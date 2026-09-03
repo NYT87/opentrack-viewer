@@ -35,11 +35,6 @@ function recordRequests(page: Page): Request[] {
  * It must be set before a file is opened, because the map is constructed with
  * the basemap already hidden.
  */
-/** The footer links to the same routes, so nav clicks target the header. */
-function navLink(page: Page, name: 'Home' | 'Viewer') {
-  return page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name });
-}
-
 /** Settings is a modal (AV-007): it neither navigates nor unmounts the viewer. */
 async function openSettings(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).click();
@@ -244,38 +239,107 @@ test('keeps the upload layout when a parse fails (AV-004)', async ({ page }) => 
   await expect(page.getByRole('region', { name: 'Elevation chart' })).toHaveCount(0);
 });
 
-test('puts details beside the map, with charts below (AV-005)', async ({ page }) => {
+test('orders the viewer as overview, map, then charts (AV-005, AV-011)', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-cadence.gpx');
 
-  const details = (await page.locator('.viewer__details').boundingBox())!;
-  const map = (await page.locator('.viewer__map').boundingBox())!;
-  const charts = (await page.locator('.chart-panel').boundingBox())!;
+  const overview = (await page.getByRole('region', { name: 'Activity overview' }).boundingBox())!;
+  const map = (await page.getByRole('region', { name: 'Route map' }).boundingBox())!;
+  const charts = (await page.locator('#activity-charts').boundingBox())!;
 
-  // Two columns: details on the left, map on the right.
-  expect(map.x).toBeGreaterThanOrEqual(details.x + details.width - 1);
-  expect(Math.abs(map.y - details.y)).toBeLessThan(2);
-
-  // Charts sit below the pair, spanning the full width rather than beside it.
-  expect(charts.y).toBeGreaterThanOrEqual(details.y + details.height - 1);
+  expect(map.y).toBeGreaterThanOrEqual(overview.y + overview.height - 1);
   expect(charts.y).toBeGreaterThanOrEqual(map.y + map.height - 1);
-  expect(charts.width).toBeGreaterThan(map.width);
-
-  // The map's own controls do not sit on top of the details text.
-  const zoomIn = (await page.getByRole('button', { name: 'Zoom in' }).boundingBox())!;
-  expect(zoomIn.x).toBeGreaterThan(details.x + details.width);
+  // The map stays big enough to inspect a route.
+  expect(map.height).toBeGreaterThan(240);
 });
 
-test('stacks with the map first on a small screen (AV-005)', async ({ page }) => {
-  await page.setViewportSize({ width: 520, height: 900 });
+test('centres the loaded viewer in a max-width column (AV-011)', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 });
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-cadence.gpx');
 
-  const details = (await page.locator('.viewer__details').boundingBox())!;
-  const map = (await page.locator('.viewer__map').boundingBox())!;
+  const content = (await page.locator('.viewer__content').boundingBox())!;
+  expect(content.width).toBeLessThan(1300);
+  // Centred: equal gutters either side.
+  expect(Math.abs(content.x - (1800 - content.x - content.width))).toBeLessThan(4);
+});
 
-  expect(map.y).toBeLessThan(details.y);
-  expect(Math.abs(map.x - details.x)).toBeLessThan(2);
+test('offers a section sidebar on large screens only (AV-011)', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const nav = page.getByRole('navigation', { name: 'Activity sections' });
+  await expect(nav).toBeVisible();
+  await expect(nav.getByRole('button', { name: 'Overview' })).toBeVisible();
+  await expect(nav.getByRole('button', { name: 'Map' })).toBeVisible();
+  await expect(nav.getByRole('button', { name: 'Charts' })).toBeVisible();
+
+  // It sits to the left of the content, not on top of it.
+  const navBox = (await nav.boundingBox())!;
+  const sections = (await page.locator('.viewer__sections').boundingBox())!;
+  expect(navBox.x + navBox.width).toBeLessThanOrEqual(sections.x + 1);
+
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect(nav).toBeHidden();
+});
+
+test('section links scroll without navigating or clearing the activity (AV-011)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1500, height: 700 });
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const scroll = page.locator('.shell__scroll');
+  expect(await scroll.evaluate((el) => el.scrollTop)).toBe(0);
+
+  await page.getByRole('navigation', { name: 'Activity sections' })
+    .getByRole('button', { name: 'Charts' })
+    .click();
+
+  await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  // Still the same route, and the activity is untouched.
+  expect(new URL(page.url()).hash).toBe('#/viewer');
+  await expect(page.getByText('Synthetic Run')).toBeVisible();
+});
+
+test('hides the laps panel when the file has no laps (AV-406)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  // GPX has no lap concept, so a real GPX activity must show no laps at all —
+  // not an empty panel, and not a section link leading nowhere.
+  await expect(page.getByRole('region', { name: 'Laps' })).toHaveCount(0);
+  await expect(
+    page.getByRole('navigation', { name: 'Activity sections' }).getByRole('button', { name: 'Laps' }),
+  ).toHaveCount(0);
+  await expect(page.locator('.map-section')).not.toHaveClass(/has-laps/);
+  // The map still occupies the section on its own.
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+});
+
+test('places laps beside the map only where there is room (AV-406)', async ({ page }) => {
+  // A stylesheet contract, not a full feature test: no format this build can
+  // parse carries laps, so there is no way to load real lap data through the
+  // UI yet. The rendering itself is covered by the integration tests in
+  // src/app/App.test.tsx, which drive the real components with real laps.
+  // Replace this with a lap-bearing fixture once FIT lands (AV-702/AV-703).
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const section = page.locator('.map-section');
+  await section.evaluate((el) => el.classList.add('has-laps'));
+
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await expect
+    .poll(() => section.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length))
+    .toBe(2);
+
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect
+    .poll(() => section.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length))
+    .toBe(1);
 });
 
 test('excludes a recording gap from the distance (P1 regression)', async ({ page }) => {
@@ -286,6 +350,195 @@ test('excludes a recording gap from the distance (P1 regression)', async ({ page
   // Accumulating across the segment boundary reported 5.7 km instead.
   await expect(page.getByRole('region', { name: 'Activity summary' })).toContainText('222 m');
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+});
+
+test('shows device information and never the serial number (AV-405)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'device-metadata.gpx');
+
+  const device = page.getByRole('region', { name: 'Device' });
+  await expect(device).toContainText('Garmin');
+  await expect(device).toContainText('Edge 530');
+  await expect(device).toContainText('9.75');
+
+  // Privacy regression: the serial is in the file and in the domain model, but
+  // it must never reach the page.
+  await expect(page.locator('body')).not.toContainText('3939123456');
+});
+
+test('omits the device panel when the file states nothing useful (AV-405)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  // The fixture's creator is still device information, so the panel appears —
+  // but as "Recorded with", not as a hardware model it cannot vouch for.
+  const device = page.getByRole('region', { name: 'Device' });
+  await expect(device).toContainText('Recorded with');
+  await expect(device).not.toContainText('Manufacturer');
+});
+
+test('selects a chart range by dragging (AV-508)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const chart = page.getByRole('region', { name: 'Elevation chart' }).locator('svg');
+  // Charts sit below the map: the pointer needs the chart actually on screen.
+  await chart.scrollIntoViewIfNeeded();
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+
+  await page.mouse.move(box.x + box.width * 0.25, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, y, { steps: 8 });
+  // Visible during the drag, before release.
+  await expect(page.locator('[data-testid="chart-selection"]').first()).toBeVisible();
+  await page.mouse.up();
+
+  // Still visible after release, on every chart sharing the axis.
+  await expect(page.locator('[data-testid="chart-selection"]')).toHaveCount(3);
+});
+
+test('ignores a tiny drag and treats it as a click (AV-508)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const chart = page.getByRole('region', { name: 'Elevation chart' }).locator('svg');
+  await chart.scrollIntoViewIfNeeded();
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+
+  await page.mouse.move(box.x + box.width * 0.5, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5 + 3, y);
+  await page.mouse.up();
+
+  await expect(page.locator('[data-testid="chart-selection"]')).toHaveCount(0);
+});
+
+test('keeps the selection when the x-axis changes (AV-509)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const chart = page.getByRole('region', { name: 'Elevation chart' }).locator('svg');
+  await chart.scrollIntoViewIfNeeded();
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.8, y, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('[data-testid="chart-selection"]').first()).toBeVisible();
+
+  const onDistance = await page
+    .locator('[data-testid="chart-selection"]')
+    .first()
+    .getAttribute('width');
+
+  await page.getByRole('button', { name: 'Time' }).click();
+
+  // Stored as point indices, so it is re-projected onto the time axis rather
+  // than discarded.
+  const band = page.locator('[data-testid="chart-selection"]').first();
+  await expect(band).toBeVisible();
+  expect(Number(await band.getAttribute('width'))).toBeGreaterThan(0);
+  expect(onDistance).toBeTruthy();
+});
+
+test('marks chart axes at real intervals and keeps labels clear (AV-514)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  const chart = page.getByRole('region', { name: 'Elevation chart' });
+  const svg = chart.locator('svg');
+
+  // The y gutter is real: labels sit left of the plot, never on top of it.
+  const gap = await svg.evaluate((node) => {
+    const label = node.querySelector('.chart__axis-label--y')!;
+    const grid = node.querySelector('.chart__grid')!;
+    return Number(grid.getAttribute('x1')) - Number(label.getAttribute('x'));
+  });
+  expect(gap).toBeGreaterThan(0);
+
+  // No label escapes the canvas on the left.
+  const leftmost = await svg.evaluate((node) =>
+    Math.min(
+      ...[...node.querySelectorAll('.chart__axis-label--y')].map((label) =>
+        Number(label.getAttribute('x')),
+      ),
+    ),
+  );
+  expect(leftmost).toBeGreaterThan(0);
+
+  // Text is not stretched: the viewBox is 1:1 with the rendered pixels.
+  const [boxWidth, attrWidth] = await svg.evaluate((node) => [
+    node.getBoundingClientRect().width,
+    Number(node.getAttribute('width')),
+  ]);
+  expect(Math.abs(boxWidth - attrWidth)).toBeLessThan(2);
+
+  // A 334 m activity has no whole-kilometre tick, so the ends carry the scale.
+  await expect(chart.locator('.is-endpoint')).toHaveCount(2);
+
+  await page.getByRole('button', { name: 'Time' }).click();
+  await expect(chart.getByText(/x-axis: elapsed time/)).toBeVisible();
+});
+
+test('renders chart axes in both themes (AV-514)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+  const label = page
+    .getByRole('region', { name: 'Elevation chart' })
+    .locator('.chart__axis-label--y')
+    .first();
+
+  await openSettings(page);
+  await page.getByRole('radio', { name: 'Light' }).check();
+  const light = await label.evaluate((node) => getComputedStyle(node).fill);
+
+  await page.getByRole('radio', { name: 'Dark' }).check();
+  const dark = await label.evaluate((node) => getComputedStyle(node).fill);
+
+  // Axis text follows the theme rather than staying one fixed colour.
+  expect(light).not.toBe(dark);
+});
+
+test('switches theme from settings without disturbing the activity (AV-009)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+  await expect(page.getByText('Elevation Route')).toBeVisible();
+
+  const html = page.locator('html');
+  const bodyBackground = () =>
+    page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+  await openSettings(page);
+  await page.getByRole('radio', { name: 'Light' }).check();
+
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  const light = await bodyBackground();
+
+  await page.getByRole('radio', { name: 'Dark' }).check();
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  const dark = await bodyBackground();
+
+  // The palette really changed, not just the attribute.
+  expect(light).not.toBe(dark);
+
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  // No reload, no route change, and the activity is untouched.
+  expect(new URL(page.url()).hash).toBe('#/viewer');
+  await expect(page.getByText('Elevation Route')).toBeVisible();
+});
+
+test('applies the theme before first paint (AV-009)', async ({ page }) => {
+  // The inline bootstrap in index.html resolves `system` before React boots,
+  // so a dark-mode device never flashes the light palette.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('./#/viewer');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
 
 test('shows a useful error for a malformed GPX file', async ({ page }) => {
@@ -427,11 +680,24 @@ test('keeps the footer below the fold until the content is scrolled', async ({ p
 
   // The overflow must be reachable by a real gesture: `overflow: hidden` still
   // permits programmatic scrollTo, so asserting on that would pass either way.
-  const box = (await scroll.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, 2000);
-  await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  //
+  // The pointer must be over the overview box, not the centre of the scroll
+  // region: that centre is the map canvas, and MapLibre consumes the wheel for
+  // zooming, which made this test position-dependent.
+  const overview = (await page.getByRole('region', { name: 'Activity overview' }).boundingBox())!;
+  await page.mouse.move(overview.x + overview.width / 2, overview.y + 20);
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.wheel(0, 200);
+        return scroll.evaluate((el) => el.scrollTop);
+      },
+      { timeout: 5000 },
+    )
+    .toBeGreaterThan(0);
 
+  // Positioning is asserted from a known scroll offset rather than wherever the
+  // wheel happened to land.
   await scroll.evaluate((el) => el.scrollTo(0, el.scrollHeight));
   const after = (await footer.boundingBox())!;
   expect(Math.round(after.y + after.height)).toBe(viewport.height);
@@ -534,7 +800,7 @@ test('credits nyt87 in the footer on every page', async ({ page }) => {
   await expect(credit).toHaveAttribute('href', 'https://nyt87.github.io/');
   await expect(repo).toHaveAttribute('href', 'https://github.com/NYT87/opentrack-viewer');
 
-  await navLink(page, 'Home').click();
+  await page.getByRole('link', { name: 'OpenTrack Viewer' }).click();
   await expect(credit).toBeVisible();
   await expect(repo).toBeVisible();
 });

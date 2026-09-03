@@ -32,6 +32,39 @@ export interface ActivitySource {
   parserVersion: string;
 }
 
+/**
+ * Optional device metadata. `serialNumber` is modelled so a parser can capture
+ * what a file contains, but it is a stable identifier: the UI never renders it
+ * (plan §5, AV-405).
+ */
+export interface ActivityDeviceInfo {
+  name?: string;
+  manufacturer?: string;
+  model?: string;
+  product?: string;
+  softwareVersion?: string;
+  firmwareVersion?: string;
+  serialNumber?: string;
+  source?: 'gpx_creator' | 'gpx_extension' | 'fit_device_info' | 'fit_file_id' | 'unknown';
+}
+
+/** Fields safe to show. Deliberately excludes every stable identifier. */
+export const DISPLAYABLE_DEVICE_FIELDS = [
+  'manufacturer',
+  'model',
+  'product',
+  'name',
+  'softwareVersion',
+  'firmwareVersion',
+] as const satisfies readonly (keyof ActivityDeviceInfo)[];
+
+/** True when there is at least one user-friendly field worth showing. */
+export function hasDisplayableDevice(
+  device: ActivityDeviceInfo | undefined,
+): device is ActivityDeviceInfo {
+  return Boolean(device) && DISPLAYABLE_DEVICE_FIELDS.some((field) => Boolean(device?.[field]));
+}
+
 export interface ActivityMetadata {
   name?: string;
   description?: string;
@@ -40,6 +73,7 @@ export interface ActivityMetadata {
   endTime?: Date;
   creator?: string;
   deviceName?: string;
+  device?: ActivityDeviceInfo;
 }
 
 export interface ActivityPoint {
@@ -116,6 +150,16 @@ export interface ActivityDerivedStats {
  * timestamps, never something the user picks.
  */
 export type ChartXAxisMode = 'distance' | 'time';
+
+/**
+ * A contiguous span of `activity.points`, inclusive at both ends. Ranges are
+ * expressed in point indices rather than axis units so a selection means the
+ * same thing whichever x-axis the charts are showing (AV-509).
+ */
+export interface ActivityPointRange {
+  startIndex: number;
+  endIndex: number;
+}
 
 export type ActivityWarningSeverity = 'info' | 'warning' | 'error';
 

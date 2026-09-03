@@ -197,7 +197,7 @@ export function resolveXAxis(activity: Activity, preference?: ChartXAxisMode): R
 }
 
 /** x values for each point on the given axis; undefined where unplottable. */
-function xValues(activity: Activity, axis: SeriesXAxis): (number | undefined)[] {
+export function pointXValues(activity: Activity, axis: SeriesXAxis): (number | undefined)[] {
   if (axis === 'distance') return computeDistance(activity.points).cumulativeMeters;
 
   if (axis === 'time') {
@@ -227,7 +227,7 @@ export function buildSeries(
   const definition = DEFINITIONS[key];
   const resolved: ResolvedXAxis =
     typeof axisOrResolved === 'string' ? { axis: axisOrResolved } : axisOrResolved;
-  const xs = xValues(activity, resolved.axis);
+  const xs = pointXValues(activity, resolved.axis);
   const derived = definition.derived?.(activity);
 
   const samples: SeriesSample[] = [];

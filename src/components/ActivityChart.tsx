@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { buildXTicks, endpointFits, thinTicks } from '../domain/axis';
 import type { ChartSeries, SeriesSample, SeriesXAxis } from '../domain/series';
 import { downsampleSeries, findNearestSample } from '../domain/series';
 import {
@@ -54,9 +55,60 @@ const X_AXIS_LABEL: Record<SeriesXAxis, string> = {
   index: 'Point index (no distance or time available)',
 };
 
-const VIEWBOX_WIDTH = 1000;
-const VIEWBOX_HEIGHT = 240;
-const PADDING = { top: 12, right: 12, bottom: 26, left: 52 };
+const CHART_HEIGHT = 190;
+/** Used until the container reports its width, and in environments with no ResizeObserver. */
+const FALLBACK_WIDTH = 800;
+
+const AXIS_FONT_SIZE = 11;
+/** Tabular numerals, so a per-character estimate is accurate enough to size a gutter. */
+const AXIS_CHAR_WIDTH = AXIS_FONT_SIZE * 0.62;
+/** Space between a y label and the plot area, so labels never touch it (AV-514). */
+const Y_LABEL_GAP = 10;
+const MIN_X_LABEL_SPACING = 64;
+
+/**
+ * AV-508. Below this many pixels a drag is a click, not a range selection —
+ * so a slightly unsteady press selects a point rather than a sliver of the
+ * activity nobody meant to choose.
+ */
+const MIN_DRAG_PIXELS = 8;
+
+const PADDING = { top: 12, right: 14, bottom: 30 };
+
+/**
+ * AV-514. The gutter is sized from the widest label actually rendered, so
+ * "1000 ft" and "9" both get exactly the room they need and neither is clipped
+ * nor left pressed against the plot.
+ */
+function measureGutter(labels: string[]): number {
+  const widest = labels.reduce((max, label) => Math.max(max, label.length), 0);
+  return Math.ceil(widest * AXIS_CHAR_WIDTH) + Y_LABEL_GAP;
+}
+
+/** Tracks the rendered width so ticks can be thinned against real pixels. */
+function useMeasuredWidth(ref: React.RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(FALLBACK_WIDTH);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(([entry]) => {
+      const next = entry?.contentRect.width ?? 0;
+      if (next > 0) setWidth(next);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return width;
+}
+
+/** A span of the chart's x-axis, in that axis's own units (AV-508). */
+export interface ChartRange {
+  start: number;
+  end: number;
+}
 
 export interface ActivityChartProps {
   series: ChartSeries;
@@ -64,8 +116,11 @@ export interface ActivityChartProps {
   units?: UnitSystem;
   /** Shown under the title, e.g. the cadence unit caveat (AV-506). */
   note?: string;
+  /** The committed selection, shown until it is cleared (AV-508). */
+  selectedRange?: ChartRange;
   onHoverPoint?: (pointIndex: number | undefined) => void;
   onSelectPoint?: (pointIndex: number | undefined) => void;
+  onSelectRange?: (range: ChartRange) => void;
 }
 
 /**
@@ -78,17 +133,56 @@ export function ActivityChart({
   activePointIndex,
   units = 'metric',
   note,
+  selectedRange,
   onHoverPoint,
   onSelectPoint,
+  onSelectRange,
 }: ActivityChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const width = useMeasuredWidth(containerRef);
 
   const rendered = useMemo(
     () => downsampleSeries(series, MAX_RENDERED_SAMPLES),
     [series],
   );
 
-  const scale = useMemo(() => buildScale(rendered), [rendered]);
+  const gridLines = useMemo(() => buildGridLines(rendered, units), [rendered, units]);
+  const gutter = useMemo(
+    () => measureGutter(gridLines.map((line) => line.label)),
+    [gridLines],
+  );
+
+  const plot = useMemo(
+    () => ({
+      left: gutter,
+      right: width - PADDING.right,
+      top: PADDING.top,
+      bottom: CHART_HEIGHT - PADDING.bottom,
+    }),
+    [gutter, width],
+  );
+
+  const scale = useMemo(() => buildScale(rendered, plot), [rendered, plot]);
+
+  const xAxis = useMemo(() => {
+    const available = plot.right - plot.left;
+    const generated = buildXTicks(rendered.xMin, rendered.xMax, rendered.xAxis, units);
+    const { ticks, labelled } = thinTicks(
+      generated,
+      rendered.xMin,
+      rendered.xMax,
+      available,
+      MIN_X_LABEL_SPACING,
+    );
+    return {
+      ticks,
+      labelled,
+      // Endpoints stay unless an interval label is already sitting on them.
+      showStart: endpointFits(rendered.xMin, labelled, rendered.xMin, rendered.xMax, available, MIN_X_LABEL_SPACING),
+      showEnd: endpointFits(rendered.xMax, labelled, rendered.xMin, rendered.xMax, available, MIN_X_LABEL_SPACING),
+    };
+  }, [rendered, plot, units]);
 
   const path = useMemo(() => {
     if (!scale || rendered.samples.length === 0) return '';
@@ -104,9 +198,9 @@ export function ActivityChart({
     if (!path || !scale) return '';
     const first = rendered.samples[0]!;
     const last = rendered.samples[rendered.samples.length - 1]!;
-    const baseline = VIEWBOX_HEIGHT - PADDING.bottom;
+    const baseline = plot.bottom;
     return `${path} L${scale.x(last.x).toFixed(2)} ${baseline} L${scale.x(first.x).toFixed(2)} ${baseline} Z`;
-  }, [path, rendered.samples, scale]);
+  }, [path, rendered.samples, scale, plot]);
 
   const activeSample = useMemo(() => {
     if (activePointIndex === undefined) return undefined;
@@ -123,14 +217,77 @@ export function ActivityChart({
     return best;
   }, [activePointIndex, rendered.samples]);
 
+  // AV-508. Pointer events rather than mouse events, so the same code path
+  // serves mouse, pen and touch when a tablet build lands.
+  // The chart's left offset is captured on pointerdown so the band can be drawn
+  // during render without reading a ref.
+  const [drag, setDrag] = useState<
+    { startX: number; currentX: number; left: number } | undefined
+  >();
+  /** Set when a drag exceeded the threshold, to suppress the click that follows. */
+  const draggedRef = useRef(false);
+
+  const domainAtOffset = useCallback(
+    (offsetX: number) => {
+      if (!scale) return undefined;
+      // A drag that runs past the plot selects up to the end, not beyond it.
+      return Math.min(Math.max(scale.invertX(offsetX), series.xMin), series.xMax);
+    },
+    [scale, series.xMin, series.xMax],
+  );
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    draggedRef.current = false;
+    const left = event.currentTarget.getBoundingClientRect().left;
+    setDrag({ startX: event.clientX, currentX: event.clientX, left });
+
+    // Capture so the gesture survives the pointer leaving the chart. Attempted
+    // last and guarded: it throws for a pointer the browser does not consider
+    // active, and losing capture is far better than losing the gesture.
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Capture is an enhancement; the drag still works without it.
+    }
+  }, []);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+    setDrag((current) => (current ? { ...current, currentX: event.clientX } : current));
+  }, []);
+
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      try {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Nothing to release: the capture attempt above was refused.
+      }
+      const current = drag;
+      setDrag(undefined);
+      if (!current) return;
+
+      if (Math.abs(event.clientX - current.startX) < MIN_DRAG_PIXELS) return;
+
+      draggedRef.current = true;
+      const from = domainAtOffset(current.startX - current.left);
+      const to = domainAtOffset(event.clientX - current.left);
+      if (from === undefined || to === undefined || from === to) return;
+
+      // A right-to-left drag means the same span as left-to-right.
+      onSelectRange?.({ start: Math.min(from, to), end: Math.max(from, to) });
+    },
+    [drag, domainAtOffset, onSelectRange],
+  );
+
   const sampleAtClientX = useCallback(
     (clientX: number) => {
       const svg = svgRef.current;
       if (!svg || !scale) return undefined;
       const rect = svg.getBoundingClientRect();
       if (rect.width === 0) return undefined;
-      const viewboxX = ((clientX - rect.left) / rect.width) * VIEWBOX_WIDTH;
-      return findNearestSample(rendered, scale.invertX(viewboxX));
+      // The viewBox is 1:1 with pixels, so no rescaling is needed here.
+      return findNearestSample(rendered, scale.invertX(clientX - rect.left));
     },
     [rendered, scale],
   );
@@ -146,8 +303,6 @@ export function ActivityChart({
     );
   }
 
-  const gridLines = scale ? buildGridLines(rendered, scale, units) : [];
-
   return (
     <section className="chart" aria-label={`${series.label} chart`}>
       <header className="chart__header">
@@ -161,53 +316,142 @@ export function ActivityChart({
       </header>
       {note && <p className="chart__note">{note}</p>}
 
-      <svg
-        ref={svgRef}
-        className="chart__svg"
-        viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={`${series.label} from ${formatY(series.yMin, series, units)} to ${formatY(series.yMax, series, units)}, by ${X_AXIS_LABEL[series.xAxis].toLowerCase()}`}
-        data-testid="elevation-chart-svg"
-        onMouseMove={(event) => onHoverPoint?.(sampleAtClientX(event.clientX)?.pointIndex)}
-        onMouseLeave={() => onHoverPoint?.(undefined)}
-        onClick={(event) => onSelectPoint?.(sampleAtClientX(event.clientX)?.pointIndex)}
-      >
-        {gridLines.map((line) => (
-          <g key={line.value}>
-            <line
-              className="chart__grid"
-              x1={PADDING.left}
-              x2={VIEWBOX_WIDTH - PADDING.right}
-              y1={line.y}
-              y2={line.y}
-            />
-            <text className="chart__axis-label" x={PADDING.left - 8} y={line.y + 4} textAnchor="end">
-              {line.label}
+      <div className="chart__plot" ref={containerRef}>
+        <svg
+          ref={svgRef}
+          className="chart__svg"
+          width={width}
+          height={CHART_HEIGHT}
+          viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
+          role="img"
+          aria-label={`${series.label} from ${formatY(series.yMin, series, units)} to ${formatY(series.yMax, series, units)}, by ${X_AXIS_LABEL[series.xAxis].toLowerCase()}`}
+          data-testid="elevation-chart-svg"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={() => setDrag(undefined)}
+          onMouseMove={(event) => onHoverPoint?.(sampleAtClientX(event.clientX)?.pointIndex)}
+          onMouseLeave={() => onHoverPoint?.(undefined)}
+          onClick={(event) => {
+            // A drag ends in a click too; only the small ones select a point.
+            if (draggedRef.current) {
+              draggedRef.current = false;
+              return;
+            }
+            onSelectPoint?.(sampleAtClientX(event.clientX)?.pointIndex);
+          }}
+        >
+          {scale &&
+            gridLines.map((line) => (
+              <g key={line.value}>
+                <line
+                  className="chart__grid"
+                  x1={plot.left}
+                  x2={plot.right}
+                  y1={scale.y(line.value)}
+                  y2={scale.y(line.value)}
+                />
+                <text
+                  className="chart__axis-label chart__axis-label--y"
+                  x={plot.left - Y_LABEL_GAP + 4}
+                  y={scale.y(line.value)}
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                >
+                  {line.label}
+                </text>
+              </g>
+            ))}
+
+          <path className="chart__area" d={areaPath} />
+          <path className="chart__line" d={path} />
+
+          {/* AV-514: marks at every generated interval; labels only where they fit. */}
+          {scale &&
+            xAxis.ticks.map((tick) => (
+              <line
+                key={`mark-${tick.value}`}
+                className="chart__tick"
+                x1={scale.x(tick.value)}
+                x2={scale.x(tick.value)}
+                y1={plot.bottom}
+                y2={plot.bottom + 4}
+              />
+            ))}
+
+          {scale &&
+            xAxis.labelled.map((tick) => (
+              <text
+                key={`label-${tick.value}`}
+                className="chart__axis-label chart__axis-label--x"
+                x={scale.x(tick.value)}
+                y={plot.bottom + 18}
+                textAnchor="middle"
+              >
+                {tick.label}
+              </text>
+            ))}
+
+          {scale && xAxis.showStart && (
+            <text
+              className="chart__axis-label chart__axis-label--x is-endpoint"
+              x={plot.left}
+              y={plot.bottom + 18}
+              textAnchor="start"
+            >
+              {formatXValue(series.xMin, series.xAxis, units)}
             </text>
-          </g>
-        ))}
+          )}
+          {scale && xAxis.showEnd && (
+            <text
+              className="chart__axis-label chart__axis-label--x is-endpoint"
+              x={plot.right}
+              y={plot.bottom + 18}
+              textAnchor="end"
+            >
+              {formatXValue(series.xMax, series.xAxis, units)}
+            </text>
+          )}
 
-        <path className="chart__area" d={areaPath} />
-        <path className="chart__line" d={path} />
+          {scale &&
+            (() => {
+              const band = drag
+                ? {
+                    start: domainAtOffset(drag.startX - drag.left),
+                    end: domainAtOffset(drag.currentX - drag.left),
+                  }
+                : selectedRange;
+              if (!band || band.start === undefined || band.end === undefined) return null;
 
-        {activeSample && scale && (
-          <g className="chart__cursor" data-testid="chart-cursor">
-            <line
-              x1={scale.x(activeSample.x)}
-              x2={scale.x(activeSample.x)}
-              y1={PADDING.top}
-              y2={VIEWBOX_HEIGHT - PADDING.bottom}
-            />
-            <circle cx={scale.x(activeSample.x)} cy={scale.y(activeSample.y)} r={5} />
-          </g>
-        )}
-      </svg>
+              const from = scale.x(Math.min(band.start, band.end));
+              const to = scale.x(Math.max(band.start, band.end));
+              if (Math.abs(to - from) < 1) return null;
 
-      <footer className="chart__footer">
-        <span>{formatXValue(series.xMin, series.xAxis, units)}</span>
-        <span>{formatXValue(series.xMax, series.xAxis, units)}</span>
-      </footer>
+              return (
+                <rect
+                  className="chart__selection"
+                  data-testid="chart-selection"
+                  x={from}
+                  y={plot.top}
+                  width={to - from}
+                  height={plot.bottom - plot.top}
+                />
+              );
+            })()}
+
+          {activeSample && scale && (
+            <g className="chart__cursor" data-testid="chart-cursor">
+              <line
+                x1={scale.x(activeSample.x)}
+                x2={scale.x(activeSample.x)}
+                y1={plot.top}
+                y2={plot.bottom}
+              />
+              <circle cx={scale.x(activeSample.x)} cy={scale.y(activeSample.y)} r={5} />
+            </g>
+          )}
+        </svg>
+      </div>
     </section>
   );
 }
@@ -225,33 +469,39 @@ function formatXValue(value: number, axis: SeriesXAxis, units: UnitSystem): stri
   return String(Math.round(value));
 }
 
-function buildScale(series: ChartSeries): Scale | undefined {
+interface PlotBox {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+function buildScale(series: ChartSeries, plot: PlotBox): Scale | undefined {
   if (series.samples.length === 0) return undefined;
 
-  const innerWidth = VIEWBOX_WIDTH - PADDING.left - PADDING.right;
-  const innerHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom;
+  const innerWidth = Math.max(1, plot.right - plot.left);
+  const innerHeight = Math.max(1, plot.bottom - plot.top);
   const xRange = series.xMax - series.xMin || 1;
   // Pad a flat profile so the line sits mid-plot instead of on the axis.
   const yRange = series.yMax - series.yMin || 1;
 
   return {
-    x: (value) => PADDING.left + ((value - series.xMin) / xRange) * innerWidth,
+    x: (value) => plot.left + ((value - series.xMin) / xRange) * innerWidth,
     y: (value) => {
       const fraction = (value - series.yMin) / yRange;
       // Pace is inverted so faster values sit at the top, as runners expect.
       return series.invertY
-        ? PADDING.top + fraction * innerHeight
-        : PADDING.top + innerHeight - fraction * innerHeight;
+        ? plot.top + fraction * innerHeight
+        : plot.top + innerHeight - fraction * innerHeight;
     },
-    invertX: (pixel) => series.xMin + ((pixel - PADDING.left) / innerWidth) * xRange,
+    invertX: (pixel) => series.xMin + ((pixel - plot.left) / innerWidth) * xRange,
   };
 }
 
 function buildGridLines(
   series: ChartSeries,
-  scale: Scale,
   units: UnitSystem,
-): { value: number; y: number; label: string }[] {
+): { value: number; label: string }[] {
   const steps = 4;
   const range = series.yMax - series.yMin || 1;
   // Ticks are labelled in the display unit, so the decision about decimals has
@@ -265,6 +515,6 @@ function buildGridLines(
 
   return Array.from({ length: steps + 1 }, (_, index) => {
     const value = series.yMin + (range * index) / steps;
-    return { value, y: scale.y(value), label: formatTick(value, series, units, decimals) };
+    return { value, label: formatTick(value, series, units, decimals) };
   });
 }

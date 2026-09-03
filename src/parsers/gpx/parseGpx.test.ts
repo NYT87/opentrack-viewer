@@ -34,6 +34,40 @@ describe('parseGpx', () => {
     expect(activity.metadata.sport).toBe('running');
   });
 
+  it('populates device information from the creator (AV-202)', () => {
+    const activity = parse('simple-route.gpx');
+
+    expect(activity.metadata.device).toMatchObject({
+      name: 'OpenTrackViewerTestFixture',
+      source: 'gpx_creator',
+    });
+  });
+
+  it('reads structured device fields from extensions (AV-202)', () => {
+    const activity = parse('device-metadata.gpx');
+
+    expect(activity.metadata.device).toMatchObject({
+      name: 'Garmin Edge 530',
+      manufacturer: 'Garmin',
+      model: 'Edge 530',
+      softwareVersion: '9.75',
+      source: 'gpx_extension',
+    });
+  });
+
+  it('captures a serial number without requiring anyone to show it', () => {
+    // Parsed so the model is complete; the UI is what must never render it.
+    expect(parse('device-metadata.gpx').metadata.device?.serialNumber).toBe('3939123456');
+  });
+
+  it('leaves device information undefined when the file states none', () => {
+    const activity = parseGpx('<?xml version="1.0"?><gpx version="1.1"><trk><trkseg>' +
+      '<trkpt lat="51.5" lon="0.0"/><trkpt lat="51.6" lon="0.1"/>' +
+      '</trkseg></trk></gpx>');
+
+    expect(activity.metadata.device).toBeUndefined();
+  });
+
   it('extracts elevation and Garmin sensor extensions', () => {
     const activity = parse('route-with-elevation.gpx');
 
@@ -138,6 +172,17 @@ describe('parseGpx', () => {
     const codes = activity.warnings.map((warning) => warning.code);
     expect(codes).toContain('multiple_tracks');
     expect(codes).toContain('multiple_segments');
+  });
+
+  it('describes what actually happens to segment gaps', () => {
+    // Regression: the warning claimed segments were "joined into a single
+    // route", which stopped being true once gaps were preserved.
+    const activity = parse('paused-run.gpx');
+    const warning = activity.warnings.find((entry) => entry.code === 'multiple_segments')!;
+
+    expect(warning.message).not.toMatch(/joined/i);
+    expect(warning.message).toMatch(/not counted towards the distance/i);
+    expect(warning.message).toMatch(/own line/i);
   });
 
   it('keeps segment identity on every point', () => {

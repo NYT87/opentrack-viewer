@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('maplibre-gl', async () => {
@@ -15,6 +15,7 @@ vi.mock('maplibre-gl', async () => {
 const { App } = await import('./App');
 const { useInteractionStore } = await import('../state/interactionStore');
 const { useActivityStore } = await import('../state/activityStore');
+const { fixtureFile } = await import('../test/helpers/fixtures');
 
 // HashRouter reads window.location.hash, which jsdom keeps across tests in a
 // file: without this, a test that navigated to Settings leaves the next one
@@ -22,11 +23,15 @@ const { useActivityStore } = await import('../state/activityStore');
 beforeEach(() => {
   window.location.hash = '#/';
   useActivityStore.getState().clear();
-  useInteractionStore.setState({ unitSystem: 'metric', basemapEnabled: true });
+  useInteractionStore.setState({
+    unitSystem: 'metric',
+    basemapEnabled: true,
+    themeMode: 'system',
+  });
 });
 
 /** The footer links to the same routes, so nav assertions target the header. */
-const navLink = (name: 'Home' | 'Viewer') =>
+const navLink = (name: 'Viewer') =>
   within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name });
 
 const openSettings = async () => {
@@ -79,12 +84,11 @@ describe('routing (AV-006)', () => {
 
   it('marks the current page in the navigation', async () => {
     render(<App />);
-    expect(navLink('Home')).toHaveAttribute('aria-current', 'page');
+    expect(navLink('Viewer')).not.toHaveAttribute('aria-current');
 
     await goToViewer();
 
     expect(navLink('Viewer')).toHaveAttribute('aria-current', 'page');
-    expect(navLink('Home')).not.toHaveAttribute('aria-current');
   });
 
   it('falls back to the homepage for an unknown route', async () => {
@@ -94,6 +98,59 @@ describe('routing (AV-006)', () => {
     expect(
       await screen.findByRole('heading', { name: /open your activity files/i }),
     ).toBeInTheDocument();
+  });
+});
+
+describe('header (AV-010)', () => {
+  const brand = () => screen.getByRole('link', { name: 'OpenTrack Viewer' });
+
+  it('uses the brand as the link home, with no duplicate Home item', async () => {
+    render(<App />);
+    await goToViewer();
+
+    // AV-010 scopes this to the header; the footer's own Home link is fine.
+    const header = within(screen.getByRole('banner'));
+    expect(header.queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
+
+    await userEvent.click(brand());
+
+    expect(window.location.hash).toBe('#/');
+    expect(
+      await screen.findByRole('heading', { name: /open your activity files/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('drops the descriptive subtitle from global chrome', () => {
+    render(<App />);
+
+    expect(screen.queryByText(/your activity file stays on your device/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the viewer reachable without a Home button', () => {
+    render(<App />);
+
+    expect(navLink('Viewer')).toBeInTheDocument();
+  });
+
+  it('renders Settings as an icon-only control with an accessible name', async () => {
+    render(<App />);
+    await goToViewer();
+
+    const settings = screen.getByRole('button', { name: 'Settings' });
+    expect(settings).toHaveAttribute('title', 'Settings');
+    // Icon only: no visible label text to read out twice.
+    expect(settings.textContent).toBe('');
+    expect(settings.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('opens the modal from the keyboard', async () => {
+    render(<App />);
+    await goToViewer();
+
+    screen.getByRole('button', { name: 'Settings' }).focus();
+    await userEvent.keyboard('{Enter}');
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
 });
 
@@ -213,6 +270,97 @@ describe('settings modal (AV-007)', () => {
 
     expect(useInteractionStore.getState().unitSystem).toBe('imperial');
     expect(useInteractionStore.getState().basemapEnabled).toBe(false);
+  });
+});
+
+describe('theme (AV-009)', () => {
+  const themeRadio = (name: 'System' | 'Dark' | 'Light') =>
+    screen.getByRole('radio', { name });
+
+  /** jsdom has no real colour-scheme preference; this stands in for the OS. */
+  const stubPrefersDark = (matches: boolean) => {
+    const listeners = new Set<() => void>();
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        matches,
+        addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+        removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+      })),
+    );
+    return listeners;
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  it('offers exactly three modes as a single-choice group', async () => {
+    render(<App />);
+    await goToViewer();
+    await openSettings();
+
+    const radios = screen.getAllByRole('radio');
+    expect(radios).toHaveLength(3);
+    // One shared name means the browser enforces single choice for us.
+    expect(new Set(radios.map((radio) => radio.getAttribute('name'))).size).toBe(1);
+    expect(themeRadio('System')).toBeChecked();
+  });
+
+  it('follows the system preference by default', () => {
+    stubPrefersDark(true);
+    render(<App />);
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+
+  it('falls back to light when the preference cannot be detected', () => {
+    vi.stubGlobal('matchMedia', undefined);
+    render(<App />);
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('forces an explicit mode over the system preference', async () => {
+    stubPrefersDark(true);
+    render(<App />);
+    await goToViewer();
+    await openSettings();
+
+    await userEvent.click(themeRadio('Light'));
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(useInteractionStore.getState().themeMode).toBe('light');
+  });
+
+  it('applies immediately, without navigating or clearing the activity', async () => {
+    render(<App />);
+    await goToViewer();
+    await userEvent.upload(screen.getByTestId('file-input'), fixtureFile('simple-route.gpx'));
+    await screen.findByText('Simple Route');
+
+    await openSettings();
+    await userEvent.click(themeRadio('Dark'));
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(window.location.hash).toBe('#/viewer');
+    expect(screen.getByText('Simple Route')).toBeInTheDocument();
+  });
+
+  it('keeps following the OS after it changes while in system mode', () => {
+    const listeners = stubPrefersDark(false);
+    render(<App />);
+    expect(document.documentElement.dataset.theme).toBe('light');
+
+    // The OS flips to dark: system mode must follow without any interaction.
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })),
+    );
+    act(() => listeners.forEach((fn) => fn()));
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
   });
 });
 

@@ -163,6 +163,13 @@ must be opt-in and scrubbed of activity data.
 | Cadence units | Shown as recorded, with the ambiguity stated | §17 asked whether run cadence should be modelled separately from cycling cadence. One field is kept, and the chart says plainly that some devices report strides per minute rather than steps per minute. Silently doubling a value to "fix" it would be a guess presented as fact. |
 | Page layout | Fixed header, one scroll region below it, footer at the end of the content | The footer is not pinned: it appears when the reader reaches the bottom. When the content is shorter than the viewport the body grows so the footer still lands on the bottom edge. `.shell__scroll` owns the scrolling, which is what keeps the header fixed without `position: fixed`. |
 | Changing files | Close the activity first | The drop zone is only present before an activity is open. This is the **one** `AV-004` criterion deliberately not met ("select another file from both upload/error and ready states"): a change-file control sitting beside a loaded map invites swapping the file out from under the view. §17 asks where a ready-state change-file action belongs; the answer taken here is "nowhere — close first". Every other `AV-004` criterion is implemented. |
+| Device serial numbers | Parsed, never rendered | §17 asks which device fields show by default and whether sensitive ones need a reveal action. There is no reveal: a serial identifies a person's hardware across every file they own, and §5 permits showing identifiers only where there is "a clear user-facing reason", which this viewer does not have. It stays in the domain model so a parser can capture what a file contains, and both a component test and a browser test fail if it ever reaches the page. |
+| GPX `creator` | Shown as "Recorded with", not as a model | §17 asks whether `creator` is device or app information. It can be either — "Garmin Edge 530" or "StravaGPX Android" — and nothing distinguishes them reliably, so it is shown verbatim under a label that claims neither. `manufacturer`/`model` are populated only when a file states them explicitly. |
+| Chart selection lifetime | Survives an x-axis switch; cleared on a new activity | §17 asks whether a selection persists when the x-axis changes. It does, because it is stored as **activity point indices** rather than a span of whichever axis was showing (`AV-509`): switching axes re-projects the same points onto the new axis. Points missing a value on an axis resolve to the nearest point that has one, so a selection over a GPS dropout stays meaningful instead of collapsing. |
+| Chart axis ticks | Fixed real-world intervals: every 1 km (1 mile in imperial), every 5 minutes | A label then means the same thing on a 3 km run and a 200 km ride, rather than shifting with the range. Marks are always generated at the interval; only the *labels* thin on a narrow axis, and endpoint labels appear when no interval label crowds them. |
+| Chart sizing | Measured width, `viewBox` 1:1 with pixels | The chart previously used a fixed `viewBox` with `preserveAspectRatio="none"`, which stretched the axis text horizontally. It now measures its container with a `ResizeObserver`, so text renders at natural proportions and tick thinning can be decided against real pixels. The y gutter is computed from the widest rendered label. |
+| Theme | Three modes — system (default), dark, light — resolved to a `data-theme` attribute | System follows `prefers-color-scheme` and keeps following it live. Where the browser cannot report a preference it resolves to **light**, which is also the base palette in CSS, so a document with no `data-theme` yet still renders correctly. An inline script in `index.html` resolves it before first paint so a dark-mode device never flashes light; it duplicates a few lines of `domain/theme.ts` deliberately, because React has not booted at that point. Session-scoped like the other settings. |
+| Map vs app theme | Independent | §17 leaves this open. The basemap keeps its own styling rather than following the app theme, so route-only mode and the tile treatment stay predictable. |
 | Routing | React Router, `HashRouter`; `/` homepage and `/viewer`, with settings as modal state rather than a route (`AV-006`, `AV-007`) | The plan defers routing until "multiple views become useful" (§4); the Settings page is that point, and §9 already reserved `src/app/routes.ts`. Hash routing because this is a static, backend-free app: on static hosting such as GitHub Pages a deep link to `/settings` would 404 without server rewrites. |
 | Distance source | File distance stream when present *and* monotonic, otherwise haversine | Devices integrate wheel/footpod data more accurately than sparse GPS fixes; a decreasing stream signals corruption and is discarded. |
 | Elevation noise threshold | 3 m (`ELEVATION_NOISE_THRESHOLD_METERS`) | Consumer altimeter noise is ±2–5 m; raw delta summing inflates gain on flat routes. Covered by the flat-route test. |
@@ -178,14 +185,14 @@ Implemented: **M0–M4** and **M3.5** — project foundation, the GPX route vert
 slice, summary stats, the chart panel with the x-axis switch and run-specific
 charts, and map/chart synchronization (`AV-001`…`003`, `AV-101`…`103`,
 `AV-201`…`203`, `AV-301`…`304`, `AV-401`…`404`, `AV-501`…`507`,
-`AV-601`…`603`, `AV-004`…`007`, plus `AV-801` and `AV-803`).
+`AV-601`…`603`, `AV-004`…`007`, `AV-009`, `AV-010`, `AV-405`, `AV-508`, `AV-509`, `AV-514`, `AV-011`, `AV-406`, plus `AV-801`
+and `AV-803`).
 
 Not implemented, and **not** yet reconciled with the code:
 
 | Task | Adds | Conflicts with what is built |
 | --- | --- | --- |
-| `AV-405` | Optional device information panel | — |
-| `AV-508`–`AV-512`, `AV-604`–`AV-605` | Chart range selection, focused slices, Reset View, map focus | — |
+| `AV-510`–`AV-512`, `AV-604`–`AV-605` | Focused activity slices, Reset View, map focus, focused-range stats | The gesture and the point-range mapping are in place; the selection is shown but does not yet focus anything |
 | `AV-513` | Speed chart for cycling activities | `domain/charts.ts` offers elevation/pace/cadence only |
 | `AV-550`–`AV-554` | Export: registry, GPX, FIT, controls | Export is listed as a non-goal in the older scope |
 | `AV-701`–`AV-704` | FIT import | — |

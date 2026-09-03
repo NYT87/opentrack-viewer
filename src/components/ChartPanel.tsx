@@ -1,8 +1,10 @@
-import type { Activity, ChartXAxisMode } from '../domain/activity';
+import { useState } from 'react';
+import type { Activity, ActivityPointRange, ChartXAxisMode } from '../domain/activity';
+import { domainFromPointRange, pointRangeFromDomain } from '../domain/range';
 import { getVisibleCharts, type ActivityChartKind } from '../domain/charts';
 import { buildSeries, getXAxisAvailability, resolveXAxis, type ChartSeriesKey } from '../domain/series';
 import type { UnitSystem } from '../domain/units';
-import { ActivityChart } from './ActivityChart';
+import { ActivityChart, type ChartRange } from './ActivityChart';
 import { ChartXAxisSwitch } from './ChartXAxisSwitch';
 
 /**
@@ -61,6 +63,33 @@ export function ChartPanel({
   const resolved = resolveXAxis(activity, xAxisPreference);
   const charts = getVisibleCharts(activity);
 
+  /**
+   * AV-508 / AV-509. The selection is stored as activity point indices, not as
+   * a span of whichever axis happened to be showing when it was made. That is
+   * what lets it survive a switch between distance and time (§17 open question
+   * resolved): the band is projected back onto the current axis for drawing.
+   *
+   * Keyed by the activity object rather than its id, so a new file starts
+   * clean even if two activities were ever to share an id. Adjusted during
+   * render rather than in an effect, per React's guidance for state that
+   * depends on props.
+   */
+  const [selection, setSelection] = useState<{
+    activity: Activity;
+    range?: ActivityPointRange;
+  }>({ activity });
+  if (selection.activity !== activity) setSelection({ activity });
+
+  const pointRange = selection.activity === activity ? selection.range : undefined;
+  const selectedRange: ChartRange | undefined = pointRange
+    ? domainFromPointRange(activity, resolved.axis, pointRange)
+    : undefined;
+
+  const handleSelectRange = (range: ChartRange) => {
+    const mapped = pointRangeFromDomain(activity, resolved.axis, range.start, range.end);
+    setSelection({ activity, range: mapped });
+  };
+
   return (
     <section className="chart-panel" aria-label="Activity charts">
       <header className="chart-panel__header">
@@ -84,8 +113,10 @@ export function ChartPanel({
             units={units}
             note={chart.kind === 'cadence' ? CADENCE_NOTE : undefined}
             activePointIndex={activePointIndex}
+            selectedRange={selectedRange}
             onHoverPoint={onHoverPoint}
             onSelectPoint={onSelectPoint}
+            onSelectRange={handleSelectRange}
           />
         ) : (
           <UnavailableChart key={chart.kind} kind={chart.kind} label={chart.label} reason={chart.unavailableReason} />

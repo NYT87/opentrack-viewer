@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChartPanel } from './ChartPanel';
 import { makeActivity } from '../test/helpers/activity';
@@ -71,6 +71,51 @@ describe('ChartPanel chart selection (AV-505, AV-506, AV-507)', () => {
     for (const name of ['Elevation chart', 'Pace chart', 'Cadence chart']) {
       expect(screen.getByRole('region', { name })).toHaveTextContent(/x-axis: elapsed time/);
     }
+  });
+});
+
+describe('ChartPanel range selection (AV-508)', () => {
+  const drag = (svg: Element, from: number, to: number) => {
+    fireEvent.pointerDown(svg, { clientX: from, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(svg, { clientX: to, pointerId: 1 });
+    fireEvent.pointerUp(svg, { clientX: to, pointerId: 1 });
+  };
+
+  it('shows the selection on every chart in the panel', () => {
+    render(<ChartPanel activity={runWithCadence} onXAxisChange={vi.fn()} />);
+    const charts = screen.getAllByTestId('elevation-chart-svg');
+
+    drag(charts[0]!, 100, 400);
+
+    // All three charts share the axis, so all three show the same span.
+    expect(screen.getAllByTestId('chart-selection')).toHaveLength(charts.length);
+  });
+
+  it('keeps the selection across an x-axis switch (AV-509)', () => {
+    const { rerender } = render(
+      <ChartPanel activity={runWithCadence} xAxisPreference="distance" onXAxisChange={vi.fn()} />,
+    );
+    drag(screen.getAllByTestId('elevation-chart-svg')[0]!, 100, 400);
+    const onDistance = screen.getAllByTestId('chart-selection')[0]!.getAttribute('width');
+
+    // Stored as point indices, so it survives and is re-projected onto time.
+    rerender(
+      <ChartPanel activity={runWithCadence} xAxisPreference="time" onXAxisChange={vi.fn()} />,
+    );
+
+    const band = screen.getAllByTestId('chart-selection')[0];
+    expect(band).toBeInTheDocument();
+    expect(Number(band!.getAttribute('width'))).toBeGreaterThan(0);
+    expect(onDistance).toBeTruthy();
+  });
+
+  it('clears the selection when a different activity is loaded', () => {
+    const { rerender } = render(<ChartPanel activity={runWithCadence} onXAxisChange={vi.fn()} />);
+    drag(screen.getAllByTestId('elevation-chart-svg')[0]!, 100, 400);
+
+    rerender(<ChartPanel activity={withBothAxes} onXAxisChange={vi.fn()} />);
+
+    expect(screen.queryByTestId('chart-selection')).not.toBeInTheDocument();
   });
 });
 

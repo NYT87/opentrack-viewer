@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FakeMap, latestMap, resetMapLibreMock } from '../test/helpers/maplibreMock';
 
@@ -63,7 +63,11 @@ describe('App vertical slice (AV-304)', () => {
     // Every test here exercises the viewer; the homepage is a separate route
     // now, and HashRouter would otherwise keep the previous test's location.
     window.location.hash = '#/viewer';
-    useInteractionStore.setState({ unitSystem: 'metric', basemapEnabled: true });
+    useInteractionStore.setState({
+    unitSystem: 'metric',
+    basemapEnabled: true,
+    themeMode: 'system',
+  });
   });
 
   it('shows an empty state that does not imply upload', () => {
@@ -160,6 +164,80 @@ describe('App vertical slice (AV-304)', () => {
     // No activity was opened, so the user can pick another file straight away.
     expect(screen.getByTestId('file-input')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toBeInTheDocument();
+  });
+
+  it('shows laps beside the map when the activity has them (AV-406)', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+    expect(screen.queryByRole('region', { name: 'Laps' })).not.toBeInTheDocument();
+
+    // GPX carries no laps; they arrive with FIT (AV-702). Inject one so the
+    // panel's wiring is exercised now rather than waiting for that parser.
+    const activity = useActivityStore.getState().activity!;
+    act(() =>
+      useActivityStore.setState({
+        activity: {
+          ...activity,
+          laps: [
+            { index: 0, distanceMeters: 1000, durationSeconds: 300 },
+            { index: 1, distanceMeters: 1000, durationSeconds: 310 },
+          ],
+        },
+      }),
+    );
+
+    expect(screen.getByRole('region', { name: 'Laps' })).toBeInTheDocument();
+    // The section jump list picks it up too.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Activity sections' })).getByRole('button', {
+        name: 'Laps',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders real lap values beside the map (AV-406)', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+    const activity = useActivityStore.getState().activity!;
+    act(() =>
+      useActivityStore.setState({
+        activity: {
+          ...activity,
+          laps: [
+            { index: 0, distanceMeters: 1000, durationSeconds: 300 },
+            { index: 1, distanceMeters: 500, durationSeconds: 120 },
+          ],
+        },
+      }),
+    );
+
+    // The values come through the real panel, not a stub.
+    const laps = within(screen.getByRole('region', { name: 'Laps' }));
+    expect(laps.getByRole('table')).toHaveTextContent('1.00 km');
+    expect(laps.getByRole('table')).toHaveTextContent('5:00');
+    expect(laps.getAllByRole('row')).toHaveLength(3); // header + two laps
+
+    const section = document.querySelector('.map-section')!;
+    expect(section).toHaveClass('has-laps');
+    // Laps first in source order: the grid puts them left on wide screens and
+    // reorders them below the map on narrow ones.
+    expect(section.firstElementChild).toHaveClass('map-section__laps');
+    expect(section.children).toHaveLength(2);
+    expect(section.lastElementChild).toHaveClass('map-section__map');
+    // The map is still there beside them, not displaced.
+    expect(screen.getByRole('region', { name: 'Route map' })).toBeInTheDocument();
+  });
+
+  it('hides the laps panel when there is nothing worth listing', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+    const activity = useActivityStore.getState().activity!;
+    act(() =>
+      useActivityStore.setState({ activity: { ...activity, laps: [{ index: 0 }, { index: 1 }] } }),
+    );
+
+    expect(screen.queryByRole('region', { name: 'Laps' })).not.toBeInTheDocument();
+    expect(document.querySelector('.map-section')).not.toHaveClass('has-laps');
   });
 
   it('tears the map down when the activity is closed', async () => {
@@ -311,7 +389,11 @@ describe('map and chart synchronization (Epic E6)', () => {
     // Every test here exercises the viewer; the homepage is a separate route
     // now, and HashRouter would otherwise keep the previous test's location.
     window.location.hash = '#/viewer';
-    useInteractionStore.setState({ unitSystem: 'metric', basemapEnabled: true });
+    useInteractionStore.setState({
+    unitSystem: 'metric',
+    basemapEnabled: true,
+    themeMode: 'system',
+  });
   });
 
   it('moves the map marker when the chart reports a hover (AV-602)', async () => {

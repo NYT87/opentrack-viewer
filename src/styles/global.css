@@ -1,15 +1,41 @@
+/*
+ * AV-009. Light is the base palette because it is also the documented fallback
+ * when a browser cannot report a colour-scheme preference — so a document with
+ * no `data-theme` yet still renders the right thing. `useAppTheme` sets
+ * `data-theme` on <html>, and index.html sets it before first paint.
+ */
 :root {
+  color-scheme: light;
+  --bg: #f6f8fa;
+  --bg-raised: #ffffff;
+  --bg-sunken: #eef1f5;
+  --border: #d3dae2;
+  --text: #16202b;
+  --text-muted: #5a6b7d;
+  --accent: #1668c4;
+  --on-accent: #ffffff;
+  --warn: #8a5300;
+  --error: #b3261e;
+  --scrim: rgba(22, 32, 43, 0.45);
+  --shadow: rgba(22, 32, 43, 0.18);
+  --radius: 10px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+:root[data-theme='dark'] {
   color-scheme: dark;
   --bg: #0b0f14;
   --bg-raised: #131a22;
+  --bg-sunken: #1d2733;
   --border: #223040;
   --text: #e6edf3;
   --text-muted: #8b9bb0;
   --accent: #4aa3ff;
+  --on-accent: #08111c;
   --warn: #ffb020;
   --error: #ff6b6b;
-  --radius: 10px;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --scrim: rgba(5, 8, 12, 0.72);
+  --shadow: rgba(0, 0, 0, 0.5);
 }
 
 * { box-sizing: border-box; }
@@ -58,7 +84,27 @@ body {
 }
 
 .shell__title { margin: 0; font-size: 16px; letter-spacing: 0.01em; }
-.shell__tagline { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; }
+
+.shell__brand { color: var(--text); text-decoration: none; }
+.shell__brand:hover { color: var(--accent); }
+.shell__brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.icon-button svg { width: 18px; height: 18px; }
+.icon-button:hover { color: var(--text); border-color: var(--accent); }
+.icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .shell__actions { display: flex; align-items: center; gap: 14px; }
 
 .shell__body { display: flex; flex: 1 0 auto; }
@@ -142,7 +188,7 @@ body {
 }
 
 .footer__credit { margin: 0; }
-.footer__heart { color: #ff6b6b; }
+.footer__heart { color: var(--error); }
 
 @media (max-width: 860px) {
   .footer__inner {
@@ -165,6 +211,10 @@ body {
 .page__intro { margin: 0; color: var(--text-muted); }
 
 .setting { display: flex; flex-direction: column; gap: 6px; }
+.setting--group { border: none; margin: 0; padding: 0; }
+
+.choice-row { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.choice { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .setting__label {
   display: flex;
   align-items: center;
@@ -174,40 +224,17 @@ body {
 }
 .setting__help { margin: 0; color: var(--text-muted); max-width: 60ch; }
 
-/* Viewer (AV-004, AV-005) */
-.viewer { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-
-/* Pre-activity states: the upload control and nothing else. */
-.viewer--intake { align-items: center; justify-content: flex-start; padding: 40px 20px; }
-.intake { width: min(560px, 100%); display: flex; flex-direction: column; gap: 16px; }
-
-.viewer__primary {
-  display: grid;
-  /* Details left, map right, on desktop and tablet. */
-  grid-template-columns: minmax(280px, 360px) 1fr;
-  align-items: stretch;
-  border-bottom: 1px solid var(--border);
+.button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
 }
-
-.viewer__details {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px;
-  border-right: 1px solid var(--border);
-  overflow-wrap: anywhere;
-}
-
-.viewer__map { position: relative; min-width: 0; display: flex; flex-direction: column; }
-
-@media (max-width: 860px) {
-  .shell__body { flex-direction: column; }
-
-  .viewer__primary { grid-template-columns: 1fr; }
-  /* Small screens lead with the map; the details read below it. */
-  .viewer__map { order: -1; }
-  .viewer__details { border-right: none; border-top: 1px solid var(--border); }
-}
+.button:hover { border-color: var(--accent); }
+.button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .select {
   align-self: flex-start;
@@ -220,17 +247,6 @@ body {
   font-size: 12px;
 }
 .select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-.button {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-}
-.button:hover { border-color: var(--accent); }
 
 /* File drop zone */
 .dropzone { display: flex; flex-direction: column; gap: 6px; }
@@ -248,7 +264,7 @@ body {
   cursor: pointer;
   text-align: center;
 }
-.dropzone__target.is-dragging { border-color: var(--accent); background: #16202b; }
+.dropzone__target.is-dragging { border-color: var(--accent); background: var(--bg-sunken); }
 .dropzone__target:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dropzone__title { font-weight: 600; }
 .dropzone__subtitle { color: var(--text-muted); font-size: 12px; }
@@ -274,7 +290,7 @@ body {
   margin-right: 8px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: #1d2733;
+  background: var(--bg-sunken);
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -291,12 +307,116 @@ body {
 .summary__header { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .summary__title { margin: 0; font-size: 15px; }
 .summary__source { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; }
-.summary__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 0; }
+.summary__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 16px;
+  margin: 0;
+}
 .summary__stat { display: flex; flex-direction: column; gap: 2px; }
-.summary__label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.summary__label {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .summary__value { margin: 0; font-size: 16px; font-variant-numeric: tabular-nums; }
 .summary__missing { color: var(--text-muted); }
 .summary__missing small { display: block; font-size: 11px; }
+
+/* Viewer (AV-004, AV-005, AV-011) */
+.viewer { flex: 1; min-width: 0; }
+
+/* Pre-activity states: the upload control and nothing else. */
+.viewer--intake { display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px; }
+.intake { width: min(560px, 100%); display: flex; flex-direction: column; gap: 16px; }
+
+/* AV-011: a centred, max-width column with a compact section sidebar. */
+.viewer__content {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 24px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px;
+  align-items: start;
+}
+
+.viewer__sections { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+.section-nav { position: sticky; top: 20px; }
+.section-nav__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.section-nav__link {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-left: 2px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.section-nav__link:hover { color: var(--text); border-left-color: var(--accent); }
+.section-nav__link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 16px;
+  min-width: 0;
+  /* Section links jump here; keep the heading clear of the fixed header. */
+  scroll-margin-top: 16px;
+}
+
+/* The map draws its own surface, so it fills its box edge to edge. */
+.box--map { padding: 0; overflow: hidden; }
+
+/* AV-406: laps to the left of the map on large screens. */
+.map-section { display: grid; gap: 20px; min-width: 0; }
+.map-section.has-laps { grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); }
+.map-section__laps { display: flex; flex-direction: column; min-height: 0; }
+.map-section__map { min-width: 0; }
+
+.laps { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.laps__title { margin: 0; font-size: 13px; }
+
+/* A long lap list scrolls rather than stretching the map out of shape. */
+.laps__scroll { overflow-y: auto; max-height: clamp(240px, 40vh, 520px); }
+
+.laps__table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.laps__table th,
+.laps__table td { padding: 5px 8px; text-align: left; white-space: nowrap; }
+.laps__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+.laps__table tbody th { font-weight: 600; color: var(--text-muted); }
+.laps__table tbody tr + tr th,
+.laps__table tbody tr + tr td { border-top: 1px solid var(--border); }
+.laps__table td { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  /* Laps fall below the map once there is no room beside it. */
+  .map-section.has-laps { grid-template-columns: minmax(0, 1fr); }
+  .map-section__laps { order: 1; }
+}
+
+@media (max-width: 1100px) {
+  /* AV-011: the sidebar is a large-screen affordance only. */
+  .section-nav { display: none; }
+  .viewer__content { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* Homepage */
 .prose { display: flex; flex-direction: column; gap: 10px; }
@@ -307,7 +427,7 @@ body {
   display: inline-block;
   border-color: var(--accent);
   background: var(--accent);
-  color: #08111c;
+  color: var(--on-accent);
   font-weight: 600;
   text-decoration: none;
 }
@@ -344,7 +464,7 @@ body {
   align-items: flex-start;
   justify-content: center;
   padding: 8vh 16px 16px;
-  background: rgba(5, 8, 12, 0.72);
+  background: var(--scrim);
 }
 
 .modal__dialog {
@@ -358,7 +478,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 24px 60px var(--shadow);
 }
 .modal__dialog:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -378,6 +498,26 @@ body {
 }
 .modal__close:hover { color: var(--text); border-color: var(--accent); }
 .modal__close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Device information (AV-405) */
+.device { display: flex; flex-direction: column; gap: 8px; }
+.device__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.device__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.device__row { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.device__label { color: var(--text-muted); font-size: 11px; }
+.device__value { margin: 0; overflow-wrap: anywhere; }
 
 /* Chart panel */
 .chart-panel { border-top: 1px solid var(--border); background: var(--bg-raised); }
@@ -424,11 +564,27 @@ body {
 .chart__header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .chart__title { margin: 0; font-size: 13px; }
 .chart__meta { margin: 0; color: var(--text-muted); font-size: 11px; }
-.chart__svg { width: 100%; height: 180px; display: block; cursor: crosshair; }
+.chart__plot { width: 100%; overflow: hidden; }
+/* The viewBox is 1:1 with pixels, so text is never stretched by the SVG. */
+.chart__svg {
+  display: block;
+  cursor: crosshair;
+  /* Vertical scrolling still belongs to the page; horizontal drags are ours. */
+  touch-action: pan-y;
+  user-select: none;
+}
 .chart__grid { stroke: var(--border); stroke-width: 1; }
-.chart__axis-label { fill: var(--text-muted); font-size: 13px; }
-.chart__area { fill: rgba(74, 163, 255, 0.16); stroke: none; }
+.chart__axis-label { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart__axis-label.is-endpoint { fill: var(--text-muted); opacity: 0.85; }
+.chart__tick { stroke: var(--border); stroke-width: 1; }
+.chart__area { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
 .chart__line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.chart__selection {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
 .chart__cursor line { stroke: var(--warn); stroke-width: 1; }
 .chart__cursor circle { fill: var(--warn); stroke: var(--bg); stroke-width: 2; }
-.chart__footer { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 11px; }

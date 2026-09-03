@@ -1,10 +1,13 @@
 import { Suspense, lazy, useCallback, useMemo } from 'react';
 import { ChartPanel } from '../components/ChartPanel';
+import { DeviceInfoPanel } from '../components/DeviceInfoPanel';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { FileDropZone } from '../components/FileDropZone';
+import { LapsPanel, hasUsefulLaps } from '../components/LapsPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
 import { SummaryPanel } from '../components/SummaryPanel';
+import { ViewerSectionNav, type ViewerSection } from '../components/ViewerSectionNav';
 import { activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
 import { selectViewerState, useActivityStore } from '../state/activityStore';
 import { activePointIndex, useInteractionStore } from '../state/interactionStore';
@@ -100,41 +103,71 @@ export function ViewerPage() {
 
   const readyActivity = viewerState.activity;
 
+  // AV-011: only sections that actually render get a link.
+  const laps = readyActivity.laps;
+  const showLaps = hasUsefulLaps(laps);
+
+  const sections: ViewerSection[] = [
+    { id: 'activity-overview', label: 'Overview' },
+    ...(route.isEmpty ? [] : [{ id: 'activity-map', label: 'Map' }]),
+    ...(showLaps ? [{ id: 'activity-laps', label: 'Laps' }] : []),
+    { id: 'activity-charts', label: 'Charts' },
+  ];
+
   return (
     <main className="viewer">
-      {/* AV-005: details and map first, as a pair; charts below, never beside. */}
-      <section className="viewer__primary" aria-label="Activity overview">
-        <div className="viewer__details">
-          <SummaryPanel activity={readyActivity} units={unitSystem} />
-          <WarningList warnings={readyActivity.warnings} />
-        </div>
+      <div className="viewer__content">
+        <ViewerSectionNav sections={sections} />
 
-        <div className="viewer__map">
-          {route.isEmpty ? (
-            <MapPlaceholder reason="no-route" />
-          ) : (
-            <Suspense fallback={<MapPlaceholder reason="loading" />}>
-              <ActivityMap
-                route={route}
-                marker={marker}
-                basemapEnabled={basemapEnabled}
-                onRouteHover={handleRouteHover}
-                onRouteClick={setSelectedPoint}
-              />
-            </Suspense>
-          )}
-        </div>
-      </section>
+        {/* AV-011: overview box, then map box, then charts — in that order. */}
+        <div className="viewer__sections">
+          <section className="box" id="activity-overview" aria-label="Activity overview">
+            <SummaryPanel activity={readyActivity} units={unitSystem} />
+            <DeviceInfoPanel device={readyActivity.metadata.device} />
+            <WarningList warnings={readyActivity.warnings} />
+          </section>
 
-      <ChartPanel
-        activity={readyActivity}
-        xAxisPreference={chartXAxisMode}
-        onXAxisChange={setChartXAxisMode}
-        units={unitSystem}
-        activePointIndex={activeIndex}
-        onHoverPoint={handleChartHover}
-        onSelectPoint={setSelectedPoint}
-      />
+          {/*
+            AV-406: laps sit beside the map on large screens and fall below it
+            on narrower ones, which the grid handles without reordering the DOM.
+          */}
+          <div className={showLaps ? 'map-section has-laps' : 'map-section'} id="activity-map">
+            {showLaps && (
+              <div className="box map-section__laps" id="activity-laps">
+                <LapsPanel laps={laps} units={unitSystem} />
+              </div>
+            )}
+
+            <section className="box box--map map-section__map" aria-label="Route map">
+              {route.isEmpty ? (
+                <MapPlaceholder reason="no-route" />
+              ) : (
+                <Suspense fallback={<MapPlaceholder reason="loading" />}>
+                  <ActivityMap
+                    route={route}
+                    marker={marker}
+                    basemapEnabled={basemapEnabled}
+                    onRouteHover={handleRouteHover}
+                    onRouteClick={setSelectedPoint}
+                  />
+                </Suspense>
+              )}
+            </section>
+          </div>
+
+          <section className="box" id="activity-charts">
+            <ChartPanel
+              activity={readyActivity}
+              xAxisPreference={chartXAxisMode}
+              onXAxisChange={setChartXAxisMode}
+              units={unitSystem}
+              activePointIndex={activeIndex}
+              onHoverPoint={handleChartHover}
+              onSelectPoint={setSelectedPoint}
+            />
+          </section>
+        </div>
+      </div>
     </main>
   );
 }

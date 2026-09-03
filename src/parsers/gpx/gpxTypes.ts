@@ -14,7 +14,10 @@ export interface RawGpxPoint {
   segmentIndex: number;
 }
 
+import type { ActivityDeviceInfo } from '../../domain/activity';
+
 export interface RawGpxDocument {
+  device?: ActivityDeviceInfo;
   name?: string;
   description?: string;
   creator?: string;

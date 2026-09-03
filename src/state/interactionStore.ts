@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ChartXAxisMode } from '../domain/activity';
+import type { ThemeMode } from '../domain/theme';
 import type { UnitSystem } from '../domain/units';
 
 /**
@@ -15,6 +16,8 @@ interface InteractionState {
   basemapEnabled: boolean;
   /** Metric by default (§17); a session preference, not persisted. */
   unitSystem: UnitSystem;
+  /** AV-009. Defaults to following the OS; session-scoped like the rest. */
+  themeMode: ThemeMode;
   /**
    * Preferred chart x-axis (§17 open question resolved: it persists for the
    * session, like units). Undefined means "let the activity decide". A stored
@@ -27,6 +30,7 @@ interface InteractionState {
   setSelectedPoint: (index: number | undefined) => void;
   setBasemapEnabled: (enabled: boolean) => void;
   setUnitSystem: (units: UnitSystem) => void;
+  setThemeMode: (mode: ThemeMode) => void;
   setChartXAxisMode: (mode: ChartXAxisMode) => void;
   reset: () => void;
 }
@@ -34,6 +38,7 @@ interface InteractionState {
 export const useInteractionStore = create<InteractionState>((set) => ({
   basemapEnabled: true,
   unitSystem: 'metric',
+  themeMode: 'system',
 
   setHoveredPoint(index, source) {
     set({ hoveredPointIndex: index, hoverSource: index === undefined ? undefined : source });
@@ -49,6 +54,10 @@ export const useInteractionStore = create<InteractionState>((set) => ({
 
   setUnitSystem(units) {
     set({ unitSystem: units });
+  },
+
+  setThemeMode(mode) {
+    set({ themeMode: mode });
   },
 
   setChartXAxisMode(mode) {

@@ -1,6 +1,7 @@
 import {
   computeStreams,
   type Activity,
+  type ActivityDeviceInfo,
   type ActivityPoint,
   type ActivitySport,
   type ActivityWarning,
@@ -42,7 +43,9 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
   if (raw.segmentCount > 1) {
     warnings.push({
       code: 'multiple_segments',
-      message: `The file has ${raw.segmentCount} track segments, joined into a single route.`,
+      message:
+        `This recording has ${raw.segmentCount} segments. Each is drawn as its own line, ` +
+        'and the gaps between them are not counted towards the distance.',
       severity: 'info',
     });
   }
@@ -60,6 +63,7 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
       description: raw.description,
       creator: raw.creator,
       deviceName: raw.creator,
+      device: raw.device,
       sport: mapSport(raw.type),
     },
     points,
@@ -150,7 +154,9 @@ function readGpxDocument(document: Document, warnings: ActivityWarning[]): RawGp
   if (tracks.length > 1) {
     warnings.push({
       code: 'multiple_tracks',
-      message: `The file contains ${tracks.length} tracks, joined into a single activity.`,
+      message:
+        `The file contains ${tracks.length} tracks, shown as one activity. ` +
+        'The gaps between them are not counted towards the distance.',
       severity: 'info',
     });
   }
@@ -178,7 +184,9 @@ function readGpxDocument(document: Document, warnings: ActivityWarning[]): RawGp
       if (segmentCount > 1) {
         warnings.push({
           code: 'multiple_routes',
-          message: `The file contains ${segmentCount} routes, joined into a single activity.`,
+          message:
+            `The file contains ${segmentCount} routes, shown as one activity. ` +
+            'The gaps between them are not counted towards the distance.',
           severity: 'info',
         });
       }
@@ -186,6 +194,7 @@ function readGpxDocument(document: Document, warnings: ActivityWarning[]): RawGp
   }
 
   return {
+    device: readDeviceInfo(root),
     // Activity-level metadata comes from the first track; later tracks in a
     // multi-track file are treated as continuations of the same activity.
     name: textOf(firstTrack, 'name') ?? textOf(metadata, 'name'),
@@ -195,6 +204,72 @@ function readGpxDocument(document: Document, warnings: ActivityWarning[]): RawGp
     points,
     segmentCount,
   };
+}
+
+/**
+ * AV-202. Reads whatever device information the file actually states.
+ *
+ * The GPX `creator` attribute names the thing that wrote the file, which may be
+ * a device ("Garmin Edge 530") or an application ("StravaGPX Android"). There
+ * is no reliable way to tell them apart, so it is recorded verbatim as `name`
+ * and the UI labels it "Recorded with" rather than claiming a hardware model
+ * (§17 open question resolved). Structured fields are populated only when the
+ * file spells them out in an extension.
+ */
+function readDeviceInfo(root: Element): ActivityDeviceInfo | undefined {
+  const device: ActivityDeviceInfo = {};
+
+  const creator = root.getAttribute('creator')?.trim();
+  if (creator) {
+    device.name = creator;
+    device.source = 'gpx_creator';
+  }
+
+  const walk = (element: Element): void => {
+    for (const child of Array.from(element.children)) {
+      const value = child.textContent?.trim();
+      if (value) {
+        switch (localName(child)) {
+          case 'manufacturer':
+            device.manufacturer ??= value;
+            break;
+          case 'model':
+            device.model ??= value;
+            break;
+          case 'product':
+            device.product ??= value;
+            break;
+          case 'serial':
+          case 'serialnumber':
+            device.serialNumber ??= value;
+            break;
+          case 'softwareversion':
+            device.softwareVersion ??= value;
+            break;
+          case 'firmwareversion':
+            device.firmwareVersion ??= value;
+            break;
+          default:
+            break;
+        }
+      }
+      if (child.children.length > 0) walk(child);
+    }
+  };
+
+  // Device details live under <metadata> or a top-level <extensions> block.
+  const metadata = firstNamed(root, 'metadata');
+  if (metadata) walk(metadata);
+  const extensions = firstNamed(root, 'extensions');
+  if (extensions) walk(extensions);
+
+  if (Object.keys(device).some((key) => key !== 'source')) {
+    if (device.manufacturer || device.model || device.product || device.serialNumber) {
+      device.source = 'gpx_extension';
+    }
+    return device;
+  }
+  return undefined;
 }
 
 function readPoint(element: Element, segmentIndex: number): RawGpxPoint {

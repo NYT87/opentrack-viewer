@@ -11,7 +11,7 @@
  * that it can hold several charts, and a flexible map would collapse toward its
  * minimum as charts are added.
  */
-.map { position: relative; flex: 0 0 auto; height: clamp(260px, 42vh, 560px); }
+.map { position: relative; display: block; height: clamp(280px, 46vh, 560px); }
 .map .map__canvas { position: absolute; inset: 0; }
 
 @media (max-width: 860px) {
@@ -38,7 +38,7 @@
   padding: 8px 12px;
   border: 1px solid var(--warn);
   border-radius: var(--radius);
-  background: rgba(11, 15, 20, 0.9);
+  background: var(--bg-raised);
   color: var(--warn);
   font-size: 12px;
 }

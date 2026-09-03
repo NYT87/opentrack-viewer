@@ -6,6 +6,20 @@
     <meta name="theme-color" content="#111418" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>OpenTrack Viewer</title>
+    <script>
+      // Resolve the default `system` theme before first paint, so a dark-mode
+      // device never flashes the light palette on load. Kept deliberately tiny
+      // and duplicated from src/domain/theme.ts: React has not booted yet.
+      try {
+        document.documentElement.dataset.theme = window.matchMedia(
+          '(prefers-color-scheme: dark)',
+        ).matches
+          ? 'dark'
+          : 'light';
+      } catch {
+        document.documentElement.dataset.theme = 'light';
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

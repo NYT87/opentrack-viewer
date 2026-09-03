@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef } from 'react';
+import { THEME_MODES, THEME_MODE_LABELS, type ThemeMode } from '../domain/theme';
 import type { UnitSystem } from '../domain/units';
 import { useInteractionStore } from '../state/interactionStore';
 
@@ -23,12 +24,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const pressOriginRef = useRef<EventTarget | null>(null);
   const unitsId = useId();
   const basemapId = useId();
+  const themeId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const unitSystem = useInteractionStore((state) => state.unitSystem);
   const setUnitSystem = useInteractionStore((state) => state.setUnitSystem);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const setBasemapEnabled = useInteractionStore((state) => state.setBasemapEnabled);
+  const themeMode = useInteractionStore((state) => state.themeMode);
+  const setThemeMode = useInteractionStore((state) => state.setThemeMode);
 
   // Move focus in on open and hand it back to the opener on close.
   useEffect(() => {
@@ -105,6 +109,33 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         <p className="modal__intro">
           These apply to the current session only. Nothing is saved to your device.
         </p>
+
+        {/*
+          AV-009: a radio group, not three toggles — the modes are mutually
+          exclusive, and native radios give that semantics and arrow-key
+          navigation without reimplementing either.
+        */}
+        <fieldset className="setting setting--group">
+          <legend className="setting__label">Theme</legend>
+          <div className="choice-row">
+            {THEME_MODES.map((mode) => (
+              <label className="choice" key={mode} htmlFor={`${themeId}-${mode}`}>
+                <input
+                  id={`${themeId}-${mode}`}
+                  type="radio"
+                  name={themeId}
+                  value={mode}
+                  checked={themeMode === mode}
+                  onChange={() => setThemeMode(mode as ThemeMode)}
+                />
+                {THEME_MODE_LABELS[mode]}
+              </label>
+            ))}
+          </div>
+          <p className="setting__help">
+            System follows your device setting, and keeps following it if you change it.
+          </p>
+        </fieldset>
 
         <section className="setting">
           <label className="setting__label" htmlFor={unitsId}>
