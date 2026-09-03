@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenTrackViewerTestFixture" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Leg One</name>
+    <type>hiking</type>
+    <trkseg>
+      <trkpt lat="51.5000" lon="0.0000"><ele>100.0</ele><time>2024-01-01T10:00:00Z</time></trkpt>
+      <trkpt lat="51.5010" lon="0.0000"><ele>110.0</ele><time>2024-01-01T10:01:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+  <trk>
+    <name>Leg Two</name>
+    <trkseg>
+      <trkpt lat="51.5020" lon="0.0000"><ele>120.0</ele><time>2024-01-01T10:02:00Z</time></trkpt>
+      <trkpt lat="51.5030" lon="0.0000"><ele>130.0</ele><time>2024-01-01T10:03:00Z</time></trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="51.5040" lon="0.0000"><ele>140.0</ele><time>2024-01-01T10:04:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

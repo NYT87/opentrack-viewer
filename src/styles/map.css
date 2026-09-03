@@ -1,0 +1,46 @@
+/*
+ * MapLibre's stylesheet ships in the lazily-loaded map chunk, so it is injected
+ * after this file and wins every tie on specificity. It sets
+ * `.maplibregl-map { position: relative }` on the very element used as the map
+ * container, which would override `position: absolute` here and collapse the
+ * container to zero height. These rules are deliberately two classes deep so
+ * they win regardless of stylesheet order.
+ */
+/*
+ * A fixed share of the viewport rather than flex:1. The main column scrolls now
+ * that it can hold several charts, and a flexible map would collapse toward its
+ * minimum as charts are added.
+ */
+.map { position: relative; flex: 0 0 auto; height: clamp(260px, 42vh, 560px); }
+.map .map__canvas { position: absolute; inset: 0; }
+
+@media (max-width: 860px) {
+  .map { height: 50vh; }
+}
+
+.map--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-raised);
+}
+
+.map__placeholder-inner { max-width: 420px; text-align: center; }
+.map__placeholder-title { margin: 0 0 8px; font-size: 15px; }
+.map__placeholder-body { margin: 0; color: var(--text-muted); }
+
+.map__notice {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  max-width: 320px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: rgba(11, 15, 20, 0.9);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.map .maplibregl-ctrl-attrib { font-size: 10px; }

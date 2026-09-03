@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+test-results
+playwright-report
+*.tsbuildinfo
+
+# Session planning scaffolding, regenerated per working session rather than
+# maintained as project documentation. The implementation plan itself is
+# tracked; these are not.
+findings.md
+progress.md
+task_plan.md

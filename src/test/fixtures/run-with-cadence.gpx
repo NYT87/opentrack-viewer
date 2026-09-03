@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenTrackViewerTestFixture" xmlns="http://www.topografix.com/GPX/1/1"
+     xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
+  <trk>
+    <name>Synthetic Run</name>
+    <type>running</type>
+    <trkseg>
+      <trkpt lat="51.500000" lon="0.0000"><ele>100.0</ele><time>2024-01-01T10:00:00Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>168</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.500270" lon="0.0000"><ele>101.0</ele><time>2024-01-01T10:00:10Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>169</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.500540" lon="0.0000"><ele>102.0</ele><time>2024-01-01T10:00:20Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>170</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.500810" lon="0.0000"><ele>103.0</ele><time>2024-01-01T10:00:30Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>168</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.501080" lon="0.0000"><ele>104.0</ele><time>2024-01-01T10:00:40Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>169</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.501080" lon="0.0000"><ele>105.0</ele><time>2024-01-01T10:00:50Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>170</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.501080" lon="0.0000"><ele>106.0</ele><time>2024-01-01T10:01:00Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>168</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.501350" lon="0.0000"><ele>107.0</ele><time>2024-01-01T10:01:10Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>169</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.501620" lon="0.0000"><ele>108.0</ele><time>2024-01-01T10:01:20Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>170</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.501890" lon="0.0000"><ele>109.0</ele><time>2024-01-01T10:01:30Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>168</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
