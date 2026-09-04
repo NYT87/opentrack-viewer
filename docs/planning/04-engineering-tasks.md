@@ -621,6 +621,20 @@ Acceptance criteria:
 - Export controls show warnings before or after download when data loss is expected.
 - Export controls are absent from empty, processing, and error layouts.
 
+#### AV-555: Add Direct Format Conversion
+
+Dependencies: AV-550, AV-551, AV-553, AV-554
+
+Acceptance criteria:
+- After a user opens any supported input format, the ready viewer offers download/export options for the other supported output formats available in the exporter registry.
+- Conversion is implemented as `input file -> parser -> normalized Activity -> selected exporter`; it does not use parser-specific source-to-target shortcuts.
+- The source format is not shown as the primary conversion target unless the UI labels it as a same-format rewrite/export.
+- Conversion works for full activity export and for selected chart-range export when a selected range is active.
+- Conversion warnings identify target-format limitations, omitted fields, approximations, and privacy removals such as device serial numbers.
+- Conversion downloads through browser `Blob`/object URL APIs only and never uploads the source file, normalized activity, or converted file.
+- Unsupported or unavailable target formats are hidden or disabled with a typed reason, not shown as broken controls.
+- Round-trip tests cover at least GPX-to-FIT and FIT-to-GPX once both exporters are available.
+
 ### Epic E6: Map and Chart Synchronization
 
 #### AV-601: Define Interaction State

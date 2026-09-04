@@ -53,6 +53,7 @@ Normalized Activity Domain Model
        +--> GPX exporter
        +--> FIT exporter
        +--> TCX exporter later
+       +--> Direct conversion flow
   |
   v
 React UI
@@ -301,6 +302,7 @@ export type ActivityExportFormat = 'gpx' | 'fit' | 'tcx';
 export interface ActivityExportRequest {
   activity: Activity;
   format: ActivityExportFormat;
+  sourceFormat?: ActivitySourceFormat;
   range?: ActivityPointRange;
   fileName?: string;
 }
@@ -353,6 +355,8 @@ export interface UserPreferences {
 - A selected range should preserve point order and include all points between the resolved start and end indexes.
 - Focused map and chart views should share the same selected point range to avoid chart/map disagreement.
 - Exporters should consume normalized `Activity` or a derived focused activity slice, not parser-specific source data.
+- Direct conversion should be modeled as parse-to-`Activity` plus export-from-`Activity`, not as source-format-to-target-format shortcuts.
+- Direct conversion should offer only exporter-supported target formats and should normally exclude the source format unless the user is explicitly using export for cleanup/rewrite.
 - Exporters may lose unsupported source-specific fields; any loss should be documented through warnings or UI copy.
 - Exporting a selected range should not mutate the original activity and should be clearly presented as exporting the selected section.
 

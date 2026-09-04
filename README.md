@@ -179,6 +179,11 @@ must be opt-in and scrubbed of activity data.
 | Offline caching | The whole build is precached; nothing else is cached at all | `AV-802` asks for the app shell. The lazily loaded map chunk, its worker and the FIT parser chunk are included too, so route-only mode (`AV-803`) and opening a `.fit` file both still work offline. There is **no runtime caching**: activity files never travel over the network — they are read from a `File` — so there is nothing of the user's to cache, and map tiles are deliberately left out, since caching a provider's responses would store a record of where the reader has been looking (§5). Offline map tiles remain a separate project (TD-005). |
 | FIT parser library | `fit-file-parser` (MIT), lazily loaded | Garmin's official `@garmin/fitsdk` is rejected on **licence**, not merit: its agreement calls the SDK "Confidential Information of Garmin" and forbids making it available to third parties, which an open-source repo served as a public static site cannot satisfy. `fit-file-parser` is MIT, ESM, ships its own types, needs no Node built-ins, and verifies correct against hand-encoded fixtures in Node and in Chromium. It costs 61 KB gzipped in its **own chunk**, so it is off the critical path and the main bundle grew by 0.26 KB. The service worker still precaches that chunk in the background (`AV-802`), so a `.fit` file opens offline — the lazy import buys a faster first paint, not fewer bytes for an installed app. Full reasoning, including the residual risk in its generated FIT profile, is TD-018. |
 | Sensor charts | Heart rate, power and temperature shown for any format | `AV-704`. They were always modelled in `charts.ts`; FIT support is simply the first format that commonly carries them. No availability rule changed to switch them on, which is the point — a GPX file with the same extensions gets the same charts. Temperature is the only one needing conversion, and it is an interval scale, so imperial uses the affine °C→°F transform rather than a factor. |
+| Export privacy | The device serial number is never written | The app refuses to display it (§5), so writing it into a file the user is likely to share would make the export the one place it leaks. The export says so, rather than dropping it silently. Everything else the source file stated — including its `creator` — is preserved, because the user already had it. |
+| Export of an activity with no route | Refused, not written empty | GPX has no track point without a position, so an indoor activity would produce a valid file containing nothing. An honest error naming the reason is more use than an empty track the user discovers later. Partial coordinate loss is different: those points are dropped and counted in a warning. |
+| Export loss warnings | Named per format, shown after the download | `AV-551`. GPX cannot carry laps, states sensor fields only through Garmin extensions, and gives cadence a number with no unit. Each is reported by code so the list grows with the format registry rather than with the UI. Shown after saving, not before: computing them means serializing the activity, and doing that on every control change would cost a full pass over the points for a message the user has not asked for yet. |
+| FIT export | `FitEncoder`, from the package FIT import already added | `AV-552`/`AV-553`. No new dependency and no new licence question. The library owns the binary container (CRC, definition records, base types); what we own is the profile mapping, verified by round-tripping every fixture and by checking the file's CRC against an independent implementation rather than the encoder's own. Loaded on demand: the encoder costs **1.7 KB gzipped** on top of the FIT parser chunk it shares, and nothing FIT-related reaches the main bundle. The minimal profile and the loss cases were specified in TD-021 before any of it was built. |
+| FIT export refuses an activity with no timestamps | Mirrors GPX refusing one with no coordinates | Every FIT record is keyed by time, so a file without timestamps would contain no records at all. The two formats fail on opposite data: a treadmill run exports to FIT but not GPX, and a route with no clock exports to GPX but not FIT. Both refuse with a message naming the reason rather than writing an empty file. |
 | Map vs app theme | Independent | §17 leaves this open. The basemap keeps its own styling rather than following the app theme, so route-only mode and the tile treatment stay predictable. |
 | Terms and Conditions | A route, not a modal | A legal document needs a stable, shareable link, and it must be readable without a loaded activity. The copy is marked **draft** in the page itself: it describes how the app actually behaves, but it has not been reviewed by anyone qualified and must be before release. |
 | Routing | React Router, `HashRouter`; `/` homepage and `/viewer`, with settings as modal state rather than a route (`AV-006`, `AV-007`) | The plan defers routing until "multiple views become useful" (§4); the Settings page is that point, and §9 already reserved `src/app/routes.ts`. Hash routing because this is a static, backend-free app: on static hosting such as GitHub Pages a deep link to `/settings` would 404 without server rewrites. |
@@ -192,18 +197,18 @@ must be opt-in and scrubbed of activity data.
 
 The plan lives in [`docs/planning/`](docs/planning/README.md).
 
-Implemented: **M0–M5** and **M3.5** — project foundation, the GPX route vertical
-slice, summary stats, the chart panel with the x-axis switch and run-specific
-charts, map/chart synchronization, and FIT import (`AV-001`…`003`, `AV-101`…`103`,
+Implemented: **M0–M5**, **M3.5** and **Stage 3** — project foundation, the GPX
+route vertical slice, summary stats, the chart panel with the x-axis switch and
+run-specific charts, map/chart synchronization, FIT import, and browser-side
+GPX and FIT export (`AV-001`…`003`, `AV-101`…`103`,
 `AV-201`…`203`, `AV-301`…`304`, `AV-401`…`404`, `AV-501`…`507`, `AV-513`, `AV-515`,
-`AV-601`…`604`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-406`, `AV-701`–`AV-704`, plus `AV-801`–`AV-803`).
+`AV-601`…`604`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-406`, `AV-550`–`AV-554`, `AV-701`–`AV-704`, plus `AV-801`–`AV-803`).
 
 Not implemented, and **not** yet reconciled with the code:
 
 | Task | Adds | Conflicts with what is built |
 | --- | --- | --- |
 | `AV-605` | Focused-range summary stats | **Deliberately not implemented** — see the decisions table |
-| `AV-550`–`AV-554` | Export: registry, GPX, FIT, controls | Export is listed as a non-goal in the older scope |
 | `AV-750`–`AV-753` | TCX import/export and round-trip tests | — |
 
 ## MapLibre integration notes

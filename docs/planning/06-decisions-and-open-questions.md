@@ -114,6 +114,52 @@ Reason: `@garmin/fitsdk` ships under the FIT Protocol License Agreement, which s
 
 Residual risk, accepted and recorded: the library's `garmin_profile.generated.js` encodes the FIT profile's message and field numbering, which originates in Garmin's published SDK documentation. The library is MIT on its author's authority. This is the same position every open-source FIT reader occupies, and the alternative — reimplementing the profile ourselves — would not improve it.
 
+### TD-019: Selected-Range Export Preserves Original Timestamps
+
+Decision: exporting a selected section writes the points' original timestamps, unshifted.
+
+Reason: §17 asked whether to normalize them to the section's start. A track point's time is a record of when the athlete was at that place; rewriting it would make the exported file disagree with every other copy of the same activity, and with the athlete's own memory of when they went out. A section is a shorter recording, not a different one. The file name gains a `-section` suffix so it cannot be mistaken for the whole activity.
+
+### TD-020: GPX Export Writes Garmin Extensions, and Never the Serial Number
+
+Decision: `AV-551` writes sensor data using Garmin's `TrackPointExtension` and `PowerExtension` namespaces, and never writes the recording device's serial number.
+
+Reason: GPX defines no element for heart rate, cadence, power, temperature or speed, so an exporter either drops them or uses the extension vocabulary every device and tool already writes. Power in particular is spelled `gpxpx:PowerInWatts` by Garmin, which is what other applications read; the GPX parser now accepts that spelling too, so an exported file re-imports with its power intact.
+
+The serial number is excluded on privacy grounds, not technical ones. §5 permits showing a stable identifier only where there is a clear reason to, and the viewer has none — `DISPLAYABLE_DEVICE_FIELDS` already excludes it. An exported file is more shareable than a screen, so writing it there would make the export the single place the identifier escapes. The export reports the omission as a warning rather than performing it silently.
+
+### TD-021: FIT Export Is Viable, Using the Encoder Already in the Tree
+
+Decision (`AV-552`): FIT export will be implemented with `FitEncoder`, which ships inside `fit-file-parser` — the dependency FIT *import* already added. It is neither a new library nor an internal encoder written from scratch, and it is not deferred.
+
+**Licence.** Unchanged: same MIT package, already assessed in TD-018. No new dependency and no new licence review.
+
+**Bundle size.** Measured, not estimated: adding the encoder to a bundle that already contains the parser costs **1.7 KB gzipped** (58,442 → 60,200 bytes), and nothing FIT-related reaches the main bundle.
+
+Stated precisely, because the marginal figure is easy to over-read: the built app splits FIT into a shared 61 KB gzipped chunk (the library, whose `exports` map publishes only its entry point, so the encoder cannot be imported apart from the parser) plus thin per-use chunks — `buildFit` at 1.9 KB and `parseFit` at 2.2 KB. So 1.7 KB is what export costs *someone who has already loaded FIT import*; a reader who only ever exports FIT downloads the shared chunk as well. Either way it is loaded on demand, and a GPX-only user downloads none of it on first paint.
+
+**Browser compatibility.** Same package, same build, already verified running in Chromium with no Node built-ins and no `Buffer` global.
+
+**Correctness risk, and where it actually sits.** `FitEncoder` is deliberately low-level: it owns the binary container — header, definition records, base-type sizes, endianness, range validation and the CRC — but the caller supplies profile field numbers and *already-scaled* values. So the library carries the fiddly binary plumbing, and the risk we take on is the profile mapping: wrong field numbers, wrong scale or offset (altitude is ×5 with a −500 m offset, distance ×100, speed ×1000, coordinates in semicircles), the FIT epoch of 1989-12-31, and omitting messages other tools expect.
+
+That risk is testable rather than theoretical, and a spike confirmed it before this decision was recorded: a four-point activity encoded to 135 bytes, its trailing CRC matched an **independent** CRC-16 implementation (the one in `make-fit-fixtures.mjs`, not the library's), its header still read `.FIT`, and `parseFit` read it back with coordinates, elevation, timestamps, sport and distance all intact. The hand-written fixture encoder remains a second independent implementation to cross-check field numbers against.
+
+**Minimal supported export profile**, defined before implementation:
+
+| Message | Global | Fields |
+| --- | --- | --- |
+| `file_id` | 0 | `type` = activity, `manufacturer` = development, `time_created`. **No `serial_number`** — TD-020 applies to every format we write. |
+| `sport` | 12 | `sport`, `sub_sport` when known |
+| `event` | 21 | `timer` start/stop pairs, reproducing segment boundaries |
+| `record` | 20 | `timestamp`, `position_lat`, `position_long`, `altitude`, `distance`, `speed`, `heart_rate`, `cadence`, `power`, `temperature` — each written only when the point has it |
+| `lap` | 19 | `start_time`, `timestamp`, `total_elapsed_time`, `total_distance`, when the activity has laps |
+| `session` | 18 | `start_time`, `timestamp`, `sport`, `total_elapsed_time`, `total_timer_time`, `total_distance` |
+| `activity` | 34 | `timestamp`, `num_sessions`, `type`, `event`, `event_type` |
+
+**Known loss, to be reported as export warnings.** FIT keys records by timestamp, so a point without one cannot be written — where GPX tolerates it. An activity with no timestamps at all must therefore be refused rather than written empty, mirroring the way GPX export refuses an activity with no coordinates. Sub-second times are lost to FIT's whole-second resolution. Cadence occupies a single field, so strides and pedal revolutions are told apart only by the declared sport — the same ambiguity GPX has. The source device's identity is not reproduced: the file declares this app as its creator.
+
+**Scope.** GPX export shipped first and does not depend on any of this (`AV-550`, `AV-551`, `AV-554` are complete), so FIT export can be built, delayed or dropped without touching it.
+
 ## 17. Open Questions
 
 - Which map tile provider should be used initially, and what are its attribution and usage requirements?
@@ -145,9 +191,6 @@ Residual risk, accepted and recorded: the library's `garmin_profile.generated.js
 - What exact label should the running cadence chart use: `strides/min`, `spm`, or full `strides per minute`?
 - Should cycling speed prefer source instantaneous speed, derived distance/time, or a smoothed hybrid?
 - Should cycling cadence be added later as an optional sensor chart separate from the initial cycling speed chart?
-- For Stage 3, is FIT export required as a shipped feature, or is a documented technical feasibility task acceptable before committing to binary FIT encoding?
-- What minimal FIT export profile is acceptable for interoperability?
-- Should selected-range export preserve original timestamps or normalize timestamps relative to the selected segment start?
 - For TCX export, how should selected-range exports handle laps that partially overlap the selected range?
 - What smoothing/noise threshold should elevation gain use?
 - Which device metadata fields should be shown by default, and should advanced/sensitive fields require an explicit reveal action?

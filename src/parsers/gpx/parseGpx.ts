@@ -307,8 +307,11 @@ function readExtensions(extensions: Element, point: RawGpxPoint): void {
         case 'cadence':
           point.cadence = parseNumber(value);
           break;
+        // `powerinwatts` is Garmin's PowerExtension spelling, which is what
+        // other tools read and therefore what AV-551 writes.
         case 'power':
         case 'watts':
+        case 'powerinwatts':
           point.powerWatts = parseNumber(value);
           break;
         case 'atemp':

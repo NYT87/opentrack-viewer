@@ -142,7 +142,9 @@ describe('App vertical slice (AV-304)', () => {
     // Changing files goes through "Close activity" rather than swapping the
     // file out from under the loaded map and charts.
     expect(screen.queryByTestId('file-input')).not.toBeInTheDocument();
-    expect(screen.queryByText(/nothing is uploaded/i)).not.toBeInTheDocument();
+    // Named specifically: other panels reassure about uploading too, and the
+    // claim under test is that the *drop zone* is gone.
+    expect(screen.queryByText(/^Drop a .* file here$/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close activity' })).toBeInTheDocument();
   });
 

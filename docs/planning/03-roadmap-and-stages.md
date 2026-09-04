@@ -100,6 +100,7 @@ Goal: Export normalized activities from the browser without uploading files.
 Outcome:
 - Export controls can serialize the full activity to GPX where supported.
 - Export controls can serialize the full activity to FIT where technically feasible and appropriately scoped.
+- Export controls can convert an opened supported activity into another supported export format through the normalized `Activity` model.
 - If a focused chart range is active, the user can export either the full activity or selected section.
 - Export warnings explain fields that cannot be represented in the selected target format.
 - Export happens through local browser download APIs only.

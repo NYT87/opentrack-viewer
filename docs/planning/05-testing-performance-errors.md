@@ -130,6 +130,10 @@ Cover:
 - Confirm export controls are hidden before a valid activity is loaded.
 - Confirm GPX export downloads a file and exported GPX can be loaded again.
 - Confirm selected range export contains only the selected activity section.
+- Confirm direct conversion offers only supported target formats after a supported file is opened.
+- Confirm direct conversion can export an opened GPX activity to FIT once FIT export is available.
+- Confirm direct conversion can export an opened FIT activity to GPX once FIT import and GPX export are available.
+- Confirm conversion warnings explain target-format data loss, approximations, and privacy removals.
 - Confirm run fixture shows pace when sufficient time/distance data exists.
 - Confirm running cadence chart appears only when `runningCadenceSpm` data exists.
 - Confirm running cadence labels and axis units use strides per minute, not RPM.
@@ -146,6 +150,7 @@ Add browser tests or request interception checks for:
 - No analytics request contains device identifiers, serial numbers, manufacturer/model fields, or raw metadata.
 - No SEO metadata contains coordinates, timestamps, file names, device identifiers, serial numbers, manufacturer/model fields, sensor values, or derived activity stats.
 - No export operation uploads activity contents or derived activity contents.
+- No direct conversion operation uploads activity contents, normalized activity contents, or converted file contents.
 - Map tile requests are limited to configured tile provider URLs.
 
 ### Fixture Policy

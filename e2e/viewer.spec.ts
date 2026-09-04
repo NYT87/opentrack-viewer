@@ -740,6 +740,122 @@ test('labels running cadence in strides per minute (AV-515)', async ({ page }) =
   );
 });
 
+test('exports the loaded activity as a real download (AV-554)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export GPX' }).click();
+  const saved = await download;
+
+  expect(saved.suggestedFilename()).toBe('Elevation-Route.gpx');
+
+  // The bytes the browser actually received are valid GPX.
+  const stream = await saved.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const xml = Buffer.concat(chunks).toString('utf-8');
+
+  expect(xml).toContain('<gpx version="1.1"');
+  expect(xml).toContain('<trkpt lat=');
+  await expect(page.getByText(/^Saved/)).toContainText('Elevation-Route.gpx');
+});
+
+test('exports only the selected section when one is chosen (AV-554)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  // Drag a selection on the elevation chart. Charts sit below the map, so the
+  // pointer needs the chart actually on screen.
+  const chart = page.getByTestId('elevation-chart-svg');
+  await chart.scrollIntoViewIfNeeded();
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
+
+  await expect(page.getByRole('radio', { name: 'Selected section' })).toBeChecked();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export GPX' }).click();
+  const saved = await download;
+
+  expect(saved.suggestedFilename()).toBe('Elevation-Route-section.gpx');
+});
+
+test('renders the export panel’s secondary text as muted', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  const colours = await page.evaluate(() => {
+    const read = (selector: string) => {
+      const element = document.querySelector(selector);
+      return element ? getComputedStyle(element).color : undefined;
+    };
+    return { body: read('.export__body'), text: getComputedStyle(document.body).color };
+  });
+
+  // A `var()` naming an undefined token is dropped silently, and the element
+  // inherits body text instead — which is exactly what it must not do here.
+  expect(colours.body).toBeDefined();
+  expect(colours.body).not.toBe(colours.text);
+});
+
+test('exports a FIT file the app can read back (AV-553)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  await page.getByLabel('Format').selectOption('fit');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export FIT' }).click();
+  const saved = await download;
+
+  expect(saved.suggestedFilename()).toBe('Elevation-Route.fit');
+
+  const stream = await saved.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const bytes = Buffer.concat(chunks);
+
+  // A real FIT header, produced by the browser rather than by a test double.
+  expect(bytes.subarray(8, 12).toString('ascii')).toBe('.FIT');
+
+  // The proof it is readable: hand it straight back to the app.
+  await page.getByRole('button', { name: 'Close activity' }).click();
+  await page.getByTestId('file-input').setInputFiles({
+    name: 'Elevation-Route.fit',
+    mimeType: 'application/vnd.ant.fit',
+    buffer: bytes,
+  });
+
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toContainText('FIT');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+});
+
+test('has no export controls before an activity is open (AV-554)', async ({ page }) => {
+  await page.goto('./#/viewer');
+
+  await expect(page.getByRole('button', { name: /^Export/ })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Export activity' })).toHaveCount(0);
+});
+
+test('exports without contacting a server (AV-550)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  const requests = recordRequests(page);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export GPX' }).click();
+  await download;
+
+  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
+    [],
+  );
+});
+
 test('opens a FIT ride, with its map and sensor charts (AV-702)', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'ride-with-sensors.fit');
@@ -920,7 +1036,9 @@ test('hides the drop zone while an activity is open', async ({ page }) => {
   await expect(page.getByText('Simple Route')).toBeVisible();
 
   await expect(page.getByTestId('file-input')).toHaveCount(0);
-  await expect(page.getByText(/nothing is uploaded/i)).toHaveCount(0);
+  // Named specifically: the export panel reassures about uploading too, and the
+  // claim under test is that the *drop zone* is gone.
+  await expect(page.getByText(/^Drop a .* file here$/)).toHaveCount(0);
 
   // Closing brings it back, which is the route to loading a different file.
   await page.getByRole('button', { name: 'Close activity' }).click();

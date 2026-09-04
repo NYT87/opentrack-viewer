@@ -668,3 +668,60 @@ body {
 
 .chart__cursor line { stroke: var(--warn); stroke-width: 1; }
 .chart__cursor circle { fill: var(--warn); stroke: var(--bg); stroke-width: 2; }
+
+/* AV-554: export controls, shown only once an activity is loaded. */
+.export__title { margin: 0; font-size: 15px; }
+.export__body {
+  margin: 6px 0 14px;
+  max-width: 60ch;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.export__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+.export__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.export__label {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.export__scope {
+  gap: 4px;
+}
+.export__choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.export__error {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--error);
+}
+.export__result {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.export__saved { margin: 0; font-size: 13px; }
+.export__note { margin: 10px 0 0; font-size: 12px; color: var(--text-muted); }
+.export__warnings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.export__warnings li { margin-top: 4px; }

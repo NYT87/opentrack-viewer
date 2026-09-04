@@ -65,6 +65,7 @@ The core promise is simple:
 - Provide a Reset View button that clears the selected section and restores the full activity view across charts, map, and summary stats.
 - Synchronize map hover/selection with chart hover/selection.
 - In Stage 3, export the current activity or selected/focused activity section to GPX and FIT where technically feasible.
+- In Stage 3, support direct browser-side conversion between supported formats: after a user opens a supported activity file, they can download it as another supported export format without uploading it.
 - In Stage 4, support TCX files for both import and export.
 - Add FIT support after the GPX vertical slice validates the domain model and UI contract.
 - Keep all activity-file parsing, normalization, calculations, and privacy-sensitive processing in the browser.
@@ -82,6 +83,8 @@ The core promise is simple:
 - No offline map tile support in the initial scope.
 - No editing/exporting activity files in the first vertical slice.
 - No export workflow before the viewer has a stable normalized activity model and chart/map focus behavior.
+- No direct conversion to formats that are not supported by the exporter registry yet.
+- No promise of lossless conversion when the target format cannot represent all normalized fields; expected loss must be reported.
 - No attempt to support every activity format before GPX is solid.
 - No standalone settings page in the target navigation model.
 - No file upload controls on the homepage beyond navigation to the viewer/process page.
