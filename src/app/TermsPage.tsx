@@ -71,10 +71,10 @@ export function TermsPage() {
         <section className="prose">
           <h3 className="prose__title">Supported formats</h3>
           <p>
-            GPX is the only format this build reads. Support for FIT and TCX is planned but not
-            available yet, and a file that cannot be read will be reported rather than partially
-            interpreted. Even for GPX, the app can only show what a file actually contains: fields
-            a device did not record cannot be reconstructed.
+            This build reads GPX and FIT. Support for TCX is planned but not available yet, and a
+            file that cannot be read will be reported rather than partially interpreted. Whichever
+            format you open, the app can only show what a file actually contains: fields a device
+            did not record cannot be reconstructed.
           </p>
         </section>
       </div>

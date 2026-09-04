@@ -285,10 +285,11 @@ describe('App vertical slice (AV-304)', () => {
   it('switches the chart x-axis and keeps the choice across files (AV-504)', async () => {
     render(<App />);
     await loadFixture('route-with-elevation.gpx');
-    expect(screen.getByText(/x-axis: distance/)).toBeInTheDocument();
+    // Every chart in the panel reports the axis, so there is one label per chart.
+    expect(screen.getAllByText(/x-axis: distance/).length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole('button', { name: 'Time' }));
-    expect(screen.getByText(/x-axis: elapsed time/)).toBeInTheDocument();
+    expect(screen.getAllByText(/x-axis: elapsed time/).length).toBeGreaterThan(0);
 
     // The preference is a session setting, so the next file keeps it.
     await loadFixture('flat-route.gpx');
@@ -438,7 +439,13 @@ describe('map and chart synchronization (Epic E6)', () => {
     );
 
     expect(useInteractionStore.getState().hoveredPointIndex).toBe(2);
-    expect(screen.getByTestId('chart-cursor')).toBeInTheDocument();
+    // The hover is shared state, so it marks more than the chart it came from.
+    // Not necessarily every chart: a series with no sample at that point has
+    // nothing to mark.
+    expect(screen.getAllByTestId('chart-cursor').length).toBeGreaterThan(1);
+    expect(
+      screen.getByTestId('elevation-chart-svg').querySelector('[data-testid="chart-cursor"]'),
+    ).not.toBeNull();
   });
 
   it('clears the marker when the hover ends', async () => {

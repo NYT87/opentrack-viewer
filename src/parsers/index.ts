@@ -19,7 +19,16 @@ const REGISTRY: Partial<Record<FormatDetection['format'], ParserFn>> = {
     options.onPhase?.('processing');
     return parseGpx(text, { fileName: file.name, fileSizeBytes: file.size });
   },
-  // fit: added by AV-702.
+  // AV-702. Imported lazily so the FIT library — ~61 KB gzipped — stays off the
+  // initial page load and out of the main bundle (TD-018). It is still
+  // precached by the service worker afterwards, in the background, so that
+  // opening a .fit file works offline; the same is true of the map chunk.
+  fit: async (file, options) => {
+    const { parseFit } = await import('./fit/parseFit');
+    const buffer = await file.arrayBuffer();
+    options.onPhase?.('processing');
+    return parseFit(buffer, { fileName: file.name, fileSizeBytes: file.size });
+  },
 };
 
 /** Files above this size get a "slow parse" heads-up warning (plan §15). */

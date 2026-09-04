@@ -4,7 +4,7 @@ export function EmptyState() {
     <div className="empty-state">
       <h2 className="empty-state__title">No activity open</h2>
       <p className="empty-state__body">
-        Choose a GPX file to see its route, distance, duration and elevation. Parsing happens
+        Choose a GPX or FIT file to see its route, distance, duration and elevation. Parsing happens
         entirely in this browser tab — your activity file is never sent to a server.
       </p>
       <p className="empty-state__note">

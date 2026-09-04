@@ -15,6 +15,9 @@ import {
   toDisplayElevation,
   toDisplayPace,
   type UnitSystem,
+  formatTemperature,
+  temperatureUnitLabel,
+  toDisplayTemperature,
 } from '../domain/units';
 
 /** Cap on rendered points; the full series still backs every statistic (§14). */
@@ -28,6 +31,7 @@ function yUnitLabel(series: ChartSeries, units: UnitSystem): string {
   if (series.key === 'elevation') return elevationUnitLabel(units);
   if (series.key === 'pace') return paceUnitLabel(units);
   if (series.key === 'speed') return speedUnitLabel(units);
+  if (series.key === 'temperature') return temperatureUnitLabel(units);
   return series.unit;
 }
 
@@ -35,6 +39,7 @@ function toDisplayY(value: number, series: ChartSeries, units: UnitSystem): numb
   if (series.key === 'elevation') return toDisplayElevation(value, units);
   if (series.key === 'pace') return toDisplayPace(value, units);
   if (series.key === 'speed') return toDisplaySpeed(value, units);
+  if (series.key === 'temperature') return toDisplayTemperature(value, units);
   return value;
 }
 
@@ -42,6 +47,7 @@ function formatY(value: number, series: ChartSeries, units: UnitSystem): string 
   if (series.key === 'elevation') return formatElevation(value, units);
   if (series.key === 'pace') return formatPace(value, units);
   if (series.key === 'speed') return formatSpeed(value, units);
+  if (series.key === 'temperature') return formatTemperature(value, units);
   return `${Math.round(value)} ${series.unit}`;
 }
 
@@ -332,7 +338,7 @@ export function ActivityChart({
           viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
           role="img"
           aria-label={`${series.label} from ${formatY(series.yMin, series, units)} to ${formatY(series.yMax, series, units)}, by ${X_AXIS_LABEL[series.xAxis].toLowerCase()}`}
-          data-testid="elevation-chart-svg"
+          data-testid={`${series.key}-chart-svg`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

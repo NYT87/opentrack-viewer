@@ -57,11 +57,22 @@ describe('detectSupportedFormat', () => {
     expect((await detectSupportedFormat(fixtureFile('simple-route.gpx'))).format).toBe('gpx');
   });
 
-  it('rejects recognized-but-unimplemented formats', async () => {
+  it('accepts FIT, which this build now parses (AV-702)', async () => {
     const header = new Uint8Array(16);
     header.set([0x2e, 0x46, 0x49, 0x54], 8);
 
-    await expect(detectSupportedFormat(new File([header], 'ride.fit'))).rejects.toMatchObject({
+    await expect(detectSupportedFormat(new File([header], 'ride.fit'))).resolves.toMatchObject({
+      format: 'fit',
+      via: 'signature',
+    });
+  });
+
+  it('rejects recognized-but-unimplemented formats', async () => {
+    // TCX is recognized by its XML root, and arrives in Stage 4.
+    const tcx =
+      '<?xml version="1.0"?><TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" />';
+
+    await expect(detectSupportedFormat(new File([tcx], 'ride.tcx'))).rejects.toMatchObject({
       code: 'unsupported_format',
     });
   });

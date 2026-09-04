@@ -22,15 +22,21 @@ export interface ActivityChartDefinition {
 
 /**
  * §18 guardrail: one chart panel, elevation first, then run pace/cadence when
- * the data supports them. Heart rate, power and temperature are modelled here
- * so availability is uniform, but are not offered in the UI yet — they arrive
- * with the FIT sensor work (AV-704).
+ * the data supports them.
+ *
+ * AV-704: heart rate, power and temperature joined the list with FIT support.
+ * Nothing about their availability rules changed to allow it — they were always
+ * modelled here, and a GPX file with the same extensions gets the same charts.
+ * Order runs from the shape of the route to the body to the environment.
  */
 export const VISIBLE_CHART_KINDS: ActivityChartKind[] = [
   'elevation',
   'pace',
   'speed',
   'cadence',
+  'heartRate',
+  'power',
+  'temperature',
 ];
 
 const LABELS: Record<ActivityChartKind, string> = {

@@ -1,4 +1,5 @@
 import { useCallback, useId, useRef, useState } from 'react';
+import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 
 export interface FileDropZoneProps {
   onFile: (file: File) => void;
@@ -14,7 +15,7 @@ export interface FileDropZoneProps {
  */
 export function FileDropZone({
   onFile,
-  acceptedExtensions = ['gpx'],
+  acceptedExtensions = SUPPORTED_FORMATS,
   disabled = false,
 }: FileDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -74,7 +75,7 @@ export function FileDropZone({
         aria-disabled={disabled}
         aria-describedby={`${inputId}-hint`}
       >
-        <span className="dropzone__title">Drop a GPX file here</span>
+        <span className="dropzone__title">Drop {describeFormats(acceptedExtensions)} here</span>
         <span className="dropzone__subtitle">or click to choose one</span>
         <input
           ref={inputRef}
@@ -103,4 +104,15 @@ export function FileDropZone({
       )}
     </div>
   );
+}
+
+/** "a GPX file", "a GPX or FIT file", "a GPX, FIT or TCX file". */
+export function describeFormats(extensions: readonly string[]): string {
+  const names = extensions.map((extension) => extension.toUpperCase());
+  if (names.length === 0) return 'a file';
+  const joined =
+    names.length === 1
+      ? names[0]!
+      : `${names.slice(0, -1).join(', ')} or ${names.at(-1)!}`;
+  return `a ${joined} file`;
 }

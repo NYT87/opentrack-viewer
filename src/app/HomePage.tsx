@@ -9,7 +9,7 @@ interface FormatSupport {
 
 const FORMATS: FormatSupport[] = [
   { name: 'GPX', status: 'Supported', detail: 'Tracks and planned routes, with elevation and sensor extensions.' },
-  { name: 'FIT', status: 'Planned', detail: 'Garmin and Wahoo recordings, including non-GPS indoor activities.' },
+  { name: 'FIT', status: 'Supported', detail: 'Garmin and Wahoo recordings, including non-GPS indoor activities.' },
   { name: 'TCX', status: 'Planned', detail: 'Training Center files, for import and export.' },
 ];
 
@@ -25,7 +25,7 @@ export function HomePage() {
         <header className="page__header">
           <h2 className="page__title">Open your activity files, privately</h2>
           <p className="page__intro">
-            OpenTrack Viewer opens GPX activity files in your browser and shows the route, the
+            OpenTrack Viewer opens GPX and FIT activity files in your browser and shows the route, the
             numbers and the charts behind a workout — without the file ever leaving your device.
           </p>
           <p>

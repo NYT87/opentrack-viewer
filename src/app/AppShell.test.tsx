@@ -302,7 +302,7 @@ describe('Terms and Conditions (AV-008)', () => {
     expect(page).toHaveTextContent(/without warranty/i);
     expect(page).toHaveTextContent(/not medical advice|medical advice/i);
     expect(page).toHaveTextContent(/responsible for the files/i);
-    expect(page).toHaveTextContent(/GPX is the only format/i);
+    expect(page).toHaveTextContent(/reads GPX and FIT/i);
   });
 
   it('marks itself as needing legal review', async () => {

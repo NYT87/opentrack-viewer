@@ -1,6 +1,6 @@
 # OpenTrack Viewer
 
-**This app opens activity files locally in your browser. GPX parsing and all
+**This app opens activity files locally in your browser. GPX and FIT parsing and all
 calculations happen on your device. The app does not upload your activity file
 to a backend.**
 
@@ -176,7 +176,9 @@ must be opt-in and scrubbed of activity data.
 | Chart axis ticks | Fixed real-world intervals: every 1 km (1 mile in imperial), every 5 minutes | A label then means the same thing on a 3 km run and a 200 km ride, rather than shifting with the range. Marks are always generated at the interval; only the *labels* thin on a narrow axis, and endpoint labels appear when no interval label crowds them. |
 | Chart sizing | Measured width, `viewBox` 1:1 with pixels | The chart previously used a fixed `viewBox` with `preserveAspectRatio="none"`, which stretched the axis text horizontally. It now measures its container with a `ResizeObserver`, so text renders at natural proportions and tick thinning can be decided against real pixels. The y gutter is computed from the widest rendered label. |
 | Theme | Three modes — system (default), dark, light — resolved to a `data-theme` attribute | System follows `prefers-color-scheme` and keeps following it live. Where the browser cannot report a preference it resolves to **light**, which is also the base palette in CSS, so a document with no `data-theme` yet still renders correctly. An inline script in `index.html` resolves it before first paint so a dark-mode device never flashes light; it duplicates a few lines of `domain/theme.ts` deliberately, because React has not booted at that point. Session-scoped like the other settings. |
-| Offline caching | The whole build is precached; nothing else is cached at all | `AV-802` asks for the app shell. The lazily loaded map chunk and its worker are included too, so route-only mode still works offline (`AV-803`). There is **no runtime caching**: activity files never travel over the network — they are read from a `File` — so there is nothing of the user's to cache, and map tiles are deliberately left out, since caching a provider's responses would store a record of where the reader has been looking (§5). Offline map tiles remain a separate project (TD-005). |
+| Offline caching | The whole build is precached; nothing else is cached at all | `AV-802` asks for the app shell. The lazily loaded map chunk, its worker and the FIT parser chunk are included too, so route-only mode (`AV-803`) and opening a `.fit` file both still work offline. There is **no runtime caching**: activity files never travel over the network — they are read from a `File` — so there is nothing of the user's to cache, and map tiles are deliberately left out, since caching a provider's responses would store a record of where the reader has been looking (§5). Offline map tiles remain a separate project (TD-005). |
+| FIT parser library | `fit-file-parser` (MIT), lazily loaded | Garmin's official `@garmin/fitsdk` is rejected on **licence**, not merit: its agreement calls the SDK "Confidential Information of Garmin" and forbids making it available to third parties, which an open-source repo served as a public static site cannot satisfy. `fit-file-parser` is MIT, ESM, ships its own types, needs no Node built-ins, and verifies correct against hand-encoded fixtures in Node and in Chromium. It costs 61 KB gzipped in its **own chunk**, so it is off the critical path and the main bundle grew by 0.26 KB. The service worker still precaches that chunk in the background (`AV-802`), so a `.fit` file opens offline — the lazy import buys a faster first paint, not fewer bytes for an installed app. Full reasoning, including the residual risk in its generated FIT profile, is TD-018. |
+| Sensor charts | Heart rate, power and temperature shown for any format | `AV-704`. They were always modelled in `charts.ts`; FIT support is simply the first format that commonly carries them. No availability rule changed to switch them on, which is the point — a GPX file with the same extensions gets the same charts. Temperature is the only one needing conversion, and it is an interval scale, so imperial uses the affine °C→°F transform rather than a factor. |
 | Map vs app theme | Independent | §17 leaves this open. The basemap keeps its own styling rather than following the app theme, so route-only mode and the tile treatment stay predictable. |
 | Terms and Conditions | A route, not a modal | A legal document needs a stable, shareable link, and it must be readable without a loaded activity. The copy is marked **draft** in the page itself: it describes how the app actually behaves, but it has not been reviewed by anyone qualified and must be before release. |
 | Routing | React Router, `HashRouter`; `/` homepage and `/viewer`, with settings as modal state rather than a route (`AV-006`, `AV-007`) | The plan defers routing until "multiple views become useful" (§4); the Settings page is that point, and §9 already reserved `src/app/routes.ts`. Hash routing because this is a static, backend-free app: on static hosting such as GitHub Pages a deep link to `/settings` would 404 without server rewrites. |
@@ -184,17 +186,17 @@ must be opt-in and scrubbed of activity data.
 | Elevation noise threshold | 3 m (`ELEVATION_NOISE_THRESHOLD_METERS`) | Consumer altimeter noise is ±2–5 m; raw delta summing inflates gain on flat routes. Covered by the flat-route test. |
 | Malformed points | Skipped with a warning; only an unreadable document fails | One bad `trkpt` should not cost the user the whole route. |
 | GPX segments | Preserved, never merged | §17 asked whether to merge or preserve. Merging is not a simplification, it is a fabrication: a `<trkseg>` boundary is where the recording stopped, so joining segments both adds distance the athlete did not cover and draws a straight line down a road they never took. `ActivityPoint.segmentIndex` carries the boundary; distance breaks at it and the route renders one LineString per segment. |
-| Web Workers | Deferred until FIT (AV-702) | Measured, not guessed: main-thread GPX parsing blocks the UI for ~0.07 s at 5,000 points, ~0.5 s at 50,000 and ~0.8 s at 100,000 — below the plan's "if UI stalls" bar (§14) for realistic files. Moving *GPX* to a worker is not a relocation: `DOMParser` does not exist in a worker (verified), so it would mean adding a DOM-free XML parser as the first non-essential runtime dependency. FIT is binary and needs no DOM, so it can go straight into a worker for free. |
+| Web Workers | Deferred until FIT (AV-702) | Measured, not guessed: main-thread GPX parsing blocks the UI for ~0.07 s at 5,000 points, ~0.5 s at 50,000 and ~0.8 s at 100,000 — below the plan's "if UI stalls" bar (§14) for realistic files. Moving *GPX* to a worker is not a relocation: `DOMParser` does not exist in a worker (verified), so it would mean adding a DOM-free XML parser as the first non-essential runtime dependency. FIT is binary and needs no DOM, so it can go straight into a worker for free. FIT import has since landed (`AV-702`) still on the main thread: the parse is fast enough on realistic files that the same "if UI stalls" bar has not been met, and the worker move stays available whenever it is. |
 
 ## Status against the plan
 
 The plan lives in [`docs/planning/`](docs/planning/README.md).
 
-Implemented: **M0–M4** and **M3.5** — project foundation, the GPX route vertical
+Implemented: **M0–M5** and **M3.5** — project foundation, the GPX route vertical
 slice, summary stats, the chart panel with the x-axis switch and run-specific
-charts, and map/chart synchronization (`AV-001`…`003`, `AV-101`…`103`,
+charts, map/chart synchronization, and FIT import (`AV-001`…`003`, `AV-101`…`103`,
 `AV-201`…`203`, `AV-301`…`304`, `AV-401`…`404`, `AV-501`…`507`, `AV-513`, `AV-515`,
-`AV-601`…`604`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-406`, plus `AV-801`–`AV-803`).
+`AV-601`…`604`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-406`, `AV-701`–`AV-704`, plus `AV-801`–`AV-803`).
 
 Not implemented, and **not** yet reconciled with the code:
 
@@ -202,7 +204,6 @@ Not implemented, and **not** yet reconciled with the code:
 | --- | --- | --- |
 | `AV-605` | Focused-range summary stats | **Deliberately not implemented** — see the decisions table |
 | `AV-550`–`AV-554` | Export: registry, GPX, FIT, controls | Export is listed as a non-goal in the older scope |
-| `AV-701`–`AV-704` | FIT import | — |
 | `AV-750`–`AV-753` | TCX import/export and round-trip tests | — |
 
 ## MapLibre integration notes

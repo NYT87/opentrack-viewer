@@ -82,6 +82,24 @@ export function formatPace(
   return `${minutes}:${String(seconds).padStart(2, '0')} ${paceUnitLabel(units)}`;
 }
 
+/** Temperature is stored in Celsius and converted only for display. */
+export function toDisplayTemperature(celsius: number, units: UnitSystem): number {
+  return units === 'imperial' ? celsius * (9 / 5) + 32 : celsius;
+}
+
+export function temperatureUnitLabel(units: UnitSystem): string {
+  return units === 'imperial' ? '\u00b0F' : '\u00b0C';
+}
+
+export function formatTemperature(
+  celsius: number | undefined,
+  units: UnitSystem = 'metric',
+): string {
+  if (!Number.isFinite(celsius)) return MISSING;
+  const value = Math.round(toDisplayTemperature(celsius as number, units));
+  return `${value} ${temperatureUnitLabel(units)}`;
+}
+
 /** Speed is stored in metres per second and converted only for display. */
 export function toDisplaySpeed(metersPerSecond: number, units: UnitSystem): number {
   return units === 'imperial'

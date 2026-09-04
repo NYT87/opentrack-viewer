@@ -187,13 +187,16 @@ test('switches the chart x-axis between distance and time (AV-504)', async ({ pa
 
   const distance = page.getByRole('button', { name: 'Distance' });
   const time = page.getByRole('button', { name: 'Time' });
+  const elevationChart = page.getByRole('region', { name: 'Elevation chart' });
   await expect(distance).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText(/x-axis: distance/)).toBeVisible();
+  await expect(elevationChart.getByText(/x-axis: distance/)).toBeVisible();
 
   await time.click();
 
+  // The axis is a panel-wide setting, so every chart follows it.
   await expect(time).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText(/x-axis: elapsed time/)).toBeVisible();
+  await expect(elevationChart.getByText(/x-axis: elapsed time/)).toBeVisible();
+  await expect(page.getByText(/x-axis: elapsed time/).first()).toBeVisible();
   // The chart is redrawn, not re-parsed: the activity is still the same file.
   await expect(page.getByText('Elevation Route')).toBeVisible();
 });
@@ -737,6 +740,74 @@ test('labels running cadence in strides per minute (AV-515)', async ({ page }) =
   );
 });
 
+test('opens a FIT ride, with its map and sensor charts (AV-702)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'ride-with-sensors.fit');
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText('FIT');
+  await expect(summary).toContainText('Avg speed');
+
+  // The route reached the map, so the lazy FIT chunk and the map agree.
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+
+  // Sensors the FIT file carries become charts with no format-specific code.
+  for (const chart of ['Speed chart', 'Heart rate chart', 'Power chart', 'Elevation chart']) {
+    await expect(page.getByRole('region', { name: chart })).toBeVisible();
+  }
+});
+
+test('opens an indoor FIT run with no GPS at all (AV-703)', async ({ page }) => {
+  await loadFixture(page, 'treadmill-run.fit');
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toBeVisible();
+  // A run, so pace rather than speed — and the distance is real despite there
+  // being no GPS, because the treadmill recorded it.
+  await expect(summary).toContainText('Avg pace');
+  await expect(summary).toContainText('133 m');
+  // The map box explains itself rather than showing an empty map, and MapLibre
+  // is never downloaded because there is nothing to draw.
+  const map = page.getByRole('region', { name: 'Route map' });
+  await expect(map).toContainText('No route to display');
+  await expect(map.locator('canvas')).toHaveCount(0);
+
+  // Charts that need no position still work.
+  await expect(page.getByRole('region', { name: 'Pace chart' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Cadence chart' })).toBeVisible();
+});
+
+test('tells an indoor FIT reader about the missing route exactly once', async ({ page }) => {
+  await loadFixture(page, 'treadmill-run.fit');
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
+
+  // The notes are collapsed until asked for.
+  await page.getByText(/parser (note|warning)/).click();
+
+  const messages = await page.getByRole('listitem').allTextContents();
+  const noGps = messages.filter((text) => /no GPS coordinates/i.test(text));
+  expect(noGps).toHaveLength(1);
+});
+
+test('never displays the serial number in a FIT file (AV-702)', async ({ page }) => {
+  await loadFixture(page, 'ride-with-sensors.fit');
+
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
+  // The fixture's device serial. Parsed, but never rendered anywhere.
+  await expect(page.locator('body')).not.toContainText('3987654321');
+});
+
+test('reads a FIT file without contacting a server (AV-702)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  const requests = recordRequests(page);
+  await loadFixture(page, 'ride-with-sensors.fit');
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
+
+  const external = requests.filter((request) => !request.url().startsWith(ORIGIN));
+  expect(external.map((request) => request.url())).toEqual([]);
+});
+
 test('shows a run its average pace, and a ride its average speed', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   const summary = page.getByRole('region', { name: 'Activity summary' });
@@ -826,7 +897,11 @@ test('hovering the chart highlights the corresponding map point', async ({ page 
   await expect(chart).toBeVisible();
   await chart.hover({ position: { x: 10, y: 40 } });
 
-  await expect(page.locator('[data-testid="chart-cursor"]')).toBeVisible();
+  // Hovering one chart marks the point on the others too: the hover is shared
+  // interaction state, not a property of the chart the pointer is over.
+  await expect(chart.getByTestId('chart-cursor')).toBeVisible();
+  await expect(page.getByTestId('chart-cursor').first()).toBeVisible();
+  expect(await page.getByTestId('chart-cursor').count()).toBeGreaterThan(1);
 });
 
 test('shows a placeholder instead of a map for an activity with no GPS', async ({ page }) => {
@@ -1146,6 +1221,8 @@ test('caches the app, and nothing of the user or the tile provider (AV-802)', as
   // The map chunk and its worker are cached, so route-only mode works offline.
   expect(cached.some((url) => url.includes('assets/ActivityMap'))).toBe(true);
   expect(cached.some((url) => url.includes('maplibre-gl-worker'))).toBe(true);
+  // The FIT parser chunk too, so a .fit file still opens offline.
+  expect(cached.some((url) => url.includes('assets/parseFit'))).toBe(true);
 });
 
 test('fixture files are never read by the server', async () => {

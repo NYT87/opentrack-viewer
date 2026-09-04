@@ -104,6 +104,16 @@ Decision: Running activities should display average pace as the primary overview
 
 Reason: Pace is the expected primary metric for running, and speed is the expected primary metric for cycling. Using sport-specific defaults makes the overview easier to scan and avoids showing a less useful metric first.
 
+### TD-018: FIT Parsing Uses `fit-file-parser`, Not Garmin's SDK
+
+Decision: FIT files are decoded with `fit-file-parser` (MIT). Garmin's official `@garmin/fitsdk` is rejected on licensing grounds, not technical ones.
+
+Reason: `@garmin/fitsdk` ships under the FIT Protocol License Agreement, which states that the SDK "is Confidential Information of Garmin" (§4) and forbids the licensee to "distribute, publish, transfer or otherwise make available the Licensed Technology... to any third party for any reason" (§2c). OpenTrack Viewer is an open-source repository deployed as a public static site, so its dependencies are published as readable source and served to anyone who opens the page. That is incompatible with both clauses. §2d, which forbids placing the technology under a license requiring source disclosure, points the same way.
+
+`fit-file-parser` is MIT, ESM, ships its own TypeScript declarations, uses no Node-only APIs, and exposes `parseAsync(ArrayBuffer)`. Verified by parsing hand-encoded fixtures in Node and in real Chromium: coordinates decode from semicircles, altitude and speed descale correctly, and sport and manufacturer enums resolve to names. It bundles to **59.4 KB gzipped**, minified, including the `buffer` polyfill it depends on; no `Buffer` global is required at runtime. That cost is code-split into its own chunk, so it is absent from the initial page load and the main bundle grows by 0.26 KB. It is *not* absent from the device: `AV-802` precaches every emitted asset, so the service worker fetches the FIT chunk in the background after the first visit — deliberately, because a reader offline with a `.fit` file should still be able to open it, exactly as the lazily loaded map chunk is precached for offline route drawing. The lazy import buys a faster first paint and a smaller critical path, not fewer bytes over the lifetime of an installed app.
+
+Residual risk, accepted and recorded: the library's `garmin_profile.generated.js` encodes the FIT profile's message and field numbering, which originates in Garmin's published SDK documentation. The library is MIT on its author's authority. This is the same position every open-source FIT reader occupies, and the alternative — reimplementing the profile ourselves — would not improve it.
+
 ## 17. Open Questions
 
 - Which map tile provider should be used initially, and what are its attribution and usage requirements?
@@ -142,7 +152,6 @@ Reason: Pace is the expected primary metric for running, and speed is the expect
 - What smoothing/noise threshold should elevation gain use?
 - Which device metadata fields should be shown by default, and should advanced/sensitive fields require an explicit reveal action?
 - Should GPX `creator` be displayed as device information, app information, or both when the file does not provide a cleaner device model?
-- Which FIT parser library has the best browser compatibility, maintenance state, license, and bundle profile?
 - What external/static information should remain visible on the initial upload-only page, and what should move into the ready viewer layout?
 - Should the ready viewer keep a compact upload/change-file action in the header, side panel, or file area?
 - What maximum content width should the loaded viewer use?

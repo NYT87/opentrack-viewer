@@ -363,7 +363,7 @@ describe('ActivityChart (AV-503)', () => {
     );
 
     render(<ActivityChart series={steady} />);
-    const svg = screen.getByTestId('elevation-chart-svg');
+    const svg = screen.getByTestId('speed-chart-svg');
 
     const labels = [...svg.querySelectorAll('.chart__axis-label--y')].map((n) => n.textContent);
     expect(labels).toHaveLength(1);
