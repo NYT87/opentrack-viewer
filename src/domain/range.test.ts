@@ -76,6 +76,33 @@ describe('pointRangeFromDomain (AV-509)', () => {
   });
 });
 
+describe('point.index semantics (AV-509, AV-510)', () => {
+  it('returns point indexes, which survive slicing', () => {
+    const source = activity();
+    // A focused slice keeps original indexes, so a range taken against the full
+    // activity still identifies the same points inside the slice.
+    const focused = { ...source, points: source.points.slice(2) };
+
+    const range = pointRangeFromDomain(source, 'time', 120, 180)!;
+    expect(range).toEqual({ startIndex: 2, endIndex: 3 });
+
+    // The same range resolves against the slice, where those points sit at
+    // array positions 0 and 1. The slice's time axis is measured from its own
+    // first timestamp, so the *values* differ — the identified points do not.
+    const onSlice = domainFromPointRange(focused, 'time', range)!;
+    expect(onSlice).toBeDefined();
+    expect(pointRangeFromDomain(focused, 'time', onSlice.start, onSlice.end)).toEqual(range);
+  });
+
+  it('returns nothing when the range names points the activity lacks', () => {
+    const source = activity();
+
+    expect(
+      domainFromPointRange(source, 'time', { startIndex: 40, endIndex: 41 }),
+    ).toBeUndefined();
+  });
+});
+
 describe('domainFromPointRange (AV-509)', () => {
   it('places a stored range back on the distance axis', () => {
     const span = domainFromPointRange(activity(), 'distance', { startIndex: 1, endIndex: 3 })!;

@@ -12,9 +12,11 @@ Outcome:
 - Basic UI shell has homepage and viewer/process routes.
 - Terms and Conditions route exists with draft content and stable links.
 - Header brand/title links to the homepage, with no duplicate Home button and no header subtitle.
+- Header places a `Tools` dropdown beside the title, with `File viewer` linking to the viewer/process page.
 - Settings exists as a modal available from non-home pages, not as a standalone page.
 - Settings opens from an icon-only header control on non-home pages.
 - Settings modal includes theme mode options: system, dark, and light.
+- Basic SEO metadata exists for homepage, viewer/process, and Terms and Conditions without exposing activity data.
 - Viewer/process page has an upload-focused empty state.
 - Map, chart, summary, and metadata regions are not visible before an activity is successfully loaded.
 - Loaded viewer content uses a max-width layout with an optional large-screen section sidebar.
@@ -41,6 +43,8 @@ Goal: Show useful first-stage activity details and optional activity metadata fo
 
 Outcome:
 - Distance, Time, Moving Time, Elapsed Time, start/end, and elevation gain displayed where available.
+- Running activity overview displays average pace instead of average speed as the primary performance metric.
+- Cycling activity overview displays average speed as the primary performance metric.
 - Laps display when the activity includes lap data.
 - On large screens, laps display to the left of the map.
 - On medium/small/mobile screens, laps display after the map.
@@ -134,7 +138,7 @@ Outcome:
 
 Start with these tasks in parallel:
 
-- Engineer A: AV-001, AV-002, AV-006, AV-007, AV-008, AV-009, AV-010, and AV-011, project scaffold, quality baseline, homepage/viewer/terms routes, settings modal shell, theme preference controls, compact header refactor, and global viewer layout.
+- Engineer A: AV-001, AV-002, AV-006, AV-007, AV-008, AV-009, AV-010, AV-011, AV-012, and AV-013, project scaffold, quality baseline, homepage/viewer/terms routes, settings modal shell, theme preference controls, compact header refactor, Tools dropdown, SEO, and global viewer layout.
 - Engineer A2: AV-406, laps display using synthetic normalized activity data.
 - Engineer B: AV-101, domain model types and conventions.
 - Engineer C: AV-102 and AV-103, file intake and format detection.
@@ -160,7 +164,10 @@ The first vertical slice is complete when:
 - The header brand/title links back to the homepage.
 - The header does not show a duplicate Home button when the brand/title link is present.
 - The header does not show a subtitle/description line.
+- The header shows a `Tools` dropdown beside the title, and `Tools > File viewer` opens the viewer/process page.
+- The viewer/process route is not duplicated as a separate top-level `Viewer` button.
 - On non-home pages, Settings opens from an accessible icon-only header control.
+- Public metadata describes OpenTrack Viewer and the current route without exposing loaded activity data.
 - The viewer/process initial state shows the local file upload action and does not show the map area.
 - A user can select or drag/drop a GPX file.
 - The file is parsed in the browser.
@@ -174,6 +181,8 @@ The first vertical slice is complete when:
 - Laps display beside the map on large screens when lap data exists.
 - Laps display after the map on medium/small/mobile screens when lap data exists.
 - Activity details include Distance, Time, Moving Time, and Elapsed Time as separate fields where available.
+- Running activity details show Average Pace when it can be calculated.
+- Cycling activity details show Average Speed when it can be calculated.
 - Charts appear below the map/laps section.
 - MapLibre renders the route.
 - The map fits the route bounds.

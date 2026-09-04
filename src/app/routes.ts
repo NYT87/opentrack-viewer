@@ -6,10 +6,12 @@
 export const ROUTES = {
   home: '/',
   viewer: '/viewer',
+  /** A routed page, not a modal: legal documents need a stable link (AV-008). */
+  terms: '/terms',
 } as const;
 
 /**
- * AV-010: no Home entry. The brand in the header is the link home, so a
- * separate Home item would be a duplicate destination.
+ * AV-012: the header's Tools menu. No Home entry — the brand is the link home
+ * (AV-010) — and no standalone Viewer button, which this menu replaces.
  */
-export const NAV_LINKS = [{ to: ROUTES.viewer, label: 'Viewer' }] as const;
+export const TOOLS_ITEMS = [{ to: ROUTES.viewer, label: 'File viewer' }] as const;

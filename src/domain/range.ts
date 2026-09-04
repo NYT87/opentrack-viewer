@@ -13,6 +13,9 @@ import { pointXValues, type SeriesXAxis } from './series';
  *
  * Out-of-bounds edges clamp to the first and last plottable points, and a
  * reversed drag is normalised.
+ *
+ * The result is expressed in `point.index` values, not positions in the points
+ * array, so it keeps meaning against a focused slice (AV-510).
  */
 export function pointRangeFromDomain(
   activity: Activity,
@@ -42,7 +45,9 @@ export function pointRangeFromDomain(
   const to = nearest(Math.max(start, end));
   if (from === undefined || to === undefined) return undefined;
 
-  return { startIndex: Math.min(from, to), endIndex: Math.max(from, to) };
+  const first = activity.points[from]!.index;
+  const last = activity.points[to]!.index;
+  return { startIndex: Math.min(first, last), endIndex: Math.max(first, last) };
 }
 
 /**
@@ -59,6 +64,13 @@ export function domainFromPointRange(
 ): { start: number; end: number } | undefined {
   const xs = pointXValues(activity, axis);
 
+  // The range speaks in point.index; find where those points sit in the array.
+  const positionOf = (pointIndex: number) =>
+    activity.points.findIndex((point) => point.index === pointIndex);
+  const startPosition = positionOf(range.startIndex);
+  const endPosition = positionOf(range.endIndex);
+  if (startPosition === -1 || endPosition === -1) return undefined;
+
   const valueSearchingFrom = (index: number, step: number): number | undefined => {
     for (let i = index; i >= 0 && i < xs.length; i += step) {
       const value = xs[i];
@@ -68,8 +80,8 @@ export function domainFromPointRange(
   };
 
   // Search outward from each edge so the band never shrinks past the selection.
-  const start = valueSearchingFrom(range.startIndex, -1) ?? valueSearchingFrom(range.startIndex, 1);
-  const end = valueSearchingFrom(range.endIndex, 1) ?? valueSearchingFrom(range.endIndex, -1);
+  const start = valueSearchingFrom(startPosition, -1) ?? valueSearchingFrom(startPosition, 1);
+  const end = valueSearchingFrom(endPosition, 1) ?? valueSearchingFrom(endPosition, -1);
   if (start === undefined || end === undefined) return undefined;
 
   return { start: Math.min(start, end), end: Math.max(start, end) };

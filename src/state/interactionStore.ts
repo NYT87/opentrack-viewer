@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChartXAxisMode } from '../domain/activity';
+import type { ActivityPointRange, ChartXAxisMode } from '../domain/activity';
 import type { ThemeMode } from '../domain/theme';
 import type { UnitSystem } from '../domain/units';
 
@@ -12,6 +12,12 @@ interface InteractionState {
   selectedPointIndex?: number;
   /** Where the current hover originated, to avoid feedback loops. */
   hoverSource?: 'map' | 'chart';
+  /**
+   * AV-601 / AV-604. The focused section, in `point.index` terms so it means
+   * the same thing to the charts and the map. Shared rather than local to the
+   * chart panel precisely because the map has to follow it.
+   */
+  selectedRange?: ActivityPointRange;
   /** User preference: draw the basemap, or route-only for privacy (§5). */
   basemapEnabled: boolean;
   /** Metric by default (§17); a session preference, not persisted. */
@@ -28,6 +34,7 @@ interface InteractionState {
 
   setHoveredPoint: (index: number | undefined, source?: 'map' | 'chart') => void;
   setSelectedPoint: (index: number | undefined) => void;
+  setSelectedRange: (range: ActivityPointRange | undefined) => void;
   setBasemapEnabled: (enabled: boolean) => void;
   setUnitSystem: (units: UnitSystem) => void;
   setThemeMode: (mode: ThemeMode) => void;
@@ -48,6 +55,10 @@ export const useInteractionStore = create<InteractionState>((set) => ({
     set({ selectedPointIndex: index });
   },
 
+  setSelectedRange(range) {
+    set({ selectedRange: range });
+  },
+
   setBasemapEnabled(enabled) {
     set({ basemapEnabled: enabled });
   },
@@ -65,7 +76,13 @@ export const useInteractionStore = create<InteractionState>((set) => ({
   },
 
   reset() {
-    set({ hoveredPointIndex: undefined, selectedPointIndex: undefined, hoverSource: undefined });
+    set({
+      hoveredPointIndex: undefined,
+      selectedPointIndex: undefined,
+      hoverSource: undefined,
+      // A range refers to points in the activity that produced it.
+      selectedRange: undefined,
+    });
   },
 }));
 

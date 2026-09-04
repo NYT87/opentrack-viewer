@@ -86,6 +86,24 @@ Decision: When lap data exists, laps should display beside the map on large scre
 
 Reason: Laps are most useful when read alongside the route, but the map should keep priority on constrained screens.
 
+### TD-015: Viewer Entry Lives Under Tools
+
+Decision: The header should place a `Tools` dropdown beside the `OpenTrack Viewer` title, and the current viewer/process route should be exposed as `File viewer` inside that dropdown instead of a standalone top-level `Viewer` button.
+
+Reason: The project may gain more browser-only tools later. Grouping tool entry points early keeps the header compact while preserving a clear path to the file viewer.
+
+### TD-016: SEO Is Static and Privacy-Safe
+
+Decision: SEO metadata should describe OpenTrack Viewer, public routes, and browser-only capabilities. It must never include loaded activity data or file-specific metadata.
+
+Reason: SEO helps users discover the app, but activity files are private local data. Search metadata must stay outside the activity-processing privacy boundary.
+
+### TD-017: Overview Primary Metric Is Sport-Specific
+
+Decision: Running activities should display average pace as the primary overview performance metric, while cycling activities should display average speed.
+
+Reason: Pace is the expected primary metric for running, and speed is the expected primary metric for cycling. Using sport-specific defaults makes the overview easier to scan and avoids showing a less useful metric first.
+
 ## 17. Open Questions
 
 - Which map tile provider should be used initially, and what are its attribution and usage requirements?
@@ -95,6 +113,11 @@ Reason: Laps are most useful when read alongside the route, but the map should k
 - What exact homepage sections should be present before the viewer action?
 - Should the homepage have any header navigation beyond the project name and viewer action?
 - Which settings icon should be used in the header, and should the tooltip appear on hover only or also support long-press/touch affordances?
+- Should the `Tools` dropdown appear on the homepage header, or only after the user leaves the homepage?
+- If more tools are added later, what ordering should the `Tools` dropdown use?
+- What is the production canonical URL for OpenTrack Viewer?
+- What image should be used for Open Graph and Twitter/X previews?
+- Should the viewer/process route be indexed, or should SEO focus primarily on homepage and legal pages?
 - Should the app default to metric units, imperial units, or locale-based units?
 - Should theme preference remain session-only like other settings, or eventually persist locally after explicit user approval?
 - Should map style/theme change with app theme, or should basemap style remain independently controlled?
@@ -107,6 +130,7 @@ Reason: Laps are most useful when read alongside the route, but the map should k
 - Should selected range map behavior hide the rest of the route, dim the rest of the route, or display only the selected segment?
 - What is the minimum drag distance or minimum selected duration/distance before a chart range selection is accepted?
 - Should pace be calculated from instantaneous speed when present, or derived from distance/time intervals by default?
+- Should average pace/speed use moving time, elapsed time, or the summary's primary `Time` value when all are available?
 - What smoothing/window should pace charts use so GPS jitter does not dominate the view?
 - What exact label should the running cadence chart use: `strides/min`, `spm`, or full `strides per minute`?
 - Should cycling speed prefer source instantaneous speed, derived distance/time, or a smoothed hybrid?

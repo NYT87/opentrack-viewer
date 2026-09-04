@@ -28,9 +28,14 @@ import type { RouteGeometry, RouteLineProperties } from '../domain/geojson';
 
 setWorkerUrl(maplibreWorkerUrl);
 
+/** An empty collection, for a map with no focused section. */
+const EMPTY_ROUTE = { type: 'FeatureCollection' as const, features: [] };
+
 const ROUTE_SOURCE = 'activity-route';
 const ROUTE_LAYER = 'activity-route-line';
 const ROUTE_CASING_LAYER = 'activity-route-casing';
+const FOCUS_SOURCE = 'activity-focus';
+const FOCUS_LAYER = 'activity-focus-line';
 const MARKER_SOURCE = 'activity-marker';
 const MARKER_LAYER = 'activity-marker-point';
 
@@ -119,6 +124,12 @@ function fitToBounds(
 
 export interface ActivityMapProps {
   route: RouteGeometry;
+  /**
+   * AV-604. The selected section. When present the full route is dimmed and
+   * this is drawn over it, so the reader keeps the context of the whole ride
+   * rather than losing everything outside the selection.
+   */
+  focusRoute?: RouteGeometry;
   /** Marker for the hovered/selected point (AV-602). */
   marker: FeatureCollection<Point, { index: number }>;
   basemapEnabled: boolean;
@@ -144,6 +155,7 @@ export interface ActivityMapProps {
  */
 export function ActivityMap({
   route,
+  focusRoute,
   marker,
   basemapEnabled,
   basemapStyle = DEFAULT_BASEMAP_STYLE,
@@ -158,16 +170,20 @@ export function ActivityMap({
   // A style swap re-runs `install`, which must publish the *current* data
   // rather than whatever was in scope when the listener was registered.
   const routeRef = useRef(route);
+  const focusRouteRef = useRef(focusRoute);
   const markerRef = useRef(marker);
   /** Bounds of the route currently displayed, for re-fitting after a resize. */
   const boundsRef = useRef<[number, number, number, number] | undefined>(undefined);
   /** Set once the user moves the camera, so a resize stops overriding them. */
   const userMovedRef = useRef(false);
+  /** Whether a section was focused, so clearing one can be told from never having had one. */
+  const hadFocusRef = useRef(false);
 
   useEffect(() => {
     routeRef.current = route;
+    focusRouteRef.current = focusRoute;
     markerRef.current = marker;
-  }, [route, marker]);
+  }, [route, focusRoute, marker]);
 
   // A newly loaded activity gets a fresh automatic fit even if the user had
   // moved the camera while viewing the previous one.
@@ -262,6 +278,19 @@ export function ActivityMap({
           paint: { 'line-color': '#4aa3ff', 'line-width': 3.5 },
         });
       }
+      if (!map.getSource(FOCUS_SOURCE)) {
+        map.addSource(FOCUS_SOURCE, {
+          type: 'geojson',
+          data: focusRouteRef.current?.featureCollection ?? EMPTY_ROUTE,
+        });
+        map.addLayer({
+          id: FOCUS_LAYER,
+          type: 'line',
+          source: FOCUS_SOURCE,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#ffd166', 'line-width': 4.5 },
+        });
+      }
       if (!map.getSource(MARKER_SOURCE)) {
         map.addSource(MARKER_SOURCE, { type: 'geojson', data: markerRef.current });
         map.addLayer({
@@ -305,6 +334,49 @@ export function ActivityMap({
     if (!route.bounds) return;
     fitToBounds(map, route.bounds, 500);
   }, [route, isStyleReady]);
+
+  /**
+   * AV-604. Dim the full route while a section is focused, draw the section
+   * over it, and fit to the section the first time it changes — after that the
+   * map is the reader's to pan and zoom.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isStyleReady) return;
+
+    const source = map.getSource(FOCUS_SOURCE);
+    if (source && 'setData' in source) {
+      (source as GeoJSONSource).setData(focusRoute?.featureCollection ?? EMPTY_ROUTE);
+    }
+
+    const hasFocus = Boolean(focusRoute && !focusRoute.isEmpty);
+    if (map.getLayer(ROUTE_LAYER)) {
+      map.setPaintProperty(ROUTE_LAYER, 'line-opacity', hasFocus ? 0.28 : 1);
+    }
+
+    if (!hasFocus || !focusRoute?.bounds) {
+      // Hand the full route's bounds back, or a later resize would re-fit to a
+      // section that is no longer selected.
+      boundsRef.current = route.bounds;
+
+      // Reset View means "show me the whole thing again", so the camera goes
+      // back with it — overriding any panning, because that is what was asked
+      // for. Guarded on having actually had a focus, so loading an activity
+      // does not fit twice.
+      if (hadFocusRef.current) {
+        hadFocusRef.current = false;
+        userMovedRef.current = false;
+        if (route.bounds) fitToBounds(map, route.bounds, 500);
+      }
+      return;
+    }
+
+    // A fresh focus re-fits even if the reader had moved the map before it.
+    hadFocusRef.current = true;
+    userMovedRef.current = false;
+    boundsRef.current = focusRoute.bounds;
+    fitToBounds(map, focusRoute.bounds, 500);
+  }, [focusRoute, route.bounds, isStyleReady]);
 
   // Push marker updates (AV-602).
   useEffect(() => {
@@ -357,6 +429,12 @@ export function ActivityMap({
   return (
     <div className="map" data-testid="activity-map">
       <div ref={containerRef} className="map__canvas" />
+
+      {focusRoute?.isEmpty && (
+        <div className="map__notice" role="status">
+          The selected section has no GPS points, so the map still shows the whole activity.
+        </div>
+      )}
 
       {styleError && basemapEnabled && (
         <div className="map__notice" role="status">

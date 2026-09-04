@@ -1,5 +1,6 @@
 import {
   computeStreams,
+  isPlausibleSpeed,
   type Activity,
   type ActivityDeviceInfo,
   type ActivityPoint,
@@ -37,7 +38,8 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
     throw new ActivityError('no_route_points', 'No <trkpt> or <rtept> elements were found.');
   }
 
-  const points = normalizePoints(raw.points, warnings);
+  const sport = mapSport(raw.type);
+  const points = normalizePoints(raw.points, warnings, sport);
   const streams = computeStreams(points);
 
   if (raw.segmentCount > 1) {
@@ -64,7 +66,7 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
       creator: raw.creator,
       deviceName: raw.creator,
       device: raw.device,
-      sport: mapSport(raw.type),
+      sport,
     },
     points,
     streams,
@@ -303,7 +305,7 @@ function readExtensions(extensions: Element, point: RawGpxPoint): void {
           break;
         case 'cad':
         case 'cadence':
-          point.cadenceRpm = parseNumber(value);
+          point.cadence = parseNumber(value);
           break;
         case 'power':
         case 'watts':
@@ -338,6 +340,9 @@ function parseDate(value: string | undefined): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+/** Sports whose cadence is strokes per minute — a unit this viewer has no field for. */
+const STROKE_CADENCE_SPORTS: ReadonlySet<ActivitySport> = new Set(['swimming', 'rowing']);
+
 function mapSport(type: string | undefined): ActivitySport {
   if (!type) return 'unknown';
   const normalized = type.toLowerCase();
@@ -351,8 +356,24 @@ function mapSport(type: string | undefined): ActivitySport {
   return 'other';
 }
 
-/** Assigns stable indices and reports points that had to be dropped. */
-function normalizePoints(raw: RawGpxPoint[], warnings: ActivityWarning[]): ActivityPoint[] {
+/**
+ * Assigns stable indices and reports points that had to be dropped.
+ *
+ * AV-515: GPX states a cadence number but never its unit, so the declared
+ * sport decides which field it belongs in. A cycling track's cadence is pedal
+ * revolutions; a walk, hike or run reports foot cadence in strides per minute.
+ *
+ * A swim or a row reports *strokes* per minute, which is neither — this viewer
+ * has no field for it, so that number is dropped rather than filed under a unit
+ * it does not have. Sports that never say what they are keep foot cadence: an
+ * untyped GPX is the common case, and a step count is the overwhelmingly likely
+ * meaning.
+ */
+function normalizePoints(
+  raw: RawGpxPoint[],
+  warnings: ActivityWarning[],
+  sport: ActivitySport,
+): ActivityPoint[] {
   const points: ActivityPoint[] = [];
   let missingCoordinates = 0;
   let missingElevation = 0;
@@ -379,12 +400,18 @@ function normalizePoints(raw: RawGpxPoint[], warnings: ActivityWarning[]): Activ
     if (Number.isFinite(item.elevationMeters)) point.elevationMeters = item.elevationMeters;
     if (item.time) point.time = item.time;
     if (Number.isFinite(item.heartRateBpm)) point.heartRateBpm = item.heartRateBpm;
-    if (Number.isFinite(item.cadenceRpm)) point.cadenceRpm = item.cadenceRpm;
+    if (Number.isFinite(item.cadence)) {
+      if (sport === 'cycling') point.cyclingCadenceRpm = item.cadence;
+      else if (!STROKE_CADENCE_SPORTS.has(sport)) point.runningCadenceSpm = item.cadence;
+    }
     if (Number.isFinite(item.powerWatts)) point.powerWatts = item.powerWatts;
     if (Number.isFinite(item.temperatureCelsius)) {
       point.temperatureCelsius = item.temperatureCelsius;
     }
-    if (Number.isFinite(item.speedMetersPerSecond)) {
+    // A negative or absurd <gpxtpx:speed> is a device fault: dropping it here
+    // keeps the value out of the model entirely, so speed is derived from
+    // positions instead of plotting the fault.
+    if (isPlausibleSpeed(item.speedMetersPerSecond)) {
       point.speedMetersPerSecond = item.speedMetersPerSecond;
     }
     points.push(point);

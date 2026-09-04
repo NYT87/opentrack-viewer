@@ -5,6 +5,7 @@ import { getXAxisAvailability } from './series';
 export type ActivityChartKind =
   | 'elevation'
   | 'pace'
+  | 'speed'
   | 'cadence'
   | 'heartRate'
   | 'power'
@@ -25,11 +26,17 @@ export interface ActivityChartDefinition {
  * so availability is uniform, but are not offered in the UI yet — they arrive
  * with the FIT sensor work (AV-704).
  */
-export const VISIBLE_CHART_KINDS: ActivityChartKind[] = ['elevation', 'pace', 'cadence'];
+export const VISIBLE_CHART_KINDS: ActivityChartKind[] = [
+  'elevation',
+  'pace',
+  'speed',
+  'cadence',
+];
 
 const LABELS: Record<ActivityChartKind, string> = {
   elevation: 'Elevation',
   pace: 'Pace',
+  speed: 'Speed',
   cadence: 'Cadence',
   heartRate: 'Heart rate',
   power: 'Power',
@@ -38,6 +45,10 @@ const LABELS: Record<ActivityChartKind, string> = {
 
 function isRunning(activity: Activity): boolean {
   return activity.metadata.sport === 'running';
+}
+
+function isCycling(activity: Activity): boolean {
+  return activity.metadata.sport === 'cycling';
 }
 
 /**
@@ -52,6 +63,7 @@ export function getChartAvailability(activity: Activity): ActivityChartDefinitio
   const hasTime = supportedXAxisModes.includes('time');
   const defaultXAxisMode: ChartXAxisMode = hasDistance ? 'distance' : 'time';
   const running = isRunning(activity);
+  const cycling = isCycling(activity);
 
   const define = (
     kind: ActivityChartKind,
@@ -82,8 +94,16 @@ export function getChartAvailability(activity: Activity): ActivityChartDefinitio
         : 'Pace needs both distance and timestamps.',
     ),
     define(
+      // AV-513: speed answers for cycling what pace answers for running.
+      'speed',
+      cycling && (streams.hasSpeed || (hasDistance && hasTime)),
+      !cycling
+        ? 'Speed is shown for cycling activities.'
+        : 'Speed needs recorded speed, or both distance and timestamps.',
+    ),
+    define(
       'cadence',
-      running && streams.hasCadence,
+      running && streams.hasRunningCadence,
       !running
         ? 'Cadence is shown for running activities.'
         : 'This activity has no cadence data.',

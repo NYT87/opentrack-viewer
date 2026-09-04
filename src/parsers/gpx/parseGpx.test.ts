@@ -34,6 +34,55 @@ describe('parseGpx', () => {
     expect(activity.metadata.sport).toBe('running');
   });
 
+  it('reads GPX cadence as strides per minute for a run (AV-515)', () => {
+    const activity = parse('run-with-cadence.gpx');
+
+    expect(activity.metadata.sport).toBe('running');
+    expect(activity.points.map((point) => point.runningCadenceSpm)).toEqual([
+      168, 169, 170, 168, 169, 170, 168, 169, 170, 168,
+    ]);
+    // Never the generic field for a run.
+    expect(activity.points.every((point) => point.cyclingCadenceRpm === undefined)).toBe(true);
+    expect(activity.streams.hasRunningCadence).toBe(true);
+    expect(activity.streams.hasCyclingCadence).toBe(false);
+  });
+
+  it('reads the same GPX cadence as pedal rpm for a ride (AV-515)', () => {
+    // GPX states a number, never a unit: the declared sport decides.
+    const activity = parse('ride-with-speed.gpx');
+
+    expect(activity.metadata.sport).toBe('cycling');
+    expect(activity.points.map((point) => point.cyclingCadenceRpm)).toEqual([85, 88, 90, 87, 86]);
+    expect(activity.streams.hasRunningCadence).toBe(false);
+    expect(activity.streams.hasCyclingCadence).toBe(true);
+  });
+
+  it('drops recorded speeds a device could not have measured (AV-513)', () => {
+    const activity = parse('ride-with-faulty-speed.gpx');
+
+    // The faulty readings never enter the model; zero survives, being a real speed.
+    expect(activity.points.map((point) => point.speedMetersPerSecond)).toEqual([
+      undefined,
+      undefined,
+      7.9,
+      8.1,
+      0,
+    ]);
+    // Plausible readings remain, so the stream is still reported.
+    expect(activity.streams.hasSpeed).toBe(true);
+  });
+
+  it('drops stroke cadence rather than filing it as strides (AV-515)', () => {
+    // A swim's <gpxtpx:cad> is strokes per minute: neither field's unit.
+    const activity = parse('swim-with-cadence.gpx');
+
+    expect(activity.metadata.sport).toBe('swimming');
+    expect(activity.points.every((point) => point.runningCadenceSpm === undefined)).toBe(true);
+    expect(activity.points.every((point) => point.cyclingCadenceRpm === undefined)).toBe(true);
+    expect(activity.streams.hasRunningCadence).toBe(false);
+    expect(activity.streams.hasCyclingCadence).toBe(false);
+  });
+
   it('populates device information from the creator (AV-202)', () => {
     const activity = parse('simple-route.gpx');
 
@@ -73,9 +122,9 @@ describe('parseGpx', () => {
 
     expect(activity.points.map((point) => point.elevationMeters)).toEqual([100, 110, 130, 105]);
     expect(activity.points.map((point) => point.heartRateBpm)).toEqual([120, 130, 150, 140]);
-    expect(activity.points.map((point) => point.cadenceRpm)).toEqual([80, 82, 84, 78]);
+    expect(activity.points.map((point) => point.runningCadenceSpm)).toEqual([80, 82, 84, 78]);
     expect(activity.streams.hasHeartRate).toBe(true);
-    expect(activity.streams.hasCadence).toBe(true);
+    expect(activity.streams.hasRunningCadence).toBe(true);
   });
 
   it('populates derived stats and time metadata', () => {

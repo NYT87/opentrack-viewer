@@ -48,6 +48,11 @@ export function HomePage() {
             can turn the basemap off in Settings and draw the route on a plain background instead,
             which makes no external request at all.
           </p>
+          <p>
+            <Link className="link" to={ROUTES.terms}>
+              Read the Terms and Conditions
+            </Link>
+          </p>
         </section>
 
         <section className="prose">

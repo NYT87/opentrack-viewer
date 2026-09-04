@@ -1,20 +1,25 @@
-import { useState } from 'react';
-import type { Activity, ActivityPointRange, ChartXAxisMode } from '../domain/activity';
+import type { Activity, ChartXAxisMode } from '../domain/activity';
 import { domainFromPointRange, pointRangeFromDomain } from '../domain/range';
+import { useInteractionStore } from '../state/interactionStore';
+import { sliceActivity } from '../domain/activitySlice';
 import { getVisibleCharts, type ActivityChartKind } from '../domain/charts';
-import { buildSeries, getXAxisAvailability, resolveXAxis, type ChartSeriesKey } from '../domain/series';
+import {
+  buildSeries,
+  getXAxisAvailability,
+  resolveXAxis,
+  restrictSeries,
+  type ChartSeriesKey,
+} from '../domain/series';
 import type { UnitSystem } from '../domain/units';
 import { ActivityChart, type ChartRange } from './ActivityChart';
 import { ChartXAxisSwitch } from './ChartXAxisSwitch';
 
 /**
- * AV-506. GPX and FIT both record running cadence in a single field, but
- * devices disagree on whether it counts one foot or two. The value is shown as
- * recorded and the unit is named explicitly rather than silently doubled, so a
- * reader can tell which convention their device used.
+ * AV-515. Running cadence is strides per minute — one foot — which is what
+ * watches and foot pods report. Said once here rather than left for the reader
+ * to infer from a bare number.
  */
-const CADENCE_NOTE =
-  'Shown as recorded. Some devices report strides per minute (one foot) rather than steps per minute.';
+const CADENCE_NOTE = 'Strides per minute: one foot, as watches and foot pods report it.';
 
 function UnavailableChart({
   kind,
@@ -59,36 +64,44 @@ export function ChartPanel({
   onHoverPoint,
   onSelectPoint,
 }: ChartPanelProps) {
-  const availability = getXAxisAvailability(activity);
-  const resolved = resolveXAxis(activity, xAxisPreference);
-  const charts = getVisibleCharts(activity);
+  // Declared before the selection so the focus can be derived from it below.
+  const availabilitySourceFor = (source: Activity) => ({
+    availability: getXAxisAvailability(source),
+    resolved: resolveXAxis(source, xAxisPreference),
+    charts: getVisibleCharts(source),
+  });
 
   /**
-   * AV-508 / AV-509. The selection is stored as activity point indices, not as
-   * a span of whichever axis happened to be showing when it was made. That is
-   * what lets it survive a switch between distance and time (§17 open question
-   * resolved): the band is projected back onto the current axis for drawing.
-   *
-   * Keyed by the activity object rather than its id, so a new file starts
-   * clean even if two activities were ever to share an id. Adjusted during
-   * render rather than in an effect, per React's guidance for state that
-   * depends on props.
+   * AV-508 / AV-509 / AV-601. The selection lives in shared state, in
+   * `point.index` terms rather than as a span of whichever axis was showing.
+   * That is what lets it survive a switch between distance and time, and what
+   * lets the map follow it (AV-604). Loading a file resets it.
    */
-  const [selection, setSelection] = useState<{
-    activity: Activity;
-    range?: ActivityPointRange;
-  }>({ activity });
-  if (selection.activity !== activity) setSelection({ activity });
+  const pointRange = useInteractionStore((state) => state.selectedRange);
+  const setSelectedRange = useInteractionStore((state) => state.setSelectedRange);
 
-  const pointRange = selection.activity === activity ? selection.range : undefined;
+  /**
+   * AV-511. A valid selection produces a focused activity, and the charts are
+   * then drawn from it: availability is recalculated against the slice, so a
+   * section without cadence stops offering a cadence chart.
+   */
+  const focus = pointRange ? sliceActivity(activity, pointRange) : undefined;
+  const focused = focus?.ok ? focus.activity : undefined;
+  const { availability, resolved, charts } = availabilitySourceFor(focused ?? activity);
+
+  // Only drawn as a band when not focused: once the charts *are* the section,
+  // highlighting the whole width would say nothing.
   const selectedRange: ChartRange | undefined = pointRange
     ? domainFromPointRange(activity, resolved.axis, pointRange)
     : undefined;
 
   const handleSelectRange = (range: ChartRange) => {
-    const mapped = pointRangeFromDomain(activity, resolved.axis, range.start, range.end);
-    setSelection({ activity, range: mapped });
+    // Mapped against the full activity: axis values stay absolute while
+    // focused, so a selection made inside a focus is still resolvable.
+    setSelectedRange(pointRangeFromDomain(activity, resolved.axis, range.start, range.end));
   };
+
+  const resetView = () => setSelectedRange(undefined);
 
   return (
     <section className="chart-panel" aria-label="Activity charts">
@@ -105,15 +118,39 @@ export function ChartPanel({
         )}
       </header>
 
+      {/*
+        AV-511 / AV-512. States plainly that this is a view of a section, not a
+        change to the file, and offers the way back.
+      */}
+      {focused && (
+        <div className="focus-bar" role="status">
+          <span className="focus-bar__text">
+            Showing a selected section of this activity. Your file is unchanged.
+          </span>
+          <button type="button" className="button" onClick={resetView}>
+            Reset View
+          </button>
+        </div>
+      )}
+
+      {focus && !focus.ok && (
+        <p className="chart-panel__notice" role="status">
+          {focus.error.hint}
+        </p>
+      )}
+
       {charts.map((chart) =>
         chart.available ? (
           <ActivityChart
             key={chart.kind}
-            series={buildSeries(activity, chart.kind as ChartSeriesKey, resolved)}
+            series={(() => {
+              const series = buildSeries(activity, chart.kind as ChartSeriesKey, resolved);
+              return pointRange && focused ? restrictSeries(series, pointRange) : series;
+            })()}
             units={units}
             note={chart.kind === 'cadence' ? CADENCE_NOTE : undefined}
             activePointIndex={activePointIndex}
-            selectedRange={selectedRange}
+            {...(focused ? {} : { selectedRange })}
             onHoverPoint={onHoverPoint}
             onSelectPoint={onSelectPoint}
             onSelectRange={handleSelectRange}

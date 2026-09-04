@@ -232,6 +232,48 @@ describe('computeStats', () => {
     expect(result.cumulativeDistanceMeters).toHaveLength(2);
   });
 
+  it('averages speed over elapsed time', () => {
+    // 111 m in 60 s is 1.85 m/s.
+    const result = computeStats(
+      points([
+        { lat: 0, lon: 0.0001, time: new Date('2024-01-01T10:00:00Z') },
+        { lat: 0.001, lon: 0.0001, time: new Date('2024-01-01T10:01:00Z') },
+      ]),
+    );
+
+    expect(result.stats.averageSpeedMetersPerSecond).toBeCloseTo(1.85, 2);
+    // Elapsed, not moving: it must agree with the duration shown beside it.
+    expect(result.stats.averageSpeedMetersPerSecond).toBeCloseTo(
+      result.stats.distanceMeters! / result.stats.durationSeconds!,
+      6,
+    );
+  });
+
+  it('omits average speed without both distance and a duration', () => {
+    const noTime = computeStats(points([{ lat: 0, lon: 0.0001 }, { lat: 0.001, lon: 0.0001 }]));
+    expect(noTime.stats.averageSpeedMetersPerSecond).toBeUndefined();
+
+    const noDistance = computeStats(
+      points([
+        { elevationMeters: 10, time: new Date('2024-01-01T10:00:00Z') },
+        { elevationMeters: 20, time: new Date('2024-01-01T10:01:00Z') },
+      ]),
+    );
+    expect(noDistance.stats.averageSpeedMetersPerSecond).toBeUndefined();
+  });
+
+  it('omits average speed for a zero-length duration', () => {
+    const instant = new Date('2024-01-01T10:00:00Z');
+    const result = computeStats(
+      points([
+        { lat: 0, lon: 0.0001, time: instant },
+        { lat: 0.001, lon: 0.0001, time: instant },
+      ]),
+    );
+
+    expect(result.stats.averageSpeedMetersPerSecond).toBeUndefined();
+  });
+
   it('handles an activity with no usable streams', () => {
     const result = computeStats(points([{}, {}]));
 

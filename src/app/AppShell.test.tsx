@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('maplibre-gl', async () => {
@@ -16,6 +16,7 @@ const { App } = await import('./App');
 const { useInteractionStore } = await import('../state/interactionStore');
 const { useActivityStore } = await import('../state/activityStore');
 const { fixtureFile } = await import('../test/helpers/fixtures');
+const { FakeMap, resetMapLibreMock } = await import('../test/helpers/maplibreMock');
 
 // HashRouter reads window.location.hash, which jsdom keeps across tests in a
 // file: without this, a test that navigated to Settings leaves the next one
@@ -23,6 +24,9 @@ const { fixtureFile } = await import('../test/helpers/fixtures');
 beforeEach(() => {
   window.location.hash = '#/';
   useActivityStore.getState().clear();
+  // FakeMap.instances is a static registry: without this, a map built by an
+  // earlier test in this file counts against the next one.
+  resetMapLibreMock();
   useInteractionStore.setState({
     unitSystem: 'metric',
     basemapEnabled: true,
@@ -30,9 +34,14 @@ beforeEach(() => {
   });
 });
 
-/** The footer links to the same routes, so nav assertions target the header. */
-const navLink = (name: 'Viewer') =>
-  within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name });
+/** AV-012: header navigation lives in the Tools menu. */
+const openTools = async () => {
+  await userEvent.click(screen.getByRole('button', { name: /Tools/ }));
+  return screen.findByRole('menu', { name: 'Tools' });
+};
+
+const toolsItem = (name: string) =>
+  within(screen.getByRole('menu', { name: 'Tools' })).getByRole('menuitem', { name });
 
 const openSettings = async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
@@ -40,7 +49,8 @@ const openSettings = async () => {
 };
 
 const goToViewer = async () => {
-  await userEvent.click(navLink('Viewer'));
+  await openTools();
+  await userEvent.click(toolsItem('File viewer'));
   await screen.findByTestId('file-input');
 };
 
@@ -82,13 +92,16 @@ describe('routing (AV-006)', () => {
     expect(await screen.findByTestId('file-input')).toBeInTheDocument();
   });
 
-  it('marks the current page in the navigation', async () => {
+  it('marks the current page in the Tools menu', async () => {
     render(<App />);
-    expect(navLink('Viewer')).not.toHaveAttribute('aria-current');
+    await openTools();
+    expect(toolsItem('File viewer')).not.toHaveAttribute('aria-current');
+    await userEvent.keyboard('{Escape}');
 
     await goToViewer();
+    await openTools();
 
-    expect(navLink('Viewer')).toHaveAttribute('aria-current', 'page');
+    expect(toolsItem('File viewer')).toHaveAttribute('aria-current', 'page');
   });
 
   it('falls back to the homepage for an unknown route', async () => {
@@ -109,7 +122,7 @@ describe('header (AV-010)', () => {
     await goToViewer();
 
     // AV-010 scopes this to the header; the footer's own Home link is fine.
-    const header = within(screen.getByRole('banner'));
+    const header = within(document.querySelector('.shell__header') as HTMLElement);
     expect(header.queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
 
     await userEvent.click(brand());
@@ -126,10 +139,11 @@ describe('header (AV-010)', () => {
     expect(screen.queryByText(/your activity file stays on your device/i)).not.toBeInTheDocument();
   });
 
-  it('keeps the viewer reachable without a Home button', () => {
+  it('keeps the viewer reachable without a Home button', async () => {
     render(<App />);
 
-    expect(navLink('Viewer')).toBeInTheDocument();
+    await openTools();
+    expect(toolsItem('File viewer')).toBeInTheDocument();
   });
 
   it('renders Settings as an icon-only control with an accessible name', async () => {
@@ -151,6 +165,172 @@ describe('header (AV-010)', () => {
     await userEvent.keyboard('{Enter}');
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('Tools menu (AV-012)', () => {
+  const toolsButton = () => screen.getByRole('button', { name: /Tools/ });
+
+  it('sits beside the brand and replaces the standalone Viewer button', () => {
+    render(<App />);
+
+    const header = within(document.querySelector('.shell__header') as HTMLElement);
+    expect(header.getByRole('button', { name: /Tools/ })).toBeInTheDocument();
+    // The old top-level link is gone.
+    expect(header.queryByRole('link', { name: 'Viewer' })).not.toBeInTheDocument();
+    // ...and it is on the left, with the title.
+    const lead = document.querySelector('.shell__lead')!;
+    expect(lead).toContainElement(screen.getByRole('heading', { level: 1 }));
+    expect(lead).toContainElement(toolsButton());
+  });
+
+  it('opens and closes on click, reporting its state', async () => {
+    render(<App />);
+    expect(toolsButton()).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    await userEvent.click(toolsButton());
+
+    expect(toolsButton()).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('menu', { name: 'Tools' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'File viewer' })).toBeInTheDocument();
+
+    await userEvent.click(toolsButton());
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('routes to the viewer from File viewer', async () => {
+    render(<App />);
+
+    await userEvent.click(toolsButton());
+    await userEvent.click(screen.getByRole('menuitem', { name: 'File viewer' }));
+
+    expect(window.location.hash).toBe('#/viewer');
+    expect(await screen.findByTestId('file-input')).toBeInTheDocument();
+    // The menu closes behind you.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('closes on Escape and hands focus back', async () => {
+    render(<App />);
+    await userEvent.click(toolsButton());
+
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(toolsButton());
+  });
+
+  it('closes on an outside press', async () => {
+    render(<App />);
+    await userEvent.click(toolsButton());
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('opens with ArrowDown and moves into the menu', async () => {
+    render(<App />);
+    toolsButton().focus();
+
+    await userEvent.keyboard('{ArrowDown}');
+
+    expect(screen.getByRole('menu', { name: 'Tools' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'File viewer' })),
+    );
+  });
+
+  it('leaves loaded state alone when opened and closed', async () => {
+    render(<App />);
+    await goToViewer();
+    await userEvent.upload(screen.getByTestId('file-input'), fixtureFile('simple-route.gpx'));
+    await screen.findByText('Simple Route');
+    useInteractionStore.getState().setUnitSystem('imperial');
+
+    await userEvent.click(toolsButton());
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.getByText('Simple Route')).toBeInTheDocument();
+    expect(useInteractionStore.getState().unitSystem).toBe('imperial');
+    expect(window.location.hash).toBe('#/viewer');
+  });
+});
+
+describe('Terms and Conditions (AV-008)', () => {
+  it('is a routed page, reachable from the footer', async () => {
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('link', { name: 'Terms and Conditions' }));
+
+    expect(window.location.hash).toBe('#/terms');
+    expect(
+      await screen.findByRole('heading', { name: 'Terms and Conditions' }),
+    ).toBeInTheDocument();
+    // Not a modal.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('is reachable from the homepage', async () => {
+    render(<App />);
+
+    const main = within(screen.getByRole('main'));
+    await userEvent.click(main.getByRole('link', { name: /Terms and Conditions/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Terms and Conditions' })).toBeInTheDocument();
+  });
+
+  it('mounts no upload, map or chart components', async () => {
+    window.location.hash = '#/terms';
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Terms and Conditions' });
+
+    expect(screen.queryByTestId('file-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-placeholder')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Activity charts' })).not.toBeInTheDocument();
+    expect(FakeMap.instances).toHaveLength(0);
+  });
+
+  it('covers each required topic', async () => {
+    window.location.hash = '#/terms';
+    render(<App />);
+    const page = await screen.findByRole('main');
+
+    expect(page).toHaveTextContent(/not uploaded to a server|no backend/i);
+    expect(page).toHaveTextContent(/tile provider/i);
+    expect(page).toHaveTextContent(/without warranty/i);
+    expect(page).toHaveTextContent(/not medical advice|medical advice/i);
+    expect(page).toHaveTextContent(/responsible for the files/i);
+    expect(page).toHaveTextContent(/GPX is the only format/i);
+  });
+
+  it('marks itself as needing legal review', async () => {
+    window.location.hash = '#/terms';
+    render(<App />);
+
+    expect(await screen.findByRole('note')).toHaveTextContent(/draft/i);
+    expect(screen.getByRole('note')).toHaveTextContent(/reviewed/i);
+  });
+
+  it('keeps the loaded activity in memory', async () => {
+    render(<App />);
+    await goToViewer();
+    await userEvent.upload(screen.getByTestId('file-input'), fixtureFile('simple-route.gpx'));
+    await screen.findByText('Simple Route');
+
+    await userEvent.click(screen.getByRole('link', { name: 'Terms and Conditions' }));
+    await screen.findByRole('heading', { name: 'Terms and Conditions' });
+
+    // Navigating away does not discard it: it is still there on return.
+    expect(useActivityStore.getState().activity?.metadata.name).toBe('Simple Route');
+
+    // Back via the Tools menu. The drop zone stays hidden because an activity
+    // is still open, so the summary is what proves it survived.
+    await openTools();
+    await userEvent.click(toolsItem('File viewer'));
+
+    expect(await screen.findByText('Simple Route')).toBeInTheDocument();
   });
 });
 

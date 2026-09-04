@@ -8,6 +8,7 @@ import { LapsPanel, hasUsefulLaps } from '../components/LapsPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { ViewerSectionNav, type ViewerSection } from '../components/ViewerSectionNav';
+import { sliceActivity } from '../domain/activitySlice';
 import { activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
 import { selectViewerState, useActivityStore } from '../state/activityStore';
 import { activePointIndex, useInteractionStore } from '../state/interactionStore';
@@ -42,6 +43,7 @@ export function ViewerPage() {
   const setSelectedPoint = useInteractionStore((state) => state.setSelectedPoint);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
+  const selectedRange = useInteractionStore((state) => state.selectedRange);
   const chartXAxisMode = useInteractionStore((state) => state.chartXAxisMode);
   const setChartXAxisMode = useInteractionStore((state) => state.setChartXAxisMode);
 
@@ -55,6 +57,17 @@ export function ViewerPage() {
         : { featureCollection: { type: 'FeatureCollection' as const, features: [] }, sourceIndices: [], isEmpty: true },
     [activity],
   );
+
+  /**
+   * AV-604. The route of the focused section, which the map draws over the
+   * dimmed full route. Undefined whenever nothing is focused, or when the
+   * selection no longer fits this activity.
+   */
+  const focusRoute = useMemo(() => {
+    if (!activity || !selectedRange) return undefined;
+    const slice = sliceActivity(activity, selectedRange);
+    return slice.ok ? activityToRouteGeoJSON(slice.activity) : undefined;
+  }, [activity, selectedRange]);
 
   const marker = useMemo(() => {
     if (!activity || activeIndex === undefined) return pointToGeoJSON(undefined);
@@ -145,6 +158,7 @@ export function ViewerPage() {
                 <Suspense fallback={<MapPlaceholder reason="loading" />}>
                   <ActivityMap
                     route={route}
+                    focusRoute={focusRoute}
                     marker={marker}
                     basemapEnabled={basemapEnabled}
                     onRouteHover={handleRouteHover}

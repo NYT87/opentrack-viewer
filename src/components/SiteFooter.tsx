@@ -59,6 +59,11 @@ export function SiteFooter() {
                 Open an activity
               </Link>
             </li>
+            <li>
+              <Link className="footer__link" to={ROUTES.terms}>
+                Terms and Conditions
+              </Link>
+            </li>
           </ul>
         </nav>
 

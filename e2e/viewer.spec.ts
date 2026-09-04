@@ -35,6 +35,12 @@ function recordRequests(page: Page): Request[] {
  * It must be set before a file is opened, because the map is constructed with
  * the basemap already hidden.
  */
+/** AV-012: header navigation lives in the Tools menu. */
+async function openTools(page: Page) {
+  await page.getByRole('button', { name: /Tools/ }).click();
+  return page.getByRole('menu', { name: 'Tools' });
+}
+
 /** Settings is a modal (AV-007): it neither navigates nor unmounts the viewer. */
 async function openSettings(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).click();
@@ -209,8 +215,8 @@ test('charts pace and cadence for a running activity (AV-505, AV-506)', async ({
 
   await expect(page.getByRole('region', { name: 'Elevation chart' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText('/km');
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toContainText('rpm');
-  // The cadence unit caveat is stated rather than silently resolved.
+  await expect(page.getByRole('region', { name: 'Cadence chart' })).toContainText('spm');
+  // AV-515: named as strides per minute, never rpm.
   await expect(page.getByRole('region', { name: 'Cadence chart' })).toContainText(
     /strides per minute/i,
   );
@@ -394,8 +400,10 @@ test('selects a chart range by dragging (AV-508)', async ({ page }) => {
   await expect(page.locator('[data-testid="chart-selection"]').first()).toBeVisible();
   await page.mouse.up();
 
-  // Still visible after release, on every chart sharing the axis.
-  await expect(page.locator('[data-testid="chart-selection"]')).toHaveCount(3);
+  // On release the charts focus on the section, so the band gives way to the
+  // focused view and its way back out (AV-511).
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
+  await expect(page.locator('[data-testid="chart-selection"]')).toHaveCount(0);
 });
 
 test('ignores a tiny drag and treats it as a click (AV-508)', async ({ page }) => {
@@ -427,21 +435,42 @@ test('keeps the selection when the x-axis changes (AV-509)', async ({ page }) =>
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.8, y, { steps: 6 });
   await page.mouse.up();
-  await expect(page.locator('[data-testid="chart-selection"]').first()).toBeVisible();
-
-  const onDistance = await page
-    .locator('[data-testid="chart-selection"]')
-    .first()
-    .getAttribute('width');
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Time' }).click();
 
-  // Stored as point indices, so it is re-projected onto the time axis rather
-  // than discarded.
-  const band = page.locator('[data-testid="chart-selection"]').first();
-  await expect(band).toBeVisible();
-  expect(Number(await band.getAttribute('width'))).toBeGreaterThan(0);
-  expect(onDistance).toBeTruthy();
+  // Stored as point indices, so the focus is re-projected onto the time axis
+  // rather than discarded.
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Elevation chart' }).getByText(/x-axis: elapsed time/),
+  ).toBeVisible();
+});
+
+test('redraws the charts for the selected section and back (AV-511, AV-512)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const chart = page.getByRole('region', { name: 'Elevation chart' }).locator('svg');
+  await chart.scrollIntoViewIfNeeded();
+  const plotted = () => chart.locator('.chart__line').getAttribute('d');
+  const whole = await plotted();
+
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.3, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.75, y, { steps: 8 });
+  await page.mouse.up();
+
+  // The charts now show the section, and say so without implying an edit.
+  await expect(page.getByText(/file is unchanged/i)).toBeVisible();
+  expect(await plotted()).not.toBe(whole);
+
+  await page.getByRole('button', { name: 'Reset View' }).click();
+
+  await expect(page.getByRole('button', { name: 'Reset View' })).toHaveCount(0);
+  await expect.poll(plotted).toBe(whole);
 });
 
 test('marks chart axes at real intervals and keeps labels clear (AV-514)', async ({ page }) => {
@@ -539,6 +568,210 @@ test('applies the theme before first paint (AV-009)', async ({ page }) => {
 
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+});
+
+test('navigates to the viewer from the Tools menu (AV-012)', async ({ page }) => {
+  await page.goto('./');
+
+  // The standalone Viewer button is gone; navigation is in the menu. Exact,
+  // because the brand link "OpenTrack Viewer" contains the word and Playwright
+  // matches accessible names by substring.
+  await expect(
+    page.locator('.shell__header').getByRole('link', { name: 'Viewer', exact: true }),
+  ).toHaveCount(0);
+
+  const menu = await openTools(page);
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'File viewer' }).click();
+
+  expect(new URL(page.url()).hash).toBe('#/viewer');
+  await expect(page.getByTestId('file-input')).toBeAttached();
+  await expect(page.getByRole('menu', { name: 'Tools' })).toHaveCount(0);
+});
+
+test('closes the Tools menu on Escape and outside clicks (AV-012)', async ({ page }) => {
+  await page.goto('./#/viewer');
+
+  await openTools(page);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Tools' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Tools/ })).toBeFocused();
+
+  await openTools(page);
+  await page.locator('.shell__header').click({ position: { x: 5, y: 5 } });
+  await expect(page.getByRole('menu', { name: 'Tools' })).toHaveCount(0);
+});
+
+test('keeps the Tools menu clear of the title and settings icon (AV-012)', async ({ page }) => {
+  await page.setViewportSize({ width: 520, height: 800 });
+  await page.goto('./#/viewer');
+
+  const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
+  const tools = (await page.getByRole('button', { name: /Tools/ }).boundingBox())!;
+  const settings = (await page.getByRole('button', { name: 'Settings' }).boundingBox())!;
+
+  // Beside the title, not on top of it, and clear of the settings icon.
+  expect(tools.x).toBeGreaterThanOrEqual(title.x + title.width - 1);
+  expect(tools.x + tools.width).toBeLessThanOrEqual(settings.x + 1);
+});
+
+test('serves Terms and Conditions as its own route (AV-008)', async ({ page }) => {
+  await page.goto('./');
+
+  await page.getByRole('main').getByRole('link', { name: /Terms and Conditions/ }).click();
+
+  expect(new URL(page.url()).hash).toBe('#/terms');
+  await expect(page.getByRole('heading', { name: 'Terms and Conditions' })).toBeVisible();
+  await expect(page.getByRole('note')).toContainText(/draft/i);
+
+  // Informational only: nothing that could process an activity is mounted.
+  await expect(page.getByTestId('file-input')).toHaveCount(0);
+  await expect(page.locator('.maplibregl-canvas')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // Deep-linkable, which is why it is a route rather than a modal.
+  await page.goto('./#/terms');
+  await expect(page.getByRole('heading', { name: 'Terms and Conditions' })).toBeVisible();
+});
+
+test('keeps a loaded activity while reading the Terms (AV-008)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+  await expect(page.getByText('Elevation Route')).toBeVisible();
+
+  await page.getByRole('contentinfo').getByRole('link', { name: 'Terms and Conditions' }).click();
+  await expect(page.getByRole('heading', { name: 'Terms and Conditions' })).toBeVisible();
+
+  const menu = await openTools(page);
+  await menu.getByRole('menuitem', { name: 'File viewer' }).click();
+
+  await expect(page.getByText('Elevation Route')).toBeVisible();
+});
+
+test('focuses the map on the selected section, then leaves it alone (AV-604)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  // The focused section is drawn over the dimmed full route.
+  const focusPixels = () =>
+    page
+      .locator('.maplibregl-canvas')
+      .screenshot()
+      .then((shot) => countPixelsNear(decodePng(shot), [0xff, 0xd1, 0x66], 40));
+  expect(await focusPixels()).toBe(0);
+
+  // Measured after the screenshot: taking one scrolls its target into view,
+  // which would otherwise leave this box pointing at the wrong place.
+  const chart = page.getByRole('region', { name: 'Elevation chart' }).locator('svg');
+  await chart.scrollIntoViewIfNeeded();
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+
+  await page.mouse.move(box.x + box.width * 0.3, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.75, y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
+
+  await expect.poll(focusPixels, { timeout: 5000 }).toBeGreaterThan(50);
+
+  // Reset View puts the whole route back.
+  await page.getByRole('button', { name: 'Reset View' }).click();
+  await expect.poll(focusPixels, { timeout: 5000 }).toBe(0);
+});
+
+test('keeps the summary describing the whole activity while focused (AV-604)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  const whole = await summary.textContent();
+
+  const chart = page.getByRole('region', { name: 'Elevation chart' }).locator('svg');
+  await chart.scrollIntoViewIfNeeded();
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.3, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.75, y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
+
+  // The summary describes the activity, not the selection.
+  expect(await summary.textContent()).toBe(whole);
+});
+
+test('charts speed for a ride, not pace or run cadence (AV-513, AV-515)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'ride-with-speed.gpx');
+
+  const speed = page.getByRole('region', { name: 'Speed chart' });
+  await expect(speed).toContainText('km/h');
+  // ~8 m/s is around 29 km/h.
+  await expect(speed).toContainText(/2[5-9]\.\d|3[0-2]\.\d/);
+
+  // Run-specific charts explain that they do not apply to a ride.
+  await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText(
+    /shown for running activities/i,
+  );
+  await expect(page.getByRole('region', { name: 'Cadence chart' })).toContainText(
+    /shown for running activities/i,
+  );
+});
+
+test('labels running cadence in strides per minute (AV-515)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  const cadence = page.getByRole('region', { name: 'Cadence chart' });
+  await expect(cadence).toContainText('Cadence (spm)');
+  await expect(cadence).not.toContainText('rpm');
+
+  // A run gets no speed chart.
+  await expect(page.getByRole('region', { name: 'Speed chart' })).toContainText(
+    /shown for cycling activities/i,
+  );
+});
+
+test('shows a run its average pace, and a ride its average speed', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+
+  await loadFixture(page, 'run-with-cadence.gpx');
+  await expect(summary).toContainText('Avg pace');
+  await expect(summary).toContainText(/\d:\d\d \/km/);
+  await expect(summary).not.toContainText('Avg speed');
+
+  await page.getByRole('button', { name: 'Close activity' }).click();
+  await loadFixture(page, 'ride-with-speed.gpx');
+  await expect(summary).toContainText('Avg speed');
+  await expect(summary).not.toContainText('Avg pace');
+});
+
+test('switches speed units across the chart and the summary (AV-513)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'ride-with-speed.gpx');
+
+  const chart = page.getByRole('region', { name: 'Speed chart' });
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+
+  // ~8 m/s is 28.8 km/h, in both places.
+  await expect(chart).toContainText('Speed (km/h)');
+  await expect(summary).toContainText('Avg speed');
+  await expect(summary).toContainText(/2[5-9]\.\d km\/h|3[0-2]\.\d km\/h/);
+
+  await openSettings(page);
+  await page.getByLabel('Units').selectOption('imperial');
+  await page.getByRole('button', { name: 'Close settings' }).click();
+
+  // ...and miles per hour when Imperial is chosen.
+  await expect(chart).toContainText('Speed (mph)');
+  await expect(summary).toContainText(/1[5-9]\.\d mph|2[0-1]\.\d mph/);
+  await expect(summary).not.toContainText('km/h');
 });
 
 test('shows a useful error for a malformed GPX file', async ({ page }) => {
@@ -862,6 +1095,57 @@ test('scopes the web app manifest to the sub-path', async ({ page }) => {
   expect(manifest.startUrl).toBe(BASE_PATH);
   expect(manifest.scope).toBe(BASE_PATH);
   expect(manifest.icon).toBe(`${BASE_PATH}icons/icon-192.png`);
+});
+
+test('serves the app shell offline after a first visit (AV-802)', async ({ page, context }) => {
+  await page.goto('./#/viewer');
+  // Wait for the worker to install and take control of the page.
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(
+    true,
+  );
+
+  await context.setOffline(true);
+  try {
+    await page.reload();
+
+    // The shell is served entirely from the precache.
+    await expect(page.getByRole('heading', { name: 'OpenTrack Viewer' })).toBeVisible();
+    await expect(page.getByTestId('file-input')).toBeAttached();
+
+    // ...and the app still does its job, because parsing never needed a server.
+    await loadFixture(page, 'route-with-elevation.gpx');
+    await expect(page.getByText('Elevation Route')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Elevation chart' })).toBeVisible();
+  } finally {
+    await context.setOffline(false);
+  }
+});
+
+test('caches the app, and nothing of the user or the tile provider (AV-802)', async ({ page }) => {
+  await page.goto('./#/viewer');
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+
+  const cached = await page.evaluate(async () => {
+    const names = await caches.keys();
+    const urls: string[] = [];
+    for (const name of names) {
+      const keys = await (await caches.open(name)).keys();
+      urls.push(...keys.map((request) => request.url));
+    }
+    return urls;
+  });
+
+  expect(cached.length).toBeGreaterThan(0);
+  // Everything cached is this app's own build output.
+  expect(cached.filter((url) => !url.startsWith(ORIGIN))).toEqual([]);
+  // Map tiles are explicitly out of scope: caching them would record where the
+  // reader has been looking.
+  expect(cached.filter((url) => url.includes('tile.openstreetmap.org'))).toEqual([]);
+  // The map chunk and its worker are cached, so route-only mode works offline.
+  expect(cached.some((url) => url.includes('assets/ActivityMap'))).toBe(true);
+  expect(cached.some((url) => url.includes('maplibre-gl-worker'))).toBe(true);
 });
 
 test('fixture files are never read by the server', async () => {

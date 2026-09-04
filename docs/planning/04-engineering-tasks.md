@@ -157,6 +157,38 @@ Acceptance criteria:
 - Header layout remains compact and responsive across desktop and mobile widths.
 - Tests cover brand-link navigation, absence of duplicate Home button, absence of header subtitle, and settings icon modal behavior.
 
+#### AV-012: Move Viewer Navigation Into Tools Dropdown
+
+Dependencies: AV-006, AV-010
+
+Acceptance criteria:
+- Header renders a `Tools` dropdown beside the `OpenTrack Viewer` title on the left side.
+- `Tools` dropdown contains a `File viewer` option.
+- Selecting `File viewer` routes to the existing viewer/process page.
+- The current top-level `Viewer` button/link is removed when `File viewer` exists in the `Tools` dropdown.
+- Dropdown opening and closing does not clear loaded activity state, focused chart range, x-axis mode, unit setting, basemap setting, theme setting, or settings modal state.
+- Dropdown has accessible button/menu semantics, keyboard support, Escape close behavior, outside-click close behavior, and visible focus styles.
+- Active/current state is clear when the user is already on the viewer/process page.
+- Dropdown remains usable on small screens without overlapping the title, settings icon, or page content.
+- Tests cover dropdown rendering beside the title, opening/closing behavior, `File viewer` routing, removal of the standalone `Viewer` button, and keyboard accessibility.
+
+#### AV-013: Implement Privacy-Safe SEO Metadata
+
+Dependencies: AV-006, AV-008
+
+Acceptance criteria:
+- `index.html` includes a strong default title and meta description for OpenTrack Viewer.
+- Homepage sets route-specific title and description for a browser-only GPX/FIT/TCX activity file viewer.
+- Viewer/process page sets route-specific title and description for the generic file viewer, not the currently loaded activity.
+- Terms and Conditions page sets route-specific title and description for legal and usage terms.
+- Open Graph tags include title, description, type, URL, and preview image when available.
+- Twitter/X card tags include title, description, card type, and preview image when available.
+- Canonical URL handling is documented and implemented once the production deployment URL is known.
+- Static `robots.txt` and `sitemap.xml` are added when the public deployment URL is known, or the task explicitly documents the placeholder/deployment dependency.
+- SEO metadata never includes user file names, route coordinates, timestamps, device identifiers, athlete metadata, sensor values, or derived activity stats.
+- Metadata updates on route changes without page reload.
+- Tests verify route titles/descriptions and confirm loaded activity data is not written into SEO tags.
+
 ### Epic E1: Domain Model and File Intake
 
 #### AV-101: Define Activity Domain Types
@@ -333,6 +365,22 @@ Acceptance criteria:
 - Long lap lists remain usable through scrolling or compact rows without shrinking the map into an unusable size.
 - Selecting or hovering a lap may be deferred, but the display structure must not block future lap-to-map/chart highlighting.
 - Tests cover lap-present, lap-missing, large-screen placement, and mobile placement states.
+
+#### AV-407: Render Sport-Specific Primary Overview Metric
+
+Dependencies: AV-401, AV-402, AV-404
+
+Acceptance criteria:
+- Running activities display Average Pace in the activity overview when distance and usable duration are available.
+- Running activities do not display Average Speed as the primary overview performance metric when Average Pace can be calculated.
+- Cycling activities display Average Speed in the activity overview when distance and usable duration are available.
+- Cycling activities do not display Average Pace as the primary overview performance metric when Average Speed can be calculated.
+- Average Pace uses duration per distance formatting, such as `min/km` or `min/mi`, according to the active unit system.
+- Average Speed uses distance per duration formatting, such as `km/h` or `mph`, according to the active unit system.
+- The duration source used for Average Pace and Average Speed is documented and consistent with the overview's primary `Time` value.
+- Activities with unknown or unsupported sport fall back to neutral overview stats without inventing a sport-specific primary metric.
+- Missing distance or duration shows an unavailable state rather than an incorrect average.
+- Tests cover running, cycling, unknown sport, missing distance, missing duration, metric units, and imperial units.
 
 ### Epic E5: Chart Panel and Activity Metrics
 

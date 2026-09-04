@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { SettingsIconButton } from '../components/SettingsIconButton';
+import { ToolsMenu } from '../components/ToolsMenu';
 import { SettingsModal } from '../components/SettingsModal';
 import { SiteFooter } from '../components/SiteFooter';
 import { useActivityStore } from '../state/activityStore';
-import { NAV_LINKS, ROUTES } from './routes';
+import { ROUTES, TOOLS_ITEMS } from './routes';
 import { useAppTheme } from './useAppTheme';
 
 /**
@@ -28,26 +29,23 @@ export function AppShell() {
     <div className="shell">
       <header className="shell__header">
         {/* AV-010: the brand is the way home, so there is no Home nav item. */}
-        <h1 className="shell__title">
-          <Link className="shell__brand" to={ROUTES.home}>
-            OpenTrack Viewer
-          </Link>
-        </h1>
+        <div className="shell__lead">
+          <h1 className="shell__title">
+            <Link className="shell__brand" to={ROUTES.home}>
+              OpenTrack Viewer
+            </Link>
+          </h1>
+
+          {/* AV-012: navigation lives here, beside the title. */}
+          <ToolsMenu
+            items={TOOLS_ITEMS.map((item) => ({
+              ...item,
+              isCurrent: location.pathname === item.to,
+            }))}
+          />
+        </div>
 
         <div className="shell__actions">
-          <nav className="nav" aria-label="Main">
-            {NAV_LINKS.map((link) => (
-              <NavLink
-                key={link.to}
-                to={link.to}
-                end
-                className={({ isActive }) => (isActive ? 'nav__link is-active' : 'nav__link')}
-              >
-                {link.label}
-              </NavLink>
-            ))}
-          </nav>
-
           {/* The homepage owns no activity state, so neither control belongs there. */}
           {!isHome && activity && (
             <button type="button" className="button" onClick={clear}>

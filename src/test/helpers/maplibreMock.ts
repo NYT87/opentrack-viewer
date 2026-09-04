@@ -20,6 +20,7 @@ export class FakeMap {
   readonly easeToCalls: unknown[] = [];
   readonly styles: unknown[] = [];
   readonly layoutProperties: Record<string, unknown> = {};
+  readonly paintProperties: Record<string, unknown> = {};
   setStyleCalls = 0;
   removed = false;
 
@@ -113,6 +114,10 @@ export class FakeMap {
 
   setLayoutProperty(id: string, name: string, value: unknown): void {
     if (name === 'visibility') this.layoutProperties[id] = value;
+  }
+
+  setPaintProperty(id: string, name: string, value: unknown): void {
+    this.paintProperties[`${id}.${name}`] = value;
   }
 
   getSource(id: string) {

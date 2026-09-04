@@ -10,8 +10,8 @@ function makeRun(points: Parameters<typeof makeActivity>[0], sport: ActivitySpor
 }
 
 const runPoints = [
-  { lat: 0, lon: 0.0001, elevationMeters: 10, cadenceRpm: 170, time: new Date('2024-01-01T10:00:00Z') },
-  { lat: 0.01, lon: 0.0001, elevationMeters: 20, cadenceRpm: 172, time: new Date('2024-01-01T10:05:00Z') },
+  { lat: 0, lon: 0.0001, elevationMeters: 10, runningCadenceSpm: 170, time: new Date('2024-01-01T10:00:00Z') },
+  { lat: 0.01, lon: 0.0001, elevationMeters: 20, runningCadenceSpm: 172, time: new Date('2024-01-01T10:05:00Z') },
 ];
 
 const availabilityOf = (activity: Activity, kind: string) =>
@@ -67,8 +67,8 @@ describe('getChartAvailability (AV-507)', () => {
 
   it('defaults to the time axis when distance is unavailable', () => {
     const indoor = makeRun([
-      { cadenceRpm: 170, time: new Date('2024-01-01T10:00:00Z') },
-      { cadenceRpm: 172, time: new Date('2024-01-01T10:05:00Z') },
+      { runningCadenceSpm: 170, time: new Date('2024-01-01T10:00:00Z') },
+      { runningCadenceSpm: 172, time: new Date('2024-01-01T10:05:00Z') },
     ]);
 
     expect(availabilityOf(indoor, 'cadence').defaultXAxisMode).toBe('time');
@@ -85,6 +85,52 @@ describe('getChartAvailability (AV-507)', () => {
   });
 });
 
+describe('speed availability (AV-513)', () => {
+  it('offers speed to cycling activities with distance and time', () => {
+    expect(availabilityOf(makeRun(runPoints, 'cycling'), 'speed').available).toBe(true);
+  });
+
+  it('withholds it from running activities', () => {
+    expect(availabilityOf(makeRun(runPoints), 'speed')).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringMatching(/cycling/i),
+    });
+  });
+
+  it('does not count a faulty recorded speed as a speed stream', () => {
+    const faulty = makeActivity([
+      { lat: 0, lon: 0.0001, speedMetersPerSecond: -5 },
+      { lat: 0.01, lon: 0.0001, speedMetersPerSecond: 300 },
+    ]);
+    const cycling = { ...faulty, metadata: { ...faulty.metadata, sport: 'cycling' as const } };
+
+    expect(cycling.streams.hasSpeed).toBe(false);
+    // ...and with no timestamps to derive from, speed is honestly unavailable.
+    expect(availabilityOf(cycling, 'speed').available).toBe(false);
+  });
+
+  it('offers it on recorded speed even without usable timestamps', () => {
+    const withSpeedSensor = makeRun(
+      [
+        { lat: 0, lon: 0.0001, speedMetersPerSecond: 8 },
+        { lat: 0.01, lon: 0.0001, speedMetersPerSecond: 9 },
+      ],
+      'cycling',
+    );
+
+    expect(availabilityOf(withSpeedSensor, 'speed').available).toBe(true);
+  });
+
+  it('explains what a cycling activity is missing', () => {
+    const noData = makeRun([{ elevationMeters: 10 }, { elevationMeters: 20 }], 'cycling');
+
+    expect(availabilityOf(noData, 'speed')).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringMatching(/distance and timestamps/i),
+    });
+  });
+});
+
 describe('getVisibleCharts', () => {
   it('returns the guardrail set in display order', () => {
     expect(getVisibleCharts(makeRun(runPoints)).map((entry) => entry.kind)).toEqual(
@@ -95,7 +141,9 @@ describe('getVisibleCharts', () => {
   it('keeps unavailable charts so the UI can explain them', () => {
     const charts = getVisibleCharts(makeRun(runPoints, 'cycling'));
 
-    expect(charts).toHaveLength(3);
+    expect(charts).toHaveLength(VISIBLE_CHART_KINDS.length);
     expect(charts.find((entry) => entry.kind === 'pace')?.available).toBe(false);
+    // ...and the cycling-specific one is offered instead.
+    expect(charts.find((entry) => entry.kind === 'speed')?.available).toBe(true);
   });
 });

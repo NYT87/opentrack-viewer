@@ -84,7 +84,17 @@ export interface ActivityPoint {
   elevationMeters?: number;
   distanceMeters?: number;
   heartRateBpm?: number;
-  cadenceRpm?: number;
+  /**
+   * AV-515. Foot cadence in **strides per minute** — one foot, the unit foot
+   * pods and watches report. Named for running because that is the only sport
+   * that charts it, but a walk or hike records the same measurement. Kept
+   * separate from cycling cadence because
+   * the two are different measurements that happen to share a name, and one
+   * generic "rpm" field made the chart label a guess.
+   */
+  runningCadenceSpm?: number;
+  /** Cycling cadence in revolutions per minute (pedal revolutions). */
+  cyclingCadenceRpm?: number;
   powerWatts?: number;
   temperatureCelsius?: number;
   speedMetersPerSecond?: number;
@@ -122,7 +132,9 @@ export interface ActivityStreams {
   hasTime: boolean;
   hasDistance: boolean;
   hasHeartRate: boolean;
-  hasCadence: boolean;
+  hasRunningCadence: boolean;
+  hasCyclingCadence: boolean;
+  hasSpeed: boolean;
   hasPower: boolean;
   hasTemperature: boolean;
 }
@@ -134,6 +146,10 @@ export interface ActivityDerivedStats {
   durationSeconds?: number;
   movingDurationSeconds?: number;
   distanceMeters?: number;
+  /** Distance over elapsed duration, matching the `Duration` figure shown. */
+  averageSpeedMetersPerSecond?: number;
+  /** The same average expressed as pace, which is how runners read it. */
+  averagePaceSecondsPerKm?: number;
   elevationGainMeters?: number;
   elevationLossMeters?: number;
   minElevationMeters?: number;
@@ -182,6 +198,30 @@ export interface Activity {
   warnings: ActivityWarning[];
 }
 
+/**
+ * Speeds above this are not plausible on a bicycle, which is the fastest thing
+ * this viewer plots. Generous enough for a fast descent (AV-513).
+ */
+export const MAX_PLAUSIBLE_CYCLING_SPEED_MPS = 35;
+
+/**
+ * True when a recorded speed can be believed. A device that reports a negative
+ * or absurd value has faulted, and the honest thing to do with a faulty reading
+ * is to treat it as absent — a speed derived from positions is then used
+ * instead, rather than drawing a spike the ride never contained.
+ *
+ * Recorded speed is checked against the *cycling* ceiling wherever it appears,
+ * because a file's sport is not always known at the point the value is read.
+ */
+export function isPlausibleSpeed(value: number | undefined): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= MAX_PLAUSIBLE_CYCLING_SPEED_MPS
+  );
+}
+
 /** True when the point carries a finite, in-range WGS84 coordinate pair. */
 export function hasValidLocation(
   point: ActivityPoint,
@@ -209,7 +249,9 @@ export function computeStreams(points: ActivityPoint[]): ActivityStreams {
     hasTime: false,
     hasDistance: false,
     hasHeartRate: false,
-    hasCadence: false,
+    hasRunningCadence: false,
+    hasCyclingCadence: false,
+    hasSpeed: false,
     hasPower: false,
     hasTemperature: false,
   };
@@ -220,7 +262,9 @@ export function computeStreams(points: ActivityPoint[]): ActivityStreams {
     if (point.time instanceof Date && !Number.isNaN(point.time.getTime())) streams.hasTime = true;
     if (Number.isFinite(point.distanceMeters)) streams.hasDistance = true;
     if (Number.isFinite(point.heartRateBpm)) streams.hasHeartRate = true;
-    if (Number.isFinite(point.cadenceRpm)) streams.hasCadence = true;
+    if (Number.isFinite(point.runningCadenceSpm)) streams.hasRunningCadence = true;
+    if (Number.isFinite(point.cyclingCadenceRpm)) streams.hasCyclingCadence = true;
+    if (isPlausibleSpeed(point.speedMetersPerSecond)) streams.hasSpeed = true;
     if (Number.isFinite(point.powerWatts)) streams.hasPower = true;
     if (Number.isFinite(point.temperatureCelsius)) streams.hasTemperature = true;
   }

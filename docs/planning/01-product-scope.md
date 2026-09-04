@@ -11,6 +11,7 @@ The core promise is simple:
 ## 2. Product Goals
 
 - Provide a main homepage that describes OpenTrack Viewer, its privacy model, supported/planned formats, and the primary action to open the activity processing page.
+- Provide privacy-safe SEO metadata so search and link previews clearly describe the app without exposing user activity data.
 - Provide a dedicated viewer/process page where users upload and inspect GPX first, then FIT/TCX and future formats.
 - Provide a Terms and Conditions page with stable navigation/linking for legal and usage terms.
 - Provide settings as a modal, not a separate page, so opening settings does not navigate away from or clear loaded activity data.
@@ -19,6 +20,8 @@ The core promise is simple:
 - Use the header brand/title as the link back to the homepage.
 - Do not show a separate Home button/nav item when the header brand already links home.
 - Keep global header chrome compact; do not show a descriptive subtitle/tagline in the header.
+- Move the viewer navigation entry into a `Tools` dropdown placed beside the title on the left side of the header.
+- The `Tools` dropdown should include a `File viewer` option that links to the current viewer/process page.
 - Show the settings entry in the header on non-home pages, including the viewer/process page; the main homepage should not show the settings entry.
 - Show Settings as an icon-only header control on non-home pages, with an accessible name and visible focus state.
 - Load local activity files through file picker and drag/drop.
@@ -45,6 +48,9 @@ The core promise is simple:
   - start time
   - end time
   - elevation gain
+- In the activity overview, show average pace as the primary performance metric for running activities.
+- In the activity overview, show average speed as the primary performance metric for cycling activities.
+- Do not show average speed as the primary running metric when average pace can be calculated.
 - Display device information when the file provides it and when it can be shown without exposing sensitive identifiers unnecessarily.
 - Add an elevation chart after the map slice is working.
 - Let users switch chart x-axis mode between distance and time.
@@ -80,6 +86,7 @@ The core promise is simple:
 - No standalone settings page in the target navigation model.
 - No file upload controls on the homepage beyond navigation to the viewer/process page.
 - No assumption that draft Terms and Conditions copy is production-legal without review.
+- No SEO, analytics, or preview metadata that includes user file names, route coordinates, timestamps, device identifiers, athlete metadata, or activity-derived values.
 
 ## 5. Privacy and Security Constraints
 
@@ -120,10 +127,11 @@ The early implementation should stay intentionally small:
 - Terms and Conditions is a read-only informational page; it must not own activity-processing state.
 - Settings are modal and session-scoped; opening settings must not reset loaded activity data.
 - Theme is an app-wide session preference available from Settings; it applies to homepage, viewer/process page, Terms and Conditions, and the settings modal itself.
-- The global header should use the OpenTrack Viewer brand/title as the home link, avoid a duplicate Home nav button, omit header subtitles, and use an icon-only Settings control where Settings is available.
+- The global header should use the OpenTrack Viewer brand/title as the home link, place a `Tools` dropdown beside the title with `File viewer` linking to the viewer/process page, avoid a duplicate Home nav button, omit header subtitles, and use an icon-only Settings control where Settings is available.
 - GPX only until route rendering and summary stats are solid.
 - One map view.
 - One responsive loaded-activity layout: max-width content, optional large-screen section sidebar, overview first, map second, charts later.
+- Sport-specific overview metrics should prefer average pace for running and average speed for cycling.
 - One chart panel with elevation first, then sport-specific charts: run pace/cadence for running and speed for cycling when the underlying data supports them.
 - Laps are displayed only when lap data exists; missing laps should not create empty layout noise.
 - No empty map/chart/stat placeholders before a valid activity is loaded.
@@ -132,6 +140,7 @@ The early implementation should stay intentionally small:
 - Export is Stage 3+ work, not part of the first GPX viewer slice.
 - No persistence.
 - No user settings beyond what is needed for the current session.
+- SEO should focus on static public pages and app capabilities, not loaded activity content.
 - No backend.
 - No account work.
 - No cloud import/export.
@@ -147,3 +156,7 @@ The README should state the privacy model in the first screen:
 Also document the map tile caveat:
 
 > The initial map view may request tiles from the configured map provider. Offline map support is planned separately.
+
+The public SEO description should reinforce the same privacy promise:
+
+> Open GPX, FIT, and TCX activity files locally in your browser. OpenTrack Viewer does not upload your activity file to a backend.

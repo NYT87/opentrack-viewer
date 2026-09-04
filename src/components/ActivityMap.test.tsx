@@ -259,6 +259,163 @@ describe('ActivityMap (AV-302/AV-303)', () => {
     expect(setWorkerUrl.mock.calls[0]?.[0]).toEqual(expect.stringContaining('maplibre-gl-worker'));
   });
 
+  it('draws the focused section over a dimmed full route (AV-604)', () => {
+    const focus = activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.6, lon: -0.2 },
+        { lat: 51.7, lon: -0.1 },
+      ]),
+    );
+
+    const { rerender } = renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    expect(map.paintProperties['activity-route-line.line-opacity']).toBe(1);
+
+    rerender(
+      <ActivityMap route={route} focusRoute={focus} marker={emptyMarker} basemapEnabled />,
+    );
+
+    // The whole route stays visible, dimmed, so the section keeps its context.
+    expect(map.paintProperties['activity-route-line.line-opacity']).toBeLessThan(1);
+    const data = map.getSource('activity-focus')?.data as { features: unknown[] };
+    expect(data.features).toHaveLength(1);
+  });
+
+  it('fits the map to the focused section (AV-604)', () => {
+    const focus = activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.6, lon: -0.2 },
+        { lat: 51.7, lon: -0.1 },
+      ]),
+    );
+
+    const { rerender } = renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    const fitsBefore = map.fitBoundsCalls.length;
+
+    rerender(
+      <ActivityMap route={route} focusRoute={focus} marker={emptyMarker} basemapEnabled />,
+    );
+
+    expect(map.fitBoundsCalls.length).toBe(fitsBefore + 1);
+    expect(map.fitBoundsCalls.at(-1)?.[0]).toEqual([-0.2, 51.6, -0.1, 51.7]);
+  });
+
+  it('leaves the map alone after the reader moves it (AV-604)', () => {
+    const focus = activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.6, lon: -0.2 },
+        { lat: 51.7, lon: -0.1 },
+      ]),
+    );
+
+    const { rerender } = renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    rerender(
+      <ActivityMap route={route} focusRoute={focus} marker={emptyMarker} basemapEnabled />,
+    );
+
+    // The reader pans away, then something incidental resizes the map.
+    act(() => map.emit('dragstart', { originalEvent: new MouseEvent('mousedown') }));
+    const fitsAfterFocus = map.fitBoundsCalls.length;
+    act(() => map.emit('resize'));
+
+    expect(map.fitBoundsCalls.length).toBe(fitsAfterFocus);
+  });
+
+  it('restores the full route when the focus is cleared (AV-604)', () => {
+    const focus = activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.6, lon: -0.2 },
+        { lat: 51.7, lon: -0.1 },
+      ]),
+    );
+
+    const { rerender } = renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    rerender(
+      <ActivityMap route={route} focusRoute={focus} marker={emptyMarker} basemapEnabled />,
+    );
+
+    rerender(<ActivityMap route={route} marker={emptyMarker} basemapEnabled />);
+
+    expect(map.paintProperties['activity-route-line.line-opacity']).toBe(1);
+    const data = map.getSource('activity-focus')?.data as { features: unknown[] };
+    expect(data.features).toHaveLength(0);
+  });
+
+  it('re-fits to the full route after a reset, not the old section (AV-604)', () => {
+    // Regression: clearing the focus left boundsRef pointing at the focused
+    // section, so the next resize snapped back to a section no longer selected.
+    const focus = activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.6, lon: -0.2 },
+        { lat: 51.7, lon: -0.1 },
+      ]),
+    );
+
+    const { rerender } = renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    rerender(
+      <ActivityMap route={route} focusRoute={focus} marker={emptyMarker} basemapEnabled />,
+    );
+    expect(map.fitBoundsCalls.at(-1)?.[0]).toEqual([-0.2, 51.6, -0.1, 51.7]);
+
+    rerender(<ActivityMap route={route} marker={emptyMarker} basemapEnabled />);
+    act(() => map.emit('resize'));
+
+    expect(map.fitBoundsCalls.at(-1)?.[0]).toEqual([-0.3, 51.5, 0.2, 51.9]);
+  });
+
+  it('moves the camera back to the whole activity on reset (AV-604)', () => {
+    const focus = activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.6, lon: -0.2 },
+        { lat: 51.7, lon: -0.1 },
+      ]),
+    );
+
+    const { rerender } = renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    rerender(
+      <ActivityMap route={route} focusRoute={focus} marker={emptyMarker} basemapEnabled />,
+    );
+    // The reader pans around while focused.
+    act(() => map.emit('dragstart', { originalEvent: new MouseEvent('mousedown') }));
+
+    rerender(<ActivityMap route={route} marker={emptyMarker} basemapEnabled />);
+
+    // Reset View is an explicit "show me the whole thing", so it overrides the
+    // panning rather than waiting for a resize.
+    expect(map.fitBoundsCalls.at(-1)?.[0]).toEqual([-0.3, 51.5, 0.2, 51.9]);
+  });
+
+  it('does not fit twice when an activity loads without a focus (AV-604)', () => {
+    renderMap();
+    const map = latestMap();
+
+    act(() => map.completeStyleLoad());
+
+    // Only the route's own fit: clearing a focus that never existed is not an
+    // event.
+    expect(map.fitBoundsCalls).toHaveLength(1);
+  });
+
+  it('says so when the focused section has no GPS points (AV-604)', () => {
+    const noLocation = activityToRouteGeoJSON(makeActivity([{ elevationMeters: 5 }]));
+
+    renderMap({ focusRoute: noLocation });
+    act(() => latestMap().completeStyleLoad());
+
+    expect(screen.getByRole('status')).toHaveTextContent(/no GPS points/i);
+  });
+
   it('removes the map on unmount', () => {
     const { unmount } = renderMap();
     const map = latestMap();

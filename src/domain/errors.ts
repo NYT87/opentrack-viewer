@@ -10,6 +10,7 @@ export type ActivityErrorCode =
   | 'map_style_load_failed'
   | 'fit_parse_failed'
   | 'large_file_slow_parse'
+  | 'invalid_selected_range'
   | 'file_read_failed';
 
 const HINTS: Record<ActivityErrorCode, string> = {
@@ -20,6 +21,7 @@ const HINTS: Record<ActivityErrorCode, string> = {
   map_style_load_failed: 'The basemap could not load. The route is still available.',
   fit_parse_failed: 'The FIT file could not be decoded.',
   large_file_slow_parse: 'This file is large and may take a moment to parse.',
+  invalid_selected_range: 'Select a longer section of the activity.',
   file_read_failed: 'The file could not be read from your device. Try selecting it again.',
 };
 

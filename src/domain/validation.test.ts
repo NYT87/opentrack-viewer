@@ -48,7 +48,7 @@ describe('assertUsableActivity', () => {
 
   it('throws when points carry no usable stream at all', () => {
     try {
-      assertUsableActivity(makeActivity([{ cadenceRpm: 80 }]));
+      assertUsableActivity(makeActivity([{ runningCadenceSpm: 80 }]));
       throw new Error('expected a failure');
     } catch (error) {
       expect((error as ActivityError).code).toBe('no_route_points');

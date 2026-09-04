@@ -13,6 +13,10 @@
   - Vitest for unit tests
   - React Testing Library for UI behavior
   - Playwright for browser-level file load and map/chart flows
+- SEO:
+  - Static metadata in `index.html` for default title, description, canonical URL, Open Graph, and Twitter/X cards
+  - Route-specific metadata managed by React for homepage, viewer/process, and Terms and Conditions pages
+  - Static `robots.txt` and `sitemap.xml` when deployment URL is known
 - PWA:
   - Vite PWA plugin after the first vertical slice
   - Cache app shell only at first
@@ -125,7 +129,8 @@ The UI must depend on normalized domain objects, not on GPX/FIT-specific parser 
 27. Settings may be opened as a modal from the header without navigating away from the viewer/process page or clearing activity state.
 28. Theme settings apply globally without reprocessing or clearing the current activity.
 29. Export controls serialize either the full normalized activity or the selected focused range into supported output formats.
-30. Later slices add synchronized hover/selection state between chart and map.
+30. Route metadata updates document title and public meta tags without reading loaded activity data.
+31. Later slices add synchronized hover/selection state between chart and map.
 
 ## 8. Domain Model
 
@@ -334,6 +339,10 @@ export interface UserPreferences {
 - Time x-axis ticks should be generated at 5 minute intervals.
 - Tick label density may be reduced responsively if labels would overlap, but the underlying target intervals should remain 1 km and 5 minutes.
 - Pace should be represented as duration per distance, derived from speed/time-distance data, and only shown when the result is meaningful for the activity.
+- The activity overview's primary performance metric should be sport-aware: average pace for running and average speed for cycling.
+- Running overview should not foreground average speed when average pace is available.
+- Cycling overview should not foreground average pace when average speed is available.
+- If sport cannot be determined, use a neutral fallback such as distance and duration without inventing a sport-specific primary metric.
 - Running cadence should only be offered when running cadence data exists and must be represented as strides per minute.
 - Avoid labeling running cadence as RPM; RPM is reserved for cycling cadence or other rotational sensor data.
 - Cycling activities should show speed instead of the running-oriented pace/cadence chart set.
@@ -383,6 +392,10 @@ Header rules:
 - The header brand/title text, `OpenTrack Viewer`, should be the homepage link.
 - Do not render a separate Home button or Home nav item when the brand/title link is present.
 - Do not render the privacy/product description as a header subtitle; keep descriptive copy on the homepage or contextual content areas.
+- Place a `Tools` dropdown beside the title on the left side of the header.
+- The `Tools` dropdown should include `File viewer`, which routes to the current viewer/process page.
+- The viewer/process page should not appear as a standalone top-level `Viewer` button when it is available through `Tools > File viewer`.
+- The `Tools` dropdown should use accessible menu/button semantics, keyboard navigation, outside-click/Escape close behavior, and a visible focus state.
 - Homepage header should not show Settings.
 - Non-home pages should expose Settings in the header as an icon-only button/control.
 - The Settings icon control must have an accessible name, keyboard focus state, and tooltip/title or equivalent affordance for pointer users.
@@ -398,6 +411,16 @@ Theme rules:
 - If `prefers-color-scheme` or equivalent detection is unavailable, resolve `system` to light.
 - Explicit `dark` and `light` override system preference.
 - Theme changes should update the app shell immediately without reloading the page or clearing loaded activity state.
+
+SEO rules:
+
+- SEO metadata must describe OpenTrack Viewer and its public pages, not the user's loaded activity.
+- Do not place activity file names, route coordinates, timestamps, device metadata, sensor values, or derived stats into document titles, meta descriptions, Open Graph tags, Twitter/X tags, canonical URLs, robots files, sitemap files, or structured data.
+- Homepage metadata should be indexable and describe browser-only activity file viewing.
+- Viewer/process metadata should describe the generic file viewer, not the currently loaded file.
+- Terms and Conditions metadata should describe the legal/usage terms page.
+- If route-specific metadata is managed client-side, it should update when navigating between homepage, viewer/process, and Terms and Conditions routes.
+- Static hosting should include `robots.txt` and `sitemap.xml` once the production URL is known.
 
 ## 8.2 Ready Viewer Layout
 
@@ -445,6 +468,8 @@ Medium/small/mobile layout:
 The first-stage activity details panel should include the values shown in the reference style when available:
 
 - Distance
+- Average Pace for running activities
+- Average Speed for cycling activities
 - Time
 - Moving Time
 - Elapsed Time
@@ -456,6 +481,12 @@ The three timing values are distinct:
 - `Elapsed Time`: wall-clock duration from activity start to end.
 
 If moving time cannot be calculated reliably in the first GPX slice, show it as unavailable rather than inventing a value. When only elapsed time is known, `Time` may initially match elapsed time, but the implementation should keep the fields separate so FIT and future formats can provide better values.
+
+Average pace and average speed are derived display metrics:
+
+- `Average Pace`: duration per distance, shown for running activities when distance and usable duration exist.
+- `Average Speed`: distance per duration, shown for cycling activities when distance and usable duration exist.
+- When both moving and elapsed duration are available, the chosen duration source for these averages should be documented and consistent with the summary's primary `Time` value.
 
 ## 9. Proposed Repository Structure
 
@@ -476,6 +507,7 @@ activity-viewer/
       ViewerPage.tsx
       TermsPage.tsx
       SettingsModal.tsx
+      Seo.tsx
       routes.ts
     components/
       FileDropZone.tsx

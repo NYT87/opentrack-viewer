@@ -151,6 +151,51 @@ describe('pace series (AV-505)', () => {
     expect(series.samples.every((sample) => Number.isFinite(sample.y))).toBe(true);
   });
 
+  it('ignores a negative recorded speed and derives instead', () => {
+    // A speed below zero is meaningless, so the positions are believed instead.
+    const faulty = makeActivity([
+      { lat: 0, lon: 0.0001, speedMetersPerSecond: -5, time: new Date('2024-01-01T10:00:00Z') },
+      {
+        lat: 0.00072,
+        lon: 0.0001,
+        speedMetersPerSecond: -5,
+        time: new Date('2024-01-01T10:00:10Z'),
+      },
+    ]);
+
+    const values = buildSeries(faulty, 'speed', 'time').samples.map((sample) => sample.y);
+    expect(values).not.toContain(-5);
+    expect(values.every((value) => value >= 0)).toBe(true);
+    expect(values.at(-1)).toBeCloseTo(8, 0);
+  });
+
+  it('ignores an absurd recorded speed and derives instead', () => {
+    // 300 m/s is over 1000 km/h: a sensor fault, not a descent.
+    const faulty = makeActivity([
+      { lat: 0, lon: 0.0001, speedMetersPerSecond: 300, time: new Date('2024-01-01T10:00:00Z') },
+      {
+        lat: 0.00072,
+        lon: 0.0001,
+        speedMetersPerSecond: 300,
+        time: new Date('2024-01-01T10:00:10Z'),
+      },
+    ]);
+
+    const values = buildSeries(faulty, 'speed', 'time').samples.map((sample) => sample.y);
+    expect(values).not.toContain(300);
+    expect(values.at(-1)).toBeCloseTo(8, 0);
+  });
+
+  it('gaps a faulty recorded speed that cannot be derived from positions', () => {
+    // Nothing to fall back on: better an empty chart than a fabricated spike.
+    const faulty = makeActivity([
+      { speedMetersPerSecond: -5 },
+      { speedMetersPerSecond: 9000 },
+    ]);
+
+    expect(buildSeries(faulty, 'speed', 'distance').isEmpty).toBe(true);
+  });
+
   it('drops implausibly fast intervals', () => {
     // ~1100 m in one second is a GPS glitch, not a sprint.
     const glitch = makeActivity([
@@ -171,12 +216,74 @@ describe('pace series (AV-505)', () => {
   });
 });
 
-describe('cadence series (AV-506)', () => {
-  it('reads the normalized cadence field', () => {
+describe('speed series (AV-513)', () => {
+  /** A ride at a steady 8 m/s, which is 28.8 km/h. */
+  const steadyRide = (count = 12) =>
+    makeActivity(
+      Array.from({ length: count }, (_, index) => ({
+        // 0.00072 degrees of latitude is ~80 m: 8 m/s over a 10 s interval.
+        lat: index * 0.00072,
+        lon: 0.0001,
+        time: new Date(Date.UTC(2024, 0, 1, 10, 0, index * 10)),
+      })),
+    );
+
+  it('derives metres per second from distance and time', () => {
+    const series = buildSeries(steadyRide(), 'speed', 'time');
+
+    expect(series.isEmpty).toBe(false);
+    for (const sample of series.samples) {
+      expect(sample.y).toBeGreaterThan(7.5);
+      expect(sample.y).toBeLessThan(8.5);
+    }
+  });
+
+  it('trusts a recorded speed over deriving one', () => {
+    // Positions say ~8 m/s; the wheel sensor says 3. The sensor wins.
+    const ride = makeActivity([
+      { lat: 0, lon: 0.0001, speedMetersPerSecond: 3, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.00072, lon: 0.0001, speedMetersPerSecond: 3, time: new Date('2024-01-01T10:00:10Z') },
+    ]);
+
+    expect(buildSeries(ride, 'speed', 'time').samples.map((s) => s.y)).toEqual([3, 3]);
+  });
+
+  it('drops implausibly fast intervals', () => {
+    // ~1100 m in a second is a GPS glitch, not a descent.
+    const glitch = makeActivity([
+      { lat: 0, lon: 0.0001, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.01, lon: 0.0001, time: new Date('2024-01-01T10:00:01Z') },
+    ]);
+
+    expect(buildSeries(glitch, 'speed', 'time').isEmpty).toBe(true);
+  });
+
+  it('plots a stationary stretch as zero rather than gapping it', () => {
+    // Standing still is a real speed; standing still is not a pace.
+    const paused = makeActivity([
+      { lat: 0, lon: 0.0001, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0, lon: 0.0001, time: new Date('2024-01-01T10:00:10Z') },
+    ]);
+
+    expect(buildSeries(paused, 'speed', 'time').samples.map((s) => s.y)).toEqual([0]);
+  });
+
+  it('is empty without timestamps or recorded speed', () => {
+    const noTime = makeActivity([
+      { lat: 0, lon: 0.0001 },
+      { lat: 0.00072, lon: 0.0001 },
+    ]);
+
+    expect(buildSeries(noTime, 'speed', 'distance').isEmpty).toBe(true);
+  });
+});
+
+describe('cadence series (AV-506, AV-515)', () => {
+  it('reads running cadence and labels it in strides per minute', () => {
     const series = buildSeries(
       makeActivity([
-        { lat: 0, lon: 0.0001, cadenceRpm: 168, time: new Date('2024-01-01T10:00:00Z') },
-        { lat: 0.001, lon: 0.0001, cadenceRpm: 174, time: new Date('2024-01-01T10:00:30Z') },
+        { lat: 0, lon: 0.0001, runningCadenceSpm: 168, time: new Date('2024-01-01T10:00:00Z') },
+        { lat: 0.001, lon: 0.0001, runningCadenceSpm: 174, time: new Date('2024-01-01T10:00:30Z') },
       ]),
       'cadence',
       'time',
@@ -184,6 +291,8 @@ describe('cadence series (AV-506)', () => {
 
     expect(series.samples.map((sample) => sample.y)).toEqual([168, 174]);
     expect(series.yMax).toBe(174);
+    // AV-515: never rpm for running cadence.
+    expect(series.unit).toBe('spm');
   });
 
   it('is empty when no point recorded cadence', () => {

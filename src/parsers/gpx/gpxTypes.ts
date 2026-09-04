@@ -6,7 +6,8 @@ export interface RawGpxPoint {
   elevationMeters?: number;
   time?: Date;
   heartRateBpm?: number;
-  cadenceRpm?: number;
+  /** As written in the file; the sport decides what unit it means. */
+  cadence?: number;
   powerWatts?: number;
   temperatureCelsius?: number;
   speedMetersPerSecond?: number;

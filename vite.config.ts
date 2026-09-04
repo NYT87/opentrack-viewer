@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 import { resolveBasePath } from './base-path.ts';
 
 /**
@@ -11,7 +12,40 @@ const base = resolveBasePath();
 
 export default defineConfig({
   base,
-  plugins: [react()],
+  plugins: [
+    react(),
+    /**
+     * AV-802. Precaches the app shell so a return visit works offline.
+     *
+     * `manifest: false` because the app already ships
+     * `public/manifest.webmanifest` with `./`-relative URLs that follow the
+     * deployment sub-path; letting the plugin generate a second one would give
+     * the page two competing manifests.
+     *
+     * There is no runtime caching at all. Activity files never travel over the
+     * network — they are read from a `File` — so there is nothing of the user's
+     * to cache, and map tiles are deliberately left uncached: caching a tile
+     * provider's responses would store a record of where the user has looked
+     * (plan §5). Offline map tiles remain a separate project (TD-005).
+     */
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: 'auto',
+      manifest: false,
+      workbox: {
+        // Everything the build emits is first-party and static, including the
+        // lazily loaded map chunk and its worker — so route-only mode keeps
+        // working offline (AV-803).
+        globPatterns: ['**/*.{js,css,html,webmanifest,png,svg,mjs}'],
+        // The map chunk is around a megabyte; the default 2 MiB cap would
+        // silently drop it from the precache.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        navigateFallback: 'index.html',
+        runtimeCaching: [],
+        cleanupOutdatedCaches: true,
+      },
+    }),
+  ],
   // MapLibre constructs its worker with `{ type: 'module' }`, so Vite must emit
   // an ES worker rather than the default IIFE bundle.
   worker: { format: 'es' },

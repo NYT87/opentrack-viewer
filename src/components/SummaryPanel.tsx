@@ -5,6 +5,8 @@ import {
   formatDistance,
   formatDuration,
   formatElevation,
+  formatPace,
+  formatSpeed,
   type UnitSystem,
 } from '../domain/units';
 
@@ -26,6 +28,9 @@ interface Stat {
  */
 export function SummaryPanel({ activity, units = 'metric' }: SummaryPanelProps) {
   const derived = activity.derived;
+  // Pace is a running convention. Anything else — cycling, or a file that never
+  // said what it was — gets speed, which is meaningful for any movement.
+  const usePace = activity.metadata.sport === 'running';
   const stats: Stat[] = [
     {
       label: 'Distance',
@@ -41,6 +46,28 @@ export function SummaryPanel({ activity, units = 'metric' }: SummaryPanelProps) 
       label: 'Moving time',
       value: formatDuration(derived?.movingDurationSeconds),
       missingReason: activity.streams.hasTime ? undefined : 'No timestamps',
+    },
+    {
+      /*
+       * The overview's primary performance metric is sport-aware: runners read
+       * a workout in minutes per kilometre, riders in kilometres per hour. Only
+       * one is shown, because every stat in this grid carries equal weight —
+       * showing both would make both primary.
+       */
+      ...(usePace
+        ? { label: 'Avg pace', value: formatPace(derived?.averagePaceSecondsPerKm, units) }
+        : { label: 'Avg speed', value: formatSpeed(derived?.averageSpeedMetersPerSecond, units) }),
+      missingReason: !(activity.streams.hasLocation && activity.streams.hasTime)
+        ? 'Needs distance and timestamps'
+        : /*
+           * A run that covered no ground has no pace — you cannot spend a
+           * finite time per kilometre without covering one — but it does have
+           * the data needed to work that out, so the reason above would be a
+           * lie. Speed has no such gap: standing still is 0 km/h.
+           */
+          usePace && derived?.averagePaceSecondsPerKm === undefined
+          ? 'No distance covered'
+          : undefined,
     },
     {
       label: 'Elevation gain',

@@ -292,6 +292,29 @@ export function computeStats(points: ActivityPoint[]): ComputeStatsResult {
   const elevation = computeElevation(points);
   const sensors = computeSensorSummary(points);
 
+  /*
+   * Average speed over *elapsed* time, not moving time, so it agrees with the
+   * `Duration` figure it sits beside. Moving time is reported separately, and a
+   * moving average could be added alongside rather than replacing this one.
+   */
+  const averageSpeedMetersPerSecond =
+    distance.totalMeters !== undefined &&
+    time.durationSeconds !== undefined &&
+    time.durationSeconds > 0
+      ? distance.totalMeters / time.durationSeconds
+      : undefined;
+
+  /*
+   * The same average, expressed the way runners read it. Derived from the speed
+   * rather than computed separately so the two can never disagree. A zero
+   * average has no pace — you cannot spend a finite time per kilometre without
+   * covering one.
+   */
+  const averagePaceSecondsPerKm =
+    averageSpeedMetersPerSecond !== undefined && averageSpeedMetersPerSecond > 0
+      ? 1000 / averageSpeedMetersPerSecond
+      : undefined;
+
   return {
     stats: {
       pointCount: points.length,
@@ -300,6 +323,8 @@ export function computeStats(points: ActivityPoint[]): ComputeStatsResult {
       durationSeconds: time.durationSeconds,
       movingDurationSeconds: computeMovingDuration(points, distance.cumulativeMeters),
       distanceMeters: distance.totalMeters,
+      averageSpeedMetersPerSecond,
+      averagePaceSecondsPerKm,
       elevationGainMeters: elevation.gainMeters,
       elevationLossMeters: elevation.lossMeters,
       minElevationMeters: elevation.minMeters,

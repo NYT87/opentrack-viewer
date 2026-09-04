@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OpenTrackViewerTestFixture"
+     xmlns="http://www.topografix.com/GPX/1/1"
+     xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
+  <trk>
+    <name>Synthetic Ride</name>
+    <type>cycling</type>
+    <trkseg>
+      <trkpt lat="51.500000" lon="0.0000"><ele>20.0</ele><time>2024-01-01T10:00:00Z</time>
+        <extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>85</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.500720" lon="0.0000"><ele>22.0</ele><time>2024-01-01T10:00:10Z</time>
+        <extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>88</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.501440" lon="0.0000"><ele>24.0</ele><time>2024-01-01T10:00:20Z</time>
+        <extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>90</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.502160" lon="0.0000"><ele>26.0</ele><time>2024-01-01T10:00:30Z</time>
+        <extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>87</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+      <trkpt lat="51.502880" lon="0.0000"><ele>28.0</ele><time>2024-01-01T10:00:40Z</time>
+        <extensions><gpxtpx:TrackPointExtension><gpxtpx:cad>86</gpxtpx:cad></gpxtpx:TrackPointExtension></extensions></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

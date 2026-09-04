@@ -347,6 +347,57 @@ describe('ActivityChart (AV-503)', () => {
     vi.restoreAllMocks();
   });
 
+  it('draws a near-constant series flat, with one label (AV-514)', () => {
+    // A steady ride: speed varies only in the fourth decimal. Spread over the
+    // plot that noise looks like terrain, and every gridline reads the same.
+    const steady = buildSeries(
+      makeActivity(
+        Array.from({ length: 6 }, (_, index) => ({
+          lat: index * 0.00072,
+          lon: 0.0001,
+          time: new Date(Date.UTC(2024, 0, 1, 10, 0, index * 10)),
+        })),
+      ),
+      'speed',
+      'time',
+    );
+
+    render(<ActivityChart series={steady} />);
+    const svg = screen.getByTestId('elevation-chart-svg');
+
+    const labels = [...svg.querySelectorAll('.chart__axis-label--y')].map((n) => n.textContent);
+    expect(labels).toHaveLength(1);
+    expect(labels[0]).toMatch(/^28\.8$/);
+
+    // ...and the line really is flat.
+    const ys = (svg.querySelector('.chart__line')!.getAttribute('d') ?? '')
+      .split(/[ML]/)
+      .filter(Boolean)
+      .map((pair) => Number(pair.trim().split(' ')[1]));
+    expect(new Set(ys).size).toBe(1);
+  });
+
+  it('adds decimals until neighbouring labels differ (AV-514)', () => {
+    // A 2 m spread over four steps needs a decimal to stay distinct.
+    const narrow = buildSeries(
+      makeActivity([
+        { lat: 0, lon: 0.0001, elevationMeters: 100 },
+        { lat: 0.5, lon: 0.0001, elevationMeters: 101 },
+        { lat: 1, lon: 0.0001, elevationMeters: 102 },
+      ]),
+      'elevation',
+      'distance',
+    );
+
+    render(<ActivityChart series={narrow} />);
+    const labels = [
+      ...screen.getByTestId('elevation-chart-svg').querySelectorAll('.chart__axis-label--y'),
+    ].map((node) => node.textContent);
+
+    expect(labels.length).toBeGreaterThan(1);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
   it('shows an empty state when no elevation is present', () => {
     const empty = buildSeries(makeActivity([{ lat: 0, lon: 0.0001 }]), 'elevation', 'distance');
 

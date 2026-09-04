@@ -82,6 +82,17 @@ export function formatPace(
   return `${minutes}:${String(seconds).padStart(2, '0')} ${paceUnitLabel(units)}`;
 }
 
+/** Speed is stored in metres per second and converted only for display. */
+export function toDisplaySpeed(metersPerSecond: number, units: UnitSystem): number {
+  return units === 'imperial'
+    ? (metersPerSecond * 3600) / METERS_PER_MILE
+    : (metersPerSecond * 3600) / 1000;
+}
+
+export function speedUnitLabel(units: UnitSystem): string {
+  return units === 'imperial' ? 'mph' : 'km/h';
+}
+
 export function formatSpeed(
   metersPerSecond: number | undefined,
   units: UnitSystem = 'metric',

@@ -1,4 +1,10 @@
-import type { Activity, ActivityPoint, ChartXAxisMode } from './activity';
+import {
+  isPlausibleSpeed,
+  type Activity,
+  type ActivityPoint,
+  type ActivityPointRange,
+  type ChartXAxisMode,
+} from './activity';
 import { computeDistance, computeTimeBounds } from './stats';
 
 /** The axis a series is actually plotted against; see ChartXAxisMode. */
@@ -7,6 +13,7 @@ export type SeriesXAxis = ChartXAxisMode | 'index';
 export type ChartSeriesKey =
   | 'elevation'
   | 'pace'
+  | 'speed'
   | 'cadence'
   | 'heartRate'
   | 'power'
@@ -70,7 +77,14 @@ interface SeriesDefinition {
 const DEFINITIONS: Record<ChartSeriesKey, SeriesDefinition> = {
   elevation: { key: 'elevation', label: 'Elevation', unit: 'm', read: (p) => p.elevationMeters },
   pace: { key: 'pace', label: 'Pace', unit: 's/km', invertY: true, derived: derivePace },
-  cadence: { key: 'cadence', label: 'Cadence', unit: 'rpm', read: (p) => p.cadenceRpm },
+  speed: { key: 'speed', label: 'Speed', unit: 'm/s', derived: deriveSpeed },
+  // AV-515: strides per minute, never rpm.
+  cadence: {
+    key: 'cadence',
+    label: 'Cadence',
+    unit: 'spm',
+    read: (p) => p.runningCadenceSpm,
+  },
   heartRate: { key: 'heartRate', label: 'Heart rate', unit: 'bpm', read: (p) => p.heartRateBpm },
   power: { key: 'power', label: 'Power', unit: 'W', read: (p) => p.powerWatts },
   temperature: {
@@ -140,6 +154,62 @@ function derivePace(activity: Activity): (number | undefined)[] {
     if (meters / seconds > MAX_PLAUSIBLE_SPEED_MPS) continue;
 
     out[i] = (seconds / meters) * 1000;
+  }
+
+  return out;
+}
+
+/**
+ * AV-513. Speed in metres per second.
+ *
+ * A recorded `speedMetersPerSecond` is trusted when the device provides a
+ * plausible one — a wheel sensor knows better than GPS positions do, but a
+ * faulty reading is worse than none, so an implausible value falls through to
+ * derivation like a missing one. Otherwise speed is derived
+ * over the same rolling window as pace, for the same reason: point-to-point
+ * speed from consumer GPS is mostly fix jitter.
+ */
+function deriveSpeed(activity: Activity): (number | undefined)[] {
+  const points = activity.points;
+  const cumulative = computeDistance(points).cumulativeMeters;
+  const times = points.map((point) =>
+    point.time instanceof Date && !Number.isNaN(point.time.getTime())
+      ? point.time.getTime() / 1000
+      : undefined,
+  );
+
+  const out: (number | undefined)[] = new Array(points.length).fill(undefined);
+  const usable: number[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const recorded = points[i]!.speedMetersPerSecond;
+    if (isPlausibleSpeed(recorded)) out[i] = recorded;
+    if (cumulative[i] !== undefined && times[i] !== undefined) usable.push(i);
+  }
+
+  let windowStart = 0;
+  for (let k = 0; k < usable.length; k += 1) {
+    const i = usable[k]!;
+    if (out[i] !== undefined) continue; // The device already told us.
+    const timeAt = times[i]!;
+
+    while (
+      windowStart < k &&
+      timeAt - times[usable[windowStart + 1]!]! >= PACE_WINDOW_SECONDS
+    ) {
+      windowStart += 1;
+    }
+
+    const j = usable[windowStart]!;
+    if (j === i) continue;
+
+    const seconds = timeAt - times[j]!;
+    const meters = cumulative[i]! - cumulative[j]!;
+    if (seconds <= 0 || meters < 0) continue;
+
+    const speed = meters / seconds;
+    // An interval that implies an impossible speed is a gap, not a data point.
+    if (!isPlausibleSpeed(speed)) continue;
+    out[i] = speed;
   }
 
   return out;
@@ -300,6 +370,39 @@ export function downsampleSeries(series: ChartSeries, maxSamples: number): Chart
   if (output[output.length - 1] !== last) output.push(last);
 
   return { ...series, samples: output };
+}
+
+/**
+ * AV-511. Narrows a series to a focused point range, keeping the x values it
+ * already has.
+ *
+ * The series is built against the *full* activity and then filtered, rather
+ * than rebuilt from the slice. Two reasons: the axis keeps absolute values, so
+ * a focused section reads "2.0 km – 4.0 km" instead of restarting at zero and
+ * losing where the reader is; and a derived series like pace keeps the window
+ * that ran into the selection, instead of starting cold at its first sample.
+ */
+export function restrictSeries(series: ChartSeries, range: ActivityPointRange): ChartSeries {
+  const samples = series.samples.filter(
+    (sample) => sample.pointIndex >= range.startIndex && sample.pointIndex <= range.endIndex,
+  );
+
+  if (samples.length === 0) {
+    return { ...series, samples: [], yMin: 0, yMax: 0, xMin: 0, xMax: 0, isEmpty: true };
+  }
+
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  for (const sample of samples) {
+    if (sample.y < yMin) yMin = sample.y;
+    if (sample.y > yMax) yMax = sample.y;
+    if (sample.x < xMin) xMin = sample.x;
+    if (sample.x > xMax) xMax = sample.x;
+  }
+
+  return { ...series, samples, yMin, yMax, xMin, xMax, isEmpty: false };
 }
 
 /** Nearest sample to an x value — drives chart hover (AV-602). */

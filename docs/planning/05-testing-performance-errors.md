@@ -34,9 +34,15 @@ Cover:
 - Header brand/title links to the homepage.
 - Header does not render a duplicate Home button/nav item when the brand/title link is present.
 - Header does not render a subtitle/tagline below the brand/title.
+- Header renders a `Tools` dropdown beside the title.
+- `Tools` dropdown contains `File viewer` and routes to the viewer/process page.
+- Header does not render a standalone top-level `Viewer` button when `File viewer` is in the `Tools` dropdown.
+- Tools dropdown has accessible button/menu behavior, keyboard support, Escape close, outside-click close, and visible focus state.
 - Header hides Settings on the homepage and shows an icon-only Settings control on non-home pages.
 - Settings icon has accessible name, tooltip/title or equivalent affordance, keyboard support, and visible focus state.
 - Settings modal open/close behavior without route changes.
+- Route-specific SEO title and description for homepage, viewer/process, and Terms and Conditions.
+- Privacy-safe SEO behavior that excludes loaded activity data from metadata.
 - Theme setting renders system, dark, and light options.
 - Theme defaults to system and falls back to light if system color-scheme detection is unavailable.
 - Theme changes apply globally without clearing loaded activity state.
@@ -52,6 +58,10 @@ Cover:
 - Section sidebar links scroll or jump to viewer sections without clearing loaded activity state.
 - Summary panel missing values.
 - Summary panel displays Distance, Time, Moving Time, and Elapsed Time as separate fields.
+- Summary/overview displays Average Pace for running activities.
+- Summary/overview displays Average Speed for cycling activities.
+- Summary/overview does not foreground Average Speed for running when Average Pace is available.
+- Summary/overview does not foreground Average Pace for cycling when Average Speed is available.
 - Device information present/missing states.
 - Laps panel present/missing states.
 - Laps panel large-screen placement beside the map.
@@ -81,17 +91,27 @@ Cover:
 - Confirm the header brand/title navigates to the homepage.
 - Confirm there is no separate Home button when the brand/title link is present.
 - Confirm the header does not show a subtitle/description line.
+- Confirm `Tools` dropdown appears beside the title.
+- Confirm `Tools > File viewer` navigates to the viewer/process page.
+- Confirm no standalone top-level `Viewer` button is rendered when `File viewer` is in the `Tools` dropdown.
+- Confirm `Tools` dropdown supports keyboard open/close and Escape close.
 - Confirm Settings is not shown on the homepage header.
 - Confirm Settings opens as a modal from the icon-only header control on the viewer/process page.
 - Confirm opening and closing Settings does not clear a loaded activity or selected chart/view state.
+- Confirm each public route sets the expected title and description.
+- Confirm loading an activity does not write file name, coordinates, timestamps, device identifiers, sensor values, or derived stats into meta tags.
 - Confirm theme can switch between system, dark, and light from Settings.
 - Confirm changing theme does not clear a loaded activity.
 - Load sample GPX through file input.
 - Confirm initial page shows only upload-focused content and no map area.
-- Confirm desktop ready layout shows activity details on the left and map on the right.
+- Confirm desktop ready layout shows overview first, then the map/laps section, then charts.
 - Confirm mobile ready layout shows the overview first, then the map, then laps when available, then charts.
 - Confirm route layer appears.
 - Confirm summary stats render.
+- Confirm running fixture displays Average Pace in the overview.
+- Confirm running fixture does not use Average Speed as the primary overview performance metric.
+- Confirm cycling fixture displays Average Speed in the overview.
+- Confirm cycling fixture does not use Average Pace as the primary overview performance metric.
 - Confirm ready viewer content is constrained to a readable maximum width.
 - Confirm large-screen viewer shows the left section sidebar with section links.
 - Confirm medium/small/mobile viewer hides the left section sidebar.
@@ -124,6 +144,7 @@ Add browser tests or request interception checks for:
 - No POST/PUT requests during local file parsing.
 - No analytics request contains coordinates, timestamps, file names, or sensor values.
 - No analytics request contains device identifiers, serial numbers, manufacturer/model fields, or raw metadata.
+- No SEO metadata contains coordinates, timestamps, file names, device identifiers, serial numbers, manufacturer/model fields, sensor values, or derived activity stats.
 - No export operation uploads activity contents or derived activity contents.
 - Map tile requests are limited to configured tile provider URLs.
 

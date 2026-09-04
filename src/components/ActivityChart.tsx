@@ -8,7 +8,10 @@ import {
   formatDuration,
   formatElevation,
   formatPace,
+  formatSpeed,
   paceUnitLabel,
+  speedUnitLabel,
+  toDisplaySpeed,
   toDisplayElevation,
   toDisplayPace,
   type UnitSystem,
@@ -24,18 +27,21 @@ const MAX_RENDERED_SAMPLES = 900;
 function yUnitLabel(series: ChartSeries, units: UnitSystem): string {
   if (series.key === 'elevation') return elevationUnitLabel(units);
   if (series.key === 'pace') return paceUnitLabel(units);
+  if (series.key === 'speed') return speedUnitLabel(units);
   return series.unit;
 }
 
 function toDisplayY(value: number, series: ChartSeries, units: UnitSystem): number {
   if (series.key === 'elevation') return toDisplayElevation(value, units);
   if (series.key === 'pace') return toDisplayPace(value, units);
+  if (series.key === 'speed') return toDisplaySpeed(value, units);
   return value;
 }
 
 function formatY(value: number, series: ChartSeries, units: UnitSystem): string {
   if (series.key === 'elevation') return formatElevation(value, units);
   if (series.key === 'pace') return formatPace(value, units);
+  if (series.key === 'speed') return formatSpeed(value, units);
   return `${Math.round(value)} ${series.unit}`;
 }
 
@@ -45,6 +51,7 @@ function formatTick(value: number, series: ChartSeries, units: UnitSystem, decim
     const total = Math.round(toDisplayPace(value, units));
     return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
   }
+  if (series.key === 'speed') return toDisplaySpeed(value, units).toFixed(decimals ? 1 : 0);
   return toDisplayY(value, series, units).toFixed(decimals);
 }
 
@@ -481,6 +488,7 @@ function buildScale(series: ChartSeries, plot: PlotBox): Scale | undefined {
 
   const innerWidth = Math.max(1, plot.right - plot.left);
   const innerHeight = Math.max(1, plot.bottom - plot.top);
+  const flat = isEffectivelyFlat(series);
   const xRange = series.xMax - series.xMin || 1;
   // Pad a flat profile so the line sits mid-plot instead of on the axis.
   const yRange = series.yMax - series.yMin || 1;
@@ -488,6 +496,9 @@ function buildScale(series: ChartSeries, plot: PlotBox): Scale | undefined {
   return {
     x: (value) => plot.left + ((value - series.xMin) / xRange) * innerWidth,
     y: (value) => {
+      // A near-constant series is drawn as the flat line it is, mid-plot,
+      // rather than having its noise stretched across the whole height.
+      if (flat) return plot.top + innerHeight / 2;
       const fraction = (value - series.yMin) / yRange;
       // Pace is inverted so faster values sit at the top, as runners expect.
       return series.invertY
@@ -496,6 +507,17 @@ function buildScale(series: ChartSeries, plot: PlotBox): Scale | undefined {
     },
     invertX: (pixel) => series.xMin + ((pixel - plot.left) / innerWidth) * xRange,
   };
+}
+
+/**
+ * True when a series barely varies — a steady ride at 28.8 km/h, a flat run.
+ * Spreading such a series over the full plot height would draw sensor noise as
+ * if it were terrain, and label every gridline with the same number.
+ */
+function isEffectivelyFlat(series: ChartSeries): boolean {
+  const span = series.yMax - series.yMin;
+  const magnitude = Math.max(Math.abs(series.yMax), Math.abs(series.yMin), 1);
+  return span <= magnitude * 0.005;
 }
 
 function buildGridLines(
@@ -509,9 +531,16 @@ function buildGridLines(
   const displayRange = Math.abs(
     toDisplayY(series.yMax, series, units) - toDisplayY(series.yMin, series, units),
   );
+
+  // One honest label beats five identical ones.
+  if (isEffectivelyFlat(series)) {
+    return [{ value: series.yMin, label: formatTick(series.yMin, series, units, 1) }];
+  }
+
   // A narrow range (a flat route) would round every tick to the same integer,
-  // so keep a decimal until the labels are actually distinct.
-  const decimals = displayRange < steps ? 1 : 0;
+  // so add decimals until adjacent labels can actually differ.
+  const step = displayRange / steps;
+  const decimals = step >= 1 ? 0 : Math.min(2, Math.ceil(-Math.log10(step)));
 
   return Array.from({ length: steps + 1 }, (_, index) => {
     const value = series.yMin + (range * index) / steps;
