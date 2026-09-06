@@ -79,24 +79,40 @@ export function computeDistance(points: ActivityPoint[]): DistanceResult {
   return { totalMeters: total, cumulativeMeters: cumulative, origin: 'derived' };
 }
 
-/** Uses the file's distance stream only when it is present and non-decreasing. */
+/**
+ * Uses the file's distance stream only when it is present and non-decreasing.
+ *
+ * Values are made relative to the first one, because a recorded distance stream
+ * is an odometer, not a measure of the points in hand. A slice of an activity
+ * keeps its original readings — a section from 80 m to 160 m still says 80 and
+ * 160 — so taking the last value as the total would report the distance from
+ * the start of the *file*, not of the section (AV-605, AV-551). Normalizing
+ * also matches the GPS-derived path, which always counts from its first point,
+ * and corrects a full activity whose device started its odometer above zero.
+ */
 function readSourceDistance(points: ActivityPoint[]): DistanceResult | undefined {
   const cumulative: (number | undefined)[] = new Array(points.length).fill(undefined);
-  let last: number | undefined;
+  let origin: number | undefined;
+  let previous: number | undefined;
+  let travelled: number | undefined;
   let count = 0;
 
   for (let i = 0; i < points.length; i += 1) {
     const value = points[i]!.distanceMeters;
     if (!Number.isFinite(value)) continue;
+    const reading = value as number;
     // A decreasing stream means resets or corruption; fall back to GPS instead.
-    if (last !== undefined && (value as number) < last) return undefined;
-    cumulative[i] = value;
-    last = value;
+    if (previous !== undefined && reading < previous) return undefined;
+
+    origin ??= reading;
+    travelled = reading - origin;
+    cumulative[i] = travelled;
+    previous = reading;
     count += 1;
   }
 
-  if (count < 2 || last === undefined) return undefined;
-  return { totalMeters: last, cumulativeMeters: cumulative, origin: 'source' };
+  if (count < 2 || travelled === undefined) return undefined;
+  return { totalMeters: travelled, cumulativeMeters: cumulative, origin: 'source' };
 }
 
 export interface TimeBoundsResult {

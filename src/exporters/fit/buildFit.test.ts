@@ -130,6 +130,37 @@ describe('FIT export round-trips (AV-553)', () => {
   });
 });
 
+describe('exporting a section of a distance-stream activity (AV-551 / AV-553)', () => {
+  it('writes the section’s own distance, not the odometer reading', async () => {
+    const ride = await fit('ride-with-sensors.fit');
+
+    const result = await exportActivity(ride, {
+      format: 'fit',
+      range: { startIndex: 2, endIndex: 4 },
+    });
+    const reimported = await roundTrip(new Uint8Array(await result.blob.arrayBuffer()));
+
+    // 160 m of ground, not the 320 m the source odometer had reached.
+    expect(reimported.derived?.distanceMeters).toBe(160);
+    expect(reimported.points).toHaveLength(3);
+  });
+
+  it('writes the same section distance to GPX', async () => {
+    const ride = await fit('ride-with-sensors.fit');
+
+    const result = await exportActivity(ride, {
+      format: 'gpx',
+      range: { startIndex: 2, endIndex: 4 },
+    });
+    const xml = await result.blob.text();
+    const reimported = parseGpx(xml, { fileName: 'section.gpx' });
+
+    // GPX carries no distance stream, so this is derived from the positions —
+    // and must agree with what FIT wrote from the recorded one.
+    expect(reimported.derived?.distanceMeters).toBeCloseTo(160, 0);
+  });
+});
+
 describe('FIT export limits (AV-553)', () => {
   it('refuses an activity with no timestamps', () => {
     const noTime = makeActivity([

@@ -725,3 +725,21 @@ body {
   color: var(--text-muted);
 }
 .export__warnings li { margin-top: 4px; }
+
+/* AV-605: what the selected section adds up to, beside the focus controls. */
+.selection-summary {
+  margin: 12px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+.selection-summary__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.selection-summary__title { margin: 0; font-size: 13px; }
+.selection-summary__scope { margin: 0; font-size: 12px; color: var(--text-muted); }

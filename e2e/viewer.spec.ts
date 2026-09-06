@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page, type Request } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 import { countPixelsNear, decodePng } from './helpers/png';
 import { resolveBasePath } from '../base-path.ts';
 
@@ -784,6 +784,45 @@ test('exports only the selected section when one is chosen (AV-554)', async ({ p
   const saved = await download;
 
   expect(saved.suggestedFilename()).toBe('Elevation-Route-section.gpx');
+});
+
+test('shows the selection its own figures, leaving the activity summary alone (AV-605)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  const distanceOf = (region: Locator) =>
+    region.locator('.summary__stat', { hasText: 'Distance' }).locator('dd').innerText();
+
+  const wholeBefore = await distanceOf(summary);
+  await expect(page.getByRole('region', { name: 'Selected section summary' })).toHaveCount(0);
+
+  // Select roughly the middle of the elevation chart.
+  const chart = page.getByTestId('elevation-chart-svg');
+  await chart.scrollIntoViewIfNeeded();
+  const box = (await chart.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.1, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, y, { steps: 8 });
+  await page.mouse.up();
+
+  const selection = page.getByRole('region', { name: 'Selected section summary' });
+  await expect(selection).toBeVisible();
+  await expect(selection).toContainText('Selected section');
+
+  // The section is shorter than the whole ride...
+  const sectionDistance = await distanceOf(selection);
+  expect(sectionDistance).not.toBe(wholeBefore);
+  // ...and the activity summary still says exactly what it said before, which
+  // is the whole point: "Distance" is never ambiguous.
+  expect(await distanceOf(summary)).toBe(wholeBefore);
+
+  await page.getByRole('button', { name: 'Reset View' }).click();
+  await expect(selection).toHaveCount(0);
+  expect(await distanceOf(summary)).toBe(wholeBefore);
 });
 
 test('renders the export panel’s secondary text as muted', async ({ page }) => {

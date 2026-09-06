@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { sliceActivity } from './activitySlice';
 import { makeActivity } from '../test/helpers/activity';
 import type { Activity } from './activity';
+import { parseFit } from '../parsers/fit/parseFit';
+import { readBinaryFixture } from '../test/helpers/fixtures';
 
 /** Six points, 111 m and one minute apart, climbing steadily. */
 const source = (): Activity =>
@@ -126,5 +128,24 @@ describe('sliceActivity (AV-510)', () => {
     const focused = unwrap(source(), 4, 99);
 
     expect(focused.points.map((point) => point.index)).toEqual([4, 5]);
+  });
+});
+
+describe('slicing an activity that carries its own distance stream', () => {
+  it('reports the section’s distance, not the odometer reading at its end', async () => {
+    // A FIT ride: every point states an absolute distance from the file's start.
+    const ride = await parseFit(readBinaryFixture('ride-with-sensors.fit'), {
+      fileName: 'ride-with-sensors.fit',
+    });
+    expect(ride.points[2]?.distanceMeters).toBe(160);
+    expect(ride.points[4]?.distanceMeters).toBe(320);
+
+    const sliced = sliceActivity(ride, { startIndex: 2, endIndex: 4 });
+    if (!sliced.ok) throw sliced.error;
+
+    // 160 m of ground between those points, not the 320 m the odometer reached.
+    expect(sliced.activity.derived?.distanceMeters).toBe(160);
+    // The points themselves are untouched: the slice shares them.
+    expect(sliced.activity.points[0]?.distanceMeters).toBe(160);
   });
 });

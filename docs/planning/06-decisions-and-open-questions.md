@@ -160,6 +160,16 @@ That risk is testable rather than theoretical, and a spike confirmed it before t
 
 **Scope.** GPX export shipped first and does not depend on any of this (`AV-550`, `AV-551`, `AV-554` are complete), so FIT export can be built, delayed or dropped without touching it.
 
+### TD-022: Focused-Range Stats Live in Their Own Panel
+
+Decision (`AV-605`): the selected section's figures are shown in a separate, labelled **Selected section** panel beside the chart focus controls. The activity summary always describes the whole activity, whatever is selected.
+
+Reason: §17 asked whether focused stats belong in the main summary panel, a secondary panel, or both. The main panel is the wrong home — a `Distance` that changes when the reader drags across a chart is ambiguous at a glance, because nothing on the row says which of the two things it is measuring. Splitting them means each panel answers one question and says which. It also matches how the map behaves: the map focuses on the selection while the summary does not, because one is a view and the other is a description of the file.
+
+Both panels are rendered from the same `buildSummaryStats`, so a figure is formatted, and a missing figure explained, identically in each — the acceptance criterion about missing-value conventions is satisfied by construction rather than by remembering to match.
+
+The section panel sits next to the focus bar rather than up in the overview: that is where the selection was made and where the reader is looking, and it puts `Reset View` next to the figures it clears.
+
 ## 17. Open Questions
 
 - Which map tile provider should be used initially, and what are its attribution and usage requirements?
@@ -182,7 +192,6 @@ That risk is testable rather than theoretical, and a spike confirmed it before t
 - Should imperial distance mode use 1 mile tick intervals, or should the 1 km interval remain the base requirement with converted labels?
 - At what chart width should interval tick labels be thinned to avoid overlap?
 - Should a selected chart range persist when switching x-axis mode, or should switching x-axis clear the selected range?
-- Should focused range stats appear in the main summary panel, a secondary comparison panel, or both?
 - Should selected range map behavior hide the rest of the route, dim the rest of the route, or display only the selected segment?
 - What is the minimum drag distance or minimum selected duration/distance before a chart range selection is accepted?
 - Should pace be calculated from instantaneous speed when present, or derived from distance/time intervals by default?

@@ -12,6 +12,7 @@ import {
 } from '../domain/series';
 import type { UnitSystem } from '../domain/units';
 import { ActivityChart, type ChartRange } from './ActivityChart';
+import { SelectionSummary } from './SelectionSummary';
 import { ChartXAxisSwitch } from './ChartXAxisSwitch';
 
 /**
@@ -123,14 +124,27 @@ export function ChartPanel({
         change to the file, and offers the way back.
       */}
       {focused && (
-        <div className="focus-bar" role="status">
-          <span className="focus-bar__text">
-            Showing a selected section of this activity. Your file is unchanged.
-          </span>
-          <button type="button" className="button" onClick={resetView}>
-            Reset View
-          </button>
-        </div>
+        <>
+          <div className="focus-bar" role="status">
+            <span className="focus-bar__text">
+              Showing a selected section of this activity. Your file is unchanged.
+            </span>
+            <button type="button" className="button" onClick={resetView}>
+              Reset View
+            </button>
+          </div>
+
+          {/*
+            AV-605. Beside the focus controls rather than up in the overview:
+            this is where the selection was made and where the reader is
+            looking, and Reset View sits next to the figures it clears.
+          */}
+          <SelectionSummary
+            selection={focused}
+            totalPoints={activity.points.length}
+            units={units}
+          />
+        </>
       )}
 
       {focus && !focus.ok && (

@@ -6,6 +6,7 @@ import {
   computeTimeBounds,
   haversineMeters,
 } from './stats';
+import { makeActivity } from '../test/helpers/activity';
 import type { ActivityPoint } from './activity';
 
 const point = (partial: Partial<ActivityPoint>, index = 0): ActivityPoint => ({
@@ -280,5 +281,52 @@ describe('computeStats', () => {
     expect(result.stats.distanceMeters).toBeUndefined();
     expect(result.stats.durationSeconds).toBeUndefined();
     expect(result.stats.elevationGainMeters).toBeUndefined();
+  });
+});
+
+describe('a recorded distance stream is an odometer, not a total', () => {
+  it('counts from the first reading, not from zero', () => {
+    // A slice of a longer ride: the readings kept their original values.
+    const section = makeActivity([
+      { distanceMeters: 80, time: new Date('2024-01-01T10:00:00Z') },
+      { distanceMeters: 120, time: new Date('2024-01-01T10:00:10Z') },
+      { distanceMeters: 160, time: new Date('2024-01-01T10:00:20Z') },
+    ]);
+
+    // 80 m of ground, not the 160 m the odometer had reached.
+    expect(section.derived?.distanceMeters).toBe(80);
+  });
+
+  it('reports cumulative distance relative to the first reading', () => {
+    const section = computeDistance([
+      { index: 0, distanceMeters: 80 },
+      { index: 1, distanceMeters: 120 },
+      { index: 2, distanceMeters: 160 },
+    ]);
+
+    expect(section.origin).toBe('source');
+    expect(section.cumulativeMeters).toEqual([0, 40, 80]);
+    expect(section.totalMeters).toBe(80);
+  });
+
+  it('leaves a stream that already starts at zero unchanged', () => {
+    const whole = computeDistance([
+      { index: 0, distanceMeters: 0 },
+      { index: 1, distanceMeters: 40 },
+      { index: 2, distanceMeters: 80 },
+    ]);
+
+    expect(whole.cumulativeMeters).toEqual([0, 40, 80]);
+    expect(whole.totalMeters).toBe(80);
+  });
+
+  it('derives an average speed from the section, not from the file', () => {
+    const section = makeActivity([
+      { distanceMeters: 80, time: new Date('2024-01-01T10:00:00Z') },
+      { distanceMeters: 160, time: new Date('2024-01-01T10:00:10Z') },
+    ]);
+
+    // 80 m in 10 s is 8 m/s; the odometer's 160 would have said 16.
+    expect(section.derived?.averageSpeedMetersPerSecond).toBeCloseTo(8, 5);
   });
 });
