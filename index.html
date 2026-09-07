@@ -5,7 +5,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111418" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>OpenTrack Viewer</title>
+
+    <!--
+      AV-013. Static defaults, because a crawler may never run the JavaScript
+      that keeps these in step with the route. Every value describes the app
+      and nothing else: no loaded file may ever be described here (TD-016).
+
+      `__SITE_URL__` is substituted at serve and build time from the one
+      definition in base-path.ts, so an alternate deployment cannot end up with
+      a canonical tag pointing at a different site than its own sitemap.
+    -->
+    <title>OpenTrack Viewer — open GPX, FIT and TCX activity files in your browser</title>
+    <meta
+      name="description"
+      content="View GPX, FIT and TCX activity files locally in your browser. Routes, elevation, pace, speed, heart rate and laps, with no upload, no account and no backend."
+    />
+    <link rel="canonical" href="__SITE_URL__" />
+
+    <meta property="og:site_name" content="OpenTrack Viewer" />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="OpenTrack Viewer — open GPX, FIT and TCX activity files in your browser"
+    />
+    <meta
+      property="og:description"
+      content="View GPX, FIT and TCX activity files locally in your browser. Routes, elevation, pace, speed, heart rate and laps, with no upload, no account and no backend."
+    />
+    <meta property="og:url" content="__SITE_URL__" />
+    <meta property="og:image" content="__SITE_URL__icons/icon-512.png" />
+
+    <meta name="twitter:card" content="summary" />
+    <meta
+      name="twitter:title"
+      content="OpenTrack Viewer — open GPX, FIT and TCX activity files in your browser"
+    />
+    <meta
+      name="twitter:description"
+      content="View GPX, FIT and TCX activity files locally in your browser. Routes, elevation, pace, speed, heart rate and laps, with no upload, no account and no backend."
+    />
+    <meta
+      name="twitter:image"
+      content="__SITE_URL__icons/icon-512.png"
+    />
     <script>
       // Resolve the default `system` theme before first paint, so a dark-mode
       // device never flashes the light palette on load. Kept deliberately tiny

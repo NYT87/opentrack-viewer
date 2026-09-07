@@ -202,6 +202,18 @@ TCX is the first format that states cadence units *itself*: `Cadence` is cycling
 - **Laps are structural and mandatory.** A `Track` exists only inside a `Lap`, and the schema requires at least one. An activity with no laps therefore exports as a single lap covering the whole track. `Calories` is a required element, so it is written as `0` when unknown rather than omitted — a file that omits it does not parse.
 - **A section export writes one lap covering the section.** This resolves the §17 question about laps that partly overlap a selected range. A lap cut in half is no longer the lap the athlete ran: its distance and time would describe something that never happened, and its name would imply otherwise. Dropping the original laps and stating a single lap for exactly the exported section is the only version that is true. This is already what `sliceActivity` does with laps, so import, focus and export agree.
 
+### TD-024: SEO Is Static, Route-Aware, and Bounded by the Hash Router
+
+Decision (`AV-013`): every route sets its own title and description from a hand-written table in `src/app/seo.ts`, `index.html` carries the same values statically, and the canonical URL is the site root for every route.
+
+**Nothing is derived from a loaded activity.** `useRouteMetadata` takes no arguments and reads no store, so there is no path by which a file name, a coordinate, a device or a derived stat could reach a `<meta>` tag. That matters more here than elsewhere in the app: a tag outlives the tab, and travels in a shared link or a browser history. Two tests load a real file — one with a device serial — and assert the whole of `document.head` still says nothing about it.
+
+**The canonical URL is the site root, for every route.** The app uses `HashRouter`, so `#/viewer` is a fragment of one page rather than a resource a crawler can fetch. Giving each route its own `#` canonical would claim distinct pages that no search engine treats as distinct. This resolves the §17 question about whether the viewer route should be indexed: it cannot be, structurally, and `sitemap.xml` therefore lists one URL. Per-route titles still earn their place — they name the browser tab, the bookmark and the history entry, and a shared link keeps its hash.
+
+**The deployment URL is confirmed:** `https://nyt87.github.io/opentrack-viewer/`. `base-path.ts` holds it as `DEFAULT_SITE_URL`, `resolveSiteUrl()` exposes it, and `VITE_SITE_URL` overrides it for a deployment elsewhere. A test asserts the app's own fallback copy still agrees with it, since the build injects the value and the literal would otherwise drift unnoticed. `robots.txt` and `sitemap.xml` are **generated at build time** from that one value rather than committed, and `index.html`'s canonical, `og:url` and image tags are substituted from it through a `__SITE_URL__` placeholder. Every URL a crawler can see therefore comes from a single definition: a deployment elsewhere cannot end up with a canonical tag naming one site and a sitemap naming another.
+
+**Still open:** the preview image is the 512×512 app icon, because there is no purpose-made one. A 1200×630 image would render better in link previews, and §17 still asks which image that should be.
+
 ## 17. Open Questions
 
 - Which map tile provider should be used initially, and what are its attribution and usage requirements?
@@ -213,9 +225,7 @@ TCX is the first format that states cadence units *itself*: `Cadence` is cycling
 - Which settings icon should be used in the header, and should the tooltip appear on hover only or also support long-press/touch affordances?
 - Should the `Tools` dropdown appear on the homepage header, or only after the user leaves the homepage?
 - If more tools are added later, what ordering should the `Tools` dropdown use?
-- What is the production canonical URL for OpenTrack Viewer?
 - What image should be used for Open Graph and Twitter/X previews?
-- Should the viewer/process route be indexed, or should SEO focus primarily on homepage and legal pages?
 - Should the app default to metric units, imperial units, or locale-based units?
 - Should theme preference remain session-only like other settings, or eventually persist locally after explicit user approval?
 - Should map style/theme change with app theme, or should basemap style remain independently controlled?

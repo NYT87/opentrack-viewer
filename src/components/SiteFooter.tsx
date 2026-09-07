@@ -1,9 +1,14 @@
 import { Link } from 'react-router-dom';
 import { ROUTES } from '../app/routes';
 
-/** Update if the repository is published under a different name. */
-const GITHUB_URL = 'https://github.com/NYT87/opentrack-viewer';
-const ISSUES_URL = `${GITHUB_URL}/issues`;
+/**
+ * The project's repository. Exported so a test can hold it and `package.json`
+ * to the same value: the footer is where a reader clicks through, and the
+ * manifest is where tooling looks, and the two silently disagreeing would send
+ * someone to the wrong place.
+ */
+export const GITHUB_URL = 'https://github.com/NYT87/opentrack-viewer';
+export const ISSUES_URL = `${GITHUB_URL}/issues`;
 const COMPANY_URL = 'https://nyt87.github.io/';
 
 /** Small route glyph, matching the app icon. Decorative next to the wordmark. */

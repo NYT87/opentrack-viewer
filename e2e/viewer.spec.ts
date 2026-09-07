@@ -1357,6 +1357,61 @@ test('deep-links into the viewer under the sub-path', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'nyt87' })).toBeVisible();
 });
 
+test('serves SEO metadata a crawler can read without running the app (AV-013)', async ({
+  page,
+}) => {
+  // Fetched as text, not rendered: this is what a crawler that never executes
+  // JavaScript actually sees.
+  const html = await (await page.request.get(`${ORIGIN}${BASE_PATH}index.html`)).text();
+
+  expect(html).toMatch(/<title>OpenTrack Viewer/);
+  expect(html).toMatch(/<meta\s+name="description"/);
+  expect(html).toMatch(/property="og:title"/);
+  expect(html).toMatch(/property="og:image"/);
+  expect(html).toMatch(/name="twitter:card"/);
+  expect(html).toMatch(/rel="canonical"/);
+});
+
+test('publishes robots.txt and a sitemap that agree on the site URL (AV-013)', async ({
+  page,
+}) => {
+  const robots = await (await page.request.get(`${ORIGIN}${BASE_PATH}robots.txt`)).text();
+  const sitemap = await (await page.request.get(`${ORIGIN}${BASE_PATH}sitemap.xml`)).text();
+
+  const sitemapUrl = robots.match(/Sitemap:\s*(\S+)/)?.[1];
+  expect(sitemapUrl).toBeDefined();
+  expect(sitemapUrl).toMatch(/\/sitemap\.xml$/);
+
+  // One indexable URL, because the app routes on the hash.
+  const locations = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]!);
+  expect(locations).toHaveLength(1);
+  expect(locations[0]).not.toContain('#');
+  // ...and the sitemap the robots file points at is the one that was published.
+  expect(sitemapUrl).toBe(`${locations[0]}sitemap.xml`);
+});
+
+test('updates the title on navigation, and never names the open file (AV-013)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  // Every test starts on the viewer route.
+  await expect(page).toHaveTitle(/^Open an activity file/);
+
+  // Navigating changes it, with no reload: the brand is the link home.
+  await page.getByRole('link', { name: 'OpenTrack Viewer', exact: true }).click();
+  await expect(page).toHaveTitle(/open GPX, FIT and TCX activity files/);
+
+  await page.getByRole('link', { name: 'Open an activity' }).first().click();
+  await loadFixture(page, 'route-with-elevation.gpx');
+  await expect(page.getByText('Elevation Route')).toBeVisible();
+
+  // The route's own title, not the activity's.
+  await expect(page).toHaveTitle(/^Open an activity file/);
+  const head = await page.evaluate(() => document.head.innerHTML);
+  expect(head).not.toContain('Elevation Route');
+  expect(head).not.toContain('route-with-elevation');
+});
+
 test('scopes the web app manifest to the sub-path', async ({ page }) => {
   const manifest = await page.evaluate(async () => {
     const link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement;

@@ -2,6 +2,15 @@
   "name": "@nyt87/opentrack-viewer",
   "private": true,
   "version": "0.1.0",
+  "description": "Open GPX, FIT and TCX activity files locally in your browser. No upload, no account, no backend.",
+  "homepage": "https://nyt87.github.io/opentrack-viewer/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NYT87/opentrack-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NYT87/opentrack-viewer/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

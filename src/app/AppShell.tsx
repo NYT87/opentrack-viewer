@@ -7,6 +7,7 @@ import { SiteFooter } from '../components/SiteFooter';
 import { useActivityStore } from '../state/activityStore';
 import { ROUTES, TOOLS_ITEMS } from './routes';
 import { useAppTheme } from './useAppTheme';
+import { useRouteMetadata } from './useRouteMetadata';
 
 /**
  * AV-003 / AV-006. Layout chrome shared by every page: header with navigation,
@@ -14,6 +15,8 @@ import { useAppTheme } from './useAppTheme';
  */
 export function AppShell() {
   useAppTheme();
+  // AV-013: title and social tags follow the route, and describe the app only.
+  useRouteMetadata();
 
   const location = useLocation();
   const isHome = location.pathname === ROUTES.home;
