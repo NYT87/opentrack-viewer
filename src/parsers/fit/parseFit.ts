@@ -3,6 +3,7 @@ import FitParser from 'fit-file-parser';
 import {
   computeStreams,
   isPlausibleSpeed,
+  toValidCoordinate,
   type Activity,
   type ActivityDeviceInfo,
   type ActivityLap,
@@ -173,11 +174,16 @@ function normalizeRecords(
     const time = record.timestamp instanceof Date ? record.timestamp : undefined;
     const point: ActivityPoint = { index, segmentIndex: segmentAt(time) };
 
-    // Indoor activities legitimately have no position at all, so a missing one
-    // is counted but never drops the record: its sensor data is still real.
-    if (isFinite(record.position_lat) && isFinite(record.position_long)) {
-      point.lat = record.position_lat;
-      point.lon = record.position_long;
+    /*
+     * Indoor activities legitimately have no position at all, so a missing one
+     * is counted but never drops the record: its sensor data is still real.
+     * The same test the map, the stats and the exporters apply — a coordinate
+     * this app refuses to draw is not one it stores.
+     */
+    const located = toValidCoordinate(record.position_lat, record.position_long);
+    if (located) {
+      point.lat = located.lat;
+      point.lon = located.lon;
     } else {
       missingCoordinates += 1;
     }

@@ -2,9 +2,10 @@ import type { Activity, ActivityPointRange, ActivityWarning } from '../domain/ac
 import { sliceActivity } from '../domain/activitySlice';
 import { ActivityError } from '../domain/errors';
 import { buildGpx } from './gpx/buildGpx';
+import { buildTcx } from './tcx/buildTcx';
 
-/** Formats this build can write. Grows with `AV-752` (TCX). */
-export type ExportFormat = 'gpx' | 'fit';
+/** Formats this build can write. */
+export type ExportFormat = 'gpx' | 'fit' | 'tcx';
 
 export interface ExportFormatDefinition {
   format: ExportFormat;
@@ -17,6 +18,12 @@ export interface ExportFormatDefinition {
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
   { format: 'gpx', label: 'GPX', extension: 'gpx', mimeType: 'application/gpx+xml' },
   { format: 'fit', label: 'FIT', extension: 'fit', mimeType: 'application/vnd.ant.fit' },
+  {
+    format: 'tcx',
+    label: 'TCX',
+    extension: 'tcx',
+    mimeType: 'application/vnd.garmin.tcx+xml',
+  },
 ];
 
 export interface ExportOptions {
@@ -55,6 +62,10 @@ type Serializer = (
 const SERIALIZERS: Record<ExportFormat, Serializer> = {
   gpx: async (activity) => {
     const { xml, warnings } = buildGpx(activity);
+    return { body: xml, warnings };
+  },
+  tcx: async (activity) => {
+    const { xml, warnings } = buildTcx(activity);
     return { body: xml, warnings };
   },
   fit: async (activity) => {

@@ -7,7 +7,7 @@
 Cover:
 - Format detection.
 - GPX parser success/failure.
-- TCX parser success/failure once TCX support begins.
+- TCX parser success/failure, including malformed documents and files missing optional data.
 - Domain validation.
 - GeoJSON conversion.
 - Distance calculation.
@@ -23,8 +23,8 @@ Cover:
 - Chart range selection domain-to-point mapping.
 - Focused activity slice derivation without mutating the original activity.
 - GPX export serialization and GPX re-import round trip.
-- FIT export strategy and FIT export validation when implemented.
-- TCX import/export mapping and round-trip behavior once TCX support begins.
+- FIT export encoding, verified by re-import and by checking the file's CRC against an independent implementation.
+- TCX import/export mapping and round-trip behavior, including import, export, and re-import of an exported file.
 
 ### Component Tests
 

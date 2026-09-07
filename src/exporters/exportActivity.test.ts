@@ -16,6 +16,12 @@ describe('exportActivity registry (AV-550)', async () => {
     expect(EXPORT_FORMATS).toEqual([
       { format: 'gpx', label: 'GPX', extension: 'gpx', mimeType: 'application/gpx+xml' },
       { format: 'fit', label: 'FIT', extension: 'fit', mimeType: 'application/vnd.ant.fit' },
+      {
+        format: 'tcx',
+        label: 'TCX',
+        extension: 'tcx',
+        mimeType: 'application/vnd.garmin.tcx+xml',
+      },
     ]);
   });
 
@@ -32,7 +38,7 @@ describe('exportActivity registry (AV-550)', async () => {
 
   it('rejects a format it cannot write', async () => {
     await expect(
-      exportActivity(parse('simple-route.gpx'), { format: 'tcx' as ExportFormat }),
+      exportActivity(parse('simple-route.gpx'), { format: 'kml' as ExportFormat }),
     ).rejects.toBeInstanceOf(ActivityError);
   });
 

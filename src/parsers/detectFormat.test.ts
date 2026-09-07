@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectFormat, detectSupportedFormat } from './detectFormat';
+import { detectFormat, detectSupportedFormat, SUPPORTED_FORMATS } from './detectFormat';
 import { ActivityError } from '../domain/errors';
 import { fixtureFile, readFixture } from '../test/helpers/fixtures';
 
@@ -67,12 +67,33 @@ describe('detectSupportedFormat', () => {
     });
   });
 
-  it('rejects recognized-but-unimplemented formats', async () => {
-    // TCX is recognized by its XML root, and arrives in Stage 4.
+  it('accepts TCX, which this build now parses (AV-751)', async () => {
     const tcx =
       '<?xml version="1.0"?><TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" />';
 
-    await expect(detectSupportedFormat(new File([tcx], 'ride.tcx'))).rejects.toMatchObject({
+    await expect(detectSupportedFormat(new File([tcx], 'ride.tcx'))).resolves.toMatchObject({
+      format: 'tcx',
+    });
+  });
+
+  it('names every format the build reads when it turns one away', async () => {
+    // User-facing text that must not outlive the format list it describes.
+    let hint = '';
+    try {
+      await detectSupportedFormat(new File(['<kml />'], 'route.kml'));
+    } catch (error) {
+      hint = (error as ActivityError).hint;
+    }
+
+    expect(hint).not.toBe('');
+    for (const format of SUPPORTED_FORMATS) {
+      expect(hint).toContain(`.${format}`);
+    }
+  });
+
+  it('rejects recognized-but-unimplemented formats', async () => {
+    // KML is recognized, but is only ever evaluated on user need.
+    await expect(detectSupportedFormat(new File(['<kml />'], 'route.kml'))).rejects.toMatchObject({
       code: 'unsupported_format',
     });
   });

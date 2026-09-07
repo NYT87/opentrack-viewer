@@ -20,8 +20,8 @@ const EXTENSION_FORMATS: Record<string, ActivitySourceFormat> = {
   csv: 'csv',
 };
 
-/** Formats this build can actually parse. Grows with Epic E7.5 (TCX). */
-export const SUPPORTED_FORMATS: ActivitySourceFormat[] = ['gpx', 'fit'];
+/** Formats this build can actually parse. */
+export const SUPPORTED_FORMATS: ActivitySourceFormat[] = ['gpx', 'fit', 'tcx'];
 
 export function extensionOf(fileName: string): string {
   const dot = fileName.lastIndexOf('.');
@@ -57,7 +57,8 @@ export async function detectSupportedFormat(file: File): Promise<FormatDetection
   if (!SUPPORTED_FORMATS.includes(detection.format)) {
     throw new ActivityError(
       'unsupported_format',
-      `${detection.format.toUpperCase()} files are not supported yet. This build reads GPX and FIT.`,
+      `${detection.format.toUpperCase()} files are not supported yet. ` +
+        'This build reads GPX, FIT and TCX.',
     );
   }
   return detection;

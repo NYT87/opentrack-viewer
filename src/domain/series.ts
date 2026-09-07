@@ -112,8 +112,8 @@ const MAX_PLAUSIBLE_SPEED_MPS = 10;
 /**
  * AV-505. Pace in seconds per kilometre, derived from distance and time over a
  * rolling window rather than from instantaneous speed: `speedMetersPerSecond`
- * is often absent in GPX and is itself device-smoothed when present, so
- * deriving keeps GPX and FIT consistent (TD-002).
+ * is often absent in GPX and TCX, and is itself device-smoothed when present,
+ * so deriving keeps every format consistent (TD-002).
  */
 function derivePace(activity: Activity): (number | undefined)[] {
   const points = activity.points;

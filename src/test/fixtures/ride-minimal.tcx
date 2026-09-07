@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The sparse end of TCX: a bike ride with positions and times only. No optional
+  sensor data, no Creator, and a bare <Cadence> which the schema defines as bike
+  cadence rather than strides.
+-->
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Biking">
+      <Id>2024-05-02T09:00:00Z</Id>
+      <Lap StartTime="2024-05-02T09:00:00Z">
+        <TotalTimeSeconds>20</TotalTimeSeconds>
+        <DistanceMeters>160.0</DistanceMeters>
+        <Calories>0</Calories>
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-05-02T09:00:00Z</Time>
+            <Position><LatitudeDegrees>51.4000000</LatitudeDegrees><LongitudeDegrees>-0.2000000</LongitudeDegrees></Position>
+            <Cadence>88</Cadence>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-05-02T09:00:10Z</Time>
+            <Position><LatitudeDegrees>51.4007200</LatitudeDegrees><LongitudeDegrees>-0.2000000</LongitudeDegrees></Position>
+            <Cadence>90</Cadence>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-05-02T09:00:20Z</Time>
+            <Position><LatitudeDegrees>51.4014400</LatitudeDegrees><LongitudeDegrees>-0.2000000</LongitudeDegrees></Position>
+            <Cadence>89</Cadence>
+          </Trackpoint>
+        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

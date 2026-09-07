@@ -70,7 +70,9 @@ describe('routing (AV-006)', () => {
     expect(screen.getByText('GPX')).toBeInTheDocument();
     expect(screen.getByText('FIT')).toBeInTheDocument();
     expect(screen.getByText('TCX')).toBeInTheDocument();
-    expect(screen.getAllByText('Planned').length).toBeGreaterThan(0);
+    // Every format the plan named is now readable, so none is listed as planned.
+    expect(screen.getAllByText('Supported')).toHaveLength(3);
+    expect(screen.queryByText('Planned')).not.toBeInTheDocument();
   });
 
   it('reaches the viewer from the homepage', async () => {
@@ -302,7 +304,7 @@ describe('Terms and Conditions (AV-008)', () => {
     expect(page).toHaveTextContent(/without warranty/i);
     expect(page).toHaveTextContent(/not medical advice|medical advice/i);
     expect(page).toHaveTextContent(/responsible for the files/i);
-    expect(page).toHaveTextContent(/reads GPX and FIT/i);
+    expect(page).toHaveTextContent(/reads GPX, FIT and TCX/i);
   });
 
   it('marks itself as needing legal review', async () => {

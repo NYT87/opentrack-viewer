@@ -843,6 +843,56 @@ test('renders the export panel’s secondary text as muted', async ({ page }) =>
   expect(colours.body).not.toBe(colours.text);
 });
 
+test('opens a TCX run, with its laps and charts (AV-751)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-laps.tcx');
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toContainText('TCX');
+  await expect(summary).toContainText('Avg pace');
+
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+
+  // TCX states laps and the calories only it carries.
+  const laps = page.getByRole('region', { name: 'Laps' });
+  await expect(laps).toBeVisible();
+  await expect(laps).toContainText('Calories');
+  await expect(laps).toContainText('12');
+
+  await expect(page.getByRole('region', { name: 'Cadence chart' })).toBeVisible();
+  // The device unit id is a serial number and must never appear.
+  await expect(page.locator('body')).not.toContainText('3939123456');
+});
+
+test('exports a TCX file the app can read back (AV-752)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-laps.tcx');
+
+  await page.getByLabel('Format').selectOption('tcx');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export TCX' }).click();
+  const saved = await download;
+
+  expect(saved.suggestedFilename()).toMatch(/\.tcx$/);
+
+  const stream = await saved.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const xml = Buffer.concat(chunks);
+  expect(xml.toString('utf-8')).toContain('<TrainingCenterDatabase');
+
+  // Hand it straight back to the app: the real proof it is readable TCX.
+  await page.getByRole('button', { name: 'Close activity' }).click();
+  await page.getByTestId('file-input').setInputFiles({
+    name: saved.suggestedFilename(),
+    mimeType: 'application/vnd.garmin.tcx+xml',
+    buffer: xml,
+  });
+
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toContainText('TCX');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+});
+
 test('exports a FIT file the app can read back (AV-553)', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'route-with-elevation.gpx');

@@ -21,6 +21,12 @@ device identifier is committed here (plan §13, Fixture Policy).
 | `not-gpx.txt` | Plain text; must fail as `unsupported_format`. |
 | `ride-with-sensors.fit` | A cycling FIT file with GPS, elevation, HR, pedal cadence, power, temperature **and a device serial number**, so tests can prove the serial is never rendered. |
 | `treadmill-run.fit` | A running FIT file with **no GPS at all**: timestamps, a recorded distance stream, HR and stride cadence. |
+| `run-with-laps.tcx` | Two laps with HR, run cadence and calories. The second lap holds **two `<Track>` elements**, which is how TCX records a pause, and a `UnitId` **serial number** tests can prove is never shown. |
+| `ride-minimal.tcx` | The sparse end of TCX: positions and times only, no `Creator`, and a bare `<Cadence>` the schema defines as pedal revolutions. |
+| `laps-without-distance.tcx` | Two continuous laps with **no per-point `DistanceMeters`**, so distance must come from the positions — which is what makes an invented break at the lap boundary visible. |
+| `impossible-coordinates.fit` | A latitude past the pole and Null Island, on points that still carry a time and a heart rate. FIT cannot express an out-of-range *longitude* at all: 181 degrees overflows its signed semicircle field, so latitude carries that case. |
+| `impossible-coordinates.tcx` | A latitude past the pole, a longitude past the antimeridian, and Null Island — each on a point that still carries a time and a heart rate, so the position can be dropped without the point being dropped with it. |
+| `malformed.tcx` | Unclosed elements; must fail as `invalid_tcx_xml`. |
 
 ## The `.fit` fixtures are generated
 

@@ -83,6 +83,24 @@ describe('parseGpx', () => {
     expect(activity.streams.hasCyclingCadence).toBe(false);
   });
 
+  it('does not store Null Island either, matching every other reader of a point', () => {
+    const gpx = `<?xml version="1.0"?>
+      <gpx version="1.1" creator="Test" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>
+        <trkpt lat="51.5" lon="-0.1"><time>2024-01-01T10:00:00Z</time></trkpt>
+        <trkpt lat="0" lon="0"><time>2024-01-01T10:00:10Z</time></trkpt>
+        <trkpt lat="51.501" lon="-0.1"><time>2024-01-01T10:00:20Z</time></trkpt>
+      </trkseg></trk></gpx>`;
+
+    const activity = parseGpx(gpx, { fileName: 'null-island.gpx' });
+
+    // (0, 0) is a device artefact, not a place off the coast of Ghana. The map
+    // and the stats have always skipped it; now it never reaches the model.
+    expect(activity.points.map((point) => point.lat)).toEqual([51.5, undefined, 51.501]);
+    expect(activity.warnings.map((warning) => warning.code)).toContain(
+      'points_missing_coordinates',
+    );
+  });
+
   it('populates device information from the creator (AV-202)', () => {
     const activity = parse('simple-route.gpx');
 

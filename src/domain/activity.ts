@@ -1,7 +1,7 @@
 /**
  * Format-independent activity domain model (AV-101, TD-002).
  *
- * Every parser (GPX today, FIT later) must produce this shape. UI, stats, map
+ * Every parser — GPX, FIT and TCX — must produce this shape. UI, stats, map
  * and chart layers depend on this module only — never on parser output types.
  */
 
@@ -45,7 +45,13 @@ export interface ActivityDeviceInfo {
   softwareVersion?: string;
   firmwareVersion?: string;
   serialNumber?: string;
-  source?: 'gpx_creator' | 'gpx_extension' | 'fit_device_info' | 'fit_file_id' | 'unknown';
+  source?:
+    | 'gpx_creator'
+    | 'gpx_extension'
+    | 'fit_device_info'
+    | 'fit_file_id'
+    | 'tcx_creator'
+    | 'unknown';
 }
 
 /** Fields safe to show. Deliberately excludes every stable identifier. */
@@ -117,6 +123,13 @@ export interface ActivityLap {
   endTime?: Date;
   distanceMeters?: number;
   durationSeconds?: number;
+  /**
+   * Energy the device estimated for this lap. Stated per lap because that is
+   * how TCX states it, and it is an estimate from a model the file does not
+   * describe — so it is reported where the file put it rather than summed into
+   * an activity total this app would appear to vouch for.
+   */
+  caloriesKcal?: number;
 }
 
 export interface ActivityEvent {
@@ -222,12 +235,27 @@ export function isPlausibleSpeed(value: number | undefined): value is number {
   );
 }
 
-/** True when the point carries a finite, in-range WGS84 coordinate pair. */
-export function hasValidLocation(
-  point: ActivityPoint,
-): point is ActivityPoint & { lat: number; lon: number } {
-  const { lat, lon } = point;
-  return (
+/** A WGS84 position this app is willing to treat as a place. */
+export interface Coordinate {
+  lat: number;
+  lon: number;
+}
+
+/**
+ * Returns the pair when it is a usable WGS84 coordinate, and `undefined`
+ * otherwise.
+ *
+ * The single definition of what this app treats as a place. Parsers use it to
+ * decide what enters the model, and the map, stats and exporters use it through
+ * `hasValidLocation` to decide what leaves — so a coordinate the app refuses to
+ * draw is never one it stored, and never one it writes out.
+ *
+ * It returns the pair rather than a type predicate because it validates *two*
+ * values: a predicate can narrow only its first argument, which would leave
+ * every caller casting the longitude it had just been told was fine.
+ */
+export function toValidCoordinate(lat: unknown, lon: unknown): Coordinate | undefined {
+  const usable =
     typeof lat === 'number' &&
     typeof lon === 'number' &&
     Number.isFinite(lat) &&
@@ -237,8 +265,16 @@ export function hasValidLocation(
     lon >= -180 &&
     lon <= 180 &&
     // (0, 0) is Null Island: almost always a parser/device artefact, not a route.
-    !(lat === 0 && lon === 0)
-  );
+    !(lat === 0 && lon === 0);
+
+  return usable ? { lat, lon } : undefined;
+}
+
+/** True when the point carries a finite, in-range WGS84 coordinate pair. */
+export function hasValidLocation(
+  point: ActivityPoint,
+): point is ActivityPoint & { lat: number; lon: number } {
+  return toValidCoordinate(point.lat, point.lon) !== undefined;
 }
 
 /** Derives the stream availability flags from the points themselves. */

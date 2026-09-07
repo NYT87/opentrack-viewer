@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Two laps, recorded continuously: the second lap begins ten seconds after the
+  first ends, with no pause. No trackpoint states DistanceMeters, so distance
+  must be derived from the positions — which means a segment break invented at
+  the lap boundary would silently drop the ground covered across it.
+  Each step north is ~100 m, so the whole activity is ~300 m.
+-->
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Running">
+      <Id>2024-06-01T06:00:00Z</Id>
+      <Lap StartTime="2024-06-01T06:00:00Z">
+        <TotalTimeSeconds>10</TotalTimeSeconds>
+        <DistanceMeters>100.0</DistanceMeters>
+        <Calories>0</Calories>
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Distance</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-06-01T06:00:00Z</Time>
+            <Position><LatitudeDegrees>51.5000000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-01T06:00:10Z</Time>
+            <Position><LatitudeDegrees>51.5009000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+          </Trackpoint>
+        </Track>
+      </Lap>
+      <Lap StartTime="2024-06-01T06:00:20Z">
+        <TotalTimeSeconds>10</TotalTimeSeconds>
+        <DistanceMeters>200.0</DistanceMeters>
+        <Calories>0</Calories>
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Distance</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-06-01T06:00:20Z</Time>
+            <Position><LatitudeDegrees>51.5018000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-01T06:00:30Z</Time>
+            <Position><LatitudeDegrees>51.5027000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+          </Trackpoint>
+        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

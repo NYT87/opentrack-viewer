@@ -37,6 +37,9 @@ function lapDuration(lap: ActivityLap): number | undefined {
  * later without restructuring this.
  */
 export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
+  // Only formats that state calories get the column, rather than a row of
+  // dashes for every GPX file.
+  const showCalories = laps.some((lap) => Number.isFinite(lap.caloriesKcal));
   return (
     <section className="laps" aria-label="Laps">
       <h3 className="laps__title">Laps</h3>
@@ -48,6 +51,7 @@ export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
               <th scope="col">Lap</th>
               <th scope="col">Distance</th>
               <th scope="col">Time</th>
+              {showCalories && <th scope="col">Calories</th>}
             </tr>
           </thead>
           <tbody>
@@ -56,6 +60,9 @@ export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
                 <th scope="row">{lap.index + 1}</th>
                 <td>{formatDistance(lap.distanceMeters, units)}</td>
                 <td>{lapDuration(lap) === undefined ? MISSING : formatDuration(lapDuration(lap))}</td>
+                {showCalories && (
+                  <td>{lap.caloriesKcal === undefined ? MISSING : `${Math.round(lap.caloriesKcal)}`}</td>
+                )}
               </tr>
             ))}
           </tbody>

@@ -1,8 +1,9 @@
 import type { Activity } from '../domain/activity';
-import { ActivityError, toActivityError } from '../domain/errors';
+import { ActivityError, toActivityError, type ActivityErrorCode } from '../domain/errors';
 import { assertUsableActivity } from '../domain/validation';
 import { detectSupportedFormat, type FormatDetection } from './detectFormat';
 import { parseGpx } from './gpx/parseGpx';
+import { parseTcx } from './tcx/parseTcx';
 
 export { detectFormat, detectSupportedFormat, SUPPORTED_FORMATS } from './detectFormat';
 export type { FormatDetection } from './detectFormat';
@@ -19,6 +20,12 @@ const REGISTRY: Partial<Record<FormatDetection['format'], ParserFn>> = {
     options.onPhase?.('processing');
     return parseGpx(text, { fileName: file.name, fileSizeBytes: file.size });
   },
+  // AV-751. XML like GPX, so it needs no library and loads with the app.
+  tcx: async (file, options) => {
+    const text = await readText(file);
+    options.onPhase?.('processing');
+    return parseTcx(text, { fileName: file.name, fileSizeBytes: file.size });
+  },
   // AV-702. Imported lazily so the FIT library — ~61 KB gzipped — stays off the
   // initial page load and out of the main bundle (TD-018). It is still
   // precached by the service worker afterwards, in the background, so that
@@ -29,6 +36,13 @@ const REGISTRY: Partial<Record<FormatDetection['format'], ParserFn>> = {
     options.onPhase?.('processing');
     return parseFit(buffer, { fileName: file.name, fileSizeBytes: file.size });
   },
+};
+
+/** How a parser's own failure is reported when it throws something untyped. */
+const PARSE_FAILURE: Partial<Record<FormatDetection['format'], ActivityErrorCode>> = {
+  gpx: 'invalid_gpx_xml',
+  fit: 'fit_parse_failed',
+  tcx: 'invalid_tcx_xml',
 };
 
 /** Files above this size get a "slow parse" heads-up warning (plan §15). */
@@ -69,7 +83,7 @@ export async function parseActivityFile(
   try {
     activity = await parser(file, options);
   } catch (error) {
-    throw toActivityError(error, detection.format === 'fit' ? 'fit_parse_failed' : 'invalid_gpx_xml');
+    throw toActivityError(error, PARSE_FAILURE[detection.format] ?? 'invalid_gpx_xml');
   }
 
   const validation = assertUsableActivity(activity);

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A two-lap run with heart rate and running cadence. The second lap holds two
+  <Track> elements, which is how TCX records a pause: the points either side
+  belong to different segments and the gap is not distance covered.
+  UnitId is a device serial number, present so tests can prove it is never shown.
+-->
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
+                        xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+  <Activities>
+    <Activity Sport="Running">
+      <Id>2024-05-01T07:00:00Z</Id>
+      <Lap StartTime="2024-05-01T07:00:00Z">
+        <TotalTimeSeconds>20</TotalTimeSeconds>
+        <DistanceMeters>66.7</DistanceMeters>
+        <Calories>12</Calories>
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-05-01T07:00:00Z</Time>
+            <Position><LatitudeDegrees>51.5000000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <AltitudeMeters>15.0</AltitudeMeters>
+            <DistanceMeters>0.0</DistanceMeters>
+            <HeartRateBpm><Value>142</Value></HeartRateBpm>
+            <Extensions><ns3:TPX><ns3:RunCadence>84</ns3:RunCadence><ns3:Speed>3.33</ns3:Speed></ns3:TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-05-01T07:00:10Z</Time>
+            <Position><LatitudeDegrees>51.5003000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <AltitudeMeters>16.0</AltitudeMeters>
+            <DistanceMeters>33.4</DistanceMeters>
+            <HeartRateBpm><Value>145</Value></HeartRateBpm>
+            <Extensions><ns3:TPX><ns3:RunCadence>85</ns3:RunCadence><ns3:Speed>3.34</ns3:Speed></ns3:TPX></Extensions>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-05-01T07:00:20Z</Time>
+            <Position><LatitudeDegrees>51.5006000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <AltitudeMeters>17.0</AltitudeMeters>
+            <DistanceMeters>66.7</DistanceMeters>
+            <HeartRateBpm><Value>147</Value></HeartRateBpm>
+            <Extensions><ns3:TPX><ns3:RunCadence>86</ns3:RunCadence><ns3:Speed>3.33</ns3:Speed></ns3:TPX></Extensions>
+          </Trackpoint>
+        </Track>
+      </Lap>
+      <Lap StartTime="2024-05-01T07:00:30Z">
+        <TotalTimeSeconds>20</TotalTimeSeconds>
+        <DistanceMeters>66.7</DistanceMeters>
+        <Calories>11</Calories>
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-05-01T07:00:30Z</Time>
+            <Position><LatitudeDegrees>51.5009000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <AltitudeMeters>18.0</AltitudeMeters>
+            <DistanceMeters>100.1</DistanceMeters>
+            <HeartRateBpm><Value>149</Value></HeartRateBpm>
+            <Extensions><ns3:TPX><ns3:RunCadence>85</ns3:RunCadence></ns3:TPX></Extensions>
+          </Trackpoint>
+        </Track>
+        <Track>
+          <Trackpoint>
+            <Time>2024-05-01T07:05:00Z</Time>
+            <Position><LatitudeDegrees>51.5012000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <AltitudeMeters>19.0</AltitudeMeters>
+            <DistanceMeters>133.4</DistanceMeters>
+            <HeartRateBpm><Value>140</Value></HeartRateBpm>
+            <Extensions><ns3:TPX><ns3:RunCadence>83</ns3:RunCadence></ns3:TPX></Extensions>
+          </Trackpoint>
+        </Track>
+      </Lap>
+      <Creator xsi:type="Device_t" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <Name>OpenTrack Test Watch</Name>
+        <UnitId>3939123456</UnitId>
+        <ProductID>2691</ProductID>
+        <Version><VersionMajor>7</VersionMajor><VersionMinor>20</VersionMinor></Version>
+      </Creator>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

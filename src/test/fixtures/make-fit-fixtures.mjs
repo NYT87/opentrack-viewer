@@ -229,9 +229,60 @@ function buildTreadmillRun() {
   return fitFile(w.bytes);
 }
 
+/**
+ * Positions no receiver could report, on points that still carry a time and a
+ * heart rate — so a dropped coordinate can be told apart from a dropped point.
+ *
+ * Only latitude can carry the out-of-range case: FIT stores coordinates as
+ * semicircles in a signed 32-bit field, and 181 degrees of longitude overflows
+ * it, so a FIT file cannot state one. Null Island can be stated exactly.
+ */
+function buildImpossibleCoordinates() {
+  const w = new Writer();
+  const start = '2024-07-02T06:00:00Z';
+
+  const fileId = define(w, 0, MSG.fileId, FILE_ID_FIELDS);
+  data(w, 0, fileId, {
+    type: FILE_TYPE_ACTIVITY,
+    manufacturer: MANUFACTURER_GARMIN,
+    product: 3121,
+    serialNumber: 3987654321,
+    timeCreated: secondsToFit(start),
+  });
+
+  const sport = define(w, 1, MSG.sport, SPORT_FIELDS);
+  data(w, 1, sport, { sport: SPORT_RUNNING, subSport: SUB_SPORT_ROAD });
+
+  const record = define(w, 2, MSG.record, [
+    ['timestamp', 253, T.uint32],
+    ['positionLat', 0, T.sint32],
+    ['positionLong', 1, T.sint32],
+    ['heartRate', 3, T.uint8],
+  ]);
+
+  const positions = [
+    [51.5, -0.1], // a real place
+    [91, -0.1], // past the pole
+    [0, 0], // Null Island
+    [51.502, -0.1], // a real place again
+  ];
+
+  for (const [index, [lat, lon]] of positions.entries()) {
+    data(w, 2, record, {
+      timestamp: secondsToFit(start) + index * 10,
+      positionLat: degreesToSemicircles(lat),
+      positionLong: degreesToSemicircles(lon),
+      heartRate: 130 + index,
+    });
+  }
+
+  return fitFile(w.bytes);
+}
+
 const FIXTURES = {
   'ride-with-sensors.fit': buildRide(),
   'treadmill-run.fit': buildTreadmillRun(),
+  'impossible-coordinates.fit': buildImpossibleCoordinates(),
 };
 
 for (const [name, bytes] of Object.entries(FIXTURES)) {

@@ -71,7 +71,18 @@ interface RecordField {
   baseType: FitBaseType;
   invalid: number;
   /** Already scaled to the units FIT stores. */
-  read: (point: ActivityPoint) => number | undefined;
+  read: (point: ActivityPoint, context: WriteContext) => number | undefined;
+}
+
+interface WriteContext {
+  /**
+   * The first recorded distance in the activity being written. A slice keeps
+   * its source's readings, so a section starting 160 m into a ride still says
+   * 160 — and a file whose odometer starts there describes a ride that began
+   * mid-air. Subtracting it makes the exported stream describe the exported
+   * activity, which is the only thing the file claims to contain.
+   */
+  distanceOrigin: number;
 }
 
 const round = (value: number) => Math.round(value);
@@ -131,7 +142,10 @@ const RECORD_FIELDS: (RecordField & { needs: (activity: Activity) => boolean })[
     baseType: FitBaseType.Uint32,
     invalid: INVALID.uint32,
     needs: (a) => a.streams.hasDistance,
-    read: (p) => (finite(p.distanceMeters) ? round(p.distanceMeters * 100) : undefined),
+    read: (p, context) =>
+      finite(p.distanceMeters)
+        ? round(Math.max(0, p.distanceMeters - context.distanceOrigin) * 100)
+        : undefined,
   },
   {
     number: 6,
@@ -238,6 +252,7 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
   // One definition for every record, so the fields are those the activity has
   // as a whole; a point missing one writes FIT's invalid marker.
   const fields = RECORD_FIELDS.filter((field) => field.needs(activity));
+  const context: WriteContext = { distanceOrigin: firstDistance(timed) };
 
   for (const segment of groupBySegment(timed)) {
     const first = segment[0]!;
@@ -260,7 +275,7 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
             number: field.number,
             size: field.size,
             baseType: field.baseType,
-            value: field.read(point) ?? field.invalid,
+            value: field.read(point, context) ?? field.invalid,
           })),
         ],
         LOCAL.record,
@@ -320,6 +335,12 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
   );
 
   return { bytes: encoder.close(), warnings };
+}
+
+/** The reading every other distance in the exported file is measured from. */
+function firstDistance(points: ActivityPoint[]): number {
+  for (const point of points) if (finite(point.distanceMeters)) return point.distanceMeters;
+  return 0;
 }
 
 function groupBySegment(points: (ActivityPoint & { time: Date })[]) {

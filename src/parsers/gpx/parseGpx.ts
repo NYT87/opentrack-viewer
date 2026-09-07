@@ -1,6 +1,7 @@
 import {
   computeStreams,
   isPlausibleSpeed,
+  toValidCoordinate,
   type Activity,
   type ActivityDeviceInfo,
   type ActivityPoint,
@@ -383,22 +384,18 @@ function normalizePoints(
   let missingTime = 0;
 
   for (const item of raw) {
-    const hasCoordinates =
-      Number.isFinite(item.lat) &&
-      Number.isFinite(item.lon) &&
-      (item.lat as number) >= -90 &&
-      (item.lat as number) <= 90 &&
-      (item.lon as number) >= -180 &&
-      (item.lon as number) <= 180;
+    // The same definition the map, the stats and the exporters use, rather than
+    // a second one that happens to agree: this one also rejects Null Island.
+    const located = toValidCoordinate(item.lat, item.lon);
 
-    if (!hasCoordinates) missingCoordinates += 1;
+    if (!located) missingCoordinates += 1;
     if (!Number.isFinite(item.elevationMeters)) missingElevation += 1;
     if (!item.time) missingTime += 1;
 
     const point: ActivityPoint = { index: points.length, segmentIndex: item.segmentIndex };
-    if (hasCoordinates) {
-      point.lat = item.lat;
-      point.lon = item.lon;
+    if (located) {
+      point.lat = located.lat;
+      point.lon = located.lon;
     }
     if (Number.isFinite(item.elevationMeters)) point.elevationMeters = item.elevationMeters;
     if (item.time) point.time = item.time;

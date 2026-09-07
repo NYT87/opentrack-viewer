@@ -92,6 +92,32 @@ describe('parseFit (AV-702)', () => {
     expect(activity.derived?.averageHeartRateBpm).toBeCloseTo(140.5, 1);
   });
 
+  it('does not store a coordinate the app would refuse to draw', async () => {
+    const activity = await parse('impossible-coordinates.fit');
+
+    // Past the pole, and Null Island. FIT cannot state an out-of-range
+    // longitude at all: 181 degrees overflows its signed semicircle field.
+    expect(activity.points.map((point) => point.lat)).toEqual([
+      expect.closeTo(51.5, 5),
+      undefined,
+      undefined,
+      expect.closeTo(51.502, 5),
+    ]);
+    expect(activity.points.map((point) => point.lon === undefined)).toEqual([
+      false,
+      true,
+      true,
+      false,
+    ]);
+
+    // The points survive: a bad fix does not discard a real heart rate.
+    expect(activity.points).toHaveLength(4);
+    expect(activity.points.map((point) => point.heartRateBpm)).toEqual([130, 131, 132, 133]);
+    expect(activity.warnings.map((warning) => warning.code)).toContain(
+      'points_missing_coordinates',
+    );
+  });
+
   it('rejects a file with no records', async () => {
     // A valid FIT header and CRC wrapping no record messages at all.
     const header = Uint8Array.from([

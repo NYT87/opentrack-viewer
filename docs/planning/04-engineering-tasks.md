@@ -54,7 +54,7 @@ Acceptance criteria:
 - Homepage describes the project, privacy model, and supported/planned formats.
 - Homepage links to Terms and Conditions.
 - Homepage does not own or display loaded activity state.
-- Viewer/process page owns file selection, parsing, map, details, charts, focused ranges, and later export controls.
+- Viewer/process page owns file selection, parsing, map, details, charts, focused ranges, and export controls.
 - Header/navigation lets users reach the viewer/process page from the homepage.
 
 #### AV-008: Add Terms and Conditions Page

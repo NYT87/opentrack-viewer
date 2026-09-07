@@ -161,6 +161,34 @@ describe('exporting a section of a distance-stream activity (AV-551 / AV-553)', 
   });
 });
 
+describe('an exported section describes itself (AV-553)', () => {
+  it('starts its record distances at zero, not at the source odometer', async () => {
+    const ride = await fit('ride-with-sensors.fit');
+    // The section's own readings begin at 160 m into the ride.
+    expect(ride.points[2]?.distanceMeters).toBe(160);
+
+    const result = await exportActivity(ride, {
+      format: 'fit',
+      range: { startIndex: 2, endIndex: 4 },
+    });
+    const reimported = await roundTrip(new Uint8Array(await result.blob.arrayBuffer()));
+
+    // Read from the points rather than the derived total: stats normalize a
+    // distance stream on import, so only the point values show what was
+    // actually written.
+    expect(reimported.points.map((point) => point.distanceMeters)).toEqual([0, 80, 160]);
+  });
+
+  it('leaves a whole activity distance stream untouched', async () => {
+    const ride = await fit('ride-with-sensors.fit');
+    const reimported = await roundTrip(buildFit(ride).bytes);
+
+    expect(reimported.points.map((point) => point.distanceMeters)).toEqual([
+      0, 80, 160, 240, 320, 400,
+    ]);
+  });
+});
+
 describe('FIT export limits (AV-553)', () => {
   it('refuses an activity with no timestamps', () => {
     const noTime = makeActivity([

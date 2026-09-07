@@ -35,7 +35,7 @@ File Intake
   v
 Parser Registry
   |
-  | GPX parser first, FIT parser later
+  | GPX, FIT and TCX parsers
   v
 Normalized Activity Domain Model
   |
@@ -52,7 +52,7 @@ Normalized Activity Domain Model
   +--> Exporter Registry
        +--> GPX exporter
        +--> FIT exporter
-       +--> TCX exporter later
+       +--> TCX exporter
        +--> Direct conversion flow
   |
   v
@@ -82,7 +82,7 @@ React UI
                  +--> Speed for cycling
                  +--> Range selection overlay
             +--> Reset View button when focused on a selected range
-       +--> Export Controls in later stages
+       +--> Export Controls
   |
   +--> Terms and Conditions Page
        +--> Browser-only processing terms
@@ -97,7 +97,7 @@ React UI
        +--> Does not clear loaded activity state
 ```
 
-The UI must depend on normalized domain objects, not on GPX/FIT-specific parser output.
+The UI must depend on normalized domain objects, never on format-specific parser output — GPX, FIT, TCX, or any format added later.
 
 ## 7. Core Data Flow
 
@@ -135,192 +135,52 @@ The UI must depend on normalized domain objects, not on GPX/FIT-specific parser 
 
 ## 8. Domain Model
 
-The domain model should represent activities independently from their source format.
+The domain model should represent activities independently from their source
+format. The shape below is an **excerpt**, showing the layering rather than
+every field: `src/domain/activity.ts` is the authoritative definition, and the
+chart, export, focus and theme types an earlier draft of this section carried
+now live beside the code that uses them — `src/domain/charts.ts`,
+`src/exporters/index.ts`, `src/state/interactionStore.ts` and
+`src/domain/theme.ts`.
 
 ```ts
-export type ActivitySourceFormat =
-  | 'gpx'
-  | 'fit'
-  | 'tcx'
-  | 'kml'
-  | 'geojson'
-  | 'csv'
-  | 'unknown';
-
-export type ActivitySport =
-  | 'running'
-  | 'cycling'
-  | 'hiking'
-  | 'walking'
-  | 'swimming'
-  | 'skiing'
-  | 'rowing'
-  | 'other'
-  | 'unknown';
-
 export interface Activity {
   id: string;
+  /** Which file this came from, and which parser read it. */
   source: ActivitySource;
+  /** Name, sport, device — everything about the activity but its samples. */
   metadata: ActivityMetadata;
   points: ActivityPoint[];
   laps?: ActivityLap[];
   events?: ActivityEvent[];
+  /** Which measurements exist at all, so the UI can ask once, not per point. */
   streams: ActivityStreams;
+  /** Computed from the points, never read from the file. */
   derived?: ActivityDerivedStats;
   warnings: ActivityWarning[];
 }
 
-export interface ActivitySource {
-  format: ActivitySourceFormat;
-  fileName?: string;
-  fileSizeBytes?: number;
-  parserVersion: string;
-}
-
-export interface ActivityMetadata {
-  name?: string;
-  description?: string;
-  sport?: ActivitySport;
-  startTime?: Date;
-  endTime?: Date;
-  creator?: string;
-  deviceName?: string;
-  device?: ActivityDeviceInfo;
-}
-
-export interface ActivityDeviceInfo {
-  name?: string;
-  manufacturer?: string;
-  model?: string;
-  product?: string;
-  softwareVersion?: string;
-  firmwareVersion?: string;
-  serialNumber?: string;
-  source?: 'gpx_creator' | 'gpx_extension' | 'fit_device_info' | 'fit_file_id' | 'unknown';
-}
-
 export interface ActivityPoint {
+  /** The only required field: a point may carry nothing else. */
   index: number;
-  time?: Date;
   lat?: number;
   lon?: number;
+  time?: Date;
   elevationMeters?: number;
   distanceMeters?: number;
   heartRateBpm?: number;
+  /** Cadence is two fields, because strides and pedal revolutions differ. */
   runningCadenceSpm?: number;
   cyclingCadenceRpm?: number;
-  powerWatts?: number;
-  temperatureCelsius?: number;
-  speedMetersPerSecond?: number;
-  gradePercent?: number;
-  accuracyMeters?: number;
-  extensions?: Record<string, unknown>;
-}
-
-export interface ActivityLap {
-  index: number;
-  startTime?: Date;
-  endTime?: Date;
-  distanceMeters?: number;
-  durationSeconds?: number;
-}
-
-export interface ActivityEvent {
-  type: 'start' | 'stop' | 'pause' | 'resume' | 'lap' | 'marker' | 'unknown';
-  time?: Date;
-  pointIndex?: number;
-  label?: string;
-}
-
-export interface ActivityStreams {
-  hasLocation: boolean;
-  hasElevation: boolean;
-  hasTime: boolean;
-  hasDistance: boolean;
-  hasHeartRate: boolean;
-  hasCadence: boolean;
-  hasPower: boolean;
-  hasTemperature: boolean;
-}
-
-export interface ActivityDerivedStats {
-  pointCount: number;
-  startTime?: Date;
-  endTime?: Date;
-  durationSeconds?: number;
-  movingDurationSeconds?: number;
-  distanceMeters?: number;
-  elevationGainMeters?: number;
-  elevationLossMeters?: number;
-  minElevationMeters?: number;
-  maxElevationMeters?: number;
-  averageHeartRateBpm?: number;
-  maxHeartRateBpm?: number;
-  averagePowerWatts?: number;
-  maxPowerWatts?: number;
-}
-
-export interface ActivityWarning {
-  code: string;
-  message: string;
-  severity: 'info' | 'warning' | 'error';
-  pointIndex?: number;
-}
-
-export type ChartXAxisMode = 'distance' | 'time';
-
-export type ActivityChartKind =
-  | 'elevation'
-  | 'pace'
-  | 'cadence'
-  | 'speed'
-  | 'heartRate'
-  | 'power'
-  | 'temperature';
-
-export interface ActivityChartDefinition {
-  kind: ActivityChartKind;
-  label: string;
-  available: boolean;
-  unavailableReason?: string;
-  defaultXAxisMode: ChartXAxisMode;
-  supportedXAxisModes: ChartXAxisMode[];
-}
-
-export interface ActivityPointRange {
-  startIndex: number;
-  endIndex: number;
-}
-
-export interface ActivityFocusState {
-  selectedRange?: ActivityPointRange;
-  mode: 'fullActivity' | 'selectedRange';
-}
-
-export type ActivityExportFormat = 'gpx' | 'fit' | 'tcx';
-
-export interface ActivityExportRequest {
-  activity: Activity;
-  format: ActivityExportFormat;
-  sourceFormat?: ActivitySourceFormat;
-  range?: ActivityPointRange;
-  fileName?: string;
-}
-
-export interface ActivityExportResult {
-  blob: Blob;
-  fileName: string;
-  mimeType: string;
-  warnings: ActivityWarning[];
-}
-
-export type ThemeMode = 'system' | 'dark' | 'light';
-
-export interface UserPreferences {
-  themeMode: ThemeMode;
-  resolvedTheme: 'dark' | 'light';
+  /** Which continuous stretch of recording this is: a pause starts a new one. */
+  segmentIndex?: number;
+  // ...and the remaining optional sensor fields.
 }
 ```
+
+Every field but `index` is optional by design: a treadmill run has no position,
+a planned route has no clock, and most files carry no power. The principles
+below say how the rest of the app is expected to behave in the face of that.
 
 ### Domain Model Principles
 
@@ -387,7 +247,7 @@ export type ActivityViewerState =
 The app should separate project description from activity processing:
 
 - `/`: homepage/main page. Describes OpenTrack Viewer, supported/planned formats, privacy model, and links to the viewer/process page and Terms and Conditions.
-- `/viewer`: activity processing page. Owns file selection, parsing, map, details, charts, focused ranges, and later export controls.
+- `/viewer`: activity processing page. Owns file selection, parsing, map, details, charts, focused ranges, and export controls.
 - `/terms`: Terms and Conditions page. Provides stable legal/usage terms and must be safe to link from footer, homepage, and repository docs.
 - Settings: modal state opened from the header on non-home pages. It should not be a route, should not unmount the viewer/process page, and should not clear loaded activity data.
 

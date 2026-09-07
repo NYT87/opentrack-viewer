@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Coordinates no receiver could report: a latitude past the pole, a longitude
+  past the antimeridian, and Null Island. Each point still carries a time and a
+  heart rate, so the test can prove the position is dropped without the point
+  being dropped with it.
+-->
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Running">
+      <Id>2024-07-01T06:00:00Z</Id>
+      <Lap StartTime="2024-07-01T06:00:00Z">
+        <TotalTimeSeconds>40</TotalTimeSeconds>
+        <DistanceMeters>200.0</DistanceMeters>
+        <Calories>0</Calories>
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-07-01T06:00:00Z</Time>
+            <Position><LatitudeDegrees>51.5000000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <HeartRateBpm><Value>130</Value></HeartRateBpm>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-07-01T06:00:10Z</Time>
+            <Position><LatitudeDegrees>91.0000000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <HeartRateBpm><Value>131</Value></HeartRateBpm>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-07-01T06:00:20Z</Time>
+            <Position><LatitudeDegrees>51.5010000</LatitudeDegrees><LongitudeDegrees>181.0000000</LongitudeDegrees></Position>
+            <HeartRateBpm><Value>132</Value></HeartRateBpm>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-07-01T06:00:30Z</Time>
+            <Position><LatitudeDegrees>0.0000000</LatitudeDegrees><LongitudeDegrees>0.0000000</LongitudeDegrees></Position>
+            <HeartRateBpm><Value>133</Value></HeartRateBpm>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-07-01T06:00:40Z</Time>
+            <Position><LatitudeDegrees>51.5020000</LatitudeDegrees><LongitudeDegrees>-0.1000000</LongitudeDegrees></Position>
+            <HeartRateBpm><Value>134</Value></HeartRateBpm>
+          </Trackpoint>
+        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

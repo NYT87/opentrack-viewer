@@ -41,7 +41,7 @@ export function SiteFooter() {
             </span>
           </p>
           <p className="footer__tagline">
-            Open GPX and FIT activity files locally in your browser. Parsing and calculations happen on
+            Open GPX, FIT and TCX activity files locally in your browser. Parsing and calculations happen on
             your device — your activity file is never uploaded.
           </p>
         </div>

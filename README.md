@@ -1,6 +1,6 @@
 # OpenTrack Viewer
 
-**This app opens activity files locally in your browser. GPX and FIT parsing and all
+**This app opens activity files locally in your browser. GPX, FIT and TCX parsing and all
 calculations happen on your device. The app does not upload your activity file
 to a backend.**
 
@@ -159,7 +159,7 @@ must be opt-in and scrubbed of activity data.
 | Units | Metric by default, switchable per session | A control in the settings modal writes to `interactionStore`; the choice persists across files but is not stored on disk. |
 | Chart x-axis | `distance` \| `time`, persisted for the session | §17 asked whether the preference persists or resets per activity. It persists, like units. A preference an activity cannot support is *not* discarded: that chart falls back and explains why, and the preference applies again to the next file. |
 | Point-index x-axis | Internal fallback only, never user-selectable | The plan's `ChartXAxisMode` is `distance \| time`. An activity with neither still needs *some* axis, so `index` remains as a rendering fallback — but it is not offered in the switch, because it is not a meaningful thing to choose. |
-| Pace derivation | Distance and time over a rolling 15 s window | §17 asked whether to use instantaneous speed or derive from intervals. Derived: `speedMetersPerSecond` is often absent from GPX and already device-smoothed when present, so deriving keeps GPX and FIT consistent (TD-002). Point-to-point pace is unusable — a metre of GPS jitter between 1 s samples swings it by minutes per km — hence the window. Stationary and implausibly fast (>10 m/s) intervals are dropped rather than plotted. |
+| Pace derivation | Distance and time over a rolling 15 s window | §17 asked whether to use instantaneous speed or derive from intervals. Derived: `speedMetersPerSecond` is often absent from GPX and already device-smoothed when present, so deriving keeps GPX, FIT and TCX consistent (TD-002). Point-to-point pace is unusable — a metre of GPS jitter between 1 s samples swings it by minutes per km — hence the window. Stationary and implausibly fast (>10 m/s) intervals are dropped rather than plotted. |
 | Cadence units | Running and cycling cadence are separate fields | §17 asked whether run cadence should be modelled separately. It is: `runningCadenceSpm` (strides per minute, one foot) and `cyclingCadenceRpm` (pedal revolutions). They are different measurements that happen to share a name, and one generic `rpm` field made the chart label a guess. GPX states a cadence number but never its unit, so the **declared sport** decides which field it lands in. A swim or a row reports *strokes* per minute, which is neither unit and has no field here, so that number is dropped rather than mislabelled; an undeclared sport keeps foot cadence, since an untyped GPX is the common case and a step count is the overwhelmingly likely meaning. Only running cadence is charted. |
 | Near-constant charts | Drawn flat, with a single axis label | A steady ride varies only in the fourth decimal. Stretching that across the plot draws sensor noise as if it were terrain, and prints the same number on every gridline. Below half a percent of the value's magnitude a series is treated as flat: one label, one straight line. |
 | Primary overview metric | **Avg pace** for running, **Avg speed** for everything else, over **elapsed** duration | Runners read a workout in minutes per kilometre, riders in kilometres per hour, so the overview follows the sport. Only one is shown: every stat in the grid carries equal visual weight, so showing both would make both primary. An activity that never said what it was gets speed, which is meaningful for any movement. Both use elapsed time because the figure sits beside `Duration` and would otherwise silently disagree with it; moving time is reported separately, and a moving average could be added alongside rather than replacing this. Pace is derived from the same average speed, so the two can never disagree. |
@@ -184,6 +184,9 @@ must be opt-in and scrubbed of activity data.
 | Export loss warnings | Named per format, shown after the download | `AV-551`. GPX cannot carry laps, states sensor fields only through Garmin extensions, and gives cadence a number with no unit. Each is reported by code so the list grows with the format registry rather than with the UI. Shown after saving, not before: computing them means serializing the activity, and doing that on every control change would cost a full pass over the points for a message the user has not asked for yet. |
 | FIT export | `FitEncoder`, from the package FIT import already added | `AV-552`/`AV-553`. No new dependency and no new licence question. The library owns the binary container (CRC, definition records, base types); what we own is the profile mapping, verified by round-tripping every fixture and by checking the file's CRC against an independent implementation rather than the encoder's own. Loaded on demand: the encoder costs **1.7 KB gzipped** on top of the FIT parser chunk it shares, and nothing FIT-related reaches the main bundle. The minimal profile and the loss cases were specified in TD-021 before any of it was built. |
 | FIT export refuses an activity with no timestamps | Mirrors GPX refusing one with no coordinates | Every FIT record is keyed by time, so a file without timestamps would contain no records at all. The two formats fail on opposite data: a treadmill run exports to FIT but not GPX, and a route with no clock exports to GPX but not FIT. Both refuse with a message naming the reason rather than writing an empty file. |
+| TCX cadence | The file's own answer wins, not the sport | TCX is the only format that states cadence units itself: the schema's `Cadence` on a trackpoint is pedal revolutions, and running cadence lives in the `RunCadence` extension. GPX and FIT both force the sport to decide (`AV-515`); TCX does not have to, so it does not. A bare `Cadence` falls back to the sport only when the file offered nothing better. |
+| TCX laps on a section export | One lap covering exactly the section | §17 asked how a selected-range export should handle a lap that partly overlaps it. A lap cut in half is no longer the lap the athlete ran — its distance and time would describe something that never happened. Dropping the originals and stating one lap for the exported section is the only version that is true, and it matches what `sliceActivity` already does with laps. Pauses inside the section survive as separate `Track` elements, and a lap boundary is not treated as a pause — a lap is a split marker the recording usually runs straight through. |
+| What counts as a place | One definition, `toValidCoordinate`, used on the way in and the way out | Finite, in range, and not `(0, 0)` — Null Island is a device artefact, not a location off the coast of Ghana. Parsers use it to decide what enters the model; the map, the stats and the exporters use it through `hasValidLocation` to decide what leaves. All three parsers previously re-derived a weaker version inline, so the model could hold coordinates every reader of it then skipped. It returns the validated pair rather than a type predicate: a predicate narrows only its first argument, so one that checked both would have left every caller casting the longitude it had just been told was fine. Each format fails differently and each has a fixture: GPX and TCX can state a longitude past the antimeridian, while FIT cannot express one at all — 181 degrees overflows its signed semicircle field — so latitude carries that case there. |
 | Map vs app theme | Independent | §17 leaves this open. The basemap keeps its own styling rather than following the app theme, so route-only mode and the tile treatment stay predictable. |
 | Terms and Conditions | A route, not a modal | A legal document needs a stable, shareable link, and it must be readable without a loaded activity. The copy is marked **draft** in the page itself: it describes how the app actually behaves, but it has not been reviewed by anyone qualified and must be before release. |
 | Routing | React Router, `HashRouter`; `/` homepage and `/viewer`, with settings as modal state rather than a route (`AV-006`, `AV-007`) | The plan defers routing until "multiple views become useful" (§4); the Settings page is that point, and §9 already reserved `src/app/routes.ts`. Hash routing because this is a static, backend-free app: on static hosting such as GitHub Pages a deep link to `/settings` would 404 without server rewrites. |
@@ -191,24 +194,25 @@ must be opt-in and scrubbed of activity data.
 | Elevation noise threshold | 3 m (`ELEVATION_NOISE_THRESHOLD_METERS`) | Consumer altimeter noise is ±2–5 m; raw delta summing inflates gain on flat routes. Covered by the flat-route test. |
 | Malformed points | Skipped with a warning; only an unreadable document fails | One bad `trkpt` should not cost the user the whole route. |
 | GPX segments | Preserved, never merged | §17 asked whether to merge or preserve. Merging is not a simplification, it is a fabrication: a `<trkseg>` boundary is where the recording stopped, so joining segments both adds distance the athlete did not cover and draws a straight line down a road they never took. `ActivityPoint.segmentIndex` carries the boundary; distance breaks at it and the route renders one LineString per segment. |
-| Web Workers | Deferred until FIT (AV-702) | Measured, not guessed: main-thread GPX parsing blocks the UI for ~0.07 s at 5,000 points, ~0.5 s at 50,000 and ~0.8 s at 100,000 — below the plan's "if UI stalls" bar (§14) for realistic files. Moving *GPX* to a worker is not a relocation: `DOMParser` does not exist in a worker (verified), so it would mean adding a DOM-free XML parser as the first non-essential runtime dependency. FIT is binary and needs no DOM, so it can go straight into a worker for free. FIT import has since landed (`AV-702`) still on the main thread: the parse is fast enough on realistic files that the same "if UI stalls" bar has not been met, and the worker move stays available whenever it is. |
+| Web Workers | Deferred until FIT (AV-702) | Measured, not guessed: main-thread GPX parsing blocks the UI for ~0.07 s at 5,000 points, ~0.5 s at 50,000 and ~0.8 s at 100,000 — below the plan's "if UI stalls" bar (§14) for realistic files. Moving the *XML* formats to a worker is not a relocation: `DOMParser` does not exist in a worker (verified), so GPX and TCX would both need a DOM-free XML parser — the first non-essential runtime dependency. FIT is binary and needs no DOM, so it can go straight into a worker for free. FIT import has since landed (`AV-702`) still on the main thread: the parse is fast enough on realistic files that the same "if UI stalls" bar has not been met, and the worker move stays available whenever it is. |
 
 ## Status against the plan
 
 The plan lives in [`docs/planning/`](docs/planning/README.md).
 
-Implemented: **M0–M5**, **M3.5** and **Stage 3** — project foundation, the GPX
-route vertical slice, summary stats, the chart panel with the x-axis switch and
-run-specific charts, map/chart synchronization, FIT import, and browser-side
-GPX and FIT export (`AV-001`…`003`, `AV-101`…`103`,
+Implemented: most of **M0–M6**, **M3.5**, **Stage 3** and **Stage 4** — project
+foundation, the GPX route vertical slice, summary stats, the chart panel with
+the x-axis switch and run-specific charts, map/chart synchronization, FIT and
+TCX import, and browser-side GPX, FIT and TCX export (`AV-001`…`003`, `AV-101`…`103`,
 `AV-201`…`203`, `AV-301`…`304`, `AV-401`…`404`, `AV-501`…`507`, `AV-513`, `AV-515`,
-`AV-601`…`605`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-406`, `AV-550`–`AV-554`, `AV-701`–`AV-704`, plus `AV-801`–`AV-803`).
+`AV-601`…`605`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-406`, `AV-407`, `AV-550`–`AV-554`, `AV-701`–`AV-704`, `AV-750`–`AV-753`, plus `AV-801`–`AV-803`).
 
-Not implemented, and **not** yet reconciled with the code:
+Not implemented:
 
-| Task | Adds | Conflicts with what is built |
+| Task | Adds | State |
 | --- | --- | --- |
-| `AV-750`–`AV-753` | TCX import/export and round-trip tests | — |
+| `AV-013` | Privacy-safe SEO metadata | **Not started.** `index.html` has a title but no meta description, no route-specific title/description, and no Open Graph or Twitter card tags. Two of its criteria — canonical URL handling, and `robots.txt`/`sitemap.xml` — are blocked on a §17 open question: **what the production deployment URL will be**. The rest does not depend on it. |
+| `AV-555` | Direct format conversion | **Mostly done, one criterion unmet.** Opening any supported format and exporting any other already goes `file → parser → Activity → exporter`, for the full activity or a selected range, with the loss warnings each target needs. What is missing: when the chosen target *is* the source format, the control does not label it as a same-format rewrite — it just reads `Export GPX` for a GPX file. |
 
 ## MapLibre integration notes
 
@@ -248,7 +252,8 @@ external requests, asserted in `e2e/viewer.spec.ts`.
 - Parsing runs on the main thread. A 100,000-point GPX blocks the UI for ~0.8 s
   (50,000 points: ~0.5 s; 5,000: ~0.07 s). Every parser sits behind an async API
   so moving one to a Web Worker is a registry change — but `DOMParser` does not
-  exist in a worker, so moving *GPX* there also means replacing it with a
-  DOM-free XML parser.
+  exist in a worker, so moving either XML format there (GPX or TCX) also means
+  replacing it with a DOM-free XML parser. FIT is binary and could move on its
+  own whenever the cost justifies it.
 - Map hover uses a linear nearest-coordinate scan. Fine for typical tracks;
   a very dense track would benefit from spatial indexing.

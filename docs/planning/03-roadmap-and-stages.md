@@ -202,7 +202,7 @@ The chart range focus slice is complete when:
 - The selected range is visibly represented on the chart.
 - Releasing the pointer focuses chart data to the selected section.
 - The map focuses to the matching route section.
-- Focused stats can be shown or clearly labeled when implemented.
+- Focused stats are shown in their own clearly labeled panel, leaving the activity summary describing the whole activity (TD-022).
 - The user can clear the selected range and return to the full activity.
 - Reset View is visible while focused and restores chart, map, and summary to the full activity.
 - The original normalized activity remains unchanged.

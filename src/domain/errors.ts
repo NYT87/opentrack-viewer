@@ -9,17 +9,19 @@ export type ActivityErrorCode =
   | 'no_location_stream'
   | 'map_style_load_failed'
   | 'fit_parse_failed'
+  | 'invalid_tcx_xml'
   | 'large_file_slow_parse'
   | 'invalid_selected_range'
   | 'file_read_failed';
 
 const HINTS: Record<ActivityErrorCode, string> = {
-  unsupported_format: 'Try a .gpx file. More formats are coming.',
+  unsupported_format: 'Try a .gpx, .fit or .tcx file.',
   invalid_gpx_xml: 'The file could not be read as GPX XML. It may be truncated or corrupted.',
   no_route_points: 'The file parsed, but contained no track points to display.',
   no_location_stream: 'This activity has no GPS coordinates, so no route can be drawn.',
   map_style_load_failed: 'The basemap could not load. The route is still available.',
   fit_parse_failed: 'The FIT file could not be decoded.',
+  invalid_tcx_xml: 'The file could not be read as TCX XML. It may be truncated or corrupted.',
   large_file_slow_parse: 'This file is large and may take a moment to parse.',
   invalid_selected_range: 'Select a longer section of the activity.',
   file_read_failed: 'The file could not be read from your device. Try selecting it again.',

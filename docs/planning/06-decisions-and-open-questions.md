@@ -10,7 +10,7 @@ Reason: This is the product's core trust and privacy boundary.
 
 ### TD-002: Format-Independent Domain Model
 
-Decision: GPX and FIT parsers must output the same `Activity` model.
+Decision: the GPX, FIT and TCX parsers must all output the same `Activity` model.
 
 Reason: The UI, stats, map, and chart layers should not depend on source file format.
 
@@ -170,6 +170,38 @@ Both panels are rendered from the same `buildSummaryStats`, so a figure is forma
 
 The section panel sits next to the focus bar rather than up in the overview: that is where the selection was made and where the reader is looking, and it puts `Reset View` next to the figures it clears.
 
+### TD-023: TCX Scope and Field Mapping
+
+Decision (`AV-750`): TCX is read and written in the browser with `DOMParser` and string serialization, exactly as GPX is — no new dependency. The mapping below is shared by the importer and the exporter.
+
+**Import — TCX to `Activity`**
+
+| TCX | `Activity` |
+| --- | --- |
+| `Activity@Sport` | `metadata.sport` |
+| `Activity/Id` | `metadata.name` fallback (TCX has no name field) |
+| `Lap@StartTime`, `TotalTimeSeconds`, `DistanceMeters`, `Calories` | `laps[].startTime`, `durationSeconds`, `distanceMeters`, `caloriesKcal` |
+| A *second* `Track` inside one `Lap` | `point.segmentIndex` — a new `Track` within a lap is where the recording stopped. A **lap boundary is not** a segment break: a lap is a split marker and the recording usually runs straight through it, so breaking there would drop the ground covered between the last point of one lap and the first of the next |
+| `Trackpoint/Time` | `point.time` |
+| `Trackpoint/Position/{Latitude,Longitude}Degrees` | `point.lat`, `point.lon` |
+| `Trackpoint/AltitudeMeters` | `point.elevationMeters` |
+| `Trackpoint/DistanceMeters` | `point.distanceMeters` |
+| `Trackpoint/HeartRateBpm/Value` | `point.heartRateBpm` |
+| `Trackpoint/Cadence` | `point.cyclingCadenceRpm` — the schema's `Cadence` on a trackpoint is bike cadence |
+| `Trackpoint/Extensions/TPX/RunCadence` | `point.runningCadenceSpm` |
+| `Trackpoint/Extensions/TPX/Speed`, `Watts` | `point.speedMetersPerSecond`, `point.powerWatts` |
+| `Activity/Creator/{Name,ProductID,Version}` | `metadata.device` |
+| `Activity/Creator/UnitId` | `device.serialNumber` — parsed, never displayed (TD-020) |
+
+TCX is the first format that states cadence units *itself*: `Cadence` is cycling and the `RunCadence` extension is running, so unlike GPX and FIT the sport does not have to decide. Where a file states both, the explicit one wins.
+
+**Known limits and loss**
+
+- **Sport vocabulary.** TCX has three values: `Running`, `Biking`, `Other`. Hiking, walking, swimming, rowing and skiing all export as `Other`, and a re-import cannot recover which they were. Warned on export.
+- **Temperature.** TCX defines no temperature field, standard or extension, so it is dropped on export. Warned.
+- **Laps are structural and mandatory.** A `Track` exists only inside a `Lap`, and the schema requires at least one. An activity with no laps therefore exports as a single lap covering the whole track. `Calories` is a required element, so it is written as `0` when unknown rather than omitted — a file that omits it does not parse.
+- **A section export writes one lap covering the section.** This resolves the §17 question about laps that partly overlap a selected range. A lap cut in half is no longer the lap the athlete ran: its distance and time would describe something that never happened, and its name would imply otherwise. Dropping the original laps and stating a single lap for exactly the exported section is the only version that is true. This is already what `sliceActivity` does with laps, so import, focus and export agree.
+
 ## 17. Open Questions
 
 - Which map tile provider should be used initially, and what are its attribution and usage requirements?
@@ -200,7 +232,6 @@ The section panel sits next to the focus bar rather than up in the overview: tha
 - What exact label should the running cadence chart use: `strides/min`, `spm`, or full `strides per minute`?
 - Should cycling speed prefer source instantaneous speed, derived distance/time, or a smoothed hybrid?
 - Should cycling cadence be added later as an optional sensor chart separate from the initial cycling speed chart?
-- For TCX export, how should selected-range exports handle laps that partially overlap the selected range?
 - What smoothing/noise threshold should elevation gain use?
 - Which device metadata fields should be shown by default, and should advanced/sensitive fields require an explicit reveal action?
 - Should GPX `creator` be displayed as device information, app information, or both when the file does not provide a cleaner device model?

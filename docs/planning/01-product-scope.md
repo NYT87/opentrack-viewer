@@ -154,7 +154,7 @@ Any proposal that requires a backend, account, database, queue, cloud object sto
 
 The README should state the privacy model in the first screen:
 
-> This app opens activity files locally in your browser. GPX/FIT parsing and calculations happen on your device. The app does not upload your activity file to a backend.
+> This app opens activity files locally in your browser. GPX, FIT and TCX parsing and calculations happen on your device. The app does not upload your activity file to a backend.
 
 Also document the map tile caveat:
 
