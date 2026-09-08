@@ -54,7 +54,7 @@ Cover:
 - Ready viewer uses a readable max-width content container.
 - Ready viewer large-screen layout displays the left section sidebar.
 - Ready viewer medium/small/mobile layout hides the left section sidebar.
-- Ready viewer main content renders overview first, map second, and charts later.
+- Ready viewer main content renders overview first, separate device card when available, map second, and charts later.
 - Section sidebar links scroll or jump to viewer sections without clearing loaded activity state.
 - Summary panel missing values.
 - Summary panel displays Distance, Time, Moving Time, and Elapsed Time as separate fields.
@@ -62,7 +62,7 @@ Cover:
 - Summary/overview displays Average Speed for cycling activities.
 - Summary/overview does not foreground Average Speed for running when Average Pace is available.
 - Summary/overview does not foreground Average Pace for cycling when Average Speed is available.
-- Device information present/missing states.
+- Device information present/missing states, including separate-card layout.
 - Laps panel present/missing states.
 - Laps panel large-screen placement beside the map.
 - Laps panel medium/small/mobile placement after the map.
@@ -117,11 +117,12 @@ Cover:
 - Confirm ready viewer content is constrained to a readable maximum width.
 - Confirm large-screen viewer shows the left section sidebar with section links.
 - Confirm medium/small/mobile viewer hides the left section sidebar.
-- Confirm content order is overview, map, then charts.
+- Confirm content order is overview, separate device card when available, map, then charts.
 - Confirm lap fixture displays laps on the left side of the map on large screens.
 - Confirm lap fixture displays laps after the map on medium/small/mobile screens.
 - Confirm fixture without laps does not render an empty laps panel.
 - Confirm device information renders when a fixture contains supported metadata.
+- Confirm device information does not render inside the summary/activity overview card.
 - Confirm chart x-axis can switch between distance and time for a fixture with both.
 - Confirm chart Y-axis labels are not clipped or cramped in the reference-width layout.
 - Confirm distance x-axis shows 1 km interval tick marks where space permits.

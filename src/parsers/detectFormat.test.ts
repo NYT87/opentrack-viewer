@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { detectFormat, detectSupportedFormat, SUPPORTED_FORMATS } from './detectFormat';
 import { ActivityError } from '../domain/errors';
-import { fixtureFile, readFixture } from '../test/helpers/fixtures';
+import { fixtureFile, readBinaryFixture, readFixture } from '../test/helpers/fixtures';
 
 const fileOf = (name: string, content: string, type = ''): File =>
   new File([content], name, { type });
@@ -96,5 +96,87 @@ describe('detectSupportedFormat', () => {
     await expect(detectSupportedFormat(new File(['<kml />'], 'route.kml'))).rejects.toMatchObject({
       code: 'unsupported_format',
     });
+  });
+});
+
+describe('video detection (AV-902)', () => {
+  const video = (fixture: string, name = fixture) =>
+    new File([readBinaryFixture(fixture)], name, { type: 'video/mp4' });
+
+  it('recognizes a GoPro video by the markers in its tail', async () => {
+    // A camera writes `moov` at the end, so the head cannot answer this.
+    await expect(detectFormat(video('gopro-with-telemetry.mp4'))).resolves.toEqual({
+      format: 'gopro',
+      via: 'signature',
+    });
+  });
+
+  it('recognizes a video with no telemetry as just a video', async () => {
+    await expect(detectFormat(video('plain-video.mp4'))).resolves.toEqual({
+      format: 'video',
+      via: 'signature',
+    });
+  });
+
+  it('trusts the container over the extension, either way', async () => {
+    // A GoPro recording renamed `.mov`, and a text file renamed `.mp4`.
+    await expect(detectFormat(video('gopro-with-telemetry.mp4', 'GX010042.mov'))).resolves
+      .toMatchObject({ format: 'gopro', via: 'signature' });
+
+    const notAVideo = new File(['not a video at all'], 'lies.mp4');
+    await expect(detectFormat(notAVideo)).resolves.toEqual({
+      format: 'video',
+      via: 'extension',
+    });
+  });
+
+  it('turns a video away for its own reason, not a generic one', async () => {
+    await expect(detectSupportedFormat(video('plain-video.mp4'))).rejects.toMatchObject({
+      code: 'unsupported_format',
+      message: expect.stringMatching(/only GoPro videos carry the telemetry/i),
+    });
+
+    // ...and a GoPro file is told it was recognized, which is a different thing.
+    await expect(detectSupportedFormat(video('gopro-with-telemetry.mp4'))).rejects.toMatchObject({
+      code: 'unsupported_format',
+      message: expect.stringMatching(/GoPro video with telemetry, but reading it is not available/i),
+    });
+  });
+
+  it('reads only the head of a file that is not a video', async () => {
+    // The tail sniff is the expensive half, and a GPX must never pay for it.
+    const reads: [number, number][] = [];
+    const gpx = fixtureFile('simple-route.gpx');
+    const original = gpx.slice.bind(gpx);
+    gpx.slice = ((start = 0, end = gpx.size) => {
+      reads.push([start, end]);
+      return original(start, end);
+    }) as File['slice'];
+
+    await detectFormat(gpx);
+
+    expect(reads).toEqual([[0, 512]]);
+  });
+
+  it('never reads a whole video, however large it claims to be', async () => {
+    // The point of the whole approach: a multi-gigabyte recording is
+    // identified from two small windows, not by loading it.
+    const bytes = readBinaryFixture('gopro-with-telemetry.mp4');
+    const file = new File([bytes], 'GX010042.mp4');
+    const reads: [number, number][] = [];
+    const original = file.slice.bind(file);
+    file.slice = ((start = 0, end = file.size) => {
+      reads.push([start, end === undefined ? file.size : end]);
+      return original(start, end);
+    }) as File['slice'];
+
+    await detectFormat(file);
+
+    // The head, then the tail — and nothing in between.
+    expect(reads).toHaveLength(2);
+    expect(reads[0]).toEqual([0, 512]);
+    expect(reads[1]![0]).toBeGreaterThanOrEqual(512);
+    const readBytes = reads.reduce((sum, [start, end]) => sum + (end - start), 0);
+    expect(readBytes).toBeLessThan(file.size + 64 * 1024);
   });
 });

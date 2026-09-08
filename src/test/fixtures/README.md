@@ -26,6 +26,8 @@ device identifier is committed here (plan §13, Fixture Policy).
 | `laps-without-distance.tcx` | Two continuous laps with **no per-point `DistanceMeters`**, so distance must come from the positions — which is what makes an invented break at the lap boundary visible. |
 | `impossible-coordinates.fit` | A latitude past the pole and Null Island, on points that still carry a time and a heart rate. FIT cannot express an out-of-range *longitude* at all: 181 degrees overflows its signed semicircle field, so latitude carries that case. |
 | `impossible-coordinates.tcx` | A latitude past the pole, a longitude past the antimeridian, and Null Island — each on a point that still carries a time and a heart rate, so the position can be dropped without the point being dropped with it. |
+| `gopro-with-telemetry.mp4` | An MP4 container whose tail carries GoPro's `gpmd` and `GoPro` markers, where a camera actually writes them. Generated: detection reads boxes, not pictures, so it holds no video. |
+| `plain-video.mp4` | The same container with no telemetry track — the "recognized, but not for us" case. |
 | `malformed.tcx` | Unclosed elements; must fail as `invalid_tcx_xml`. |
 
 ## The `.fit` fixtures are generated

@@ -12,6 +12,10 @@ export type ActivitySourceFormat =
   | 'kml'
   | 'geojson'
   | 'csv'
+  /** An MP4/MOV that carries GoPro GPMF telemetry (`AV-902`). */
+  | 'gopro'
+  /** An MP4/MOV with no telemetry this app can use — a video, and only that. */
+  | 'video'
   | 'unknown';
 
 export type ActivitySport =

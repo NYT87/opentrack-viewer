@@ -77,7 +77,7 @@ React UI
             +--> Primary Activity Section
                  +--> Activity Details Panel
                  +--> MapLibre Route Map
-            +--> Device Info Panel when available
+            +--> Device Info Card when available
             +--> Chart Panel
                  +--> X-axis switch: distance/time
                  +--> Elevation
@@ -137,7 +137,7 @@ The UI must depend on normalized domain objects, never on format-specific parser
 16. Map section renders in its own content box below the overview.
 17. Laps render beside the map on large screens when lap data exists.
 18. On medium/small/mobile screens, the section sidebar is hidden and laps render after the map.
-19. Device information panel displays optional device metadata when available.
+19. Device information card displays optional device metadata separately from the summary/activity overview when available.
 20. Chart availability logic decides which charts can be shown for the activity.
 21. Chart series adapters generate elevation, running pace, running cadence, cycling speed, and future sensor series.
 22. Chart panel renders available charts with a user-selected x-axis mode below the map/laps area.
@@ -217,6 +217,7 @@ below say how the rest of the app is expected to behave in the face of that.
 - The UI should gracefully handle partial activities.
 - Device information is optional metadata; missing device information is not an error.
 - The UI should prefer human-readable device fields such as manufacturer, model, name, and software/firmware version.
+- Device information should render in its own card rather than inside the summary/activity overview card.
 - Stable identifiers such as serial number should not be displayed by default and should never be sent to telemetry.
 - Chart configuration should be derived from normalized `Activity` data, not source file format.
 - A chart may be hidden, disabled, or shown with an empty state based on data availability and activity sport.
@@ -266,7 +267,7 @@ export type ActivityViewerState =
 - `empty`: show only the local file upload button/drop zone and any external/static supporting information currently shown outside the viewer.
 - `readingFile` and `processingFile`: keep the upload-focused layout and show progress/status near the upload area.
 - `error`: keep the upload-focused layout, show the error near the upload area, and allow another file selection.
-- `ready`: render the full activity viewer, including map, summary, charts, device information when available, and viewer controls.
+- `ready`: render the full activity viewer, including map, summary, charts, a separate device information card when available, and viewer controls.
 - Map, chart, summary, and activity metadata areas should not appear in `empty`, `readingFile`, `processingFile`, or `error` states.
 - Loading skeletons for the map/chart areas are unnecessary in the initial scope because those areas are not visible until processing succeeds.
 
@@ -324,9 +325,10 @@ SEO rules:
 After an activity is successfully processed, the ready viewer should use a clear top-to-bottom flow:
 
 1. Activity data overview box.
-2. Map box, with laps beside the map on large screens when laps exist.
-3. Charts section.
-4. Later-stage export and advanced controls.
+2. Device information card when available.
+3. Map box, with laps beside the map on large screens when laps exist.
+4. Charts section.
+5. Later-stage export and advanced controls.
 
 ### Global Loaded-Activity Layout
 
@@ -335,6 +337,7 @@ Large-screen layout:
 - A compact left sidebar should appear beside the main content and link to major in-page sections such as overview, map, laps when available, and charts.
 - The sidebar links should use section anchors or equivalent in-page navigation and should not clear loaded activity state.
 - Main content should render the activity data overview as the first content box.
+- Device information should render as its own card below or beside the overview according to available layout space; it should not be nested inside the summary/overview card.
 - The map should render in a separate content box below the overview.
 - Charts should render below the map/laps area, not beside the overview.
 - Content boxes should not be nested inside other boxes.
@@ -343,6 +346,7 @@ Medium/small/mobile layout:
 - The left section sidebar should not render.
 - Main content should remain one column.
 - The activity data overview box appears first.
+- The device card appears after the overview when device information is available.
 - The map box appears after the overview.
 - Laps appear after the map when laps exist.
 - Charts remain below the map/laps area.

@@ -104,8 +104,9 @@ Acceptance criteria:
 - Large-screen layout includes a compact left sidebar with in-page links to major sections such as Overview, Map, Laps when available, and Charts.
 - Sidebar links scroll or jump within the current viewer page without reloading, navigating away, or clearing loaded activity state.
 - Sidebar is hidden on medium, small, and mobile screens.
-- Main content order is activity data overview box, map box, then chart section.
-- Activity overview is a first-class content box for existing summary/device/activity metadata; it does not copy unrelated content from reference screenshots.
+- Main content order is activity data overview box, separate device card when available, map box, then chart section.
+- Activity overview is a first-class content box for summary/activity metadata; it does not copy unrelated content from reference screenshots and does not include device metadata.
+- Device metadata has its own card when available and should not be nested inside the summary/activity overview card.
 - Map has its own content box and remains large enough to inspect the route.
 - Charts remain below the map/laps section.
 - Responsive layout avoids overlapping text, sidebar links, map controls, laps content, and chart controls.
@@ -351,6 +352,20 @@ Acceptance criteria:
 - Missing device information does not show an error.
 - Sensitive stable identifiers, including serial number, are hidden by default.
 - Device information display works independently from source format.
+
+#### AV-408: Split Device Information Into a Separate Card
+
+Dependencies: AV-011, AV-404, AV-405
+
+Acceptance criteria:
+- Device information renders in its own card/panel, separate from the summary/activity overview card.
+- Summary/activity overview card continues to contain activity metrics and overview information only; it does not include manufacturer, model, device name, software version, firmware version, serial number, or other device fields.
+- The separate device card is shown only when `ActivityMetadata.device` has at least one safe, user-friendly display field.
+- Missing device information does not render an empty device card and does not create layout gaps.
+- The device card follows the same responsive content width and spacing rules as the other ready-viewer cards.
+- On mobile/small screens, the device card appears after the overview and before the map.
+- On large screens, the device card may sit below or beside the overview, but it must remain visually distinct from the summary card.
+- Tests cover device-present, device-missing, summary-without-device-fields, mobile ordering, large-screen layout, and redaction of stable identifiers.
 
 #### AV-406: Render Activity Laps
 

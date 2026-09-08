@@ -226,6 +226,51 @@ Decision: Telemetry overlay work should first support overlay preview and overla
 
 Reason: Overlay-only export is useful, smaller in scope, and avoids source video transcoding. Burned-in video export requires heavier browser APIs, memory management, codec/container decisions, audio handling, and longer-running local processing, so it needs measured evidence before becoming committed delivery scope.
 
+### TD-027: Device Metadata Uses a Separate Card
+
+Decision: Device information should render in its own viewer card when safe display fields are available, not inside the summary/activity overview card.
+
+Reason: Summary metrics and recording-device metadata answer different questions. Splitting them keeps the overview focused on activity performance while giving device metadata a clear place with its own privacy/redaction behavior.
+
+### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
+
+Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
+
+**Licences, read from the licence files rather than the manifests.** Every one is permissive and none conflicts with publishing this app as open source — but two of them do not say what `package.json` says, which matters because that field is what a licence scanner reads:
+
+| Package | `package.json` | `LICENSE` file | Governs |
+| --- | --- | --- | --- |
+| `gopro-telemetry` | `ISC` | MIT — "MIT License, Copyright (c) 2019 Juan Irache Duesca" | **MIT.** The manifest is wrong. |
+| `gpmf-extract` | `ISC` | MIT, same author, same wording | **MIT.** The same mistake, in the same hand. |
+| `mp4box` | `BSD-3-Clause` | BSD ("Redistribution and use…") | BSD-3-Clause, agreed |
+| `binary-parser` | `MIT` | MIT ("Permission is hereby granted…") | MIT, agreed |
+
+ISC and MIT are both permissive and near-identical in effect, so nothing turns on the discrepancy legally. It is recorded because an automated audit of this project will report ISC for two dependencies whose actual terms are MIT, and someone will otherwise have to rediscover why.
+
+**The three candidates, assessed**
+
+| Project | Licence | Verdict |
+| --- | --- | --- |
+| [`gopro/gpmf-parser`](https://github.com/gopro/gpmf-parser) | **Apache-2.0 *or* MIT**, at our choice — its `LICENSE.txt` opens "Apache License 2.0 or MIT" and the README says "licensed under either". C, actively pushed | The authoritative definition of GPMF, and worth reading as the spec. **Not compiled to WebAssembly:** that would add an Emscripten toolchain to the build and ship a `.wasm` asset, to duplicate what a maintained pure-JS path already does. WASM would earn its place only if the JS proved wrong or too slow — neither is in evidence. |
+| [`JuanIrache/gopro-telemetry`](https://github.com/JuanIrache/gopro-telemetry) | MIT by its licence file, pure JS, published 2025-10 | **Chosen** for interpretation. Handles `GPS5` (HERO5–HERO10) and `GPS9` (HERO11 onward), plus `ACCL`, `GYRO`, `GRAV`, `CORI`, `MAGN`, `TMPC`, `SHUT`. 18 KB gzipped. |
+| [`kmatzen/telemetrik`](https://github.com/kmatzen/telemetrik) | MIT, Python | Not a browser dependency, as the task notes. Kept as an **independent oracle** for fixtures — the same role the hand-written FIT encoder plays against `fit-file-parser`: two implementations agreeing is worth more than one agreeing with itself. |
+
+**Reading the metadata track without loading the video.** This was the criterion that decided the approach, and `gpmf-extract` already answers it — verified by reading its source, not its README:
+
+- It reads with `file.stream().pipeTo(new WritableStream(…))`, applying backpressure at a 2 MB chunk size. The video is never held in memory; it flows past.
+- It runs that read in an **inline Web Worker** by default, falling back to the main thread when workers are unavailable or the worker errors.
+- It reports **progress** by byte offset, and accepts a **cancellation token** checked on every chunk.
+- `mp4box.onReady` finds the track whose codec is `gpmd`; when there is none it terminates early rather than reading on.
+- Only the metadata samples are retained. **Peak memory is proportional to the GPMF payload — a few MB for a long recording — not to the video.**
+
+**A defect to handle in `AV-903`:** `gpmf-extract` resolves once it has collected its samples but never calls `terminate()`, so the stream keeps reading to end-of-file afterwards. The promise settles early; the I/O does not stop. The fix is ours to apply: pass a `cancellationToken` and cancel it on resolve.
+
+**Bundle.** ~81 KB gzipped for the whole path — `mp4box` 54 KB, `gopro-telemetry` 18 KB, `gpmf-extract` and `binary-parser` the rest. Comparable to the FIT parser's 61 KB, and loaded on demand behind the tool page, so nobody who never opens a video pays for it.
+
+**First supported scope.** MP4/MOV carrying a `gpmd` track from HERO5 onward: `GPS5` or `GPS9` into `lat`, `lon`, `elevationMeters`, `time` and `speedMetersPerSecond`. A file with no `gpmd` track is reported as unsupported with a typed error, never half-parsed. The IMU streams (`ACCL`, `GYRO`, `GRAV`, `CORI`, `MAGN`) have no home in `Activity` today and belong to `AV-905`.
+
+**One semantic trap, recorded before it bites.** `TMPC` is the *camera's* temperature, not the air's. It must not become `temperatureCelsius` unremarked — that field means ambient temperature everywhere else in this app, and a camera in the sun reads far above it. The same class of mistake as GPX cadence with no unit.
+
 ## 17. Open Questions
 
 ### Answered by what was built

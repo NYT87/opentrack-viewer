@@ -52,7 +52,7 @@ The core promise is simple:
 - In the activity overview, show average pace as the primary performance metric for running activities.
 - In the activity overview, show average speed as the primary performance metric for cycling activities.
 - Do not show average speed as the primary running metric when average pace can be calculated.
-- Display device information when the file provides it and when it can be shown without exposing sensitive identifiers unnecessarily.
+- Display device information in its own card, separate from the summary/activity overview card, when the file provides it and when it can be shown without exposing sensitive identifiers unnecessarily.
 - Add an elevation chart after the map slice is working.
 - Let users switch chart x-axis mode between distance and time.
 - Render chart axes with readable spacing so Y-axis labels are not cramped and X-axis tick marks provide useful orientation.
@@ -150,7 +150,7 @@ The early implementation should stay intentionally small:
 - The global header should use the OpenTrack Viewer brand/title as the home link, place a `Tools` dropdown beside the title with `File viewer` linking to the viewer/process page and future tool entries such as GoPro video telemetry extraction, avoid a duplicate Home nav button, omit header subtitles, and always show an icon-only Settings control.
 - GPX only until route rendering and summary stats are solid.
 - One map view.
-- One responsive loaded-activity layout: max-width content, optional large-screen section sidebar, overview first, map second, charts later.
+- One responsive loaded-activity layout: max-width content, optional large-screen section sidebar, overview first, separate device card when available, map second, charts later.
 - Sport-specific overview metrics should prefer average pace for running and average speed for cycling.
 - One chart panel with elevation first, then sport-specific charts: run pace/cadence for running and speed for cycling when the underlying data supports them.
 - Laps are displayed only when lap data exists; missing laps should not create empty layout noise.

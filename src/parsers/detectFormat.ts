@@ -10,6 +10,16 @@ export interface FormatDetection {
 /** Bytes read from the head of the file for signature sniffing. */
 const SIGNATURE_BYTES = 512;
 
+/**
+ * AV-902. How much of a video's tail to sniff for GoPro's markers.
+ *
+ * A camera writes `moov` — and with it the `gpmd` track and GoPro's `udta`
+ * atoms — at the *end* of the file, so the head cannot answer the question. 64
+ * KiB of a multi-gigabyte recording is still the minimum needed to identify it,
+ * and it is read only once the head has already said this is a video.
+ */
+const VIDEO_TAIL_BYTES = 64 * 1024;
+
 const EXTENSION_FORMATS: Record<string, ActivitySourceFormat> = {
   gpx: 'gpx',
   fit: 'fit',
@@ -18,6 +28,8 @@ const EXTENSION_FORMATS: Record<string, ActivitySourceFormat> = {
   geojson: 'geojson',
   json: 'geojson',
   csv: 'csv',
+  mp4: 'video',
+  mov: 'video',
 };
 
 /** Formats this build can actually parse. */
@@ -39,6 +51,14 @@ export async function detectFormat(file: File): Promise<FormatDetection> {
   // so a mislabelled file is still routed to the right parser.
   if (isFitSignature(head)) return { format: 'fit', via: 'signature' };
 
+  // AV-902. An ISO base media container announces itself in its first box, so
+  // a video is identified from the head alone. Only then is its tail read, to
+  // ask the more expensive question of whether it carries telemetry.
+  if (isIsoBaseMediaSignature(head)) {
+    const gopro = (await hasGoProMarkers(file, head)) ? 'gopro' : 'video';
+    return { format: gopro, via: 'signature' };
+  }
+
   const xmlRoot = detectXmlRoot(head);
   if (xmlRoot) return { format: xmlRoot, via: 'xml-root' };
 
@@ -55,13 +75,26 @@ export async function detectFormat(file: File): Promise<FormatDetection> {
 export async function detectSupportedFormat(file: File): Promise<FormatDetection> {
   const detection = await detectFormat(file);
   if (!SUPPORTED_FORMATS.includes(detection.format)) {
-    throw new ActivityError(
-      'unsupported_format',
-      `${detection.format.toUpperCase()} files are not supported yet. ` +
-        'This build reads GPX, FIT and TCX.',
-    );
+    throw new ActivityError('unsupported_format', unsupportedMessage(detection.format));
   }
   return detection;
+}
+
+/**
+ * AV-902. A video is turned away for a different reason than a spreadsheet is,
+ * and saying which is the difference between a clear refusal and a shrug.
+ */
+function unsupportedMessage(format: ActivitySourceFormat): string {
+  if (format === 'gopro') {
+    return 'This looks like a GoPro video with telemetry, but reading it is not available yet.';
+  }
+  if (format === 'video') {
+    return 'This is a video file. Only GoPro videos carry the telemetry this app can read, and ' +
+      'support for them is not available yet.';
+  }
+  return (
+    `${format.toUpperCase()} files are not supported yet. This build reads GPX, FIT and TCX.`
+  );
 }
 
 async function readHead(file: File): Promise<Uint8Array> {
@@ -74,6 +107,45 @@ function isFitSignature(head: Uint8Array): boolean {
   return (
     head[8] === 0x2e && head[9] === 0x46 && head[10] === 0x49 && head[11] === 0x54 // ".FIT"
   );
+}
+
+/**
+ * An ISO base media file (MP4, MOV) opens with a box whose type is `ftyp`,
+ * four bytes in — after the box's own length.
+ */
+function isIsoBaseMediaSignature(head: Uint8Array): boolean {
+  if (head.length < 12) return false;
+  return (
+    head[4] === 0x66 && head[5] === 0x74 && head[6] === 0x79 && head[7] === 0x70 // "ftyp"
+  );
+}
+
+/**
+ * AV-902. Whether a video looks like it carries GoPro telemetry.
+ *
+ * `gpmd` is the handler and codec name of the metadata track; `GoPro` and
+ * `FIRM` appear in the camera's `udta` atoms. Any of them is enough to route
+ * the file hopefully — `AV-903` is what decides definitively, by actually
+ * finding the track.
+ *
+ * Deliberately "when possible", as the task puts it: a `moov` too far from
+ * either end goes unrecognized and the file is treated as ordinary video,
+ * which is the honest answer rather than a guess.
+ */
+async function hasGoProMarkers(file: File, head: Uint8Array): Promise<boolean> {
+  if (containsGoProMarker(head)) return true;
+
+  const tailStart = Math.max(SIGNATURE_BYTES, file.size - VIDEO_TAIL_BYTES);
+  if (tailStart >= file.size) return false;
+
+  const tail = new Uint8Array(await file.slice(tailStart).arrayBuffer());
+  return containsGoProMarker(tail);
+}
+
+function containsGoProMarker(bytes: Uint8Array): boolean {
+  // latin1 so arbitrary binary decodes without loss or replacement characters.
+  const text = new TextDecoder('latin1').decode(bytes);
+  return text.includes('gpmd') || text.includes('GoPro') || text.includes('FIRM');
 }
 
 function detectXmlRoot(head: Uint8Array): ActivitySourceFormat | undefined {

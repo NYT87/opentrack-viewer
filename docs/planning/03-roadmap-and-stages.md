@@ -48,7 +48,7 @@ Outcome:
 - Laps display when the activity includes lap data.
 - On large screens, laps display to the left of the map.
 - On medium/small/mobile screens, laps display after the map.
-- Device information is displayed when available.
+- Device information is displayed in a separate card when available.
 - Missing device information is handled quietly.
 - Stats handle missing time/elevation fields.
 - Units are consistent and test-covered.
@@ -208,7 +208,7 @@ The first vertical slice is complete when:
 - Loaded viewer content is constrained to a readable maximum width.
 - Large-screen loaded viewer layout shows a compact left section sidebar.
 - Medium/small/mobile loaded viewer layout hides the left section sidebar.
-- Main loaded viewer content shows activity data overview first, map second, and charts later.
+- Main loaded viewer content shows activity data overview first, separate device card when available, map second, and charts later.
 - Laps display beside the map on large screens when lap data exists.
 - Laps display after the map on medium/small/mobile screens when lap data exists.
 - Activity details include Distance, Time, Moving Time, and Elapsed Time as separate fields where available.
