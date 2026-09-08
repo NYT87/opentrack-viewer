@@ -214,9 +214,21 @@ TCX import, and browser-side GPX, FIT and TCX export (`AV-001`…`003`, `AV-101`
 `AV-201`…`203`, `AV-301`…`304`, `AV-401`…`404`, `AV-501`…`507`, `AV-513`, `AV-515`,
 `AV-601`…`605`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-013`, `AV-406`, `AV-407`, `AV-550`–`AV-555`, `AV-701`–`AV-704`, `AV-750`–`AV-753`, plus `AV-801`–`AV-803`).
 
-Every task in the plan is implemented, and six of the seven questions left in
-§17 have been answered and built. One remains open: which image to use for
-link previews.
+The plan grew in `f42a152` with two new epics, neither started:
+
+| Epic | Tasks | Adds |
+| --- | --- | --- |
+| **E9** GoPro video telemetry | `AV-901`–`AV-907` | Read the GPMF metadata track out of an MP4/MOV in the browser and normalize its GPS and sensor streams into `Activity`, behind its own tool page |
+| **E10** Telemetry video overlays | `AV-1001`–`AV-1008` | An overlay tool page: a timeline and template model, a synchronized preview, and export of overlay assets or burned-in video where feasible |
+
+Everything before them is implemented — 67 tasks — with one criterion
+outstanding: `AV-555` asks that unavailable export targets be *hidden or
+disabled with a typed reason, not shown as broken controls*. Today every
+format is always offered and refuses on click (a treadmill run offers
+`Convert to GPX`, then explains it has no coordinates). The refusal is clear,
+but the control should not have looked available.
+
+One §17 question also remains open: which image to use for link previews.
 
 ## MapLibre integration notes
 

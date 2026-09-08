@@ -1487,6 +1487,43 @@ test('deep-links into the viewer under the sub-path', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'nyt87' })).toBeVisible();
 });
 
+test('falls back to the homepage for an unknown hash route (AV-006)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  // A stale bookmark, a renamed route, a typo — under the deployment sub-path,
+  // where the router is the only thing that can resolve it.
+  await page.goto('./#/settings');
+
+  // The homepage itself, not an empty shell: its heading and its content.
+  await expect(page.getByRole('heading', { name: /Open your activity files/i })).toBeVisible();
+  await expect(page.getByText(/Your file stays on your device/i)).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Read the Terms and Conditions' })).toBeVisible();
+
+  // The chrome is intact, so the reader can go somewhere real from here.
+  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'nyt87' })).toBeVisible();
+
+  // The title falls back to the site default rather than naming a route that
+  // does not exist (AV-013).
+  await expect(page).toHaveTitle(/open GPX, FIT and TCX activity files/);
+  expect(errors).toEqual([]);
+
+  // ...and navigating on from it works.
+  await page.getByRole('link', { name: 'Read the Terms and Conditions' }).click();
+  await expect(page.getByRole('heading', { name: /Terms and Conditions/i })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe('#/terms');
+});
+
+test('publishes a 404 fallback for unknown paths, not just unknown hashes (AV-006)', async () => {
+  // The other half of "no blank screen". A hash the router cannot resolve is
+  // the app's problem; a *path* it never sees is the host's, and GitHub Pages
+  // answers an unknown path with its own 404 page unless the build ships one.
+  const workflow = readFileSync(join(process.cwd(), '.github/workflows/ci-deploy.yml'), 'utf-8');
+
+  expect(workflow).toContain('cp dist/index.html dist/404.html');
+});
+
 test('serves SEO metadata a crawler can read without running the app (AV-013)', async ({
   page,
 }) => {
