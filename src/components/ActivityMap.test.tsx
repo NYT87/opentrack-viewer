@@ -433,3 +433,48 @@ describe('FakeMap harness', () => {
     expect(FakeMap.instances).toHaveLength(1);
   });
 });
+
+describe('a highlighted lap does not move the map (§17)', () => {
+  const lapRoute = () =>
+    activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.6, lon: -0.2 },
+        { lat: 51.61, lon: -0.2 },
+      ]),
+    );
+
+  it('draws the lap without fitting to it', () => {
+    const route = activityToRouteGeoJSON(
+      makeActivity([
+        { lat: 51.5, lon: -0.1 },
+        { lat: 51.52, lon: -0.1 },
+      ]),
+    );
+
+    const { rerender } = renderMap({ route });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    const fitsAfterLoad = map.fitBoundsCalls.length;
+
+    rerender(
+      <ActivityMap route={route} marker={emptyMarker} basemapEnabled lapRoute={lapRoute()} />,
+    );
+
+    // The lap's own line is drawn...
+    expect(map.sources.get('activity-lap')?.data).toMatchObject({ type: 'FeatureCollection' });
+    // ...and the camera has not been asked to go anywhere. This is the whole
+    // difference from a chart selection, which does fit to its section.
+    expect(map.fitBoundsCalls).toHaveLength(fitsAfterLoad);
+  });
+
+  it('clears the lap line when the lap is let go', () => {
+    const route = activityToRouteGeoJSON(makeActivity([{ lat: 51.5, lon: -0.1 }]));
+    const { rerender } = renderMap({ route, lapRoute: lapRoute() });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+
+    rerender(<ActivityMap route={route} marker={emptyMarker} basemapEnabled />);
+
+    expect(map.sources.get('activity-lap')?.data).toMatchObject({ features: [] });
+  });
+});

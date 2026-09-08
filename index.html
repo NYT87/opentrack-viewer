@@ -49,15 +49,24 @@
       content="__SITE_URL__icons/icon-512.png"
     />
     <script>
-      // Resolve the default `system` theme before first paint, so a dark-mode
-      // device never flashes the light palette on load. Kept deliberately tiny
-      // and duplicated from src/domain/theme.ts: React has not booted yet.
+      // Resolve the theme before first paint, so neither a dark-mode device nor
+      // a reader who chose dark ever flashes the light palette on load. Kept
+      // deliberately tiny and duplicated from src/domain/preferences.ts and
+      // theme.ts: React has not booted yet, and this must not wait for it.
       try {
-        document.documentElement.dataset.theme = window.matchMedia(
-          '(prefers-color-scheme: dark)',
-        ).matches
-          ? 'dark'
-          : 'light';
+        var stored = null;
+        try {
+          stored = window.localStorage.getItem('opentrack-viewer:theme');
+        } catch {
+          // Private browsing and blocked site data both throw on access.
+        }
+
+        document.documentElement.dataset.theme =
+          stored === 'dark' || stored === 'light'
+            ? stored
+            : window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
       } catch {
         document.documentElement.dataset.theme = 'light';
       }

@@ -218,9 +218,9 @@ test('charts pace and cadence for a running activity (AV-505, AV-506)', async ({
 
   await expect(page.getByRole('region', { name: 'Elevation chart' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText('/km');
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toContainText('spm');
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText('spm');
   // AV-515: named as strides per minute, never rpm.
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toContainText(
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText(
     /strides per minute/i,
   );
 });
@@ -573,6 +573,50 @@ test('applies the theme before first paint (AV-009)', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
 
+test('remembers the theme across a reload, and applies it before paint', async ({ page }) => {
+  // A dark-mode device, so the stored choice has to override the system one to
+  // prove it was read at all.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('./#/viewer');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+  const settings = await openSettings(page);
+  await settings.getByRole('radio', { name: 'Light' }).check();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+
+  await page.reload();
+
+  // Still light on a dark-mode device: the stored choice survived, and the
+  // pre-paint script read it rather than waiting for React.
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  expect(await page.evaluate(() => localStorage.getItem('opentrack-viewer:theme'))).toBe('light');
+
+  // ...and it is the only thing stored.
+  const keys = await page.evaluate(() => Object.keys(localStorage));
+  expect(keys).toEqual(['opentrack-viewer:theme']);
+});
+
+test('starts from the browser locale for units', async ({ browser }) => {
+  const american = await browser.newContext({ locale: 'en-US' });
+  const page = await american.newPage();
+  await page.goto(`${SITE}#/viewer`);
+  await page.getByTestId('file-input').setInputFiles('src/test/fixtures/route-with-elevation.gpx');
+
+  // No setting touched: the locale chose miles. `mph` rather than `mi`, which
+  // runs into the next label in the concatenated text content.
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toContainText('mph');
+  await american.close();
+
+  const french = await browser.newContext({ locale: 'fr-FR' });
+  const other = await french.newPage();
+  await other.goto(`${SITE}#/viewer`);
+  await other.getByTestId('file-input').setInputFiles('src/test/fixtures/route-with-elevation.gpx');
+
+  await expect(other.getByRole('region', { name: 'Activity summary' })).toContainText('km/h');
+  await french.close();
+});
+
 test('navigates to the viewer from the Tools menu (AV-012)', async ({ page }) => {
   await page.goto('./');
 
@@ -721,7 +765,7 @@ test('charts speed for a ride, not pace or run cadence (AV-513, AV-515)', async 
   await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText(
     /shown for running activities/i,
   );
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toContainText(
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText(
     /shown for running activities/i,
   );
 });
@@ -730,7 +774,7 @@ test('labels running cadence in strides per minute (AV-515)', async ({ page }) =
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-cadence.gpx');
 
-  const cadence = page.getByRole('region', { name: 'Cadence chart' });
+  const cadence = page.getByRole('region', { name: 'Cadence chart', exact: true });
   await expect(cadence).toContainText('Cadence (spm)');
   await expect(cadence).not.toContainText('rpm');
 
@@ -740,12 +784,48 @@ test('labels running cadence in strides per minute (AV-515)', async ({ page }) =
   );
 });
 
+test('highlights a lap from its row, and lets go again (§17)', async ({ page }) => {
+  await loadFixture(page, 'run-with-laps.tcx');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+
+  const laps = page.getByRole('region', { name: 'Laps' });
+  await laps.getByRole('button', { name: 'Highlight lap 2' }).click();
+  await expect(laps.getByRole('button', { name: 'Stop highlighting lap 2' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  // Pressing again puts the route back, and no other lap is left pressed.
+  await laps.getByRole('button', { name: 'Stop highlighting lap 2' }).click();
+  await expect(laps.getByRole('button', { name: 'Highlight lap 2' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect(laps.getByRole('button', { name: /^Stop highlighting/ })).toHaveCount(0);
+});
+
+test('charts pedal cadence for a ride that records it', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'ride-with-sensors.fit');
+
+  const pedal = page.getByRole('region', { name: 'Pedal cadence chart' });
+  await expect(pedal).toBeVisible();
+  await expect(pedal).toContainText('rpm');
+  await expect(pedal).toContainText(/pedal revolutions per minute/i);
+
+  // The running cadence chart is still listed, saying why it is empty — the
+  // same way a run is told that speed is a cycling chart.
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText(
+    /shown for running activities/i,
+  );
+});
+
 test('exports the loaded activity as a real download (AV-554)', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'route-with-elevation.gpx');
 
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export GPX' }).click();
+  await page.getByRole('button', { name: 'Rewrite as GPX' }).click();
   const saved = await download;
 
   expect(saved.suggestedFilename()).toBe('Elevation-Route.gpx');
@@ -780,7 +860,7 @@ test('exports only the selected section when one is chosen (AV-554)', async ({ p
   await expect(page.getByRole('radio', { name: 'Selected section' })).toBeChecked();
 
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export GPX' }).click();
+  await page.getByRole('button', { name: 'Rewrite as GPX' }).click();
   const saved = await download;
 
   expect(saved.suggestedFilename()).toBe('Elevation-Route-section.gpx');
@@ -859,7 +939,7 @@ test('opens a TCX run, with its laps and charts (AV-751)', async ({ page }) => {
   await expect(laps).toContainText('Calories');
   await expect(laps).toContainText('12');
 
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toBeVisible();
   // The device unit id is a serial number and must never appear.
   await expect(page.locator('body')).not.toContainText('3939123456');
 });
@@ -868,9 +948,10 @@ test('exports a TCX file the app can read back (AV-752)', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-laps.tcx');
 
-  await page.getByLabel('Format').selectOption('tcx');
+  // A TCX file already defaults to TCX, and writing it back out is a rewrite.
+  await expect(page.getByLabel('Format')).toHaveValue('tcx');
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export TCX' }).click();
+  await page.getByRole('button', { name: 'Rewrite as TCX' }).click();
   const saved = await download;
 
   expect(saved.suggestedFilename()).toMatch(/\.tcx$/);
@@ -899,7 +980,7 @@ test('exports a FIT file the app can read back (AV-553)', async ({ page }) => {
 
   await page.getByLabel('Format').selectOption('fit');
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export FIT' }).click();
+  await page.getByRole('button', { name: 'Convert to FIT' }).click();
   const saved = await download;
 
   expect(saved.suggestedFilename()).toBe('Elevation-Route.fit');
@@ -924,10 +1005,27 @@ test('exports a FIT file the app can read back (AV-553)', async ({ page }) => {
   await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
 });
 
+test('distinguishes a rewrite from a conversion (AV-555)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'ride-with-sensors.fit');
+
+  // A FIT file offers its own format first, named for what it is.
+  await expect(page.getByLabel('Format')).toHaveValue('fit');
+  await expect(page.getByRole('button', { name: 'Rewrite as FIT' })).toBeVisible();
+
+  // Choosing another target is a conversion, and the file that arrives is one.
+  await page.getByLabel('Format').selectOption('gpx');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to GPX' }).click();
+  const saved = await download;
+
+  expect(saved.suggestedFilename()).toMatch(/\.gpx$/);
+});
+
 test('has no export controls before an activity is open (AV-554)', async ({ page }) => {
   await page.goto('./#/viewer');
 
-  await expect(page.getByRole('button', { name: /^Export/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^(Rewrite as|Convert to)/ })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Export activity' })).toHaveCount(0);
 });
 
@@ -937,7 +1035,7 @@ test('exports without contacting a server (AV-550)', async ({ page }) => {
 
   const requests = recordRequests(page);
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export GPX' }).click();
+  await page.getByRole('button', { name: 'Rewrite as GPX' }).click();
   await download;
 
   expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
@@ -980,7 +1078,7 @@ test('opens an indoor FIT run with no GPS at all (AV-703)', async ({ page }) => 
 
   // Charts that need no position still work.
   await expect(page.getByRole('region', { name: 'Pace chart' })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toBeVisible();
 });
 
 test('tells an indoor FIT reader about the missing route exactly once', async ({ page }) => {
@@ -1179,7 +1277,7 @@ test('keeps the loaded activity while settings is open (AV-007)', async ({ page 
 test('keeps the footer below the fold until the content is scrolled', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-cadence.gpx');
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toBeAttached();
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toBeAttached();
 
   const viewport = page.viewportSize()!;
   const footer = page.getByRole('contentinfo');
@@ -1296,7 +1394,7 @@ test('keeps the footer reachable on a narrow screen', async ({ page }) => {
   await page.setViewportSize({ width: 520, height: 700 });
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-cadence.gpx');
-  await expect(page.getByRole('region', { name: 'Cadence chart' })).toBeAttached();
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toBeAttached();
 
   const footer = page.getByRole('contentinfo');
   await footer.scrollIntoViewIfNeeded();

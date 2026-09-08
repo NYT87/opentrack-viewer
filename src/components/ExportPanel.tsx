@@ -23,7 +23,16 @@ interface Outcome {
  */
 export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
   const formatId = useId();
-  const [format, setFormat] = useState<ExportFormat>(EXPORT_FORMATS[0]!.format);
+  /*
+   * AV-555. Writing the file back out in the format it arrived in is the least
+   * surprising default, and is usually what a section export wants — so it is
+   * offered first, and named for what it is. A rewrite is not a conversion, and
+   * neither one is a copy: both are serialized from the parsed activity.
+   */
+  const sourceFormat = EXPORT_FORMATS.find(
+    (entry) => entry.format === activity.source.format,
+  )?.format;
+  const [format, setFormat] = useState<ExportFormat>(sourceFormat ?? EXPORT_FORMATS[0]!.format);
   const [wantsSection, setWantsSection] = useState(true);
   const [outcome, setOutcome] = useState<Outcome | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -35,6 +44,7 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
   // simply stops applying, with no state to keep in step.
   const exportsSection = Boolean(selectedRange) && wantsSection;
   const label = EXPORT_FORMATS.find((entry) => entry.format === format)?.label ?? format;
+  const isRewrite = format === sourceFormat;
 
   const handleExport = async () => {
     setIsWriting(true);
@@ -80,7 +90,7 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
           >
             {EXPORT_FORMATS.map((entry) => (
               <option key={entry.format} value={entry.format}>
-                {entry.label}
+                {entry.format === sourceFormat ? `${entry.label} (same format)` : entry.label}
               </option>
             ))}
           </select>
@@ -116,9 +126,15 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
           onClick={() => void handleExport()}
           disabled={isWriting}
         >
-          {isWriting ? 'Writing…' : `Export ${label}`}
+          {isWriting ? 'Writing…' : isRewrite ? `Rewrite as ${label}` : `Convert to ${label}`}
         </button>
       </div>
+
+      <p className="export__hint">
+        {isRewrite
+          ? `Rewritten from the activity as this app read it, not copied from your ${label} file — so anything the parser could not represent is not carried over.`
+          : `Converted through the same activity model every format is read into, rather than translated from ${activity.source.format.toUpperCase()} directly.`}
+      </p>
 
       {error && (
         <p className="export__error" role="alert">

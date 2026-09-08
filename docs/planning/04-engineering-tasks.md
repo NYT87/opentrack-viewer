@@ -123,7 +123,7 @@ Acceptance criteria:
 - Settings entry is available from the header on non-home pages.
 - Settings entry is not shown on the homepage/main page header.
 - Modal has accessible dialog semantics, keyboard close behavior, focus trapping, and focus return to the opener.
-- Existing settings controls continue to be session-scoped and are not written to disk.
+- Existing settings controls continue to be session-scoped and are not written to disk. *(Superseded for the theme alone by the §17 answer in `06-decisions-and-open-questions.md`: the theme is remembered between visits. Every other setting is still session-scoped.)*
 
 #### AV-009: Add Theme Mode Setting
 
@@ -138,7 +138,7 @@ Acceptance criteria:
 - Explicit light mode forces light theme regardless of system preference.
 - Theme applies globally across homepage, viewer/process page, Terms and Conditions page, and Settings modal.
 - Theme changes apply immediately without page reload, route change, file reprocessing, or clearing loaded activity state.
-- Theme choice is session-scoped unless a later persistence task explicitly changes that behavior.
+- Theme choice is session-scoped unless a later persistence task explicitly changes that behavior. *(The §17 answer did: it now persists under `opentrack-viewer:theme`.)*
 - UI exposes the control as a clear single-choice option set, not independent toggles.
 
 #### AV-010: Refactor Header Navigation and Settings Icon

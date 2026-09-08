@@ -14,6 +14,13 @@ export default defineConfig({
   use: {
     // Navigate with './', not '/': the latter resolves to the origin root.
     baseURL,
+    /*
+     * Pinned, because units now default from the browser locale: without this
+     * the same suite passes in Paris and fails in New York, since a US context
+     * would render miles where these tests assert kilometres. Tests that care
+     * about the locale create their own context and say so.
+     */
+    locale: 'en-GB',
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

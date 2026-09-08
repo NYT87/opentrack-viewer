@@ -7,6 +7,7 @@ export type ActivityChartKind =
   | 'pace'
   | 'speed'
   | 'cadence'
+  | 'cyclingCadence'
   | 'heartRate'
   | 'power'
   | 'temperature';
@@ -34,6 +35,7 @@ export const VISIBLE_CHART_KINDS: ActivityChartKind[] = [
   'pace',
   'speed',
   'cadence',
+  'cyclingCadence',
   'heartRate',
   'power',
   'temperature',
@@ -44,6 +46,10 @@ const LABELS: Record<ActivityChartKind, string> = {
   pace: 'Pace',
   speed: 'Speed',
   cadence: 'Cadence',
+  // Named apart from running cadence, because a ride shows both entries: the
+  // running one explaining why it is empty, this one carrying the data. Two
+  // charts called "Cadence" would be a puzzle rather than a pair.
+  cyclingCadence: 'Pedal cadence',
   heartRate: 'Heart rate',
   power: 'Power',
   temperature: 'Temperature',
@@ -112,6 +118,14 @@ export function getChartAvailability(activity: Activity): ActivityChartDefinitio
       running && streams.hasRunningCadence,
       !running
         ? 'Cadence is shown for running activities.'
+        : 'This activity has no cadence data.',
+    ),
+    define(
+      // Pedal revolutions, for rides that record them.
+      'cyclingCadence',
+      cycling && streams.hasCyclingCadence,
+      !cycling
+        ? 'Pedal cadence is shown for cycling activities.'
         : 'This activity has no cadence data.',
     ),
     define('heartRate', streams.hasHeartRate, 'This activity has no heart rate data.'),

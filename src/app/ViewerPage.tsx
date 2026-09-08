@@ -10,6 +10,7 @@ import { MapPlaceholder } from '../components/MapPlaceholder';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { ViewerSectionNav, type ViewerSection } from '../components/ViewerSectionNav';
 import { sliceActivity } from '../domain/activitySlice';
+import { lapPointRange } from '../domain/range';
 import { activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
 import { selectViewerState, useActivityStore } from '../state/activityStore';
 import { activePointIndex, useInteractionStore } from '../state/interactionStore';
@@ -45,6 +46,7 @@ export function ViewerPage() {
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
   const selectedRange = useInteractionStore((state) => state.selectedRange);
+  const selectedLapIndex = useInteractionStore((state) => state.selectedLapIndex);
   const chartXAxisMode = useInteractionStore((state) => state.chartXAxisMode);
   const setChartXAxisMode = useInteractionStore((state) => state.setChartXAxisMode);
 
@@ -69,6 +71,21 @@ export function ViewerPage() {
     const slice = sliceActivity(activity, selectedRange);
     return slice.ok ? activityToRouteGeoJSON(slice.activity) : undefined;
   }, [activity, selectedRange]);
+
+  /**
+   * §17. The route of the highlighted lap, drawn over the full route in its own
+   * colour. The map is never fitted to it: picking a lap says which part of the
+   * ride it is, not that the reader wants to be taken there.
+   */
+  const lapRoute = useMemo(() => {
+    if (!activity || selectedLapIndex === undefined) return undefined;
+    const lap = activity.laps?.find((entry) => entry.index === selectedLapIndex);
+    const range = lap ? lapPointRange(activity, lap) : undefined;
+    if (!range) return undefined;
+
+    const slice = sliceActivity(activity, range);
+    return slice.ok ? activityToRouteGeoJSON(slice.activity) : undefined;
+  }, [activity, selectedLapIndex]);
 
   const marker = useMemo(() => {
     if (!activity || activeIndex === undefined) return pointToGeoJSON(undefined);
@@ -161,6 +178,7 @@ export function ViewerPage() {
                   <ActivityMap
                     route={route}
                     focusRoute={focusRoute}
+                    lapRoute={lapRoute}
                     marker={marker}
                     basemapEnabled={basemapEnabled}
                     onRouteHover={handleRouteHover}

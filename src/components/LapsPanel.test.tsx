@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { LapsPanel, hasUsefulLaps } from './LapsPanel';
 import type { ActivityLap } from '../domain/activity';
+import { useInteractionStore } from '../state/interactionStore';
 
 const laps: ActivityLap[] = [
   {
@@ -76,5 +78,57 @@ describe('LapsPanel (AV-406)', () => {
     render(<LapsPanel laps={laps} />);
 
     expect(rows()[1]).toHaveAttribute('data-lap-index', '1');
+  });
+});
+
+describe('a lap row highlights its stretch of the route', () => {
+  beforeEach(() => {
+    useInteractionStore.getState().reset();
+  });
+
+  const twoLaps: ActivityLap[] = [
+    { index: 0, distanceMeters: 1000, durationSeconds: 300 },
+    { index: 1, distanceMeters: 1000, durationSeconds: 290 },
+  ];
+
+  it('names what pressing a row does, not just the lap number', () => {
+    render(<LapsPanel laps={twoLaps} />);
+
+    expect(screen.getByRole('button', { name: 'Highlight lap 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Highlight lap 2' })).toBeInTheDocument();
+  });
+
+  it('selects a lap, and says so', async () => {
+    render(<LapsPanel laps={twoLaps} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Highlight lap 2' }));
+
+    expect(useInteractionStore.getState().selectedLapIndex).toBe(1);
+    expect(screen.getByRole('button', { name: 'Stop highlighting lap 2' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('presses again to put the route back', async () => {
+    render(<LapsPanel laps={twoLaps} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Highlight lap 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Stop highlighting lap 1' }));
+
+    expect(useInteractionStore.getState().selectedLapIndex).toBeUndefined();
+  });
+
+  it('holds one lap at a time', async () => {
+    render(<LapsPanel laps={twoLaps} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Highlight lap 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Highlight lap 2' }));
+
+    expect(useInteractionStore.getState().selectedLapIndex).toBe(1);
+    expect(screen.getByRole('button', { name: 'Highlight lap 1' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 });

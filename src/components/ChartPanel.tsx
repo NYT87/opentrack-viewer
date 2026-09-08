@@ -21,6 +21,12 @@ import { ChartXAxisSwitch } from './ChartXAxisSwitch';
  * to infer from a bare number.
  */
 const CADENCE_NOTE = 'Strides per minute: one foot, as watches and foot pods report it.';
+const CYCLING_CADENCE_NOTE = 'Pedal revolutions per minute, as a crank or power meter reports it.';
+
+const CHART_NOTES: Partial<Record<ActivityChartKind, string>> = {
+  cadence: CADENCE_NOTE,
+  cyclingCadence: CYCLING_CADENCE_NOTE,
+};
 
 function UnavailableChart({
   kind,
@@ -162,7 +168,7 @@ export function ChartPanel({
               return pointRange && focused ? restrictSeries(series, pointRange) : series;
             })()}
             units={units}
-            note={chart.kind === 'cadence' ? CADENCE_NOTE : undefined}
+            note={CHART_NOTES[chart.kind]}
             activePointIndex={activePointIndex}
             {...(focused ? {} : { selectedRange })}
             onHoverPoint={onHoverPoint}

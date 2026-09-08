@@ -1,4 +1,4 @@
-import type { Activity, ActivityPointRange } from './activity';
+import type { Activity, ActivityLap, ActivityPointRange } from './activity';
 import { pointXValues, type SeriesXAxis } from './series';
 
 /**
@@ -85,4 +85,35 @@ export function domainFromPointRange(
   if (start === undefined || end === undefined) return undefined;
 
   return { start: Math.min(start, end), end: Math.max(start, end) };
+}
+
+/**
+ * The span of points a lap covers, found by time.
+ *
+ * A lap states when it began and ended; a point states when it was recorded.
+ * Nothing in any format links the two directly, so the times are what join
+ * them. A lap whose bounds are unknown — or that no point falls inside — has
+ * no range, and the caller shows nothing rather than guessing at one.
+ */
+export function lapPointRange(
+  activity: Activity,
+  lap: ActivityLap,
+): ActivityPointRange | undefined {
+  const start = lap.startTime?.getTime();
+  const end = lap.endTime?.getTime();
+  if (start === undefined) return undefined;
+
+  let first: number | undefined;
+  let last: number | undefined;
+
+  for (const point of activity.points) {
+    const time = point.time instanceof Date ? point.time.getTime() : undefined;
+    if (time === undefined || time < start) continue;
+    if (end !== undefined && time > end) break;
+
+    first ??= point.index;
+    last = point.index;
+  }
+
+  return first === undefined || last === undefined ? undefined : { startIndex: first, endIndex: last };
 }

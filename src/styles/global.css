@@ -743,3 +743,30 @@ body {
 }
 .selection-summary__title { margin: 0; font-size: 13px; }
 .selection-summary__scope { margin: 0; font-size: 12px; color: var(--text-muted); }
+
+/* AV-555: says whether the chosen target is a rewrite or a conversion. */
+.export__hint {
+  margin: 12px 0 0;
+  max-width: 70ch;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* §17: a lap row is a toggle that recolours its stretch of the route. */
+.laps__select {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.laps__select:hover { border-color: var(--border); }
+.laps__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.laps__select[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--bg-sunken);
+  font-weight: 600;
+}
+.laps__row.is-selected td { font-weight: 600; }

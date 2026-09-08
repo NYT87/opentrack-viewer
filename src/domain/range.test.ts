@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { domainFromPointRange, pointRangeFromDomain } from './range';
+import { domainFromPointRange, lapPointRange, pointRangeFromDomain } from './range';
 import { makeActivity } from '../test/helpers/activity';
 
 /** Five points ~111 m apart, one minute apart. */
@@ -145,5 +145,61 @@ describe('domainFromPointRange (AV-509)', () => {
     const noTime = makeActivity([{ lat: 0, lon: 0.0001 }, { lat: 0.001, lon: 0.0001 }]);
 
     expect(domainFromPointRange(noTime, 'time', { startIndex: 0, endIndex: 1 })).toBeUndefined();
+  });
+});
+
+describe('lapPointRange', () => {
+  const activity = makeActivity(
+    Array.from({ length: 6 }, (_, index) => ({
+      lat: 51.5 + index * 0.001,
+      lon: -0.1,
+      time: new Date(Date.UTC(2024, 0, 1, 10, 0, index * 10)),
+    })),
+  );
+
+  it('finds the points a lap covers, by time', () => {
+    expect(
+      lapPointRange(activity, {
+        index: 0,
+        startTime: new Date('2024-01-01T10:00:10Z'),
+        endTime: new Date('2024-01-01T10:00:30Z'),
+      }),
+    ).toEqual({ startIndex: 1, endIndex: 3 });
+  });
+
+  it('runs to the end when a lap states no end', () => {
+    expect(
+      lapPointRange(activity, { index: 0, startTime: new Date('2024-01-01T10:00:40Z') }),
+    ).toEqual({ startIndex: 4, endIndex: 5 });
+  });
+
+  it('has no range for a lap that states no start', () => {
+    expect(lapPointRange(activity, { index: 0 })).toBeUndefined();
+  });
+
+  it('has no range when no point falls inside the lap', () => {
+    expect(
+      lapPointRange(activity, {
+        index: 0,
+        startTime: new Date('2024-01-01T11:00:00Z'),
+        endTime: new Date('2024-01-01T11:30:00Z'),
+      }),
+    ).toBeUndefined();
+  });
+
+  it('ignores points with no timestamp rather than guessing', () => {
+    const patchy = makeActivity([
+      { lat: 51.5, lon: -0.1, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 51.501, lon: -0.1 },
+      { lat: 51.502, lon: -0.1, time: new Date('2024-01-01T10:00:20Z') },
+    ]);
+
+    expect(
+      lapPointRange(patchy, {
+        index: 0,
+        startTime: new Date('2024-01-01T10:00:00Z'),
+        endTime: new Date('2024-01-01T10:00:20Z'),
+      }),
+    ).toEqual({ startIndex: 0, endIndex: 2 });
   });
 });

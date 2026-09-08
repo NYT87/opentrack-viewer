@@ -15,6 +15,7 @@ export type ChartSeriesKey =
   | 'pace'
   | 'speed'
   | 'cadence'
+  | 'cyclingCadence'
   | 'heartRate'
   | 'power'
   | 'temperature';
@@ -84,6 +85,14 @@ const DEFINITIONS: Record<ChartSeriesKey, SeriesDefinition> = {
     label: 'Cadence',
     unit: 'spm',
     read: (p) => p.runningCadenceSpm,
+  },
+  // The other cadence: pedal revolutions, which is a different measurement
+  // rather than the same one in different clothes — hence its own series.
+  cyclingCadence: {
+    key: 'cyclingCadence',
+    label: 'Pedal cadence',
+    unit: 'rpm',
+    read: (p) => p.cyclingCadenceRpm,
   },
   heartRate: { key: 'heartRate', label: 'Heart rate', unit: 'bpm', read: (p) => p.heartRateBpm },
   power: { key: 'power', label: 'Power', unit: 'W', read: (p) => p.powerWatts },

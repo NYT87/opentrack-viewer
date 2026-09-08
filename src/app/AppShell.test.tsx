@@ -439,7 +439,9 @@ describe('settings modal (AV-007)', () => {
 
     expect(screen.getByLabelText('Units')).toBeInTheDocument();
     expect(screen.getByLabelText('Basemap tiles')).toBeInTheDocument();
-    expect(screen.getByText(/nothing is saved to your device/i)).toBeInTheDocument();
+    // The theme is now remembered; the copy must say which is which.
+    expect(screen.getByText(/theme is remembered on this device/i)).toBeInTheDocument();
+    expect(screen.getByText(/no activity data is ever stored/i)).toBeInTheDocument();
   });
 
   it('writes preferences to the shared store', async () => {

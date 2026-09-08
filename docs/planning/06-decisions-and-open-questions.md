@@ -216,46 +216,64 @@ Decision (`AV-013`): every route sets its own title and description from a hand-
 
 ## 17. Open Questions
 
-- Which map tile provider should be used initially, and what are its attribution and usage requirements?
-- Should routes be `/` and `/viewer`, or hash equivalents for static hosting?
-- Should the Terms and Conditions route be `/terms`, `/terms-and-conditions`, or a hash equivalent for static hosting?
-- Who will review and approve the final Terms and Conditions copy before production release?
-- What exact homepage sections should be present before the viewer action?
-- Should the homepage have any header navigation beyond the project name and viewer action?
-- Which settings icon should be used in the header, and should the tooltip appear on hover only or also support long-press/touch affordances?
-- Should the `Tools` dropdown appear on the homepage header, or only after the user leaves the homepage?
-- If more tools are added later, what ordering should the `Tools` dropdown use?
-- What image should be used for Open Graph and Twitter/X previews?
-- Should the app default to metric units, imperial units, or locale-based units?
-- Should theme preference remain session-only like other settings, or eventually persist locally after explicit user approval?
-- Should map style/theme change with app theme, or should basemap style remain independently controlled?
-- Should distance prefer file-provided distance streams or derived GPS distance when both exist?
-- Should chart x-axis preference persist for the session, or reset per loaded activity?
-- Should imperial distance mode use 1 mile tick intervals, or should the 1 km interval remain the base requirement with converted labels?
-- At what chart width should interval tick labels be thinned to avoid overlap?
-- Should a selected chart range persist when switching x-axis mode, or should switching x-axis clear the selected range?
-- Should selected range map behavior hide the rest of the route, dim the rest of the route, or display only the selected segment?
-- What is the minimum drag distance or minimum selected duration/distance before a chart range selection is accepted?
-- Should pace be calculated from instantaneous speed when present, or derived from distance/time intervals by default?
-- Should average pace/speed use moving time, elapsed time, or the summary's primary `Time` value when all are available?
-- What smoothing/window should pace charts use so GPS jitter does not dominate the view?
-- What exact label should the running cadence chart use: `strides/min`, `spm`, or full `strides per minute`?
-- Should cycling speed prefer source instantaneous speed, derived distance/time, or a smoothed hybrid?
-- Should cycling cadence be added later as an optional sensor chart separate from the initial cycling speed chart?
-- What smoothing/noise threshold should elevation gain use?
-- Which device metadata fields should be shown by default, and should advanced/sensitive fields require an explicit reveal action?
-- Should GPX `creator` be displayed as device information, app information, or both when the file does not provide a cleaner device model?
-- What external/static information should remain visible on the initial upload-only page, and what should move into the ready viewer layout?
-- Should the ready viewer keep a compact upload/change-file action in the header, side panel, or file area?
-- What maximum content width should the loaded viewer use?
-- What viewport breakpoint should show or hide the loaded viewer section sidebar?
-- Should the section sidebar use active scrollspy state in the first version or only static anchor links?
-- Which lap fields should appear in the first laps table/list beyond distance and duration?
-- Should clicking a lap later focus the map/chart range, or should lap selection stay display-only initially?
-- Should charts begin immediately below the map/laps section on all screens, or should mobile show a compact chart navigation first?
-- For GPX files without explicit pause data, what threshold should define moving time versus elapsed time?
-- Should parsing move to Web Workers immediately or after the first performance issue is observed?
-- How much metadata should be displayed, given privacy concerns?
-- Should GPX route segments be preserved visually or merged into a single route initially?
-- Should malformed points be skipped with warnings or fail the entire file?
-- Should the first PWA version support only app-shell offline, or include a route-only mode without basemap?
+### Answered by what was built
+
+Each of these was recorded as an open question and has since been settled by a
+decision above or by the shipped code. The answer is kept rather than the
+question deleted, so the reasoning stays findable.
+
+| Question | Answer |
+| --- | --- |
+| Which map tile provider, and its attribution? | OpenStreetMap raster tiles, with `© OpenStreetMap contributors` rendered on the map. Route-only mode fetches none (TD-005). |
+| Path routes or hash equivalents? | Hash. `HashRouter`, so a static host needs no rewrite rules and a deep link survives a refresh. |
+| `/terms`, `/terms-and-conditions`, or a hash equivalent? | `/terms`, as a routed page rather than a modal, so a legal document has a stable link (`AV-008`). |
+| What homepage sections before the viewer action? | The privacy statement, a table of supported formats with their status, and the action itself. |
+| Homepage header navigation beyond the name and viewer action? | No. The brand is the link home, and `Tools` carries navigation (`AV-010`, `AV-012`). |
+| Which settings icon, and how does its tooltip behave? | A gear button with `aria-label` and `title`, so it is named for assistive technology and shows a tooltip on hover and focus. |
+| Does the `Tools` dropdown appear on the homepage? | Yes, in the header on every page. `Settings` is the control that is hidden until there is something to configure. |
+| Metric, imperial, or locale-based units by default? | The browser's locale decides, and Settings overrides it for the session. See the built answer below. |
+| Should map style follow the app theme? | No — the basemap is independently controlled, because a dark basemap is a cartographic choice rather than a UI one. |
+| File-provided distance stream or derived GPS distance? | The file's, when it is present and non-decreasing; otherwise derived from positions. A recorded stream is an odometer, so it is read relative to its first value. |
+| Does the chart x-axis preference persist? | For the session, across loaded files — like the unit system. `reset()` clears the hover and range state a new file invalidates, not the user's preferences. |
+| Imperial tick intervals: miles or converted kilometres? | Whole miles. A label should mean the same thing in either system (`AV-514`). |
+| At what width are tick labels thinned? | Not a width: labels are dropped when they would fall closer than the minimum spacing, keeping every tick mark. |
+| Does a selected range survive an x-axis switch? | Yes. The selection is stored as point indices, not as a span of whichever axis was showing (`AV-509`). |
+| Selected-range map behaviour: hide, dim, or section only? | The full route is dimmed and the section drawn over it, so the selection is legible without losing where it sits (`AV-604`). |
+| Minimum drag before a range is accepted? | 8 pixels. Below that the gesture is treated as a click, so a click never becomes an accidental one-point selection. |
+| Pace from instantaneous speed or derived? | Derived, over a rolling window — see the pace decision above. |
+| Average pace/speed over moving or elapsed time? | Elapsed, so the figure agrees with the `Duration` beside it. Moving time is reported separately. |
+| What pace smoothing window? | 15 seconds, enough that GPS jitter between samples does not dominate. |
+| `strides/min`, `spm`, or the full phrase for cadence? | `spm` on the axis, with the chart stating "Strides per minute: one foot, as watches and foot pods report it." |
+| Cycling speed: recorded, derived, or hybrid? | Recorded when plausible, derived otherwise — a wheel sensor knows better than GPS, but a faulty reading is worse than none. |
+| What elevation-gain noise threshold? | 3 m, so barometric jitter on flat ground does not accumulate into a climb. |
+| Which device fields are shown, and do sensitive ones need a reveal? | Manufacturer, model, name and software version. There is no reveal control: the serial number is never displayable (TD-020). |
+| Is GPX `creator` device or app information? | Neither is claimed. It is shown as "Recorded with", because the same field holds "Garmin Edge 530" and "StravaGPX Android". |
+| What stays on the upload-only page? | The privacy statement and the formats accepted; everything about an activity appears only once one is open. |
+| Where does a change-file action live in the ready viewer? | Nowhere. The drop zone is removed while an activity is open, and `Close activity` is the way back — so a file cannot be swapped out from under a loaded map and charts. |
+| What maximum content width? | 1120 px. |
+| At what breakpoint does the section sidebar appear? | 1100 px. |
+| Scrollspy or static anchors first? | Static buttons — not `#id` anchors, which `HashRouter` would read as a route. |
+| Which lap fields beyond distance and duration? | Calories, and only for formats that state them, rather than a column of dashes for every GPX. |
+| Charts below the map on all screens, or mobile chart navigation first? | Below on all screens, with the section list serving as navigation where there is room for it. |
+| Moving-time threshold without explicit pause data? | 0.5 m/s. |
+| Move parsing to Web Workers immediately or after a measured problem? | After. Measured instead: main-thread parsing stays under the plan's "if UI stalls" bar for realistic files, and `DOMParser` does not exist in a worker. |
+| How much metadata to display, given privacy? | Only what a person reads: human-readable device fields, never stable identifiers, and never in SEO tags (TD-016, TD-020). |
+| Preserve or merge GPX route segments? | Preserve. Merging is a fabrication: it adds distance the athlete did not cover and draws a line down a road they never took. |
+| Skip malformed points or fail the file? | Skip with a warning, and fail only when nothing usable remains. |
+| App-shell offline only, or route-only mode too? | Both shipped (`AV-802`, `AV-803`). |
+
+### Answered, needing no work
+
+- **Who approves the Terms and Conditions copy before release?** The repository owner.
+- **How should the `Tools` dropdown be ordered once it holds more than one entry?** Revisited when a second tool exists; there is nothing to order until then.
+
+### Answered, and built
+
+- **Units follow the browser locale.** Through `Intl.Locale`'s `measurementSystem` where the browser exposes it, and a small region list where it does not. The UK is deliberately metric: it measures road distance in miles but runs and rides in kilometres. It is a default only — the Settings control overrides it for the session.
+- **The theme preference persists**, under `opentrack-viewer:theme`, and is the only thing this app writes to `localStorage`. The pre-paint script in `index.html` reads it before React boots, so a remembered dark theme does not flash light. The settings modal previously said "Nothing is saved to your device"; it now says which one thing is, and that no activity data ever is. The Terms page's narrower claim — nothing about your *activity* is stored — was already true and is unchanged. Persisting happens without a consent step, as answered.
+- **Pedal cadence is a chart of its own**, offered to rides that record it, in `rpm`. It is labelled **Pedal cadence** rather than Cadence: a ride lists both entries — the running one explaining why it is empty, this one carrying the data — and two charts with the same name would be a puzzle rather than a pair.
+- **A lap row highlights its stretch of the route**, in a colour of its own, and does not move the map. That is the whole difference from a chart range selection, which does move the camera: a lap says which part of the ride this is, not take me there. A unit test asserts no `fitBounds` follows a lap selection.
+
+### Still open
+
+- What image should be used for Open Graph and Twitter/X previews? The 512×512 app icon stands in; a purpose-made 1200×630 image would render properly in link previews.

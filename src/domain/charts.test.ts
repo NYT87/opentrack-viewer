@@ -147,3 +147,52 @@ describe('getVisibleCharts', () => {
     expect(charts.find((entry) => entry.kind === 'speed')?.available).toBe(true);
   });
 });
+
+describe('pedal cadence is its own chart', () => {
+  const rideWithCadence = () => {
+    const activity = makeActivity([
+      { lat: 0, lon: 0.0001, cyclingCadenceRpm: 85, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.001, lon: 0.0001, cyclingCadenceRpm: 90, time: new Date('2024-01-01T10:00:10Z') },
+    ]);
+    return { ...activity, metadata: { ...activity.metadata, sport: 'cycling' as const } };
+  };
+
+  const availabilityOf = (activity: Activity, kind: string) =>
+    getChartAvailability(activity).find((entry) => entry.kind === kind);
+
+  it('is offered to a ride that records it', () => {
+    expect(availabilityOf(rideWithCadence(), 'cyclingCadence')?.available).toBe(true);
+  });
+
+  it('is named apart from running cadence, since a ride lists both', () => {
+    const charts = getChartAvailability(rideWithCadence());
+
+    expect(charts.find((entry) => entry.kind === 'cadence')?.label).toBe('Cadence');
+    expect(charts.find((entry) => entry.kind === 'cyclingCadence')?.label).toBe('Pedal cadence');
+  });
+
+  it('is not offered to a run, whose cadence is strides', () => {
+    const run = makeActivity([
+      { lat: 0, lon: 0.0001, runningCadenceSpm: 85 },
+      { lat: 0.001, lon: 0.0001, runningCadenceSpm: 86 },
+    ]);
+    const running = { ...run, metadata: { ...run.metadata, sport: 'running' as const } };
+
+    expect(availabilityOf(running, 'cyclingCadence')).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringMatching(/cycling activities/i),
+    });
+    // ...and the running chart is the one it gets.
+    expect(availabilityOf(running, 'cadence')?.available).toBe(true);
+  });
+
+  it('says a ride without a cadence sensor has none, not that it is the wrong sport', () => {
+    const bare = makeActivity([{ lat: 0, lon: 0.0001 }, { lat: 0.001, lon: 0.0001 }]);
+    const ride = { ...bare, metadata: { ...bare.metadata, sport: 'cycling' as const } };
+
+    expect(availabilityOf(ride, 'cyclingCadence')).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringMatching(/no cadence data/i),
+    });
+  });
+});

@@ -1,4 +1,9 @@
-/** AV-009. Session theme preference; `system` follows the OS/browser. */
+/**
+ * AV-009. The theme preference. `system` follows the OS/browser.
+ *
+ * Remembered between visits, unlike every other setting here — see
+ * `domain/preferences.ts`, which owns the storage.
+ */
 export type ThemeMode = 'system' | 'dark' | 'light';
 
 /** What actually gets painted. `system` always resolves to one of these. */

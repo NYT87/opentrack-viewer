@@ -107,7 +107,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         </header>
 
         <p className="modal__intro">
-          These apply to the current session only. Nothing is saved to your device.
+          Your theme is remembered on this device, so you need not choose it again. Everything
+          else here applies to this session only, and no activity data is ever stored.
         </p>
 
         {/*

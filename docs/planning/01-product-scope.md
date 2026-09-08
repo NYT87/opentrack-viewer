@@ -128,7 +128,7 @@ The early implementation should stay intentionally small:
 - Main homepage is descriptive and does not own activity-processing state.
 - Viewer/process page owns the activity-file workflow.
 - Terms and Conditions is a read-only informational page; it must not own activity-processing state.
-- Settings are modal and session-scoped; opening settings must not reset loaded activity data.
+- Settings are modal and session-scoped — with the theme the one exception, remembered between visits; opening settings must not reset loaded activity data.
 - Theme is an app-wide session preference available from Settings; it applies to homepage, viewer/process page, Terms and Conditions, and the settings modal itself.
 - The global header should use the OpenTrack Viewer brand/title as the home link, place a `Tools` dropdown beside the title with `File viewer` linking to the viewer/process page, avoid a duplicate Home nav button, omit header subtitles, and use an icon-only Settings control where Settings is available.
 - GPX only until route rendering and summary stats are solid.

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ActivityPointRange, ChartXAxisMode } from '../domain/activity';
+import { localeUnitSystem, readStoredTheme, storeTheme } from '../domain/preferences';
 import type { ThemeMode } from '../domain/theme';
 import type { UnitSystem } from '../domain/units';
 
@@ -20,10 +21,19 @@ interface InteractionState {
   selectedRange?: ActivityPointRange;
   /** User preference: draw the basemap, or route-only for privacy (§5). */
   basemapEnabled: boolean;
-  /** Metric by default (§17); a session preference, not persisted. */
+  /** Defaulted from the browser's locale (§17); a session preference. */
   unitSystem: UnitSystem;
-  /** AV-009. Defaults to following the OS; session-scoped like the rest. */
+  /**
+   * AV-009. Defaults to following the OS, and is the one preference kept
+   * between visits rather than for the session.
+   */
   themeMode: ThemeMode;
+  /**
+   * The lap the reader asked to see. Deliberately separate from
+   * `selectedRange`: a chart selection focuses the view and moves the camera,
+   * while a lap only recolours its stretch of the route where it already is.
+   */
+  selectedLapIndex?: number;
   /**
    * Preferred chart x-axis (§17 open question resolved: it persists for the
    * session, like units). Undefined means "let the activity decide". A stored
@@ -38,14 +48,19 @@ interface InteractionState {
   setBasemapEnabled: (enabled: boolean) => void;
   setUnitSystem: (units: UnitSystem) => void;
   setThemeMode: (mode: ThemeMode) => void;
+  /** AV-407 follow-up: which lap the map should pick out, if any. */
+  setSelectedLapIndex: (index: number | undefined) => void;
   setChartXAxisMode: (mode: ChartXAxisMode) => void;
   reset: () => void;
 }
 
 export const useInteractionStore = create<InteractionState>((set) => ({
   basemapEnabled: true,
-  unitSystem: 'metric',
-  themeMode: 'system',
+  // The browser's own locale decides the starting unit system; the Settings
+  // control overrides it, and that override lasts the session.
+  unitSystem: localeUnitSystem(),
+  // A stored theme wins over `system`, so a reader who chose dark keeps it.
+  themeMode: readStoredTheme() ?? 'system',
 
   setHoveredPoint(index, source) {
     set({ hoveredPointIndex: index, hoverSource: index === undefined ? undefined : source });
@@ -67,8 +82,14 @@ export const useInteractionStore = create<InteractionState>((set) => ({
     set({ unitSystem: units });
   },
 
+  setSelectedLapIndex(index) {
+    set({ selectedLapIndex: index });
+  },
+
   setThemeMode(mode) {
     set({ themeMode: mode });
+    // The one preference written to disk. Everything else is session state.
+    storeTheme(mode);
   },
 
   setChartXAxisMode(mode) {
@@ -82,6 +103,8 @@ export const useInteractionStore = create<InteractionState>((set) => ({
       hoverSource: undefined,
       // A range refers to points in the activity that produced it.
       selectedRange: undefined,
+      // ...and so does a lap.
+      selectedLapIndex: undefined,
     });
   },
 }));

@@ -5,6 +5,8 @@ import { ExportPanel } from './ExportPanel';
 import { parseGpx } from '../parsers/gpx/parseGpx';
 import { readFixture } from '../test/helpers/fixtures';
 import { makeActivity } from '../test/helpers/activity';
+import { parseFit } from '../parsers/fit/parseFit';
+import { readBinaryFixture } from '../test/helpers/fixtures';
 
 const activity = parseGpx(readFixture('route-with-elevation.gpx'), {
   fileName: 'route-with-elevation.gpx',
@@ -49,13 +51,16 @@ describe('ExportPanel (AV-554)', () => {
     render(<ExportPanel activity={activity} />);
 
     expect(screen.getByLabelText('Format')).toHaveValue('gpx');
-    expect(screen.getByRole('button', { name: 'Export GPX' })).toBeInTheDocument();
+    // AV-555: the file's own format is offered, and named for what it is.
+    expect(screen.getByRole('option', { name: 'GPX (same format)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'TCX' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rewrite as GPX' })).toBeInTheDocument();
   });
 
   it('saves a file the browser can download', async () => {
     render(<ExportPanel activity={activity} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Export GPX' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
 
     expect(saved).toHaveLength(1);
     expect(saved[0]!.fileName).toBe('Elevation-Route.gpx');
@@ -73,12 +78,12 @@ describe('ExportPanel (AV-554)', () => {
     render(<ExportPanel activity={activity} selectedRange={{ startIndex: 1, endIndex: 2 }} />);
 
     // The selection is the default, because it is what the user just made.
-    await userEvent.click(screen.getByRole('button', { name: 'Export GPX' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
     expect(saved[0]!.fileName).toBe('Elevation-Route-section.gpx');
     expect((await saved[0]!.blob.text()).match(/<trkpt/g)).toHaveLength(2);
 
     await userEvent.click(screen.getByRole('radio', { name: 'Whole activity' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Export GPX' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
 
     expect(saved[1]!.fileName).toBe('Elevation-Route.gpx');
     expect((await saved[1]!.blob.text()).match(/<trkpt/g)).toHaveLength(activity.points.length);
@@ -88,7 +93,8 @@ describe('ExportPanel (AV-554)', () => {
     render(<ExportPanel activity={activity} />);
 
     await userEvent.selectOptions(screen.getByLabelText('Format'), 'fit');
-    await userEvent.click(screen.getByRole('button', { name: 'Export FIT' }));
+    // A different target is a conversion, and says so.
+    await userEvent.click(screen.getByRole('button', { name: 'Convert to FIT' }));
 
     // The FIT writer is loaded on demand, so the file arrives after the click.
     await screen.findByText(/Saved/);
@@ -101,7 +107,7 @@ describe('ExportPanel (AV-554)', () => {
     const withLaps = { ...activity, laps: [{ index: 0 }, { index: 1 }] };
     render(<ExportPanel activity={withLaps} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Export GPX' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
 
     expect(screen.getByText(/could not carry/)).toBeInTheDocument();
     expect(screen.getByText(/GPX has no lap structure/)).toBeInTheDocument();
@@ -111,7 +117,7 @@ describe('ExportPanel (AV-554)', () => {
     const clean = parseGpx(readFixture('simple-route.gpx'), { fileName: 'simple-route.gpx' });
     render(<ExportPanel activity={clean} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Export GPX' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
 
     expect(screen.getByText(/Saved/)).toBeInTheDocument();
     expect(screen.queryByText(/could not carry/)).not.toBeInTheDocument();
@@ -124,9 +130,42 @@ describe('ExportPanel (AV-554)', () => {
     ]);
     render(<ExportPanel activity={indoor} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Export GPX' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent(/no GPS coordinates/i);
     expect(saved).toHaveLength(0);
+  });
+});
+
+describe('a rewrite is not a conversion (AV-555)', () => {
+  it('offers the source format first, named as a rewrite', () => {
+    render(<ExportPanel activity={activity} />);
+
+    expect(screen.getByLabelText('Format')).toHaveValue('gpx');
+    expect(screen.getByRole('button', { name: 'Rewrite as GPX' })).toBeInTheDocument();
+    expect(screen.getByText(/not copied from your GPX file/)).toBeInTheDocument();
+  });
+
+  it('calls a different target a conversion', async () => {
+    render(<ExportPanel activity={activity} />);
+
+    await userEvent.selectOptions(screen.getByLabelText('Format'), 'tcx');
+
+    expect(screen.getByRole('button', { name: 'Convert to TCX' })).toBeInTheDocument();
+    expect(screen.queryByText(/not copied from your/)).not.toBeInTheDocument();
+    expect(screen.getByText(/through the same activity model/)).toBeInTheDocument();
+  });
+
+  it('follows the format the file actually arrived in', async () => {
+    const fit = await parseFit(readBinaryFixture('ride-with-sensors.fit'), {
+      fileName: 'ride-with-sensors.fit',
+    });
+    render(<ExportPanel activity={fit} />);
+
+    // A FIT file defaults to FIT, and GPX becomes the conversion.
+    expect(screen.getByLabelText('Format')).toHaveValue('fit');
+    expect(screen.getByRole('option', { name: 'FIT (same format)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'GPX' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rewrite as FIT' })).toBeInTheDocument();
   });
 });

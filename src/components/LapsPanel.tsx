@@ -1,5 +1,6 @@
 import type { ActivityLap } from '../domain/activity';
 import { MISSING, formatDistance, formatDuration, type UnitSystem } from '../domain/units';
+import { useInteractionStore } from '../state/interactionStore';
 
 export interface LapsPanelProps {
   laps: ActivityLap[];
@@ -33,10 +34,14 @@ function lapDuration(lap: ActivityLap): number | undefined {
  * nothing is inferred or filled in, so a lap with no distance shows the missing
  * marker rather than a number the file never contained.
  *
- * Rows carry `data-lap-index` so lap-to-map/chart highlighting can hook in
- * later without restructuring this.
+ * A row is a toggle, not a link: pressing it picks that lap out on the map and
+ * pressing it again puts it back. It deliberately does **not** move the map —
+ * a lap is a marker within the activity, not a request to look somewhere else,
+ * which is what separates it from a chart range selection.
  */
 export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
+  const selectedLapIndex = useInteractionStore((state) => state.selectedLapIndex);
+  const setSelectedLapIndex = useInteractionStore((state) => state.setSelectedLapIndex);
   // Only formats that state calories get the column, rather than a row of
   // dashes for every GPX file.
   const showCalories = laps.some((lap) => Number.isFinite(lap.caloriesKcal));
@@ -55,16 +60,35 @@ export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
             </tr>
           </thead>
           <tbody>
-            {laps.map((lap) => (
-              <tr key={lap.index} data-lap-index={lap.index}>
-                <th scope="row">{lap.index + 1}</th>
+            {laps.map((lap) => {
+              const isSelected = lap.index === selectedLapIndex;
+              return (
+              <tr
+                key={lap.index}
+                data-lap-index={lap.index}
+                className={isSelected ? 'laps__row is-selected' : 'laps__row'}
+              >
+                <th scope="row">
+                  <button
+                    type="button"
+                    className="laps__select"
+                    aria-pressed={isSelected}
+                    // The cell shows a number; the name says what pressing it
+                    // does, so the control is not just "1" to a screen reader.
+                    aria-label={`${isSelected ? 'Stop highlighting' : 'Highlight'} lap ${lap.index + 1}`}
+                    onClick={() => setSelectedLapIndex(isSelected ? undefined : lap.index)}
+                  >
+                    {lap.index + 1}
+                  </button>
+                </th>
                 <td>{formatDistance(lap.distanceMeters, units)}</td>
                 <td>{lapDuration(lap) === undefined ? MISSING : formatDuration(lapDuration(lap))}</td>
                 {showCalories && (
                   <td>{lap.caloriesKcal === undefined ? MISSING : `${Math.round(lap.caloriesKcal)}`}</td>
                 )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

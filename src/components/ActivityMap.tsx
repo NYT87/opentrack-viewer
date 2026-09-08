@@ -38,6 +38,8 @@ const FOCUS_SOURCE = 'activity-focus';
 const FOCUS_LAYER = 'activity-focus-line';
 const MARKER_SOURCE = 'activity-marker';
 const MARKER_LAYER = 'activity-marker-point';
+const LAP_SOURCE = 'activity-lap';
+const LAP_LAYER = 'activity-lap-line';
 
 /**
  * Default basemap: OpenStreetMap raster tiles, declared inline so there is no
@@ -130,6 +132,11 @@ export interface ActivityMapProps {
    * rather than losing everything outside the selection.
    */
   focusRoute?: RouteGeometry;
+  /**
+   * The lap the reader picked out. Drawn in its own colour over the route, and
+   * never fitted to: a lap says "which part is this", not "take me there".
+   */
+  lapRoute?: RouteGeometry;
   /** Marker for the hovered/selected point (AV-602). */
   marker: FeatureCollection<Point, { index: number }>;
   basemapEnabled: boolean;
@@ -156,6 +163,7 @@ export interface ActivityMapProps {
 export function ActivityMap({
   route,
   focusRoute,
+  lapRoute,
   marker,
   basemapEnabled,
   basemapStyle = DEFAULT_BASEMAP_STYLE,
@@ -171,6 +179,7 @@ export function ActivityMap({
   // rather than whatever was in scope when the listener was registered.
   const routeRef = useRef(route);
   const focusRouteRef = useRef(focusRoute);
+  const lapRouteRef = useRef(lapRoute);
   const markerRef = useRef(marker);
   /** Bounds of the route currently displayed, for re-fitting after a resize. */
   const boundsRef = useRef<[number, number, number, number] | undefined>(undefined);
@@ -182,8 +191,9 @@ export function ActivityMap({
   useEffect(() => {
     routeRef.current = route;
     focusRouteRef.current = focusRoute;
+    lapRouteRef.current = lapRoute;
     markerRef.current = marker;
-  }, [route, focusRoute, marker]);
+  }, [route, focusRoute, lapRoute, marker]);
 
   // A newly loaded activity gets a fresh automatic fit even if the user had
   // moved the camera while viewing the previous one.
@@ -291,6 +301,21 @@ export function ActivityMap({
           paint: { 'line-color': '#ffd166', 'line-width': 4.5 },
         });
       }
+      if (!map.getSource(LAP_SOURCE)) {
+        map.addSource(LAP_SOURCE, {
+          type: 'geojson',
+          data: lapRouteRef.current?.featureCollection ?? EMPTY_ROUTE,
+        });
+        map.addLayer({
+          id: LAP_LAYER,
+          type: 'line',
+          source: LAP_SOURCE,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          // A colour of its own: not the route's blue, and not the focus amber,
+          // so a highlighted lap inside a focused section still reads as one.
+          paint: { 'line-color': '#c77dff', 'line-width': 5 },
+        });
+      }
       if (!map.getSource(MARKER_SOURCE)) {
         map.addSource(MARKER_SOURCE, { type: 'geojson', data: markerRef.current });
         map.addLayer({
@@ -349,6 +374,13 @@ export function ActivityMap({
       (source as GeoJSONSource).setData(focusRoute?.featureCollection ?? EMPTY_ROUTE);
     }
 
+    const lapSource = map.getSource(LAP_SOURCE);
+    if (lapSource && 'setData' in lapSource) {
+      // Data only: no bounds, no camera. A lap recolours where the reader
+      // already is (§17), unlike a chart selection, which moves the view.
+      (lapSource as GeoJSONSource).setData(lapRoute?.featureCollection ?? EMPTY_ROUTE);
+    }
+
     const hasFocus = Boolean(focusRoute && !focusRoute.isEmpty);
     if (map.getLayer(ROUTE_LAYER)) {
       map.setPaintProperty(ROUTE_LAYER, 'line-opacity', hasFocus ? 0.28 : 1);
@@ -376,7 +408,7 @@ export function ActivityMap({
     userMovedRef.current = false;
     boundsRef.current = focusRoute.bounds;
     fitToBounds(map, focusRoute.bounds, 500);
-  }, [focusRoute, route.bounds, isStyleReady]);
+  }, [focusRoute, lapRoute, route.bounds, isStyleReady]);
 
   // Push marker updates (AV-602).
   useEffect(() => {
