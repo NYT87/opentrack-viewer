@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ExportPanel } from './ExportPanel';
 import { parseGpx } from '../parsers/gpx/parseGpx';
@@ -123,16 +123,20 @@ describe('ExportPanel (AV-554)', () => {
     expect(screen.queryByText(/could not carry/)).not.toBeInTheDocument();
   });
 
-  it('explains a refusal instead of saving an empty file', async () => {
+  it('says up front that it cannot write an empty file, rather than after (AV-555)', async () => {
     const indoor = makeActivity([
       { heartRateBpm: 120, time: new Date('2024-01-01T10:00:00Z') },
       { heartRateBpm: 130, time: new Date('2024-01-01T10:01:00Z') },
     ]);
     render(<ExportPanel activity={indoor} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
+    // GPX is this activity's own format, and the one it cannot be written to.
+    // The reason is stated before a press, and the press cannot happen.
+    expect(screen.getByText(/GPX needs GPS coordinates/i)).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: /GPX/ });
+    expect(button).toBeDisabled();
 
-    expect(screen.getByRole('alert')).toHaveTextContent(/no GPS coordinates/i);
+    await userEvent.click(button);
     expect(saved).toHaveLength(0);
   });
 });
@@ -167,5 +171,54 @@ describe('a rewrite is not a conversion (AV-555)', () => {
     expect(screen.getByRole('option', { name: 'FIT (same format)' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'GPX' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Rewrite as FIT' })).toBeInTheDocument();
+  });
+});
+
+describe('a target that cannot be written is disabled, not broken (AV-555)', () => {
+  const indoor = () =>
+    makeActivity([
+      { heartRateBpm: 120, time: new Date('2024-01-01T10:00:00Z') },
+      { heartRateBpm: 130, time: new Date('2024-01-01T10:01:00Z') },
+    ]);
+
+  it('disables the option and marks it, rather than letting it be chosen', () => {
+    render(<ExportPanel activity={indoor()} />);
+
+    const gpx = screen.getByRole('option', { name: /GPX/ }) as HTMLOptionElement;
+    expect(gpx.disabled).toBe(true);
+    expect(gpx.textContent).toMatch(/unavailable/i);
+
+    // The formats it *can* be written to are untouched.
+    expect((screen.getByRole('option', { name: /^FIT/ }) as HTMLOptionElement).disabled).toBe(
+      false,
+    );
+    expect((screen.getByRole('option', { name: /^TCX/ }) as HTMLOptionElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('explains why, and refuses to be pressed, when the choice is unavailable', async () => {
+    // Reaching an unavailable format needs the control set directly, which is
+    // what a keyboard or a restored form state can do even with it disabled.
+    render(<ExportPanel activity={indoor()} />);
+    const select = screen.getByLabelText('Format') as HTMLSelectElement;
+
+    await act(async () => {
+      select.value = 'gpx';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(screen.getByText(/GPX needs GPS coordinates/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /GPX/ })).toBeDisabled();
+    expect(saved).toHaveLength(0);
+  });
+
+  it('offers everything for an activity that has both position and time', () => {
+    render(<ExportPanel activity={activity} />);
+
+    for (const option of screen.getAllByRole('option')) {
+      expect((option as HTMLOptionElement).disabled, option.textContent ?? '').toBe(false);
+      expect(option.textContent).not.toMatch(/unavailable/i);
+    }
   });
 });

@@ -194,6 +194,7 @@ must be opt-in and scrubbed of activity data.
 | Rewrite vs conversion | The source format is offered first, and named as a rewrite | `AV-555`. Writing a file back out in the format it arrived in is the least surprising default and is usually what a section export wants, so it leads — but `Rewrite as GPX` and `Convert to TCX` are different claims and the control makes both. Neither is a copy: the panel says so, because a GPX that goes out is serialized from the parsed activity and carries only what the parser could represent. |
 | Pedal cadence | Its own chart, named apart from running cadence | §17 asked whether cycling cadence should be a chart of its own. It is, in `rpm`. It is called **Pedal cadence** because a ride lists both cadence entries — the running one explaining why it is empty, this one carrying the data — and two charts called "Cadence" would be a puzzle rather than a pair. |
 | Lap highlighting | Recolours the lap's stretch of route; never moves the map | §17 asked whether a lap should focus the view. It does not, deliberately: a lap says *which part of the ride this is*, not *take me there*. That is the whole difference from a chart range selection, which does move the camera, and a unit test asserts no `fitBounds` follows a lap press. A lap with no continuous stretch to draw — its points either side of a recording gap — shows its figures but offers **no control**, because one that silently does nothing is worse than none. `hasDrawableRoute` answers that by counting rather than by building the geometry, and a test pins it against the geometry so the two cannot drift. |
+| Unwritable export targets | Disabled with their reason, never offered and then refused | `AV-555`. An indoor run cannot be written to GPX, and a route with no clock cannot be written to FIT or TCX. Each format states its own requirement beside its serializer — the exporter refuses on exactly that condition — so the rule and the writer cannot disagree, and a test asks the writer to confirm every answer. Judged against what is *about to be written*: a section through a tunnel disables GPX even when the whole ride has coordinates. |
 | Map vs app theme | Independent | §17 leaves this open. The basemap keeps its own styling rather than following the app theme, so route-only mode and the tile treatment stay predictable. |
 | Terms and Conditions | A route, not a modal | A legal document needs a stable, shareable link, and it must be readable without a loaded activity. The copy is marked **draft** in the page itself: it describes how the app actually behaves, but it has not been reviewed by anyone qualified and must be before release. |
 | Routing | React Router, `HashRouter`; `/` homepage and `/viewer`, with settings as modal state rather than a route (`AV-006`, `AV-007`) | The plan defers routing until "multiple views become useful" (§4); the Settings page is that point, and §9 already reserved `src/app/routes.ts`. Hash routing because this is a static, backend-free app: on static hosting such as GitHub Pages a deep link to `/settings` would 404 without server rewrites. |
@@ -221,12 +222,8 @@ The plan grew in `f42a152` with two new epics, neither started:
 | **E9** GoPro video telemetry | `AV-901`–`AV-907` | Read the GPMF metadata track out of an MP4/MOV in the browser and normalize its GPS and sensor streams into `Activity`, behind its own tool page |
 | **E10** Telemetry video overlays | `AV-1001`–`AV-1008` | An overlay tool page: a timeline and template model, a synchronized preview, and export of overlay assets or burned-in video where feasible |
 
-Everything before them is implemented — 67 tasks — with one criterion
-outstanding: `AV-555` asks that unavailable export targets be *hidden or
-disabled with a typed reason, not shown as broken controls*. Today every
-format is always offered and refuses on click (a treadmill run offers
-`Convert to GPX`, then explains it has no coordinates). The refusal is clear,
-but the control should not have looked available.
+Everything before them is implemented — 67 tasks, every acceptance criterion
+met.
 
 One §17 question also remains open: which image to use for link previews.
 

@@ -1,7 +1,12 @@
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { Activity, ActivityPointRange, ActivityWarning } from '../domain/activity';
 import { ActivityError } from '../domain/errors';
-import { EXPORT_FORMATS, exportActivity, type ExportFormat } from '../exporters';
+import {
+  EXPORT_FORMATS,
+  exportActivity,
+  getExportAvailability,
+  type ExportFormat,
+} from '../exporters';
 
 export interface ExportPanelProps {
   activity: Activity;
@@ -46,6 +51,19 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
   const label = EXPORT_FORMATS.find((entry) => entry.format === format)?.label ?? format;
   const isRewrite = format === sourceFormat;
 
+  /*
+   * AV-555. A format this activity cannot be written to is offered as a
+   * disabled option carrying its reason, rather than as a control that fails
+   * on press. Computed for what is actually about to be written, so a section
+   * with no coordinates disables GPX even when the whole ride has them.
+   */
+  const availability = useMemo(
+    () => getExportAvailability(activity, exportsSection ? selectedRange : undefined),
+    [activity, exportsSection, selectedRange],
+  );
+  const chosen = availability.find((entry) => entry.format === format);
+  const isUnavailable = chosen?.available === false;
+
   const handleExport = async () => {
     setIsWriting(true);
     try {
@@ -88,9 +106,10 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
             value={format}
             onChange={(event) => setFormat(event.target.value as ExportFormat)}
           >
-            {EXPORT_FORMATS.map((entry) => (
-              <option key={entry.format} value={entry.format}>
+            {availability.map((entry) => (
+              <option key={entry.format} value={entry.format} disabled={!entry.available}>
                 {entry.format === sourceFormat ? `${entry.label} (same format)` : entry.label}
+                {entry.available ? '' : ' — unavailable'}
               </option>
             ))}
           </select>
@@ -124,16 +143,18 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
           type="button"
           className="button button--primary"
           onClick={() => void handleExport()}
-          disabled={isWriting}
+          disabled={isWriting || isUnavailable}
         >
           {isWriting ? 'Writing…' : isRewrite ? `Rewrite as ${label}` : `Convert to ${label}`}
         </button>
       </div>
 
       <p className="export__hint">
-        {isRewrite
-          ? `Rewritten from the activity as this app read it, not copied from your ${label} file — so anything the parser could not represent is not carried over.`
-          : `Converted through the same activity model every format is read into, rather than translated from ${activity.source.format.toUpperCase()} directly.`}
+        {isUnavailable
+          ? chosen?.reason
+          : isRewrite
+            ? `Rewritten from the activity as this app read it, not copied from your ${label} file — so anything the parser could not represent is not carried over.`
+            : `Converted through the same activity model every format is read into, rather than translated from ${activity.source.format.toUpperCase()} directly.`}
       </p>
 
       {error && (

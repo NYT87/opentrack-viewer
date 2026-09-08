@@ -1,6 +1,12 @@
-import type { Activity, ActivityPointRange, ActivityWarning } from '../domain/activity';
+import {
+  hasValidLocation,
+  type Activity,
+  type ActivityPoint,
+  type ActivityPointRange,
+  type ActivityWarning,
+} from '../domain/activity';
 import { sliceActivity } from '../domain/activitySlice';
-import { ActivityError } from '../domain/errors';
+import { ActivityError, type ActivityErrorCode } from '../domain/errors';
 import { buildGpx } from './gpx/buildGpx';
 import { buildTcx } from './tcx/buildTcx';
 
@@ -13,18 +19,96 @@ export interface ExportFormatDefinition {
   label: string;
   extension: string;
   mimeType: string;
+  /**
+   * What this format needs from an activity before it can be written at all.
+   *
+   * Stated here rather than in the UI because it is the exporter's rule: the
+   * serializer refuses on exactly this condition, and `AV-555` asks that a
+   * target it would refuse never be offered as though it would not. A test
+   * pins the two together, so the predicate cannot quietly disagree with the
+   * writer it speaks for.
+   */
+  requires: (activity: Activity) => boolean;
+  /** Said in the UI when `requires` is not met. */
+  unavailableReason: string;
+  /** The code the serializer would throw, so the reason is typed, not prose. */
+  unavailableCode: ActivityErrorCode;
 }
 
+const hasTime = (point: ActivityPoint): boolean =>
+  point.time instanceof Date && !Number.isNaN(point.time.getTime());
+
 export const EXPORT_FORMATS: ExportFormatDefinition[] = [
-  { format: 'gpx', label: 'GPX', extension: 'gpx', mimeType: 'application/gpx+xml' },
-  { format: 'fit', label: 'FIT', extension: 'fit', mimeType: 'application/vnd.ant.fit' },
+  {
+    format: 'gpx',
+    label: 'GPX',
+    extension: 'gpx',
+    mimeType: 'application/gpx+xml',
+    // A GPX track point cannot exist without a position.
+    requires: (activity) => activity.points.some(hasValidLocation),
+    unavailableReason: 'GPX needs GPS coordinates, and this activity has none.',
+    unavailableCode: 'no_location_stream',
+  },
+  {
+    format: 'fit',
+    label: 'FIT',
+    extension: 'fit',
+    mimeType: 'application/vnd.ant.fit',
+    // Every FIT record is keyed by time.
+    requires: (activity) => activity.points.some(hasTime),
+    unavailableReason: 'FIT needs timestamps, and this activity has none.',
+    unavailableCode: 'fit_parse_failed',
+  },
   {
     format: 'tcx',
     label: 'TCX',
     extension: 'tcx',
     mimeType: 'application/vnd.garmin.tcx+xml',
+    // A track point needs a time, and a lap is defined by when it started.
+    requires: (activity) => activity.points.some(hasTime),
+    unavailableReason: 'TCX needs timestamps, and this activity has none.',
+    unavailableCode: 'invalid_tcx_xml',
   },
 ];
+
+export interface ExportAvailability {
+  format: ExportFormat;
+  label: string;
+  available: boolean;
+  /** Present only when unavailable. */
+  reason?: string;
+  code?: ActivityErrorCode;
+}
+
+/**
+ * AV-555. Which formats can be written for what is actually about to be
+ * exported — the selected section when there is one, not the whole activity.
+ *
+ * A section can be unexportable where the activity is not: a stretch of a ride
+ * through a tunnel has no coordinates of its own, and offering GPX for it would
+ * be a control that fails on press.
+ */
+export function getExportAvailability(
+  activity: Activity,
+  range?: ActivityPointRange,
+): ExportAvailability[] {
+  const sliced = range ? sliceActivity(activity, range) : undefined;
+  // An unusable range is the range's problem, not the format's: fall back to
+  // the whole activity rather than reporting every format as unavailable.
+  const source = sliced?.ok ? sliced.activity : activity;
+
+  return EXPORT_FORMATS.map((entry) =>
+    entry.requires(source)
+      ? { format: entry.format, label: entry.label, available: true }
+      : {
+          format: entry.format,
+          label: entry.label,
+          available: false,
+          reason: entry.unavailableReason,
+          code: entry.unavailableCode,
+        },
+  );
+}
 
 export interface ExportOptions {
   format: ExportFormat;

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { EXPORT_FORMATS, exportActivity, type ExportFormat } from './index';
+import {
+  EXPORT_FORMATS,
+  exportActivity,
+  getExportAvailability,
+  type ExportFormat,
+} from './index';
 import { parseGpx } from '../parsers/gpx/parseGpx';
 import { readFixture } from '../test/helpers/fixtures';
 import { makeActivity } from '../test/helpers/activity';
@@ -13,7 +18,16 @@ const roundTrip = async (blob: Blob, fileName = 'exported.gpx') =>
 
 describe('exportActivity registry (AV-550)', async () => {
   it('advertises what it can write', async () => {
-    expect(EXPORT_FORMATS).toEqual([
+    // The shipping details only; each entry also carries the rule for when it
+    // can be written at all, which has its own tests below.
+    expect(
+      EXPORT_FORMATS.map(({ format, label, extension, mimeType }) => ({
+        format,
+        label,
+        extension,
+        mimeType,
+      })),
+    ).toEqual([
       { format: 'gpx', label: 'GPX', extension: 'gpx', mimeType: 'application/gpx+xml' },
       { format: 'fit', label: 'FIT', extension: 'fit', mimeType: 'application/vnd.ant.fit' },
       {
@@ -237,5 +251,87 @@ describe('export warnings name what GPX cannot carry (AV-551)', async () => {
 
     const { warnings } = await exportActivity(partial, { format: 'gpx' });
     expect(warnings.map((warning) => warning.code)).toContain('export_points_without_position');
+  });
+});
+
+describe('a format that would refuse is never offered (AV-555)', () => {
+  const indoor = () =>
+    makeActivity([
+      { heartRateBpm: 120, time: new Date('2024-01-01T10:00:00Z') },
+      { heartRateBpm: 130, time: new Date('2024-01-01T10:01:00Z') },
+    ]);
+
+  const plannedRoute = () =>
+    makeActivity([
+      { lat: 51.5, lon: -0.1 },
+      { lat: 51.501, lon: -0.1 },
+    ]);
+
+  const availabilityOf = (activity: Parameters<typeof getExportAvailability>[0], format: string) =>
+    getExportAvailability(activity).find((entry) => entry.format === format)!;
+
+  it('offers every format for an activity with both position and time', () => {
+    const complete = parse('route-with-elevation.gpx');
+
+    expect(getExportAvailability(complete).every((entry) => entry.available)).toBe(true);
+  });
+
+  it('withholds GPX from an activity with no coordinates, and says why', () => {
+    expect(availabilityOf(indoor(), 'gpx')).toEqual({
+      format: 'gpx',
+      label: 'GPX',
+      available: false,
+      reason: expect.stringMatching(/needs GPS coordinates/i),
+      code: 'no_location_stream',
+    });
+    // ...while the formats it can be written to stay on offer.
+    expect(availabilityOf(indoor(), 'fit').available).toBe(true);
+    expect(availabilityOf(indoor(), 'tcx').available).toBe(true);
+  });
+
+  it('withholds the timed formats from a route with no clock', () => {
+    expect(availabilityOf(plannedRoute(), 'fit')).toMatchObject({
+      available: false,
+      code: 'fit_parse_failed',
+    });
+    expect(availabilityOf(plannedRoute(), 'tcx')).toMatchObject({
+      available: false,
+      code: 'invalid_tcx_xml',
+    });
+    expect(availabilityOf(plannedRoute(), 'gpx').available).toBe(true);
+  });
+
+  it('judges the section, not the activity, when a range is selected', () => {
+    // The first two points have no position; the ride as a whole does.
+    const partly = makeActivity([
+      { time: new Date('2024-01-01T10:00:00Z') },
+      { time: new Date('2024-01-01T10:00:10Z') },
+      { lat: 51.5, lon: -0.1, time: new Date('2024-01-01T10:00:20Z') },
+      { lat: 51.501, lon: -0.1, time: new Date('2024-01-01T10:00:30Z') },
+    ]);
+
+    const whole = getExportAvailability(partly).find((e) => e.format === 'gpx')!;
+    const section = getExportAvailability(partly, { startIndex: 0, endIndex: 1 }).find(
+      (e) => e.format === 'gpx',
+    )!;
+
+    expect(whole.available).toBe(true);
+    expect(section.available).toBe(false);
+  });
+
+  it('agrees with what the exporters actually do', async () => {
+    // The guard against drift: availability is a promise about the writer, and
+    // the only way to keep it honest is to ask the writer.
+    const activities = [parse('route-with-elevation.gpx'), indoor(), plannedRoute()];
+
+    for (const [index, activity] of activities.entries()) {
+      for (const entry of getExportAvailability(activity)) {
+        const attempt = exportActivity(activity, { format: entry.format }).then(
+          () => true,
+          () => false,
+        );
+        expect(await attempt, `activity ${index} → ${entry.format}`).toBe(entry.available);
+      }
+    }
   });
 });

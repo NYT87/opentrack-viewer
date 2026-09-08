@@ -1054,6 +1054,25 @@ test('distinguishes a rewrite from a conversion (AV-555)', async ({ page }) => {
   expect(saved.suggestedFilename()).toMatch(/\.gpx$/);
 });
 
+test('disables an export target it cannot write, and says why (AV-555)', async ({ page }) => {
+  await loadFixture(page, 'treadmill-run.fit');
+
+  // An indoor run has timestamps but no coordinates, so GPX is the one format
+  // it cannot be written to. Previously it was offered and refused on press.
+  const gpx = page.getByRole('option', { name: /GPX/ });
+  await expect(gpx).toBeDisabled();
+  await expect(gpx).toContainText(/unavailable/i);
+
+  // The formats it can be written to stay on offer, and work.
+  await expect(page.getByRole('option', { name: /^FIT/ })).toBeEnabled();
+  await expect(page.getByRole('option', { name: /^TCX/ })).toBeEnabled();
+
+  await page.getByLabel('Format').selectOption('tcx');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to TCX' }).click();
+  expect((await download).suggestedFilename()).toMatch(/\.tcx$/);
+});
+
 test('has no export controls before an activity is open (AV-554)', async ({ page }) => {
   await page.goto('./#/viewer');
 
