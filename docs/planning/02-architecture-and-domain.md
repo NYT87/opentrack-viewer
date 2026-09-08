@@ -6,7 +6,7 @@
 - UI: React
 - Build tool: Vite
 - Map: MapLibre GL JS
-- Routing: React Router with static-hosting-safe routes. The app should have homepage, viewer/process, and Terms and Conditions routes. Settings should be modal state, not a route.
+- Routing: React Router with static-hosting-safe routes. The app should have homepage, viewer/process, GoPro video telemetry extraction, and Terms and Conditions routes. Settings should be modal state, not a route.
 - State: React state/hooks first; add Zustand only if shared interaction state becomes awkward
 - Charts: lightweight SVG/canvas chart component first, or a focused chart library later if interaction requirements justify it
 - Testing:
@@ -15,7 +15,7 @@
   - Playwright for browser-level file load and map/chart flows
 - SEO:
   - Static metadata in `index.html` for default title, description, canonical URL, Open Graph, and Twitter/X cards
-  - Route-specific metadata managed by React for homepage, viewer/process, and Terms and Conditions pages
+  - Route-specific metadata managed by React for homepage, viewer/process, GoPro video telemetry extraction, and Terms and Conditions pages
   - Static `robots.txt` and `sitemap.xml` when deployment URL is known
 - PWA:
   - Vite PWA plugin after the first vertical slice
@@ -27,6 +27,9 @@
 ```text
 Local File
   |
+  | Activity file: GPX / FIT / TCX
+  | Video file later: GoPro MP4 / MOV with GPMF telemetry
+  |
   | Browser File API
   v
 File Intake
@@ -36,6 +39,7 @@ File Intake
 Parser Registry
   |
   | GPX, FIT and TCX parsers
+  | GoPro video telemetry adapter later
   v
 Normalized Activity Domain Model
   |
@@ -84,6 +88,20 @@ React UI
             +--> Reset View button when focused on a selected range
        +--> Export Controls
   |
+  +--> GoPro Video Telemetry Extraction Page
+       +--> Local MP4/MOV Selection
+       +--> Extraction Progress and Cancellation
+       +--> Extraction Warnings and Result Summary
+       +--> Open in Viewer button after successful extraction
+       +--> Client-side handoff of normalized Activity to Viewer/Process Page
+  |
+  +--> Telemetry Overlay Page later
+       +--> Local Video Selection or Handoff from GoPro Extraction
+       +--> Overlay Template/Gauge Designer
+       +--> Video Preview with Telemetry Sync
+       +--> Overlay-only Export
+       +--> Burned-in Video Export after feasibility spike
+  |
   +--> Terms and Conditions Page
        +--> Browser-only processing terms
        +--> Map tile/provider caveat
@@ -91,7 +109,7 @@ React UI
        +--> User responsibility and acceptable use
   |
   +--> Settings Modal
-       +--> Opened from header on non-home pages
+       +--> Opened from the global header on every page
        +--> Theme: system / dark / light
        +--> Does not navigate away from current page
        +--> Does not clear loaded activity state
@@ -131,7 +149,13 @@ The UI must depend on normalized domain objects, never on format-specific parser
 28. Theme settings apply globally without reprocessing or clearing the current activity.
 29. Export controls serialize either the full normalized activity or the selected focused range into supported output formats.
 30. Route metadata updates document title and public meta tags without reading loaded activity data.
-31. Later slices add synchronized hover/selection state between chart and map.
+31. In the GoPro milestone, the user opens a dedicated video telemetry extraction page from `Tools`, selects a local MP4/MOV file, and extracts telemetry without uploading the video.
+32. After successful GoPro extraction, the extraction page shows a button that navigates to the viewer and passes the normalized `Activity` plus safe auxiliary telemetry through client-side app state.
+33. The viewer renders the extracted GoPro activity through the same map, overview, charts, range focus, export, and reset-view contracts used for GPX/FIT/TCX activities.
+34. After GoPro extraction is stable, a later overlay page can consume the local video plus normalized `Activity`/auxiliary telemetry to render synchronized gauges, maps, and metric overlays.
+35. Overlay-only exports serialize the overlay timeline independently from the source video, for use in external editing applications.
+36. Burned-in video export composites video frames and overlay frames in the browser only after a feasibility spike confirms acceptable browser support, memory use, duration limits, and export quality.
+37. Later slices add synchronized hover/selection state between chart and map.
 
 ## 8. Domain Model
 
@@ -185,6 +209,8 @@ below say how the rest of the app is expected to behave in the face of that.
 ### Domain Model Principles
 
 - Optional fields are expected. GPX files may lack HR/power/cadence. FIT files may lack GPS.
+- A GoPro video telemetry import should normalize GPS samples into ordinary `ActivityPoint` records, so maps, charts, stats, focused ranges, and export flows continue to use the same contracts.
+- High-frequency GoPro telemetry that is not an activity point stream, such as accelerometer, gyroscope, gravity vector, camera orientation, ISO, shutter speed, and white balance, should be modeled as optional auxiliary streams instead of forcing everything into `ActivityPoint`.
 - Latitude and longitude are optional at the point level so indoor FIT activities can still be represented.
 - Derived values should be clearly separated from source values.
 - Parser warnings should be preserved and shown in a non-blocking way when possible.
@@ -217,6 +243,8 @@ below say how the rest of the app is expected to behave in the face of that.
 - Exporters should consume normalized `Activity` or a derived focused activity slice, not parser-specific source data.
 - Direct conversion should be modeled as parse-to-`Activity` plus export-from-`Activity`, not as source-format-to-target-format shortcuts.
 - Direct conversion should offer only exporter-supported target formats and should normally exclude the source format unless the user is explicitly using export for cleanup/rewrite.
+- GoPro video extraction should be modeled as `local video -> dedicated extraction page -> metadata/GPMF extraction -> normalized Activity plus optional telemetry streams -> viewer handoff`, not as a server conversion job.
+- Telemetry overlay generation should be modeled as `local video + normalized Activity/telemetry streams -> synchronized overlay timeline -> preview -> overlay-only export or browser-side video render`, not as a backend render job.
 - Exporters may lose unsupported source-specific fields; any loss should be documented through warnings or UI copy.
 - Exporting a selected range should not mutate the original activity and should be clearly presented as exporting the selected section.
 
@@ -248,8 +276,10 @@ The app should separate project description from activity processing:
 
 - `/`: homepage/main page. Describes OpenTrack Viewer, supported/planned formats, privacy model, and links to the viewer/process page and Terms and Conditions.
 - `/viewer`: activity processing page. Owns file selection, parsing, map, details, charts, focused ranges, and export controls.
+- `/video-telemetry` or equivalent: GoPro video telemetry extraction page. Owns local MP4/MOV selection, extraction progress, cancellation, extracted telemetry summary, warnings, and the post-success button that opens the viewer with extracted data.
+- `/overlays` or equivalent later: telemetry overlay page. Owns overlay template selection/customization, synchronized video preview, overlay-only export, and burned-in video export when feasible.
 - `/terms`: Terms and Conditions page. Provides stable legal/usage terms and must be safe to link from footer, homepage, and repository docs.
-- Settings: modal state opened from the header on non-home pages. It should not be a route, should not unmount the viewer/process page, and should not clear loaded activity data.
+- Settings: modal state opened from the global header on every page. It should not be a route, should not unmount the current page, and should not clear loaded activity data.
 
 Header rules:
 
@@ -258,13 +288,14 @@ Header rules:
 - Do not render the privacy/product description as a header subtitle; keep descriptive copy on the homepage or contextual content areas.
 - Place a `Tools` dropdown beside the title on the left side of the header.
 - The `Tools` dropdown should include `File viewer`, which routes to the current viewer/process page.
+- When GoPro video telemetry extraction is implemented, the `Tools` dropdown should also include a `Video telemetry` or `GoPro telemetry` entry that routes to the dedicated extraction page.
+- When telemetry overlays are implemented, the `Tools` dropdown should also include an `Overlays` or `Telemetry overlays` entry that routes to the overlay page.
 - The viewer/process page should not appear as a standalone top-level `Viewer` button when it is available through `Tools > File viewer`.
 - The `Tools` dropdown should use accessible menu/button semantics, keyboard navigation, outside-click/Escape close behavior, and a visible focus state.
-- Homepage header should not show Settings.
-- Non-home pages should expose Settings in the header as an icon-only button/control.
+- Every page should expose Settings in the header as an icon-only button/control, including the homepage, viewer/process page, Terms and Conditions page, and future tool pages.
 - The Settings icon control must have an accessible name, keyboard focus state, and tooltip/title or equivalent affordance for pointer users.
 - Terms and Conditions should be reachable through footer/global links and may be linked from the homepage.
-- The viewer/process page should keep a compact action to open settings while activity data remains mounted.
+- The viewer/process page should keep the global compact action to open settings while activity data remains mounted.
 - Closing the settings modal should return focus to the button/control that opened it.
 
 Theme rules:
@@ -282,6 +313,8 @@ SEO rules:
 - Do not place activity file names, route coordinates, timestamps, device metadata, sensor values, or derived stats into document titles, meta descriptions, Open Graph tags, Twitter/X tags, canonical URLs, robots files, sitemap files, or structured data.
 - Homepage metadata should be indexable and describe browser-only activity file viewing.
 - Viewer/process metadata should describe the generic file viewer, not the currently loaded file.
+- GoPro video telemetry extraction metadata should describe local browser-side extraction from GoPro video files without claiming uploaded/cloud processing.
+- Telemetry overlay metadata should describe local browser-side overlay generation without implying cloud rendering or uploaded videos.
 - Terms and Conditions metadata should describe the legal/usage terms page.
 - If route-specific metadata is managed client-side, it should update when navigating between homepage, viewer/process, and Terms and Conditions routes.
 - Static hosting should include `robots.txt` and `sitemap.xml` once the production URL is known.

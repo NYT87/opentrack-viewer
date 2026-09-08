@@ -3,6 +3,15 @@ import { MISSING, formatDistance, formatDuration, type UnitSystem } from '../dom
 import { useInteractionStore } from '../state/interactionStore';
 
 export interface LapsPanelProps {
+  /**
+   * Laps that can be picked out on the map. A lap whose points straddle a
+   * pause has no line to draw; its row still shows its figures, but offers no
+   * control, because a control that does nothing is worse than none.
+   *
+   * Omitted means every lap can be highlighted, which is what a caller with no
+   * map to draw on wants.
+   */
+  highlightable?: ReadonlySet<number>;
   laps: ActivityLap[];
   units?: UnitSystem;
 }
@@ -39,7 +48,12 @@ function lapDuration(lap: ActivityLap): number | undefined {
  * a lap is a marker within the activity, not a request to look somewhere else,
  * which is what separates it from a chart range selection.
  */
-export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
+/** Why a lap can carry figures and still have nothing to show on the map. */
+const NOT_DRAWABLE =
+  'This lap has no continuous stretch of route to highlight: its points sit either side of a ' +
+  'recording gap.';
+
+export function LapsPanel({ laps, units = 'metric', highlightable }: LapsPanelProps) {
   const selectedLapIndex = useInteractionStore((state) => state.selectedLapIndex);
   const setSelectedLapIndex = useInteractionStore((state) => state.setSelectedLapIndex);
   // Only formats that state calories get the column, rather than a row of
@@ -62,6 +76,7 @@ export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
           <tbody>
             {laps.map((lap) => {
               const isSelected = lap.index === selectedLapIndex;
+              const canHighlight = highlightable?.has(lap.index) ?? true;
               return (
               <tr
                 key={lap.index}
@@ -69,17 +84,23 @@ export function LapsPanel({ laps, units = 'metric' }: LapsPanelProps) {
                 className={isSelected ? 'laps__row is-selected' : 'laps__row'}
               >
                 <th scope="row">
-                  <button
-                    type="button"
-                    className="laps__select"
-                    aria-pressed={isSelected}
-                    // The cell shows a number; the name says what pressing it
-                    // does, so the control is not just "1" to a screen reader.
-                    aria-label={`${isSelected ? 'Stop highlighting' : 'Highlight'} lap ${lap.index + 1}`}
-                    onClick={() => setSelectedLapIndex(isSelected ? undefined : lap.index)}
-                  >
-                    {lap.index + 1}
-                  </button>
+                  {canHighlight ? (
+                    <button
+                      type="button"
+                      className="laps__select"
+                      aria-pressed={isSelected}
+                      // The cell shows a number; the name says what pressing it
+                      // does, so the control is not just "1" to a screen reader.
+                      aria-label={`${isSelected ? 'Stop highlighting' : 'Highlight'} lap ${lap.index + 1}`}
+                      onClick={() => setSelectedLapIndex(isSelected ? undefined : lap.index)}
+                    >
+                      {lap.index + 1}
+                    </button>
+                  ) : (
+                    <span className="laps__number" title={NOT_DRAWABLE}>
+                      {lap.index + 1}
+                    </span>
+                  )}
                 </th>
                 <td>{formatDistance(lap.distanceMeters, units)}</td>
                 <td>{lapDuration(lap) === undefined ? MISSING : formatDuration(lapDuration(lap))}</td>

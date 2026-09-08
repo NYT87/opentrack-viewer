@@ -49,14 +49,23 @@ export function AppShell() {
         </div>
 
         <div className="shell__actions">
-          {/* The homepage owns no activity state, so neither control belongs there. */}
+          {/*
+            Closing an activity is scoped to having one: the homepage owns no
+            activity state, so the control would act on nothing.
+          */}
           {!isHome && activity && (
             <button type="button" className="button" onClick={clear}>
               Close activity
             </button>
           )}
 
-          {!isHome && <SettingsIconButton onClick={() => setIsSettingsOpen(true)} />}
+          {/*
+            AV-007 / TD-008: Settings belongs in the global header on *every*
+            page, the homepage included. Units and theme are app-wide choices,
+            and a reader who wants dark mode should not have to open a file to
+            find the switch.
+          */}
+          <SettingsIconButton onClick={() => setIsSettingsOpen(true)} />
         </div>
       </header>
 

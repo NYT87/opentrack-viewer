@@ -770,3 +770,4 @@ body {
   font-weight: 600;
 }
 .laps__row.is-selected td { font-weight: 600; }
+.laps__number { padding: 2px 6px; color: var(--text-muted); cursor: help; }

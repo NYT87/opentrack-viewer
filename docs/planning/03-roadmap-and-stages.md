@@ -13,8 +13,8 @@ Outcome:
 - Terms and Conditions route exists with draft content and stable links.
 - Header brand/title links to the homepage, with no duplicate Home button and no header subtitle.
 - Header places a `Tools` dropdown beside the title, with `File viewer` linking to the viewer/process page.
-- Settings exists as a modal available from non-home pages, not as a standalone page.
-- Settings opens from an icon-only header control on non-home pages.
+- Settings exists as a modal available from the global header on every page, not as a standalone page.
+- Settings opens from an icon-only header control on the homepage, viewer/process page, Terms page, and future tool pages.
 - Settings modal includes theme mode options: system, dark, and light.
 - Basic SEO metadata exists for homepage, viewer/process, and Terms and Conditions without exposing activity data.
 - Viewer/process page has an upload-focused empty state.
@@ -135,6 +135,36 @@ Outcome:
 - App shell caches offline.
 - Offline maps remain a separate project.
 
+### M7: GoPro Video Telemetry Extraction
+
+Goal: Extract GPS and selected telemetry streams from local GoPro MP4/MOV files in the browser and feed the existing activity viewer/export pipeline.
+
+Outcome:
+- User can open a dedicated GoPro/video telemetry extraction page from the header `Tools` dropdown.
+- User can select a local GoPro MP4/MOV file without uploading it.
+- Browser-side code extracts the embedded GPMF telemetry track or enough raw GPMF payload/timing data to decode it.
+- GPS samples normalize into `ActivityPoint[]` and feed the existing map, stats, chart, focus-range, and export flows.
+- After extraction succeeds, the extraction page displays a button that opens the viewer with the extracted activity data loaded.
+- Device/camera information is displayed only when safe and useful; stable identifiers remain hidden.
+- High-frequency streams such as accelerometer, gyroscope, gravity, orientation, and camera/video settings are detected and surfaced in scoped UI or export warnings, not forced into the route model.
+- Large video files are processed with bounded memory, progress feedback, cancellation, and Web Worker isolation where needed.
+- The implementation strategy is chosen after evaluating `gopro/gpmf-parser`, `gopro-telemetry` plus raw GPMF extraction, and `telemetrik` as a reference/test oracle.
+- GoPro video telemetry extraction remains entirely client-side.
+
+### M8: Telemetry Video Overlays
+
+Goal: Generate synchronized telemetry overlays from local video plus extracted activity/sensor data, with overlay-only export for external video editors and browser-side burned-in video export when feasible.
+
+Outcome:
+- User can open a dedicated telemetry overlay page from the header `Tools` dropdown after video telemetry extraction exists.
+- Overlay page can receive a local video and extracted `Activity`/auxiliary telemetry from the GoPro extraction flow.
+- User can preview synchronized overlays on the video timeline without uploading video, telemetry, generated frames, or output files.
+- Initial overlay templates cover a small useful set: speed or pace, distance/time, elevation, route/map inset, and optional heart rate/cadence/power/sensor gauges when data exists.
+- User can choose basic styling/layout options such as position, size, colors, unit system, and visibility per overlay component.
+- User can export overlay-only assets, such as transparent WebM where supported, chroma-key background video, or PNG/WebP frame sequences, for use in external video editing applications.
+- Browser-side burned-in video export is implemented only after a feasibility spike confirms the encoding stack, browser support, memory profile, export duration limits, and quality are acceptable.
+- Overlay generation remains entirely client-side and does not introduce a backend render queue.
+
 ## 12. Start Here: Parallelizable First Tasks
 
 Start with these tasks in parallel:
@@ -167,7 +197,7 @@ The first vertical slice is complete when:
 - The header does not show a subtitle/description line.
 - The header shows a `Tools` dropdown beside the title, and `Tools > File viewer` opens the viewer/process page.
 - The viewer/process route is not duplicated as a separate top-level `Viewer` button.
-- On non-home pages, Settings opens from an accessible icon-only header control.
+- Settings opens from an accessible icon-only header control on every page.
 - Public metadata describes OpenTrack Viewer and the current route without exposing loaded activity data.
 - The viewer/process initial state shows the local file upload action and does not show the map area.
 - A user can select or drag/drop a GPX file.

@@ -38,7 +38,7 @@ Cover:
 - `Tools` dropdown contains `File viewer` and routes to the viewer/process page.
 - Header does not render a standalone top-level `Viewer` button when `File viewer` is in the `Tools` dropdown.
 - Tools dropdown has accessible button/menu behavior, keyboard support, Escape close, outside-click close, and visible focus state.
-- Header hides Settings on the homepage and shows an icon-only Settings control on non-home pages.
+- Header shows an icon-only Settings control on every page, including the homepage, viewer/process page, Terms and Conditions page, and future tool pages.
 - Settings icon has accessible name, tooltip/title or equivalent affordance, keyboard support, and visible focus state.
 - Settings modal open/close behavior without route changes.
 - Route-specific SEO title and description for homepage, viewer/process, and Terms and Conditions.
@@ -93,10 +93,12 @@ Cover:
 - Confirm the header does not show a subtitle/description line.
 - Confirm `Tools` dropdown appears beside the title.
 - Confirm `Tools > File viewer` navigates to the viewer/process page.
+- When GoPro video telemetry extraction is implemented, confirm `Tools` includes the video telemetry entry and routes to the dedicated extraction page.
+- When telemetry overlays are implemented, confirm `Tools` includes the overlay entry and routes to the dedicated overlay page.
 - Confirm no standalone top-level `Viewer` button is rendered when `File viewer` is in the `Tools` dropdown.
 - Confirm `Tools` dropdown supports keyboard open/close and Escape close.
-- Confirm Settings is not shown on the homepage header.
-- Confirm Settings opens as a modal from the icon-only header control on the viewer/process page.
+- Confirm Settings is shown on the homepage header.
+- Confirm Settings opens as a modal from the icon-only header control on the homepage and viewer/process page.
 - Confirm opening and closing Settings does not clear a loaded activity or selected chart/view state.
 - Confirm each public route sets the expected title and description.
 - Confirm loading an activity does not write file name, coordinates, timestamps, device identifiers, sensor values, or derived stats into meta tags.
@@ -141,6 +143,18 @@ Cover:
 - Confirm cycling fixture does not show running pace/cadence charts by default.
 - Confirm malformed GPX produces a useful error.
 - Confirm no request is made with the raw file content.
+- Confirm GoPro video telemetry extraction, when implemented, opens a local MP4/MOV fixture without upload.
+- Confirm GoPro video telemetry extraction runs on its own page, not inside the generic file viewer.
+- Confirm successful extraction reveals an `Open in viewer` or equivalent button.
+- Confirm the button navigates to the viewer and renders the extracted activity data through the same map, stats, charts, range focus, reset-view, and export flows.
+- Confirm viewer reload or direct entry without handoff state returns to the normal empty upload state.
+- Confirm GoPro GPS telemetry normalizes into the same map, stats, chart, focus-range, and export adapters as GPX/FIT/TCX.
+- Confirm GoPro files with missing or low-quality GPS show useful warnings without crashing.
+- Confirm high-frequency GoPro streams are downsampled/windowed for responsive charts.
+- Confirm telemetry overlay preview, when implemented, runs on its own page and can receive local video plus extracted `Activity`/auxiliary telemetry through client-side handoff.
+- Confirm overlay preview stays synchronized on play, pause, seek, and manual offset adjustment.
+- Confirm overlay-only export produces the selected local output format with expected dimensions, duration/timeline length, and template settings.
+- Confirm burned-in video export is tested only after the browser-side feasibility task chooses an acceptable encoding path.
 
 ### Privacy Regression Tests
 
@@ -151,6 +165,9 @@ Add browser tests or request interception checks for:
 - No SEO metadata contains coordinates, timestamps, file names, device identifiers, serial numbers, manufacturer/model fields, sensor values, or derived activity stats.
 - No export operation uploads activity contents or derived activity contents.
 - No direct conversion operation uploads activity contents, normalized activity contents, or converted file contents.
+- No GoPro video telemetry operation uploads video bytes, raw GPMF payloads, extracted coordinates, device metadata, or derived activity values.
+- No GoPro extraction-to-viewer handoff uses backend storage, account state, or cloud persistence.
+- No telemetry overlay preview or export uploads source video frames, telemetry samples, generated overlay frames, rendered video output, file names, or output metadata.
 - Map tile requests are limited to configured tile provider URLs.
 
 ### Fixture Policy
@@ -166,6 +183,11 @@ Add browser tests or request interception checks for:
 - Initial parser can run on the main thread, but isolate parsing behind an async API so Web Worker migration is easy.
 - Consider downsampling for rendering and charts while preserving original data for stats.
 - Avoid storing duplicate large arrays where possible.
+- GoPro MP4/MOV inputs can be much larger than activity files; metadata extraction should use ranged reads, progress, cancellation, and Worker isolation before any full-video-scale implementation.
+- Do not decode video frames for the telemetry milestone unless a later feature explicitly requires video playback or frame synchronization.
+- Telemetry overlay preview should use efficient canvas or GPU-backed rendering where needed and avoid per-frame React renders.
+- Overlay-only export should be planned before burned-in video export because it avoids decoding/re-encoding the source video and is more likely to work across browsers.
+- Burned-in video export must be gated by measured feasibility for WebCodecs, MediaRecorder, ffmpeg.wasm, or the selected encoder path, including memory use, duration limits, audio handling, and mobile behavior.
 - Use memoization for GeoJSON and chart series derived from the current activity.
 - Cache derived chart series by activity identity and x-axis mode.
 - Axis tick generation should be deterministic and cheap; compute ticks from visible domain and x-axis mode rather than sampling rendered pixels on every frame.

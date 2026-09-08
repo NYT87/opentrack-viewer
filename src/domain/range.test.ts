@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { domainFromPointRange, lapPointRange, pointRangeFromDomain } from './range';
+import {
+  domainFromPointRange,
+  hasDrawableRoute,
+  lapPointRange,
+  pointRangeFromDomain,
+} from './range';
 import { makeActivity } from '../test/helpers/activity';
+import { sliceActivity } from './activitySlice';
+import { activityToRouteGeoJSON } from './geojson';
 
 /** Five points ~111 m apart, one minute apart. */
 const activity = () =>
@@ -201,5 +208,82 @@ describe('lapPointRange', () => {
         endTime: new Date('2024-01-01T10:00:20Z'),
       }),
     ).toEqual({ startIndex: 0, endIndex: 2 });
+  });
+});
+
+describe('hasDrawableRoute', () => {
+  it('is true for two located points in the same segment', () => {
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1, segmentIndex: 0 },
+      { lat: 51.501, lon: -0.1, segmentIndex: 0 },
+    ]);
+
+    expect(hasDrawableRoute(activity, { startIndex: 0, endIndex: 1 })).toBe(true);
+  });
+
+  it('is false across a pause with one point on each side', () => {
+    // The case found by running the app: a lap boundary inside a recording gap.
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1, segmentIndex: 0 },
+      { lat: 51.501, lon: -0.1, segmentIndex: 1 },
+    ]);
+
+    expect(hasDrawableRoute(activity, { startIndex: 0, endIndex: 1 })).toBe(false);
+  });
+
+  it('is true when either side of a pause has a pair', () => {
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1, segmentIndex: 0 },
+      { lat: 51.501, lon: -0.1, segmentIndex: 1 },
+      { lat: 51.502, lon: -0.1, segmentIndex: 1 },
+    ]);
+
+    expect(hasDrawableRoute(activity, { startIndex: 0, endIndex: 2 })).toBe(true);
+  });
+
+  it('is false for a single point, and for none', () => {
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1 },
+      { lat: 51.501, lon: -0.1 },
+    ]);
+
+    expect(hasDrawableRoute(activity, { startIndex: 0, endIndex: 0 })).toBe(false);
+  });
+
+  it('joins across an unlocated point, exactly as the renderer does', () => {
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1 },
+      { heartRateBpm: 120 },
+      { lat: 51.502, lon: -0.1 },
+    ]);
+    const range = { startIndex: 0, endIndex: 2 };
+
+    // Only a segment change breaks a line; a point with no position is simply
+    // skipped. Checked against the geometry rather than assumed.
+    expect(hasDrawableRoute(activity, range)).toBe(true);
+
+    const sliced = sliceActivity(activity, range);
+    expect(sliced.ok && !activityToRouteGeoJSON(sliced.activity).isEmpty).toBe(true);
+  });
+
+  it('agrees with the geometry for every case it is asked about', () => {
+    // The guard against the two drifting apart: one answers cheaply, the other
+    // by building the route, and they must never disagree.
+    const cases = [
+      [{ lat: 51.5, lon: -0.1, segmentIndex: 0 }, { lat: 51.501, lon: -0.1, segmentIndex: 0 }],
+      [{ lat: 51.5, lon: -0.1, segmentIndex: 0 }, { lat: 51.501, lon: -0.1, segmentIndex: 1 }],
+      [{ lat: 51.5, lon: -0.1 }, { heartRateBpm: 120 }, { lat: 51.502, lon: -0.1 }],
+      [{ heartRateBpm: 120 }, { heartRateBpm: 130 }],
+      [{ lat: 51.5, lon: -0.1 }],
+    ];
+
+    for (const [index, points] of cases.entries()) {
+      const activity = makeActivity(points);
+      const range = { startIndex: 0, endIndex: points.length - 1 };
+      const sliced = sliceActivity(activity, range);
+      const drawn = sliced.ok && !activityToRouteGeoJSON(sliced.activity).isEmpty;
+
+      expect(hasDrawableRoute(activity, range), `case ${index}`).toBe(drawn);
+    }
   });
 });

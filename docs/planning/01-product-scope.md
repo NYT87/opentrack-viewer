@@ -20,10 +20,11 @@ The core promise is simple:
 - Use the header brand/title as the link back to the homepage.
 - Do not show a separate Home button/nav item when the header brand already links home.
 - Keep global header chrome compact; do not show a descriptive subtitle/tagline in the header.
-- Move the viewer navigation entry into a `Tools` dropdown placed beside the title on the left side of the header.
+- Move browser-side tool navigation into a `Tools` dropdown placed beside the title on the left side of the header.
 - The `Tools` dropdown should include a `File viewer` option that links to the current viewer/process page.
-- Show the settings entry in the header on non-home pages, including the viewer/process page; the main homepage should not show the settings entry.
-- Show Settings as an icon-only header control on non-home pages, with an accessible name and visible focus state.
+- When the GoPro milestone is implemented, the `Tools` dropdown should also include a video telemetry extraction option that opens the dedicated GoPro extraction page.
+- Always show the settings entry in the global header, including the homepage, viewer/process page, Terms and Conditions page, and future tool pages.
+- Show Settings as an icon-only header control with an accessible name and visible focus state.
 - Load local activity files through file picker and drag/drop.
 - Before an activity is loaded, show only the file upload action and any supporting external/static information that belongs outside the viewer.
 - Hide the map, charts, summary stats, and activity metadata until a file has been read, parsed, validated, and normalized successfully.
@@ -67,6 +68,12 @@ The core promise is simple:
 - In Stage 3, export the current activity or selected/focused activity section to GPX and FIT where technically feasible.
 - In Stage 3, support direct browser-side conversion between supported formats: after a user opens a supported activity file, they can download it as another supported export format without uploading it.
 - In Stage 4, support TCX files for both import and export.
+- In a later milestone, let users open local GoPro MP4/MOV videos on a dedicated extraction page and extract embedded GPS and telemetry data into the same viewer/export pipeline when browser performance allows it.
+- After GoPro video telemetry is extracted successfully, show a clear action that opens the viewer with the extracted activity data already loaded.
+- After the GoPro extraction milestone is complete, add a later overlay milestone that can generate telemetry overlays from local video plus extracted activity/sensor data.
+- Let users preview synchronized telemetry overlays on top of the selected video without uploading the video or telemetry.
+- Let users export overlay-only assets, such as transparent or chroma-key video/image-sequence overlays, so they can use them in external video editing applications.
+- Evaluate browser-side burned-in video export where the generated overlay is integrated into the source video and downloaded as a new video file.
 - Add FIT support after the GPX vertical slice validates the domain model and UI contract.
 - Keep all activity-file parsing, normalization, calculations, and privacy-sensitive processing in the browser.
 - Make the app installable as a PWA once the first useful viewer experience exists.
@@ -85,6 +92,11 @@ The core promise is simple:
 - No export workflow before the viewer has a stable normalized activity model and chart/map focus behavior.
 - No direct conversion to formats that are not supported by the exporter registry yet.
 - No promise of lossless conversion when the target format cannot represent all normalized fields; expected loss must be reported.
+- No server-side video upload, transcoding, telemetry extraction, or FFmpeg service for GoPro files.
+- No full video playback/editing suite in the GoPro telemetry milestone; the scope is extracting and visualizing embedded telemetry.
+- No server-side video rendering, overlay rendering, transcoding, or cloud export queue for telemetry overlays.
+- No promise that burned-in video export is feasible for large files until a browser encoding feasibility spike is complete.
+- No full nonlinear video editor; overlay work should stay focused on telemetry gauges, maps, metrics, timing, styling, preview, and export.
 - No attempt to support every activity format before GPX is solid.
 - No standalone settings page in the target navigation model.
 - No file upload controls on the homepage beyond navigation to the viewer/process page.
@@ -96,7 +108,12 @@ The core promise is simple:
 ### Hard Constraints
 
 - Activity files must never be uploaded to an application backend.
+- Video files used for GoPro telemetry extraction must never be uploaded to an application backend.
 - Parsing must happen locally using browser APIs such as `File`, `Blob`, `FileReader`, `ArrayBuffer`, and `DOMParser`.
+- GoPro video telemetry extraction, if implemented, must happen locally from the selected MP4/MOV file using browser-side byte-range/blob reads and parser code that runs in the page or a Web Worker.
+- Handoff from the GoPro extraction page to the viewer must keep extracted activity data client-side, preferably in memory-owned app state. It must not require persistence, account state, backend storage, or a telemetry upload.
+- Telemetry overlay preview, overlay-only export, and burned-in video export must keep source video, extracted telemetry, generated overlay frames, and rendered output local to the browser.
+- If browser-side video rendering requires temporary blobs or object URLs, they must be revocable and must not be persisted without explicit user download.
 - The app must not log raw file contents.
 - The app must not send route coordinates, timestamps, device IDs, athlete metadata, or sensor streams to analytics services.
 - Device serial numbers, product IDs, and other stable identifiers should be treated as sensitive metadata and hidden by default unless there is a clear user-facing reason to expose them.
@@ -130,7 +147,7 @@ The early implementation should stay intentionally small:
 - Terms and Conditions is a read-only informational page; it must not own activity-processing state.
 - Settings are modal and session-scoped — with the theme the one exception, remembered between visits; opening settings must not reset loaded activity data.
 - Theme is an app-wide session preference available from Settings; it applies to homepage, viewer/process page, Terms and Conditions, and the settings modal itself.
-- The global header should use the OpenTrack Viewer brand/title as the home link, place a `Tools` dropdown beside the title with `File viewer` linking to the viewer/process page, avoid a duplicate Home nav button, omit header subtitles, and use an icon-only Settings control where Settings is available.
+- The global header should use the OpenTrack Viewer brand/title as the home link, place a `Tools` dropdown beside the title with `File viewer` linking to the viewer/process page and future tool entries such as GoPro video telemetry extraction, avoid a duplicate Home nav button, omit header subtitles, and always show an icon-only Settings control.
 - GPX only until route rendering and summary stats are solid.
 - One map view.
 - One responsive loaded-activity layout: max-width content, optional large-screen section sidebar, overview first, map second, charts later.
@@ -141,6 +158,8 @@ The early implementation should stay intentionally small:
 - One selected chart range at a time.
 - Range selection is an inspection/focus tool, not an activity edit or crop operation.
 - Export is Stage 3+ work, not part of the first GPX viewer slice.
+- Telemetry overlay generation is post-GoPro-extraction work and should not block GPX/FIT/TCX viewing, conversion, or extraction.
+- Overlay-only export should be planned before burned-in video export because it is more likely to be feasible in the browser and useful with existing video editors.
 - No persistence.
 - No user settings beyond what is needed for the current session.
 - SEO should focus on static public pages and app capabilities, not loaded activity content.

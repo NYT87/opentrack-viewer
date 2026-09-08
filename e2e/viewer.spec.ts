@@ -617,6 +617,24 @@ test('starts from the browser locale for units', async ({ browser }) => {
   await french.close();
 });
 
+test('opens Settings from the homepage header (AV-007)', async ({ page }) => {
+  await page.goto('./');
+
+  // TD-008: an app-wide choice should not require opening a file to find.
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('radio', { name: 'Dark' })).toBeVisible();
+
+  // Choosing a theme on the homepage applies there, without navigating.
+  await dialog.getByRole('radio', { name: 'Dark' }).check();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(new URL(page.url()).hash).toBe('');
+
+  // Close activity stays scoped to pages that have one.
+  await expect(page.getByRole('button', { name: 'Close activity' })).toHaveCount(0);
+});
+
 test('navigates to the viewer from the Tools menu (AV-012)', async ({ page }) => {
   await page.goto('./');
 
@@ -789,19 +807,33 @@ test('highlights a lap from its row, and lets go again (§17)', async ({ page })
   await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
 
   const laps = page.getByRole('region', { name: 'Laps' });
-  await laps.getByRole('button', { name: 'Highlight lap 2' }).click();
-  await expect(laps.getByRole('button', { name: 'Stop highlighting lap 2' })).toHaveAttribute(
+  await laps.getByRole('button', { name: 'Highlight lap 1' }).click();
+  await expect(laps.getByRole('button', { name: 'Stop highlighting lap 1' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
 
   // Pressing again puts the route back, and no other lap is left pressed.
-  await laps.getByRole('button', { name: 'Stop highlighting lap 2' }).click();
-  await expect(laps.getByRole('button', { name: 'Highlight lap 2' })).toHaveAttribute(
+  await laps.getByRole('button', { name: 'Stop highlighting lap 1' }).click();
+  await expect(laps.getByRole('button', { name: 'Highlight lap 1' })).toHaveAttribute(
     'aria-pressed',
     'false',
   );
   await expect(laps.getByRole('button', { name: /^Stop highlighting/ })).toHaveCount(0);
+});
+
+test('offers no control for a lap with no stretch of route to draw (§17)', async ({ page }) => {
+  await loadFixture(page, 'run-with-laps.tcx');
+
+  // Lap 2 of this fixture has one point either side of a 4.5 minute pause, so
+  // there is no continuous line to highlight. Found by running the app: the
+  // press used to do nothing at all, with nothing said about why.
+  const laps = page.getByRole('region', { name: 'Laps' });
+  await expect(laps.getByRole('button', { name: 'Highlight lap 2' })).toHaveCount(0);
+  await expect(laps.getByTitle(/either side of a recording gap/i)).toHaveText('2');
+
+  // Its figures are unaffected: only the control is absent.
+  await expect(laps).toContainText('11');
 });
 
 test('charts pedal cadence for a ride that records it', async ({ page }) => {

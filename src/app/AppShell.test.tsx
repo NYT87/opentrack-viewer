@@ -337,10 +337,26 @@ describe('Terms and Conditions (AV-008)', () => {
 });
 
 describe('settings modal (AV-007)', () => {
-  it('is not offered on the homepage', () => {
+  it('is offered on the homepage, and opens there', async () => {
+    // TD-008: units and theme are app-wide choices, so the control belongs in
+    // the global header on every page — a reader who wants dark mode should
+    // not have to open a file to find the switch.
     render(<App />);
 
-    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('radio', { name: 'Dark' })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Units')).toBeInTheDocument();
+  });
+
+  it('leaves Close activity to pages that have one', () => {
+    // Scoped differently from Settings on purpose: the homepage owns no
+    // activity, so the control would act on nothing.
+    render(<App />);
+
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close activity' })).not.toBeInTheDocument();
   });
 
   it('is offered in the header on the viewer page', async () => {

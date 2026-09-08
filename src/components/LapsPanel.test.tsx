@@ -132,3 +132,35 @@ describe('a lap row highlights its stretch of the route', () => {
     );
   });
 });
+
+describe('a lap with nothing to highlight offers no control', () => {
+  beforeEach(() => {
+    // Otherwise a selection from an earlier test renames the button.
+    useInteractionStore.getState().reset();
+  });
+
+  const twoLaps: ActivityLap[] = [
+    { index: 0, distanceMeters: 1000, durationSeconds: 300 },
+    { index: 1, distanceMeters: 1000, durationSeconds: 290 },
+  ];
+
+  it('shows the number plainly, and says why', () => {
+    render(<LapsPanel laps={twoLaps} highlightable={new Set([0])} />);
+
+    expect(screen.getByRole('button', { name: 'Highlight lap 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Highlight lap 2' })).not.toBeInTheDocument();
+
+    // Its figures are still there; only the control is gone.
+    const rows = screen.getAllByRole('row');
+    expect(rows[2]).toHaveTextContent('2');
+    expect(rows[2]).toHaveTextContent('1.00 km');
+    expect(screen.getByTitle(/either side of a recording gap/i)).toHaveTextContent('2');
+  });
+
+  it('offers every lap when the caller says nothing', () => {
+    render(<LapsPanel laps={twoLaps} />);
+
+    expect(screen.getByRole('button', { name: 'Highlight lap 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Highlight lap 2' })).toBeInTheDocument();
+  });
+});

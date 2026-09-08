@@ -10,7 +10,7 @@ import { MapPlaceholder } from '../components/MapPlaceholder';
 import { SummaryPanel } from '../components/SummaryPanel';
 import { ViewerSectionNav, type ViewerSection } from '../components/ViewerSectionNav';
 import { sliceActivity } from '../domain/activitySlice';
-import { lapPointRange } from '../domain/range';
+import { hasDrawableRoute, lapPointRange } from '../domain/range';
 import { activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
 import { selectViewerState, useActivityStore } from '../state/activityStore';
 import { activePointIndex, useInteractionStore } from '../state/interactionStore';
@@ -86,6 +86,22 @@ export function ViewerPage() {
     const slice = sliceActivity(activity, range);
     return slice.ok ? activityToRouteGeoJSON(slice.activity) : undefined;
   }, [activity, selectedLapIndex]);
+
+  /**
+   * Which laps can actually be picked out on the map. A lap whose points sit
+   * either side of a pause has no line to draw, and offering a control that
+   * silently does nothing is worse than not offering one.
+   */
+  const highlightableLaps = useMemo(() => {
+    const drawable = new Set<number>();
+    if (!activity) return drawable;
+
+    for (const lap of activity.laps ?? []) {
+      const range = lapPointRange(activity, lap);
+      if (range && hasDrawableRoute(activity, range)) drawable.add(lap.index);
+    }
+    return drawable;
+  }, [activity]);
 
   const marker = useMemo(() => {
     if (!activity || activeIndex === undefined) return pointToGeoJSON(undefined);
@@ -166,7 +182,7 @@ export function ViewerPage() {
           <div className={showLaps ? 'map-section has-laps' : 'map-section'} id="activity-map">
             {showLaps && (
               <div className="box map-section__laps" id="activity-laps">
-                <LapsPanel laps={laps} units={unitSystem} />
+                <LapsPanel laps={laps} units={unitSystem} highlightable={highlightableLaps} />
               </div>
             )}
 

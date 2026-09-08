@@ -1,4 +1,4 @@
-import type { Activity, ActivityLap, ActivityPointRange } from './activity';
+import { hasValidLocation, type Activity, type ActivityLap, type ActivityPointRange } from './activity';
 import { pointXValues, type SeriesXAxis } from './series';
 
 /**
@@ -116,4 +116,37 @@ export function lapPointRange(
   }
 
   return first === undefined || last === undefined ? undefined : { startIndex: first, endIndex: last };
+}
+
+/**
+ * Whether a span of points can be drawn as a route line.
+ *
+ * A line needs two located points from the *same* recorded segment: a pause
+ * splits the route, and one point on either side of it draws nothing. That is
+ * not hypothetical — a lap boundary can fall inside a pause, leaving a lap with
+ * a point on each side and no line to show for it.
+ *
+ * Answered by counting rather than by building the geometry, so a panel can ask
+ * it of every lap without serializing the whole route each time.
+ */
+export function hasDrawableRoute(activity: Activity, range: ActivityPointRange): boolean {
+  let segment: number | undefined;
+  let run = 0;
+
+  for (const point of activity.points) {
+    if (point.index < range.startIndex) continue;
+    if (point.index > range.endIndex) break;
+
+    // Skipped, not treated as a break: `activityToRouteGeoJSON` joins across an
+    // unlocated point too, and this must answer for the same geometry it draws.
+    if (!hasValidLocation(point)) continue;
+
+    const current = point.segmentIndex ?? 0;
+    run = current === segment ? run + 1 : 1;
+    segment = current;
+
+    if (run >= 2) return true;
+  }
+
+  return false;
 }

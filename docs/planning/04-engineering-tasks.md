@@ -120,8 +120,7 @@ Acceptance criteria:
 - Opening settings does not change the current route.
 - Opening settings does not unmount the viewer/process page.
 - Opening settings does not clear the loaded `Activity`, focused range, chart x-axis choice, basemap setting, or unit setting.
-- Settings entry is available from the header on non-home pages.
-- Settings entry is not shown on the homepage/main page header.
+- Settings entry is available from the global header on every page, including the homepage, viewer/process page, Terms and Conditions page, and future tool pages.
 - Modal has accessible dialog semantics, keyboard close behavior, focus trapping, and focus return to the opener.
 - Existing settings controls continue to be session-scoped and are not written to disk. *(Superseded for the theme alone by the §17 answer in `06-decisions-and-open-questions.md`: the theme is remembered between visits. Every other setting is still session-scoped.)*
 
@@ -150,12 +149,12 @@ Acceptance criteria:
 - Header no longer renders the descriptive subtitle/tagline under the brand/title.
 - Header no longer renders a separate Home button/nav item when the brand/title link is present.
 - Viewer/process and Terms and Conditions navigation remains reachable without relying on a duplicate Home button.
-- Settings entry is rendered as an icon-only button/control on the right side of non-home page headers.
+- Settings entry is rendered as an icon-only button/control on the right side of the global header on every page.
 - Settings icon button has accessible name `Settings`, keyboard support, visible focus state, and tooltip/title or equivalent affordance.
 - Settings icon opens the settings modal without route navigation.
 - Opening or closing the settings modal from the icon does not clear loaded activity, focused chart range, x-axis mode, unit setting, basemap setting, or theme setting.
 - Header layout remains compact and responsive across desktop and mobile widths.
-- Tests cover brand-link navigation, absence of duplicate Home button, absence of header subtitle, and settings icon modal behavior.
+- Tests cover brand-link navigation, absence of duplicate Home button, absence of header subtitle, Settings icon visibility on every route, and settings icon modal behavior.
 
 #### AV-012: Move Viewer Navigation Into Tools Dropdown
 
@@ -165,6 +164,7 @@ Acceptance criteria:
 - Header renders a `Tools` dropdown beside the `OpenTrack Viewer` title on the left side.
 - `Tools` dropdown contains a `File viewer` option.
 - Selecting `File viewer` routes to the existing viewer/process page.
+- Dropdown implementation supports future tool entries without layout churn, including GoPro video telemetry extraction when `AV-907` lands.
 - The current top-level `Viewer` button/link is removed when `File viewer` exists in the `Tools` dropdown.
 - Dropdown opening and closing does not clear loaded activity state, focused chart range, x-axis mode, unit setting, basemap setting, theme setting, or settings modal state.
 - Dropdown has accessible button/menu semantics, keyboard support, Escape close behavior, outside-click close behavior, and visible focus styles.
@@ -801,3 +801,180 @@ Acceptance criteria:
 - If map tiles fail, route can still render on a neutral background.
 - User sees a clear map tile/network message.
 - No activity data is sent to compensate for tile failure.
+
+### Epic E9: GoPro Video Telemetry
+
+#### AV-901: Evaluate GoPro Telemetry Extraction Strategy
+
+Dependencies: AV-101, AV-304
+
+Acceptance criteria:
+- Evaluate `https://github.com/gopro/gpmf-parser` as the authoritative GPMF payload parser reference, including whether compiling to WebAssembly is practical for browser use.
+- Evaluate `https://github.com/juanirache/gopro-telemetry` and its raw GPMF extraction dependency path for TypeScript/browser compatibility, bundle size, maintenance, and license fit.
+- Evaluate `https://github.com/kmatzen/telemetrik` as a reference implementation or fixture oracle, while noting that pure Python is not a direct browser dependency for this app.
+- Document how the browser will locate and read the GoPro metadata track from MP4/MOV without uploading or fully loading unnecessary video bytes into memory.
+- Decide the first supported GoPro camera/video scope, expected metadata streams, and unsupported-file behavior.
+- Record license, bundle-size, Web Worker, memory, and performance tradeoffs before implementation begins.
+
+#### AV-902: Extend Format Detection for GoPro Video Files
+
+Dependencies: AV-103, AV-901
+
+Acceptance criteria:
+- File intake recognizes candidate GoPro MP4/MOV files by extension and container/header sniffing.
+- Detection distinguishes generic unsupported video from video that appears to contain GoPro/GPMF telemetry when possible.
+- Unsupported video files fail with a clear typed error, not a generic parser crash.
+- Detection reads only the minimum bytes needed for identification.
+- Existing GPX, FIT, and TCX detection behavior is unchanged.
+
+#### AV-903: Extract Raw GPMF Metadata in the Browser
+
+Dependencies: AV-901, AV-902
+
+Acceptance criteria:
+- Browser-side code locates the MP4/MOV metadata track and extracts raw GPMF payloads plus timing information.
+- Extraction uses `Blob.slice`, `ArrayBuffer`, streaming/ranged reads, or equivalent browser APIs to avoid loading full multi-GB videos into memory.
+- Extraction runs behind an async API that can move to a Web Worker or already runs in a Worker.
+- UI receives progress and supports cancellation for large files.
+- No video bytes, raw telemetry payloads, file names, or extracted coordinates are uploaded.
+
+#### AV-904: Normalize GoPro GPS Telemetry Into Activity
+
+Dependencies: AV-101, AV-903
+
+Acceptance criteria:
+- GPS samples such as `GPS5`/`GPS9` normalize into `ActivityPoint[]` with time, latitude, longitude, altitude, speed, and quality metadata where available.
+- GPS quality fields such as fix type and dilution/precision are used to drop or warn about unreliable points.
+- Normalized GoPro activities feed existing stats, GeoJSON, MapLibre, chart, focus-range, and export flows without GoPro-specific UI branches.
+- Missing GPS produces a useful no-route/unsupported-telemetry message while preserving other detected telemetry where useful.
+- Device/camera metadata is parsed only into safe display fields; serial numbers and stable identifiers are not rendered.
+
+#### AV-905: Surface Additional GoPro Telemetry Streams
+
+Dependencies: AV-901, AV-903, AV-904
+
+Acceptance criteria:
+- Detects available non-GPS streams such as accelerometer, gyroscope, gravity vector, camera orientation, image orientation, temperature, ISO, shutter speed, white balance, audio level, and highlights when present.
+- Defines which streams are displayed in the activity viewer, which are hidden initially, and which are exposed only through export/download.
+- High-frequency streams use downsampling or windowing so charts remain responsive.
+- Stream labels include units and sample rates when available.
+- Unsupported streams are summarized in warnings rather than silently ignored.
+
+#### AV-906: GoPro Telemetry Fixtures and Browser Tests
+
+Dependencies: AV-903, AV-904
+
+Acceptance criteria:
+- Includes a small synthetic or redistributable GoPro/GPMF fixture with GPS telemetry.
+- Includes at least one fixture or generated payload with missing/unreliable GPS to test warnings.
+- Unit tests cover MP4/GPMF extraction, GPS normalization, quality filtering, and safe metadata handling.
+- Browser tests confirm a local GoPro video fixture can be opened without upload and mapped through the same viewer pipeline.
+- Performance tests or benchmarks cover a large-video simulation without requiring a large committed fixture.
+
+#### AV-907: Add GoPro Video Telemetry Tool Page and Viewer Handoff
+
+Dependencies: AV-012, AV-901, AV-903, AV-904
+
+Acceptance criteria:
+- Add a dedicated GoPro/video telemetry extraction route such as `/video-telemetry`; extraction does not happen inside the generic file viewer page.
+- Add a `Tools` dropdown option named `Video telemetry`, `GoPro telemetry`, or similar that routes to the extraction page.
+- The extraction page owns MP4/MOV file selection, drag/drop if used, extraction progress, cancellation, warnings, and extraction result summary.
+- Before extraction succeeds, the page does not render the full activity viewer, map, chart panels, or export controls.
+- After extraction succeeds, the page displays a clear button such as `Open in viewer` or `View activity`.
+- Selecting that button navigates to the viewer and displays the extracted video telemetry as a loaded `Activity` through the existing viewer UI.
+- The handoff uses client-side state only. It must not upload the video, extracted GPMF payloads, coordinates, device metadata, or normalized activity to a backend.
+- If the user reloads or opens the viewer without handoff state, the viewer falls back to its normal empty upload state with a useful message if appropriate.
+- Tests cover `Tools` routing to the extraction page, successful extraction-page state transition, post-success button visibility, viewer navigation with loaded extracted activity, and reload/empty-state fallback.
+
+### Epic E10: Telemetry Video Overlays
+
+#### AV-1001: Evaluate Browser Overlay and Video Export Strategy
+
+Dependencies: AV-907
+
+Acceptance criteria:
+- Evaluate browser APIs and libraries for overlay preview and export, including Canvas/OffscreenCanvas, WebCodecs, MediaRecorder, ffmpeg.wasm, WebGL/WebGPU where useful, and plain frame-sequence export.
+- Decide the first supported export modes: overlay-only transparent video, chroma-key video, image sequence, project/config JSON, and/or burned-in video.
+- Document browser support, memory requirements, expected export duration limits, codec/container constraints, mobile limitations, and fallback behavior.
+- Confirm whether burned-in video export is feasible without server-side transcoding for realistic GoPro clips.
+- Record a phased recommendation that implements overlay-only export before burned-in video export unless feasibility results justify doing both together.
+
+#### AV-1002: Add Telemetry Overlay Tool Page
+
+Dependencies: AV-012, AV-907, AV-1001
+
+Acceptance criteria:
+- Add a dedicated route such as `/overlays`; overlay generation does not happen inside the generic viewer or extraction page.
+- Add a `Tools` dropdown option named `Overlays`, `Telemetry overlays`, or similar that routes to the overlay page.
+- Overlay page accepts handoff state from GoPro extraction containing the local video reference where still available, normalized `Activity`, auxiliary telemetry streams, timing metadata, and safe warnings.
+- Overlay page also supports selecting a local video and compatible activity/telemetry data manually when handoff state is not available.
+- Direct entry or reload without required local state shows a clear empty state and asks the user to select the needed local files again.
+- Tests cover routing from `Tools`, handoff entry, reload fallback, and no accidental rendering of viewer-only map/chart panels before overlay data exists.
+
+#### AV-1003: Define Overlay Timeline and Template Model
+
+Dependencies: AV-101, AV-905, AV-1001
+
+Acceptance criteria:
+- Define a format-independent overlay timeline model that maps video time to normalized activity points and auxiliary telemetry samples.
+- Define reusable overlay component types for text metrics, gauges, route/map inset, progress markers, and sensor charts.
+- Template configuration includes component visibility, position, size, unit mode, style tokens, and data-source binding.
+- The model supports missing data gracefully; unavailable metrics are hidden or warned instead of rendering broken placeholders.
+- Unit tests cover time-to-sample interpolation, missing telemetry, activity/video offset handling, and template serialization.
+
+#### AV-1004: Build Overlay Preview and Synchronization
+
+Dependencies: AV-1002, AV-1003
+
+Acceptance criteria:
+- Overlay page previews the local video with a synchronized overlay layer.
+- Preview supports play, pause, seek, and timeline scrub while keeping overlay values aligned to the current video time.
+- User can adjust an activity/video time offset when telemetry and video are not aligned.
+- Overlay rendering is responsive and does not block playback for realistic preview sizes.
+- Tests cover seek synchronization, offset adjustment, visible overlay updates, and missing-data states.
+
+#### AV-1005: Implement Overlay Template Controls
+
+Dependencies: AV-1003, AV-1004
+
+Acceptance criteria:
+- Provide a small initial template set focused on activity videos: compact HUD, route/map inset, and metric strip.
+- Let users enable/disable supported components such as speed/pace, distance, time, elevation, route/map inset, heart rate, cadence, power, and selected sensor gauges when data exists.
+- Let users adjust basic layout and visual style controls without needing a full design editor.
+- Controls use existing app theme/design conventions and remain usable on desktop and mobile.
+- Tests cover template switching, component visibility, style persistence for the session, and unsupported metric warnings.
+
+#### AV-1006: Export Overlay-Only Assets
+
+Dependencies: AV-1001, AV-1003, AV-1004, AV-1005
+
+Acceptance criteria:
+- Export overlay-only output without modifying the source video.
+- Support at least one editor-friendly output path from the feasibility decision, such as transparent WebM, chroma-key video, or PNG/WebP frame sequence.
+- Export respects video duration, frame rate selection, resolution, unit settings, template settings, and selected telemetry offset.
+- Export runs locally with progress, cancellation, and clear failure messages for unsupported browsers/codecs.
+- No video frames, telemetry, generated overlay frames, or output assets are uploaded.
+- Tests cover short fixture export, cancellation, unsupported-browser fallback, and generated output dimensions/duration metadata where practical.
+
+#### AV-1007: Implement Burned-In Video Export When Feasible
+
+Dependencies: AV-1001, AV-1004, AV-1006
+
+Acceptance criteria:
+- Implement only if `AV-1001` confirms a browser-side encoding path that is acceptable for target browsers and realistic clip sizes.
+- Composite source video frames and overlay frames entirely in the browser.
+- Export a downloadable video file with the overlay integrated into the image.
+- Provide progress, cancellation, estimated constraints, and clear messages when the video is too large or the browser lacks required APIs/codecs.
+- Preserve the original source video file; rendering produces a new user-downloaded file only.
+- Tests cover a short fixture render, audio handling decision, cancellation, and no-upload privacy behavior.
+
+#### AV-1008: Overlay Export Fixtures and Regression Tests
+
+Dependencies: AV-1003, AV-1004, AV-1006
+
+Acceptance criteria:
+- Add small redistributable or synthetic video/telemetry fixtures suitable for automated overlay tests.
+- Add deterministic render tests for overlay components at fixed timestamps.
+- Add browser tests for opening the overlay page, previewing overlays, and exporting a short overlay-only asset.
+- Add performance checks for longer timeline simulation without committing large videos.
+- Add privacy regression tests to ensure no network requests contain video bytes, telemetry samples, rendered frames, file names, or output metadata.

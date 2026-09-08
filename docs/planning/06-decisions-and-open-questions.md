@@ -46,7 +46,7 @@ Reason: Export should preserve the product's privacy boundary. No backend is nee
 
 ### TD-008: Settings Are Modal State
 
-Decision: Settings should be a modal opened from non-home pages instead of a routed page.
+Decision: Settings should be a modal opened from the global header on every page instead of a routed page.
 
 Reason: Users should be able to adjust units, basemap behavior, and future viewer settings without navigating away from the loaded activity or resetting in-memory file state.
 
@@ -64,7 +64,7 @@ Reason: System default respects user device preferences, while light fallback ke
 
 ### TD-011: Header Brand Is the Home Link
 
-Decision: The global header should use the `OpenTrack Viewer` brand/title as the homepage link, omit the descriptive subtitle, avoid a duplicate Home button, and expose Settings on non-home pages through an icon-only control.
+Decision: The global header should use the `OpenTrack Viewer` brand/title as the homepage link, omit the descriptive subtitle, avoid a duplicate Home button, and always expose Settings through an icon-only control.
 
 Reason: This keeps the app chrome compact after an activity is loaded, reduces redundant navigation, and preserves a clear settings entry without taking unnecessary horizontal space.
 
@@ -214,6 +214,18 @@ Decision (`AV-013`): every route sets its own title and description from a hand-
 
 **Still open:** the preview image is the 512×512 app icon, because there is no purpose-made one. A 1200×630 image would render better in link previews, and §17 still asks which image that should be.
 
+### TD-025: GoPro Extraction Is a Separate Tool Page
+
+Decision: GoPro MP4/MOV telemetry extraction should live on a dedicated extraction page, reachable from the header `Tools` dropdown. After extraction succeeds, that page should show a button that opens the existing viewer with the normalized activity loaded through client-side state.
+
+Reason: Video extraction has different UX, progress, cancellation, error states, and performance risks than ordinary activity-file parsing. Keeping it as its own tool avoids overloading the generic viewer empty state while still reusing the viewer for maps, charts, stats, focus ranges, reset view, and exports after data exists.
+
+### TD-026: Overlay-Only Export Before Burned-In Video Export
+
+Decision: Telemetry overlay work should first support overlay preview and overlay-only export for external video editors. Burned-in video export should follow only after a browser-side encoding feasibility task validates the implementation path.
+
+Reason: Overlay-only export is useful, smaller in scope, and avoids source video transcoding. Burned-in video export requires heavier browser APIs, memory management, codec/container decisions, audio handling, and longer-running local processing, so it needs measured evidence before becoming committed delivery scope.
+
 ## 17. Open Questions
 
 ### Answered by what was built
@@ -230,7 +242,7 @@ question deleted, so the reasoning stays findable.
 | What homepage sections before the viewer action? | The privacy statement, a table of supported formats with their status, and the action itself. |
 | Homepage header navigation beyond the name and viewer action? | No. The brand is the link home, and `Tools` carries navigation (`AV-010`, `AV-012`). |
 | Which settings icon, and how does its tooltip behave? | A gear button with `aria-label` and `title`, so it is named for assistive technology and shows a tooltip on hover and focus. |
-| Does the `Tools` dropdown appear on the homepage? | Yes, in the header on every page. `Settings` is the control that is hidden until there is something to configure. |
+| Does the `Tools` dropdown appear on the homepage? | Yes, in the header on every page. Settings also appears in the header on every page. |
 | Metric, imperial, or locale-based units by default? | The browser's locale decides, and Settings overrides it for the session. See the built answer below. |
 | Should map style follow the app theme? | No — the basemap is independently controlled, because a dark basemap is a cartographic choice rather than a UI one. |
 | File-provided distance stream or derived GPS distance? | The file's, when it is present and non-decreasing; otherwise derived from positions. A recorded stream is an odometer, so it is read relative to its first value. |
@@ -265,7 +277,7 @@ question deleted, so the reasoning stays findable.
 ### Answered, needing no work
 
 - **Who approves the Terms and Conditions copy before release?** The repository owner.
-- **How should the `Tools` dropdown be ordered once it holds more than one entry?** Revisited when a second tool exists; there is nothing to order until then.
+- **Once GoPro extraction is available, how should `Tools` entries be ordered?** Prefer `File viewer` first, then `Video telemetry`, unless usage data or product copy suggests another order.
 
 ### Answered, and built
 
@@ -277,3 +289,11 @@ question deleted, so the reasoning stays findable.
 ### Still open
 
 - What image should be used for Open Graph and Twitter/X previews? The 512×512 app icon stands in; a purpose-made 1200×630 image would render properly in link previews.
+- For GoPro video telemetry, should the first implementation use a WebAssembly build of GoPro's `gpmf-parser`, a JavaScript stack such as `gopro-telemetry` plus raw GPMF extraction, or an internal minimal MP4/GPMF reader?
+- What GoPro models and telemetry streams are in the first supported scope: GPS only, GPS plus speed/altitude, or GPS plus IMU/camera streams?
+- How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
+- What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
+- Which overlay-only export format should ship first: transparent WebM, chroma-key video, PNG/WebP image sequence, or a combination?
+- Is burned-in browser-side video export viable for realistic GoPro clips with acceptable quality, memory usage, duration limits, browser support, and audio handling?
+- What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
+- Should overlay configuration be exported as project JSON so users can reuse templates between videos?
