@@ -29,6 +29,13 @@ export interface ActivitySnapshot {
 
 interface ActivityState extends ActivitySnapshot {
   loadFile: (file: File) => Promise<void>;
+  /**
+   * AV-907. Hands an already-parsed activity to the viewer — the video
+   * telemetry page does its own reading, so it has an `Activity` rather than a
+   * file. In memory only: a reload leaves the viewer empty, which is the
+   * behaviour that task asks for and the privacy model requires (§5).
+   */
+  setActivity: (activity: Activity) => void;
   clear: () => void;
 }
 
@@ -55,6 +62,11 @@ export const useActivityStore = create<ActivityState>((set) => ({
         error: toActivityError(error, 'unsupported_format'),
       });
     }
+  },
+
+  setActivity(activity: Activity) {
+    useInteractionStore.getState().reset();
+    set({ status: 'ready', activity, error: undefined, fileName: activity.source.fileName });
   },
 
   clear() {

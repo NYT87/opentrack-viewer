@@ -196,6 +196,9 @@ must be opt-in and scrubbed of activity data.
 | Lap highlighting | Recolours the lap's stretch of route; never moves the map | §17 asked whether a lap should focus the view. It does not, deliberately: a lap says *which part of the ride this is*, not *take me there*. That is the whole difference from a chart range selection, which does move the camera, and a unit test asserts no `fitBounds` follows a lap press. A lap with no continuous stretch to draw — its points either side of a recording gap — shows its figures but offers **no control**, because one that silently does nothing is worse than none. `hasDrawableRoute` answers that by counting rather than by building the geometry, and a test pins it against the geometry so the two cannot drift. |
 | Unwritable export targets | Disabled with their reason, never offered and then refused | `AV-555`. An indoor run cannot be written to GPX, and a route with no clock cannot be written to FIT or TCX. Each format states its own requirement beside its serializer — the exporter refuses on exactly that condition — so the rule and the writer cannot disagree, and a test asks the writer to confirm every answer. Judged against what is *about to be written*: a section through a tunnel disables GPX even when the whole ride has coordinates. |
 | Detecting a GoPro video | `ftyp` from the head; GoPro's markers from a 64 KiB tail | `AV-902`. A container announces itself in its first box, so a video is identified from 512 bytes. Whether it carries telemetry cannot be: a camera writes `moov` — and the `gpmd` track with it — at the **end**. So the tail is read, and only once the head has already said this is a video, so a GPX never pays for it. A test asserts a GPX causes exactly one 512-byte read and a video exactly two windows, never the whole file. Where neither window finds a marker the file is called an ordinary video rather than guessed at, which is what `AV-902`'s "when possible" allows; `AV-903` decides definitively by finding the track. |
+| GPS quality from a camera | Points without a satellite fix are dropped, not plotted | `AV-904`. GoPro's own HERO8 sample is the argument: recorded indoors, its 231 GPS samples all report fix 0 and DOP 99.99, and every one lands in the **North Pacific at nine kilometres altitude**. A track needs a fix of 2 or better and a DOP under 10; a recording with none is refused with a message saying why, rather than drawn somewhere it never was. GPS5 keeps that quality in `sticky` — stated once and implied after — so the last stated value is carried forward; reading it per sample silently admits every point after the first. GPS9 states both in each sample instead, which is the only structural difference between the two. |
+| Video telemetry is its own page | `/video-telemetry`, handing an `Activity` to the viewer in memory | `AV-907`. A video is orders of magnitude larger than a GPX file, so reading one needs progress and a stop button — neither of which belongs in a drop zone. The page shows no map, charts or export controls until there is an activity to describe. The handoff is the store the viewer already reads, so a reload leaves the viewer empty rather than showing a stale track, which is both what the task asks and what §5 requires. |
+| Extracting GPMF | Streamed through `gpmf-extract`, behind an abortable async API | `AV-903`. 86 KB of payload comes out of a 4.2 MB clip, and the ratio is the point: the video is streamed past with backpressure, never held, so a multi-gigabyte file costs the same memory as a short one. Running it turned up two defects beyond the one TD-025 already recorded — an unparseable file **hangs forever**, and a container with no telemetry track throws a `TypeError` rather than the documented error. Both are handled: the read reaching 100% is treated as the end of what can arrive, and everything the library throws becomes a typed `ActivityError`. |
 | GoPro telemetry | `gpmf-extract` over `mp4box` to find the track, `gopro-telemetry` to read it | `AV-901`. GoPro's own `gpmf-parser` — dual-licensed Apache-2.0 *or* MIT — stays the specification reference rather than a WebAssembly build — that would add an Emscripten toolchain to duplicate a maintained JS path. `telemetrik` stays an oracle for fixtures, not a dependency. The deciding criterion was memory: `gpmf-extract` streams the file through a `WritableStream` with backpressure inside a Worker, so peak memory tracks the **GPMF payload**, not the multi-gigabyte video. ~81 KB gzipped, loaded on demand. See TD-025, which reads every licence from its licence file rather than its manifest — two of the four disagree, declaring ISC while shipping MIT — and records a defect to work around plus one semantic trap (`TMPC` is the camera's temperature, not the air's). |
 | Map vs app theme | Independent | §17 leaves this open. The basemap keeps its own styling rather than following the app theme, so route-only mode and the tile treatment stay predictable. |
 | Terms and Conditions | A route, not a modal | A legal document needs a stable, shareable link, and it must be readable without a loaded activity. The copy is marked **draft** in the page itself: it describes how the app actually behaves, but it has not been reviewed by anyone qualified and must be before release. |
@@ -217,17 +220,51 @@ TCX import, and browser-side GPX, FIT and TCX export (`AV-001`…`003`, `AV-101`
 `AV-201`…`203`, `AV-301`…`304`, `AV-401`…`404`, `AV-501`…`507`, `AV-513`, `AV-515`,
 `AV-601`…`605`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-013`, `AV-406`, `AV-407`, `AV-550`–`AV-555`, `AV-701`–`AV-704`, `AV-750`–`AV-753`, plus `AV-801`–`AV-803`).
 
-The plan grew in `f42a152` with two new epics, neither started:
+The plan grew in `f42a152` with two new epics:
 
 | Epic | Tasks | Adds |
 | --- | --- | --- |
-| **E9** GoPro video telemetry | `AV-903`–`AV-907` | Read the GPMF metadata track out of an MP4/MOV in the browser and normalize its GPS and sensor streams into `Activity`, behind its own tool page. `AV-901` and `AV-902` are done: the strategy is recorded in TD-025, and detection already tells a GoPro video from an ordinary one |
+| **E9** GoPro video telemetry | `AV-905`, `AV-906` | Surface the remaining telemetry streams — accelerometer, gyroscope, orientation, temperature — and add the browser and performance tests `AV-906` asks for |
 | **E10** Telemetry video overlays | `AV-1001`–`AV-1008` | An overlay tool page: a timeline and template model, a synchronized preview, and export of overlay assets or burned-in video where feasible |
 
-Everything before them is implemented — 67 tasks, every acceptance criterion
-met.
+`AV-901`–`AV-904` and `AV-907` are done: the strategy is in TD-025, detection
+tells a GoPro video from an ordinary one, `extractGpmf` streams the GPMF
+payload out of a real clip, `parseGopro` turns its GPS into a plain `Activity`,
+and **Tools → Video telemetry** is a page of its own that reads a video and
+hands the result to the viewer.
+
+The generic file intake still refuses an MP4, deliberately: `AV-907`'s first
+criterion is that "extraction does not happen inside the generic file viewer
+page", because reading a multi-gigabyte file needs progress and a way to stop
+that a drop zone has nowhere to put. A test pins that boundary.
+
+Everything before the two new epics is implemented — 67 tasks, every
+acceptance criterion met.
 
 One §17 question also remains open: which image to use for link previews.
+
+## Upstream issues we work around
+
+`gpmf-extract`, the library that pulls GoPro telemetry out of an MP4, has four
+defects this app works around — including a Web Worker that silently reports
+"no telemetry" for files that have some, and an unparseable file that hangs
+forever rather than failing.
+[`docs/upstream/gpmf-extract-issues.md`](docs/upstream/gpmf-extract-issues.md)
+documents them as a standalone report, reproducible without any knowledge of
+this project, for anyone who wants to fix them at the source.
+
+## Third-party test data
+
+`src/test/fixtures/hero7.raw` and `hero11.raw` are GPMF payloads from
+[`gopro-telemetry`](https://github.com/JuanIrache/gopro-telemetry/tree/master/samples),
+MIT © Juan Irache Duesca.
+
+`src/test/fixtures/hero8.mp4` is a GoPro HERO8 sample from
+[`gopro/gpmf-parser`](https://github.com/gopro/gpmf-parser/tree/main/samples),
+© GoPro, Inc., used under its Apache-2.0 or MIT terms. It is the one fixture in
+this repository that was not generated: extraction has to be tested against a
+container a camera actually wrote, and no synthetic file stands in for a real
+`moov` and `gpmd` track. Every other fixture is produced by a script beside it.
 
 ## MapLibre integration notes
 

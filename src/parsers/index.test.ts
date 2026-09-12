@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseActivityFile } from './index';
-import { binaryFixtureFile, fixtureFile } from '../test/helpers/fixtures';
+import { binaryFixtureFile, fixtureFile, readBinaryFixture } from '../test/helpers/fixtures';
 
 describe('parseActivityFile (AV-304 pipeline)', () => {
   it('detects, parses and validates a GPX file end to end', async () => {
@@ -99,5 +99,22 @@ describe('FIT intake (AV-702)', () => {
     expect(noGps).toHaveLength(1);
     // ...exactly once: the reader should not be told the same thing twice.
     expect(new Set(activity.warnings.map((w) => w.message)).size).toBe(activity.warnings.length);
+  });
+});
+
+describe('video is not accepted by the generic intake (AV-907)', () => {
+  it('refuses a GoPro video here, however well it could be read elsewhere', async () => {
+    // `extractGpmf` and `parseGopro` can read this exact file. The refusal is
+    // the plan: AV-907 gives video a route of its own, with the progress and
+    // cancellation a multi-gigabyte read needs. If this test ever fails
+    // because someone added `gopro` to SUPPORTED_FORMATS, check AV-907 first.
+    const video = new File([readBinaryFixture('hero8.mp4')], 'GH010042.mp4', {
+      type: 'video/mp4',
+    });
+
+    await expect(parseActivityFile(video)).rejects.toMatchObject({
+      code: 'unsupported_format',
+      message: expect.stringMatching(/GoPro video with telemetry, but reading it is not available/i),
+    });
   });
 });

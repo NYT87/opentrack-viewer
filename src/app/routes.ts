@@ -8,10 +8,19 @@ export const ROUTES = {
   viewer: '/viewer',
   /** A routed page, not a modal: legal documents need a stable link (AV-008). */
   terms: '/terms',
+  /**
+   * AV-907. Video telemetry has a route of its own rather than sharing the
+   * viewer's drop zone: reading a multi-gigabyte file needs progress and a way
+   * to stop, and the viewer has nowhere to put either.
+   */
+  videoTelemetry: '/video-telemetry',
 } as const;
 
 /**
  * AV-012: the header's Tools menu. No Home entry — the brand is the link home
  * (AV-010) — and no standalone Viewer button, which this menu replaces.
  */
-export const TOOLS_ITEMS = [{ to: ROUTES.viewer, label: 'File viewer' }] as const;
+export const TOOLS_ITEMS = [
+  { to: ROUTES.viewer, label: 'File viewer' },
+  { to: ROUTES.videoTelemetry, label: 'Video telemetry' },
+] as const;

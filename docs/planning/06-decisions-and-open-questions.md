@@ -258,12 +258,17 @@ ISC and MIT are both permissive and near-identical in effect, so nothing turns o
 **Reading the metadata track without loading the video.** This was the criterion that decided the approach, and `gpmf-extract` already answers it — verified by reading its source, not its README:
 
 - It reads with `file.stream().pipeTo(new WritableStream(…))`, applying backpressure at a 2 MB chunk size. The video is never held in memory; it flows past.
-- It runs that read in an **inline Web Worker** by default, falling back to the main thread when workers are unavailable or the worker errors.
+- It streams the read in chunks with backpressure. The library's own inline Web Worker is intentionally disabled for now; current Chromium can misread a valid GoPro file through that worker path, so extraction stays on the main thread until it can move into an app-owned worker.
 - It reports **progress** by byte offset, and accepts a **cancellation token** checked on every chunk.
 - `mp4box.onReady` finds the track whose codec is `gpmd`; when there is none it terminates early rather than reading on.
 - Only the metadata samples are retained. **Peak memory is proportional to the GPMF payload — a few MB for a long recording — not to the video.**
 
-**A defect to handle in `AV-903`:** `gpmf-extract` resolves once it has collected its samples but never calls `terminate()`, so the stream keeps reading to end-of-file afterwards. The promise settles early; the I/O does not stop. The fix is ours to apply: pass a `cancellationToken` and cancel it on resolve.
+**Four defects in `gpmf-extract`.** The first was found by reading its source, the next two by running it in tests, and the last only by running it in a real browser. Each is summarized below; [`docs/upstream/gpmf-extract-issues.md`](../upstream/gpmf-extract-issues.md) writes them up as a self-contained report, with reproductions and suggested fixes, for anyone who wants to take them upstream:
+
+1. **It never stops reading.** The promise resolves once the samples are collected, but `terminate()` is never called, so a multi-gigabyte file keeps streaming afterwards. Handled by passing a `cancellationToken` and cancelling it in a `finally` — on the success path too, because settling is not what ends the read.
+2. **A file it cannot parse hangs forever.** Given bytes that are not an MP4 it neither resolves nor rejects: it reads to the end, recognizes no container, and stops. In a UI that is a progress bar that fills and then waits. Handled by treating the read reaching 100% as the end of what can arrive, and rejecting `no_telemetry_track` after a short grace period. A test proves it: with the guard removed, that case runs until the 60-second timeout.
+3. **Its failures are untyped and undocumented.** A container without a `gpmd` track throws `TypeError: Cannot read properties of undefined (reading 'duration')`, not the documented `'Track not found'`. Everything it throws is mapped to an `ActivityError` — `no_telemetry_track`, `extraction_cancelled` or `gopro_extract_failed` — so a caller never matches on prose.
+4. **Its Web Worker is broken in current Chromium.** With `useWorker: true` a valid HERO8 clip reports `'Track not found'`; with it off, the same file reads correctly. The library's README hedges that the worker "seems to crash on some recent browsers", and a browser test caught it doing so — jsdom could never have, since it has no `Worker` and silently took the other path. The worker is therefore **disabled**. The read is still chunked through a stream, so the main thread is released between chunks, and `AV-903`'s API is async precisely so the whole extraction can move into a worker of our own later.
 
 **Bundle.** ~81 KB gzipped for the whole path — `mp4box` 54 KB, `gopro-telemetry` 18 KB, `gpmf-extract` and `binary-parser` the rest. Comparable to the FIT parser's 61 KB, and loaded on demand behind the tool page, so nobody who never opens a video pays for it.
 

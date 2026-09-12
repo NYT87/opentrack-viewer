@@ -46,6 +46,13 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
       'Open a GPX, FIT or TCX file to see its route, distance, duration, elevation and sensor ' +
       'charts. Parsing happens in this browser tab; your file is never uploaded.',
   },
+  [ROUTES.videoTelemetry]: {
+    title: `Read GoPro video telemetry — ${SITE_NAME}`,
+    // Describes what the page does, never a video someone happens to open.
+    description:
+      'Read the GPS track a GoPro recorded alongside the picture, and view it as an activity. ' +
+      'The video is read in this browser tab and never uploaded.',
+  },
   [ROUTES.terms]: {
     title: `Terms and Conditions — ${SITE_NAME}`,
     description:

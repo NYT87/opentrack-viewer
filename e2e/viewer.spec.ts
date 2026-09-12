@@ -635,6 +635,47 @@ test('opens Settings from the homepage header (AV-007)', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Close activity' })).toHaveCount(0);
 });
 
+test('reads a real GoPro video and opens it in the viewer (AV-907)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  const requests = recordRequests(page);
+
+  await page.goto('./#/video-telemetry');
+  await expect(page.getByRole('heading', { name: 'Video telemetry' })).toBeVisible();
+
+  // Nothing of the viewer before there is anything to view.
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Export activity' })).toHaveCount(0);
+
+  // A real HERO8 clip, read by the browser itself — 4.2 MB of MP4.
+  await page.getByTestId('file-input').setInputFiles('src/test/fixtures/hero8.mp4');
+
+  // This clip was recorded indoors, so every GPS sample lacks a fix: the page
+  // has to say so rather than draw a route through the North Pacific.
+  const failed = page.getByRole('region', { name: 'Extraction failed' });
+  await expect(failed).toBeVisible({ timeout: 60_000 });
+  await expect(failed.getByRole('alert')).toContainText(/usable satellite fix/i);
+
+  // Reading a video uploads nothing, whatever the outcome.
+  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
+    [],
+  );
+});
+
+test('offers video telemetry in the Tools menu (AV-907)', async ({ page }) => {
+  await page.goto('./');
+
+  await page.getByRole('button', { name: 'Tools' }).click();
+  await page.getByRole('menuitem', { name: 'Video telemetry' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Video telemetry' })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe('#/video-telemetry');
+
+  // Opened directly, the viewer has no handed-over activity and says so.
+  await page.goto('./#/viewer');
+  await expect(page.getByTestId('file-input')).toBeAttached();
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toHaveCount(0);
+});
+
 test('navigates to the viewer from the Tools menu (AV-012)', async ({ page }) => {
   await page.goto('./');
 

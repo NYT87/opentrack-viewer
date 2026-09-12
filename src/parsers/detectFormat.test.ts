@@ -158,6 +158,15 @@ describe('video detection (AV-902)', () => {
     expect(reads).toEqual([[0, 512]]);
   });
 
+  it('recognizes a file an actual camera wrote', async () => {
+    // The generated fixtures above are box shells; this is a real HERO8 clip,
+    // with a real moov at the end. The design is only worth anything if it
+    // works on that.
+    const file = new File([readBinaryFixture('hero8.mp4')], 'GH010042.mp4');
+
+    await expect(detectFormat(file)).resolves.toEqual({ format: 'gopro', via: 'signature' });
+  });
+
   it('never reads a whole video, however large it claims to be', async () => {
     // The point of the whole approach: a multi-gigabyte recording is
     // identified from two small windows, not by loading it.

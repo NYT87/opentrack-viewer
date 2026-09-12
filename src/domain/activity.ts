@@ -55,6 +55,7 @@ export interface ActivityDeviceInfo {
     | 'fit_device_info'
     | 'fit_file_id'
     | 'tcx_creator'
+    | 'gopro_device'
     | 'unknown';
 }
 

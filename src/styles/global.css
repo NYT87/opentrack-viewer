@@ -771,3 +771,7 @@ body {
 }
 .laps__row.is-selected td { font-weight: 600; }
 .laps__number { padding: 2px 6px; color: var(--text-muted); cursor: help; }
+
+/* AV-907: the video telemetry page's progress and actions. */
+.video__progress { width: min(100%, 420px); height: 10px; }
+.video__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }

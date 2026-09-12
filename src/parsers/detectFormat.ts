@@ -32,7 +32,15 @@ const EXTENSION_FORMATS: Record<string, ActivitySourceFormat> = {
   mov: 'video',
 };
 
-/** Formats this build can actually parse. */
+/**
+ * Formats the generic file intake accepts.
+ *
+ * `gopro` is deliberately absent even though `extractGpmf` and `parseGopro`
+ * can read one: `AV-907` gives video its own route, because pulling telemetry
+ * out of a multi-gigabyte file needs progress and cancellation that the plain
+ * drop zone has nowhere to put. Adding it here would build the thing that task
+ * exists to avoid.
+ */
 export const SUPPORTED_FORMATS: ActivitySourceFormat[] = ['gpx', 'fit', 'tcx'];
 
 export function extensionOf(fileName: string): string {

@@ -26,6 +26,9 @@ const REGISTRY: Partial<Record<FormatDetection['format'], ParserFn>> = {
     options.onPhase?.('processing');
     return parseTcx(text, { fileName: file.name, fileSizeBytes: file.size });
   },
+  // No `gopro` entry: video is read on its own route (`AV-907`), not through
+  // the generic intake, because it needs progress and cancellation. See
+  // `SUPPORTED_FORMATS`.
   // AV-702. Imported lazily so the FIT library — ~61 KB gzipped — stays off the
   // initial page load and out of the main bundle (TD-018). It is still
   // precached by the service worker afterwards, in the background, so that
