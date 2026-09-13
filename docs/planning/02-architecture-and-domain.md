@@ -67,6 +67,7 @@ React UI
        +--> Privacy model
        +--> Supported/planned formats
        +--> Open viewer/process page action
+       +--> GoPro/video telemetry page information and action when available
        +--> Terms and Conditions link
   |
   +--> Viewer/Process Page
@@ -220,7 +221,8 @@ below say how the rest of the app is expected to behave in the face of that.
 - Device information should render in its own card rather than inside the summary/activity overview card.
 - Stable identifiers such as serial number should not be displayed by default and should never be sent to telemetry.
 - Chart configuration should be derived from normalized `Activity` data, not source file format.
-- A chart may be hidden, disabled, or shown with an empty state based on data availability and activity sport.
+- Chart panels should render only available charts. Unavailable chart kinds should be hidden entirely instead of rendering explanatory placeholders.
+- Use explicit non-chart warnings only for file-level problems or data-quality issues that affect the user's trust in the loaded activity.
 - Time-based charts require enough timestamped points to build a useful x-axis.
 - Distance-based charts require point distances or enough GPS points to derive cumulative distance.
 - Chart layout must reserve enough Y-axis label gutter/padding so axis labels do not look squeezed against the plot area.
@@ -231,11 +233,15 @@ below say how the rest of the app is expected to behave in the face of that.
 - The activity overview's primary performance metric should be sport-aware: average pace for running and average speed for cycling.
 - Running overview should not foreground average speed when average pace is available.
 - Cycling overview should not foreground average pace when average speed is available.
+- GoPro/video activities without source speed should derive speed from neighboring GPS points when timestamps and valid coordinates are available.
+- GoPro/video activities should expose a user-selectable performance display mode between speed and pace when the activity type is ambiguous or user-overridden.
+- Default GoPro/video performance display should be speed in the active unit system; pace remains available when distance/time are sufficient.
 - If sport cannot be determined, use a neutral fallback such as distance and duration without inventing a sport-specific primary metric.
 - Running cadence should only be offered when running cadence data exists and must be represented as strides per minute.
 - Avoid labeling running cadence as RPM; RPM is reserved for cycling cadence or other rotational sensor data.
 - Cycling activities should show speed instead of the running-oriented pace/cadence chart set.
 - Speed should be represented as distance per time, using source speed when reliable or derived distance/time when needed.
+- Derived speed and derived pace should use the same unit-system settings as the rest of the viewer and should not require re-parsing the video.
 - Cycling cadence can be reconsidered later as a separate chart, but the initial cycling-specific chart should be speed.
 - Range selection should be represented as point indexes after translating from the active chart x-axis domain.
 - The original `Activity` should remain immutable; focused views should be derived from it.
@@ -275,7 +281,7 @@ export type ActivityViewerState =
 
 The app should separate project description from activity processing:
 
-- `/`: homepage/main page. Describes OpenTrack Viewer, supported/planned formats, privacy model, and links to the viewer/process page and Terms and Conditions.
+- `/`: homepage/main page. Describes OpenTrack Viewer, supported/planned formats, privacy model, links to the viewer/process page and Terms and Conditions, and includes GoPro/video telemetry page information when that tool is available or explicitly marked as planned.
 - `/viewer`: activity processing page. Owns file selection, parsing, map, details, charts, focused ranges, and export controls.
 - `/video-telemetry` or equivalent: GoPro video telemetry extraction page. Owns local MP4/MOV selection, extraction progress, cancellation, extracted telemetry summary, warnings, and the post-success button that opens the viewer with extracted data.
 - `/overlays` or equivalent later: telemetry overlay page. Owns overlay template selection/customization, synchronized video preview, overlay-only export, and burned-in video export when feasible.
@@ -313,6 +319,7 @@ SEO rules:
 - SEO metadata must describe OpenTrack Viewer and its public pages, not the user's loaded activity.
 - Do not place activity file names, route coordinates, timestamps, device metadata, sensor values, or derived stats into document titles, meta descriptions, Open Graph tags, Twitter/X tags, canonical URLs, robots files, sitemap files, or structured data.
 - Homepage metadata should be indexable and describe browser-only activity file viewing.
+- Homepage copy may mention local GoPro video telemetry extraction once available, but must not imply videos are uploaded, processed by a server, or handled by the generic file viewer.
 - Viewer/process metadata should describe the generic file viewer, not the currently loaded file.
 - GoPro video telemetry extraction metadata should describe local browser-side extraction from GoPro video files without claiming uploaded/cloud processing.
 - Telemetry overlay metadata should describe local browser-side overlay generation without implying cloud rendering or uploaded videos.
@@ -340,6 +347,7 @@ Large-screen layout:
 - Device information should render as its own card below or beside the overview according to available layout space; it should not be nested inside the summary/overview card.
 - The map should render in a separate content box below the overview.
 - Charts should render below the map/laps area, not beside the overview.
+- The charts section should include only available chart panels; unavailable chart kinds should not reserve space.
 - Content boxes should not be nested inside other boxes.
 
 Medium/small/mobile layout:

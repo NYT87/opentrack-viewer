@@ -30,6 +30,7 @@ Cover:
 
 Cover:
 - Homepage content and primary action to open the viewer/process page.
+- Homepage GoPro/video telemetry information and route action when that feature page is available.
 - Terms and Conditions page content and navigation links.
 - Header brand/title links to the homepage.
 - Header does not render a duplicate Home button/nav item when the brand/title link is present.
@@ -66,7 +67,7 @@ Cover:
 - Laps panel present/missing states.
 - Laps panel large-screen placement beside the map.
 - Laps panel medium/small/mobile placement after the map.
-- Chart empty and populated states.
+- Chart populated states and unavailable chart omission.
 - Chart x-axis switch enabled/disabled states.
 - Chart Y-axis label gutter and clipping regression.
 - Chart distance x-axis tick marks at 1 km intervals.
@@ -74,8 +75,8 @@ Cover:
 - Run-specific chart visibility for pace and cadence.
 - Running cadence labels and Y-axis units display strides per minute, not RPM.
 - Cycling-specific chart visibility for speed.
-- Running activities hiding or disabling cycling-specific speed charts.
-- Non-run and non-cycling activities hiding or disabling sport-specific charts.
+- Running activities hide cycling-specific speed charts without placeholder messages.
+- Non-run and non-cycling activities hide sport-specific charts without placeholder messages.
 - Chart drag selection overlay and clear-selection controls.
 - Reset View button visibility and behavior.
 - Focused range chart redraw behavior.
@@ -94,6 +95,7 @@ Cover:
 - Confirm `Tools` dropdown appears beside the title.
 - Confirm `Tools > File viewer` navigates to the viewer/process page.
 - When GoPro video telemetry extraction is implemented, confirm `Tools` includes the video telemetry entry and routes to the dedicated extraction page.
+- When GoPro video telemetry extraction is implemented, confirm the homepage describes the video telemetry page and links to it without claiming upload/server processing.
 - When telemetry overlays are implemented, confirm `Tools` includes the overlay entry and routes to the dedicated overlay page.
 - Confirm no standalone top-level `Viewer` button is rendered when `File viewer` is in the `Tools` dropdown.
 - Confirm `Tools` dropdown supports keyboard open/close and Escape close.
@@ -127,6 +129,9 @@ Cover:
 - Confirm chart Y-axis labels are not clipped or cramped in the reference-width layout.
 - Confirm distance x-axis shows 1 km interval tick marks where space permits.
 - Confirm time x-axis shows 5 minute interval tick marks where space permits.
+- Confirm unavailable charts do not render section titles, placeholder messages, empty plots, or reserved space.
+- Confirm a non-running activity does not show Pace or running Cadence placeholder messages.
+- Confirm a non-cycling activity does not show Speed or Pedal cadence placeholder messages.
 - Confirm chart click-drag-release focuses the chart to the selected section.
 - Confirm selected chart section focuses the map bounds to the matching route section.
 - Confirm Reset View restores full chart, full map route, full map bounds, and full summary stats.
@@ -150,6 +155,9 @@ Cover:
 - Confirm the button navigates to the viewer and renders the extracted activity data through the same map, stats, charts, range focus, reset-view, and export flows.
 - Confirm viewer reload or direct entry without handoff state returns to the normal empty upload state.
 - Confirm GoPro GPS telemetry normalizes into the same map, stats, chart, focus-range, and export adapters as GPX/FIT/TCX.
+- Confirm GoPro/video activities without source speed derive speed from valid GPS point distance and time.
+- Confirm GoPro/video activities default to speed display in the active unit system and can switch between speed and pace when distance/time are sufficient.
+- Confirm switching between speed and pace does not re-read or re-parse the video file.
 - Confirm GoPro files with missing or low-quality GPS show useful warnings without crashing.
 - Confirm high-frequency GoPro streams are downsampled/windowed for responsive charts.
 - Confirm telemetry overlay preview, when implemented, runs on its own page and can receive local video plus extracted `Activity`/auxiliary telemetry through client-side handoff.

@@ -17,6 +17,7 @@ Outcome:
 - Settings opens from an icon-only header control on the homepage, viewer/process page, Terms page, and future tool pages.
 - Settings modal includes theme mode options: system, dark, and light.
 - Basic SEO metadata exists for homepage, viewer/process, and Terms and Conditions without exposing activity data.
+- Homepage has a place for future tool information so GoPro/video telemetry can be surfaced after the dedicated page exists.
 - Viewer/process page has an upload-focused empty state.
 - Map, chart, summary, and metadata regions are not visible before an activity is successfully loaded.
 - Loaded viewer content uses a max-width layout with an optional large-screen section sidebar.
@@ -77,7 +78,7 @@ Outcome:
 - Cycling activities can show speed when speed or time/distance data is sufficient.
 - Cycling activities do not show the running-oriented pace/cadence chart set by default.
 - Non-run and non-cycling activities do not show sport-specific charts by default.
-- Chart availability is explained through empty/disabled states rather than parser-specific errors.
+- Unavailable chart sections are omitted without placeholder messages.
 
 ### M4: Map/Chart Synchronization
 
@@ -141,9 +142,12 @@ Goal: Extract GPS and selected telemetry streams from local GoPro MP4/MOV files 
 
 Outcome:
 - User can open a dedicated GoPro/video telemetry extraction page from the header `Tools` dropdown.
+- Homepage describes the GoPro/video telemetry page and links to it once the page is available.
 - User can select a local GoPro MP4/MOV file without uploading it.
 - Browser-side code extracts the embedded GPMF telemetry track or enough raw GPMF payload/timing data to decode it.
 - GPS samples normalize into `ActivityPoint[]` and feed the existing map, stats, chart, focus-range, and export flows.
+- If a GoPro video has GPS points but no source speed stream, speed is derived from point distance and time where reliable.
+- GoPro/video activities default to speed display in the active unit system and allow switching between speed and pace when sport is ambiguous or user-overridden.
 - After extraction succeeds, the extraction page displays a button that opens the viewer with the extracted activity data loaded.
 - Device/camera information is displayed only when safe and useful; stable identifiers remain hidden.
 - High-frequency streams such as accelerometer, gyroscope, gravity, orientation, and camera/video settings are detected and surfaced in scoped UI or export warnings, not forced into the route model.

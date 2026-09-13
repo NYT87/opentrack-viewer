@@ -57,6 +57,20 @@ Acceptance criteria:
 - Viewer/process page owns file selection, parsing, map, details, charts, focused ranges, and export controls.
 - Header/navigation lets users reach the viewer/process page from the homepage.
 
+#### AV-014: Add GoPro Video Telemetry Information to Homepage
+
+Dependencies: AV-006, AV-907
+
+Acceptance criteria:
+- Homepage includes a clear section, card, or feature row for the GoPro/video telemetry page once that route is implemented.
+- Homepage copy explains that users can extract GPS and telemetry from local GoPro MP4/MOV files on the dedicated video telemetry page.
+- Homepage includes a link or action to open the dedicated GoPro/video telemetry page.
+- Copy clearly states the privacy boundary: videos and extracted telemetry stay in the browser and are not uploaded.
+- Copy does not imply GoPro videos can be processed inside the generic file viewer.
+- If the GoPro/video telemetry page is not ready in the deployed milestone, homepage copy either omits the action or labels the feature as planned/coming soon without a broken link.
+- Homepage layout remains focused and does not become a dashboard; the primary activity file viewer action remains clear.
+- Tests cover homepage rendering, link routing to the video telemetry page when available, planned/unavailable state if used, and privacy copy.
+
 #### AV-008: Add Terms and Conditions Page
 
 Dependencies: AV-006
@@ -419,7 +433,7 @@ Acceptance criteria:
 - Chart has readable axes or labels.
 - Y-axis labels have enough gutter and vertical spacing; labels must not appear pressed against the chart edge or plotted line.
 - Chart plot area reserves enough left padding for the widest Y-axis tick label and unit formatting.
-- Empty/missing elevation state is handled.
+- Missing elevation omits the elevation chart from the chart panel.
 - Chart is responsive.
 
 #### AV-503: Add Chart Tests
@@ -428,7 +442,7 @@ Dependencies: AV-502
 
 Acceptance criteria:
 - Tests verify chart renders with elevation data.
-- Tests verify missing elevation fallback.
+- Tests verify missing elevation omits the elevation chart.
 - Tests cover distance x-axis behavior.
 - Tests cover time x-axis behavior.
 - Tests cover disabled or unavailable x-axis states.
@@ -479,7 +493,7 @@ Dependencies: AV-101, AV-501
 
 Acceptance criteria:
 - Cadence chart is available for run activities when `runningCadenceSpm` is present.
-- Cadence chart is hidden or shown as unavailable when cadence data is absent.
+- Cadence chart is hidden when cadence data is absent.
 - Running cadence labels use strides per minute, not RPM.
 - FIT-derived running cadence and GPX-extension running cadence can feed the same chart adapter after parser mapping normalizes them to `runningCadenceSpm`.
 
@@ -508,6 +522,20 @@ Acceptance criteria:
 - Speed availability depends on cycling sport plus usable speed or time/distance data.
 - Cycling activities do not show running pace/cadence charts by default.
 - The UI does not hard-code source format checks for chart visibility.
+
+#### AV-516: Hide Unavailable Chart Sections
+
+Dependencies: AV-507, AV-502, AV-505, AV-506, AV-513
+
+Acceptance criteria:
+- Chart panel renders only chart kinds returned as available by the central chart availability function.
+- Unavailable charts do not render a title, explanatory message, empty chart, disabled chart, or reserved vertical space.
+- Non-running activities do not render placeholder messages for Pace or running Cadence.
+- Non-cycling activities do not render placeholder messages for cycling Speed or Pedal cadence.
+- Activities without heart rate, power, temperature, or other optional streams do not render no-data chart messages for those streams.
+- If no charts are available at all, the entire charts section is omitted or replaced by a single compact page-level fallback only if product copy explicitly requires it; do not show one message per unavailable chart.
+- Chart count/order remains stable for available charts, with elevation first and sport-specific/sensor charts after it.
+- Tests cover a running activity, cycling activity, activity with elevation only, activity with no optional sensors, and an activity with no chartable data.
 
 #### AV-513: Build Speed Series for Cycling Activities
 
@@ -900,6 +928,22 @@ Acceptance criteria:
 - The handoff uses client-side state only. It must not upload the video, extracted GPMF payloads, coordinates, device metadata, or normalized activity to a backend.
 - If the user reloads or opens the viewer without handoff state, the viewer falls back to its normal empty upload state with a useful message if appropriate.
 - Tests cover `Tools` routing to the extraction page, successful extraction-page state transition, post-success button visibility, viewer navigation with loaded extracted activity, and reload/empty-state fallback.
+
+#### AV-908: Derive GoPro Video Speed and Add Speed/Pace Display Mode
+
+Dependencies: AV-401, AV-402, AV-407, AV-501, AV-904, AV-907
+
+Acceptance criteria:
+- When a GoPro/video activity has reliable GPS coordinates and timestamps but no usable source speed, derive per-point or segment speed from neighboring point distance and elapsed time.
+- Derived speed ignores invalid coordinates, duplicate timestamps, zero-duration intervals, paused/gap segments, and implausible jumps using the same validation philosophy as existing stats and chart series.
+- Default GoPro/video activity performance display is speed, formatted in the active unit system such as km/h or mph.
+- If distance and time are sufficient, the viewer lets the user switch GoPro/video performance display between speed and pace.
+- Pace is formatted with the active unit system, such as min/km or min/mi.
+- The switch is available for GoPro/video activities when sport is missing, ambiguous, or user-overridden because videos may represent running, walking, cycling, driving, or another movement type.
+- If a sport is confidently classified as running, the existing running pace default may apply; if confidently classified as cycling, the existing cycling speed default may apply.
+- Switching between speed and pace does not re-read or re-parse the video; it uses normalized points and derived metrics already in memory.
+- Overview metric, chart availability, tooltip labels, and export/overlay consumers use the selected display mode where appropriate without mutating the original `Activity`.
+- Tests cover source-speed present, source-speed absent with derived speed, insufficient GPS/time data, metric units, imperial units, ambiguous sport toggle, running default, cycling default, and no video reparse on toggle.
 
 ### Epic E10: Telemetry Video Overlays
 

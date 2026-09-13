@@ -11,6 +11,7 @@ The core promise is simple:
 ## 2. Product Goals
 
 - Provide a main homepage that describes OpenTrack Viewer, its privacy model, supported/planned formats, and the primary action to open the activity processing page.
+- When the GoPro/video telemetry page is available, include homepage information that explains local GoPro MP4/MOV telemetry extraction and links to that dedicated page.
 - Provide privacy-safe SEO metadata so search and link previews clearly describe the app without exposing user activity data.
 - Provide a dedicated viewer/process page where users upload and inspect GPX first, then FIT/TCX and future formats.
 - Provide a Terms and Conditions page with stable navigation/linking for legal and usage terms.
@@ -61,6 +62,7 @@ The core promise is simple:
 - For run activities, add pace and cadence charts when the normalized activity has enough data.
 - Running cadence must be displayed as strides per minute, not revolutions per minute.
 - For cycling activities, add a speed chart instead of the running-oriented pace/cadence chart set.
+- When a chart is not available for the loaded activity, skip that chart section entirely instead of showing a message such as no data or shown only for another sport.
 - Let users select a range directly on a chart by click-drag-release.
 - When a chart range is selected, focus charts and map on only that activity section while preserving the original full activity in memory.
 - Provide a Reset View button that clears the selected section and restores the full activity view across charts, map, and summary stats.
@@ -69,7 +71,10 @@ The core promise is simple:
 - In Stage 3, support direct browser-side conversion between supported formats: after a user opens a supported activity file, they can download it as another supported export format without uploading it.
 - In Stage 4, support TCX files for both import and export.
 - In a later milestone, let users open local GoPro MP4/MOV videos on a dedicated extraction page and extract embedded GPS and telemetry data into the same viewer/export pipeline when browser performance allows it.
+- Homepage GoPro copy should make clear that video telemetry extraction happens on the dedicated page, not inside the generic file viewer, and that video files are not uploaded.
 - After GoPro video telemetry is extracted successfully, show a clear action that opens the viewer with the extracted activity data already loaded.
+- For GoPro/video activities without source speed data, derive speed from GPS point distance and time when enough reliable points exist.
+- For GoPro/video activities, default to speed display in the active unit system, and let users switch between speed and pace when the video could represent running, walking, cycling, driving, or another ambiguous activity type.
 - After the GoPro extraction milestone is complete, add a later overlay milestone that can generate telemetry overlays from local video plus extracted activity/sensor data.
 - Let users preview synchronized telemetry overlays on top of the selected video without uploading the video or telemetry.
 - Let users export overlay-only assets, such as transparent or chroma-key video/image-sequence overlays, so they can use them in external video editing applications.
@@ -143,6 +148,7 @@ The early implementation should stay intentionally small:
 
 - One activity loaded at a time.
 - Main homepage is descriptive and does not own activity-processing state.
+- Homepage may link to the GoPro/video telemetry page and explain the feature, but it must not own video-file selection, telemetry extraction, or loaded extracted activity state.
 - Viewer/process page owns the activity-file workflow.
 - Terms and Conditions is a read-only informational page; it must not own activity-processing state.
 - Settings are modal and session-scoped — with the theme the one exception, remembered between visits; opening settings must not reset loaded activity data.
@@ -152,7 +158,9 @@ The early implementation should stay intentionally small:
 - One map view.
 - One responsive loaded-activity layout: max-width content, optional large-screen section sidebar, overview first, separate device card when available, map second, charts later.
 - Sport-specific overview metrics should prefer average pace for running and average speed for cycling.
+- GoPro/video telemetry activities should support a user-selected speed/pace display mode when sport cannot be confidently inferred.
 - One chart panel with elevation first, then sport-specific charts: run pace/cadence for running and speed for cycling when the underlying data supports them.
+- Unavailable chart panels should not render placeholder titles or messages; they should be omitted from the chart list.
 - Laps are displayed only when lap data exists; missing laps should not create empty layout noise.
 - No empty map/chart/stat placeholders before a valid activity is loaded.
 - One selected chart range at a time.

@@ -232,6 +232,24 @@ Decision: Device information should render in its own viewer card when safe disp
 
 Reason: Summary metrics and recording-device metadata answer different questions. Splitting them keeps the overview focused on activity performance while giving device metadata a clear place with its own privacy/redaction behavior.
 
+### TD-028: Unavailable Charts Are Omitted
+
+Decision: The chart panel should render only available charts. Chart kinds that do not apply to the current sport or lack usable data should be skipped entirely rather than shown as title-plus-message placeholders.
+
+Reason: A long list of unavailable chart messages creates visual noise and makes the activity look broken. The availability function still owns the decision, but the viewer should spend vertical space only on charts the user can inspect.
+
+### TD-029: Homepage Surfaces GoPro as a Separate Tool
+
+Decision: Once the dedicated GoPro/video telemetry page exists, the homepage should include concise information and a route action for that page. The copy must present it as a separate browser-only tool, not as a capability of the generic file viewer.
+
+Reason: GoPro telemetry extraction is useful enough to advertise from the homepage, but it has a different workflow and privacy/performance model from GPX/FIT/TCX file viewing. Clear homepage copy should route users to the right tool without weakening the no-upload promise.
+
+### TD-030: GoPro Video Defaults to Speed With Pace as a Display Mode
+
+Decision: GoPro/video activities should derive speed from GPS point distance and time when no reliable source speed is present. Because video telemetry may come from running, walking, cycling, driving, or another movement type, the viewer should default to speed and let users switch between speed and pace when both can be derived.
+
+Reason: GoPro videos do not always carry a trustworthy sport classification. Speed is the safest neutral default across many movement types, while pace is useful for human-powered activities. A display-mode switch preserves both without forcing the parser to guess the sport.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
