@@ -42,8 +42,10 @@ export interface ExtractGpmfOptions {
  *
  * **Memory.** `gpmf-extract` streams the file with backpressure rather than
  * reading it whole, so peak memory tracks the *metadata* — a few megabytes for
- * a long recording — not the video, which may be gigabytes (TD-025). It does
- * that work in a Web Worker of its own, which is what keeps the UI responsive.
+ * a long recording — not the video, which may be gigabytes (TD-025). The
+ * library worker is intentionally disabled below for browser correctness; the
+ * read still yields between chunks, and the API stays async so extraction can
+ * later move into an app-owned worker without changing callers.
  *
  * The library is loaded on demand: a reader who never opens a video should not
  * download an MP4 demuxer.

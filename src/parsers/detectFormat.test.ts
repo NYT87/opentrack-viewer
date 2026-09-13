@@ -111,6 +111,17 @@ describe('video detection (AV-902)', () => {
     });
   });
 
+  it('recognizes HERO7-style markers near the head', async () => {
+    const bytes = new Uint8Array(128);
+    bytes.set([0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70]); // ftyp
+    bytes.set(new TextEncoder().encode('GPRO HERO7 Black GPS5'), 24);
+
+    await expect(detectFormat(new File([bytes], 'hero7-head-markers.mp4'))).resolves.toEqual({
+      format: 'gopro',
+      via: 'signature',
+    });
+  });
+
   it('recognizes a video with no telemetry as just a video', async () => {
     await expect(detectFormat(video('plain-video.mp4'))).resolves.toEqual({
       format: 'video',

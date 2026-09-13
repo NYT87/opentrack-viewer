@@ -131,10 +131,11 @@ function isIsoBaseMediaSignature(head: Uint8Array): boolean {
 /**
  * AV-902. Whether a video looks like it carries GoPro telemetry.
  *
- * `gpmd` is the handler and codec name of the metadata track; `GoPro` and
- * `FIRM` appear in the camera's `udta` atoms. Any of them is enough to route
- * the file hopefully — `AV-903` is what decides definitively, by actually
- * finding the track.
+ * `gpmd` is the handler and codec name of the metadata track; `GoPro`, `GPRO`,
+ * `HERO`, `FIRM`, `GPS5` and `GPS9` appear in camera atoms or the GPMF stream
+ * itself, depending on model and where `moov` was written. Any of them is
+ * enough to route the file hopefully — `AV-903` is what decides definitively,
+ * by actually finding the track.
  *
  * Deliberately "when possible", as the task puts it: a `moov` too far from
  * either end goes unrecognized and the file is treated as ordinary video,
@@ -153,7 +154,7 @@ async function hasGoProMarkers(file: File, head: Uint8Array): Promise<boolean> {
 function containsGoProMarker(bytes: Uint8Array): boolean {
   // latin1 so arbitrary binary decodes without loss or replacement characters.
   const text = new TextDecoder('latin1').decode(bytes);
-  return text.includes('gpmd') || text.includes('GoPro') || text.includes('FIRM');
+  return /gpmd|GoPro|GPRO|HERO|FIRM|GPS[59]/.test(text);
 }
 
 function detectXmlRoot(head: Uint8Array): ActivitySourceFormat | undefined {
