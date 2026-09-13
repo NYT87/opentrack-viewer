@@ -250,6 +250,12 @@ Decision: GoPro/video activities should derive speed from GPS point distance and
 
 Reason: GoPro videos do not always carry a trustworthy sport classification. Speed is the safest neutral default across many movement types, while pace is useful for human-powered activities. A display-mode switch preserves both without forcing the parser to guess the sport.
 
+### TD-031: Route Builder Edits Draft Tracks, Not Activities
+
+Decision: Route Builder should operate on a separate draft planned-track model. A viewed activity can seed the draft through a `Create Custom Track` action, but the original normalized `Activity` remains immutable. Additional imported tracks are parsed through the normal parser registry, normalized, and appended to the draft rather than merged through format-specific shortcuts.
+
+Reason: Recorded activities and planned routes have different meanings. A recorded activity contains what happened; a planned track is instructions or intent for a device. Keeping a separate draft model protects the viewer, lets route editing drop activity-only fields intentionally, and keeps export behavior testable through the existing browser-side exporter registry.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -365,3 +371,8 @@ question deleted, so the reasoning stays findable.
 - Is burned-in browser-side video export viable for realistic GoPro clips with acceptable quality, memory usage, duration limits, browser support, and audio handling?
 - What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
 - Should overlay configuration be exported as project JSON so users can reuse templates between videos?
+- For Route Builder, should the first implementation support manual straight-line point editing only, or should road/path snapping be added later through an optional routing provider?
+- Which user-facing label should ship for the viewer action: `Create Custom Track`, `Plan Route from Activity`, or another phrase?
+- Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?
+- Should Route Builder support undo/redo in the first milestone, or only confirmation for destructive section discard?
+- Should far-apart appended tracks be joined by a visible straight segment, kept as separate segments, or require the user to confirm the join?

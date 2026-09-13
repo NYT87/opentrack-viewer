@@ -1037,3 +1037,109 @@ Acceptance criteria:
 - Add browser tests for opening the overlay page, previewing overlays, and exporting a short overlay-only asset.
 - Add performance checks for longer timeline simulation without committing large videos.
 - Add privacy regression tests to ensure no network requests contain video bytes, telemetry samples, rendered frames, file names, or output metadata.
+
+### Epic E11: Route Builder and Custom Track Export
+
+#### AV-1101: Define Route Draft Domain Model
+
+Dependencies: AV-101, AV-301, AV-550
+
+Acceptance criteria:
+- Define a route-draft model for planned tracks that is separate from immutable loaded `Activity` objects.
+- Draft model can represent a new blank track, a track copied from an existing activity, and a track created by appending imported routes.
+- Draft points preserve order and include latitude, longitude, optional elevation, optional time, optional distance, source provenance, and edit metadata where useful.
+- Draft operations are pure functions where practical and do not mutate the source `Activity`.
+- Draft model can generate a normalized route-oriented `Activity` or exporter input for GPX/FIT/TCX export.
+- Activity-only data such as heart rate, power, calories, detailed laps, and device metadata is either intentionally dropped from planned-track drafts or explicitly retained by documented policy.
+- Unit tests cover blank draft creation, activity-to-draft copy, draft-to-activity/export conversion, point ordering, and source-activity immutability.
+
+#### AV-1102: Add Route Builder Tool Page and Navigation
+
+Dependencies: AV-012, AV-1101
+
+Acceptance criteria:
+- Add a dedicated route such as `/route-builder`; route editing does not happen inside the generic viewer page.
+- Add a `Tools` dropdown option named `Route Builder`, `Route planner`, or an agreed equivalent.
+- Route Builder page has an empty/new-track state with a clear action to start a blank planned track.
+- Route Builder page can receive client-side handoff state from the viewer with an editable route draft.
+- Reload or direct entry without handoff state does not crash and allows starting a new draft or importing a track.
+- Route Builder page uses the app theme, global header, settings modal, SEO route metadata, and responsive layout conventions.
+- Tests cover route rendering, `Tools` navigation, empty/new state, handoff entry state, reload fallback, and Settings modal behavior on the page.
+
+#### AV-1103: Add Viewer Action to Create a Custom Track
+
+Dependencies: AV-304, AV-1101, AV-1102
+
+Acceptance criteria:
+- Ready viewer exposes a clear action such as `Create Custom Track` when the loaded activity has enough valid location points to seed a planned route.
+- The action is hidden or disabled with a typed reason when the activity has no usable route geometry.
+- Selecting the action creates an editable route draft from the loaded activity and opens Route Builder through client-side state.
+- The original loaded activity remains unchanged and can still be viewed if the user returns.
+- The action does not upload activity data, persist route data, or require an account.
+- Tests cover route-capable activity, no-location activity, handoff payload shape, navigation to Route Builder, and source-activity immutability.
+
+#### AV-1104: Implement Manual Route Point Editing
+
+Dependencies: AV-1101, AV-1102, AV-302, AV-303
+
+Acceptance criteria:
+- Route Builder renders the draft track on MapLibre and fits bounds to the current draft.
+- User can add points to the draft track from map interactions or explicit controls.
+- User can remove selected individual points.
+- User can move or adjust selected points if this is included in the first editing scope; otherwise the omission is documented and the UI does not imply drag-to-move support.
+- Point edits update the preview route immediately without recreating the original loaded activity.
+- Invalid point coordinates are rejected with non-blocking feedback.
+- Editing controls are keyboard-accessible where practical and remain usable on desktop and mobile.
+- Tests cover add point, remove point, optional move point, invalid coordinate rejection, preview update, and source immutability.
+
+#### AV-1105: Implement Section Discard and Draft Repair
+
+Dependencies: AV-1101, AV-1104
+
+Acceptance criteria:
+- User can select a contiguous section of the draft route and discard it.
+- Discarding a section joins the remaining before/after points in order unless the user explicitly chooses to keep a gap.
+- The UI makes the destructive edit preview clear before or immediately after applying it and provides at least an undo or explicit confirmation if the interaction is easy to trigger accidentally.
+- Draft distance and preview geometry update after the section is removed.
+- Edge cases such as deleting the first point, last point, entire route, or a one-point route are handled without crashes.
+- Tests cover forward and reverse section selections, deleting middle/start/end/all sections, undo or confirmation behavior, and route geometry after discard.
+
+#### AV-1106: Append Another Imported Track to Current Draft
+
+Dependencies: AV-102, AV-103, AV-1101, AV-1102, AV-1104
+
+Acceptance criteria:
+- While editing a draft, user can import another supported track file from the Route Builder page.
+- The imported file is parsed through the existing format detector and parser registry, not through a route-builder-specific parser.
+- The imported activity must have usable route points; otherwise it is rejected with a clear typed error.
+- Imported route points append to the end of the current draft in their original order.
+- The append operation can optionally insert a visible join/gap marker if the end of the current draft and start of the imported track are far apart.
+- Appending does not overwrite the current draft unless the user explicitly starts over.
+- Imported file contents and appended route points are not uploaded or persisted automatically.
+- Tests cover GPX append initially, later FIT/TCX append as supported, unsupported file rejection, no-route rejection, far-gap warning, ordering, and no-upload privacy behavior.
+
+#### AV-1107: Export Planned Track for External Devices
+
+Dependencies: AV-550, AV-551, AV-553, AV-752, AV-1101, AV-1104, AV-1106
+
+Acceptance criteria:
+- Route Builder exposes export controls only when the draft contains enough valid route geometry.
+- User can export the planned track through supported exporter-registry formats, starting with GPX.
+- FIT and TCX export are offered only when the exporter registry can represent the planned track correctly and communicate known limitations.
+- Exported file names clearly identify route-builder/planned-track output rather than original recorded activity exports.
+- Export warnings explain omitted activity-only data, missing timestamps, lost sensor fields, device metadata removal, and target-format limitations.
+- Export uses browser `Blob`/object URL/download APIs only.
+- Exported planned GPX can be re-imported by the viewer and render the same route shape.
+- Tests cover export availability, GPX export/re-import, disabled unavailable formats, warnings, file naming, and no-upload privacy behavior.
+
+#### AV-1108: Route Builder E2E, Accessibility, and Performance Coverage
+
+Dependencies: AV-1102, AV-1103, AV-1104, AV-1105, AV-1106, AV-1107
+
+Acceptance criteria:
+- Browser test covers viewer loaded with a route, `Create Custom Track`, Route Builder handoff, point edit, section discard, append imported track, and GPX export.
+- Browser test covers direct Route Builder entry with a new blank draft.
+- Accessibility tests cover navigation, buttons, menus, dialogs, map-adjacent controls, focus states, and keyboard-safe alternatives for core edit operations.
+- Responsive tests cover desktop layout and mobile layout without the large-screen sidebar.
+- Performance checks cover editing and previewing drafts with large point counts, including append operations.
+- Privacy regression tests confirm route-builder import, edit, append, and export flows do not upload route points, file contents, draft metadata, or exported files.

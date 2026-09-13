@@ -13,6 +13,7 @@ Outcome:
 - Terms and Conditions route exists with draft content and stable links.
 - Header brand/title links to the homepage, with no duplicate Home button and no header subtitle.
 - Header places a `Tools` dropdown beside the title, with `File viewer` linking to the viewer/process page.
+- Header `Tools` dropdown can grow to include later browser-only tools such as video telemetry, overlays, and Route Builder.
 - Settings exists as a modal available from the global header on every page, not as a standalone page.
 - Settings opens from an icon-only header control on the homepage, viewer/process page, Terms page, and future tool pages.
 - Settings modal includes theme mode options: system, dark, and light.
@@ -169,6 +170,26 @@ Outcome:
 - Browser-side burned-in video export is implemented only after a feasibility spike confirms the encoding stack, browser support, memory profile, export duration limits, and quality are acceptable.
 - Overlay generation remains entirely client-side and does not introduce a backend render queue.
 
+### M9: Route Builder and Custom Track Export
+
+Goal: Let users create, edit, combine, and export planned tracks locally so they can reuse routes on GPS watches, cycling computers, phones, and other compatible devices.
+
+Outcome:
+- User can open a dedicated Route Builder page from the header `Tools` dropdown.
+- From a loaded activity in the viewer, a clear action such as `Create Custom Track` opens Route Builder with an editable copy of the current route.
+- The original viewed activity remains unchanged; all edits happen against a draft planned track.
+- User can create a new blank planned track from the Route Builder page.
+- User can add points to the draft track on the map.
+- User can remove individual points from the draft track.
+- User can discard a selected section from the draft track.
+- User can reorder or repair the draft only within scoped manual editing rules; automatic route optimization is out of scope.
+- User can import another supported track while already editing, and the imported route points append to the end of the current draft so two saved sections can be joined.
+- Appended tracks are parsed through the normal parser registry and normalized before they are added to the draft.
+- Route Builder can preview the resulting track on MapLibre before export.
+- User can export the planned track through the existing client-side exporter registry, starting with GPX and later FIT/TCX when appropriate.
+- Exported planned tracks omit unsupported activity-only data or report clear warnings when target formats cannot represent draft metadata.
+- Route Builder remains entirely client-side with no backend route storage, account, cloud sync, route optimization service, or automatic upload.
+
 ## 12. Start Here: Parallelizable First Tasks
 
 Start with these tasks in parallel:
@@ -183,6 +204,13 @@ Start with these tasks in parallel:
 - Engineer G: AV-508 and AV-509, chart range-selection gesture and domain-to-point-range mapping using synthetic chart data.
 
 Then converge on AV-304, the first vertical slice.
+
+Later, after export and map interaction foundations are stable, Route Builder work can run in parallel:
+
+- Engineer H: AV-1101 and AV-1102, route-draft model plus dedicated page/tool navigation.
+- Engineer I: AV-1103 and AV-1104, map editing gestures for adding/removing points and discarding sections.
+- Engineer J: AV-1105 and AV-1106, viewer-to-builder handoff plus append-import flow.
+- Engineer K: AV-1107 and AV-1108, planned-track export and Route Builder tests.
 
 The first meaningful demo should be:
 

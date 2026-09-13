@@ -25,6 +25,8 @@ Cover:
 - GPX export serialization and GPX re-import round trip.
 - FIT export encoding, verified by re-import and by checking the file's CRC against an independent implementation.
 - TCX import/export mapping and round-trip behavior, including import, export, and re-import of an exported file.
+- Route draft creation from blank state and from a normalized activity.
+- Route draft edit operations: add point, remove point, discard section, append imported track, and draft-to-export conversion.
 
 ### Component Tests
 
@@ -83,6 +85,9 @@ Cover:
 - Focused range summary stats state.
 - Export controls visibility only in ready state.
 - Export full activity versus selected range behavior.
+- Route Builder empty/new-track state.
+- Route Builder handoff state when opened from a loaded viewer activity.
+- Route Builder map preview, add/remove point controls, section discard controls, append-import controls, and export controls.
 
 ### Browser/E2E Tests
 
@@ -97,6 +102,7 @@ Cover:
 - When GoPro video telemetry extraction is implemented, confirm `Tools` includes the video telemetry entry and routes to the dedicated extraction page.
 - When GoPro video telemetry extraction is implemented, confirm the homepage describes the video telemetry page and links to it without claiming upload/server processing.
 - When telemetry overlays are implemented, confirm `Tools` includes the overlay entry and routes to the dedicated overlay page.
+- When Route Builder is implemented, confirm `Tools` includes the Route Builder entry and routes to the dedicated route-building page.
 - Confirm no standalone top-level `Viewer` button is rendered when `File viewer` is in the `Tools` dropdown.
 - Confirm `Tools` dropdown supports keyboard open/close and Escape close.
 - Confirm Settings is shown on the homepage header.
@@ -164,6 +170,13 @@ Cover:
 - Confirm overlay preview stays synchronized on play, pause, seek, and manual offset adjustment.
 - Confirm overlay-only export produces the selected local output format with expected dimensions, duration/timeline length, and template settings.
 - Confirm burned-in video export is tested only after the browser-side feasibility task chooses an acceptable encoding path.
+- Confirm a loaded route in the viewer can open Route Builder through `Create Custom Track` or the agreed label.
+- Confirm Route Builder receives an editable copy and the original viewer activity is not mutated.
+- Confirm Route Builder can start a new blank planned track.
+- Confirm Route Builder can add points, remove points, discard a selected section, and update the preview route.
+- Confirm Route Builder can import another supported track while editing and append its route points to the end of the draft.
+- Confirm Route Builder can export a planned GPX file that re-imports into the viewer with the same route shape.
+- Confirm Route Builder does not offer unsupported export formats as broken controls.
 
 ### Privacy Regression Tests
 
@@ -177,6 +190,7 @@ Add browser tests or request interception checks for:
 - No GoPro video telemetry operation uploads video bytes, raw GPMF payloads, extracted coordinates, device metadata, or derived activity values.
 - No GoPro extraction-to-viewer handoff uses backend storage, account state, or cloud persistence.
 - No telemetry overlay preview or export uploads source video frames, telemetry samples, generated overlay frames, rendered video output, file names, or output metadata.
+- No Route Builder operation uploads source activity points, imported track contents, route draft points, edit operations, generated planned tracks, or exported route files.
 - Map tile requests are limited to configured tile provider URLs.
 
 ### Fixture Policy
@@ -197,6 +211,9 @@ Add browser tests or request interception checks for:
 - Telemetry overlay preview should use efficient canvas or GPU-backed rendering where needed and avoid per-frame React renders.
 - Overlay-only export should be planned before burned-in video export because it avoids decoding/re-encoding the source video and is more likely to work across browsers.
 - Burned-in video export must be gated by measured feasibility for WebCodecs, MediaRecorder, ffmpeg.wasm, or the selected encoder path, including memory use, duration limits, audio handling, and mobile behavior.
+- Route Builder preview should avoid full map/source rebuilds on every pointer move for large drafts; defer expensive recalculation until edit commit where possible.
+- Appending another track should stream or parse through existing intake paths and avoid duplicating large arrays beyond the editable draft and source parse result.
+- Section discard should be implemented as deterministic array/range operations with clear bounds checks, not fragile coordinate string manipulation.
 - Use memoization for GeoJSON and chart series derived from the current activity.
 - Cache derived chart series by activity identity and x-axis mode.
 - Axis tick generation should be deterministic and cheap; compute ticks from visible domain and x-axis mode rather than sampling rendered pixels on every frame.
@@ -208,6 +225,7 @@ Add browser tests or request interception checks for:
 - FIT parsing may be CPU-heavy; plan to move parser work to a Web Worker if UI stalls.
 - FIT export can be correctness-sensitive because FIT is binary and schema-driven; prefer a proven browser-compatible encoder if one satisfies license and bundle constraints.
 - XML export for GPX/TCX should use structured serialization instead of string concatenation when practical.
+- Planned-track export should reuse exporter validation and warnings instead of bypassing the exporter registry.
 
 ## 15. Error Handling Principles
 
@@ -220,6 +238,7 @@ Add browser tests or request interception checks for:
 - Settings modal errors should not affect loaded activity data or route state.
 - Theme resolution errors should fall back to light and not block the app.
 - Terms page rendering errors should not affect activity-processing state.
+- Route Builder errors should distinguish invalid draft, unsupported appended file, appended file with no route, invalid edit selection, and export limitation.
 
 Example error categories:
 
@@ -240,3 +259,8 @@ Example error categories:
 - `unsupported_export_format`
 - `export_failed`
 - `tcx_parse_failed`
+- `route_builder_invalid_draft`
+- `route_builder_no_route_points`
+- `route_builder_invalid_edit`
+- `route_builder_append_failed`
+- `route_builder_export_failed`

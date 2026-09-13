@@ -6,7 +6,7 @@
 - UI: React
 - Build tool: Vite
 - Map: MapLibre GL JS
-- Routing: React Router with static-hosting-safe routes. The app should have homepage, viewer/process, GoPro video telemetry extraction, and Terms and Conditions routes. Settings should be modal state, not a route.
+- Routing: React Router with static-hosting-safe routes. The app should have homepage, viewer/process, GoPro video telemetry extraction, Route Builder, telemetry overlay, and Terms and Conditions routes. Settings should be modal state, not a route.
 - State: React state/hooks first; add Zustand only if shared interaction state becomes awkward
 - Charts: lightweight SVG/canvas chart component first, or a focused chart library later if interaction requirements justify it
 - Testing:
@@ -29,6 +29,7 @@ Local File
   |
   | Activity file: GPX / FIT / TCX
   | Video file later: GoPro MP4 / MOV with GPMF telemetry
+  | Planned route later: new/editable track or appended imported tracks
   |
   | Browser File API
   v
@@ -58,6 +59,7 @@ Normalized Activity Domain Model
        +--> FIT exporter
        +--> TCX exporter
        +--> Direct conversion flow
+       +--> Planned route/track export
   |
   v
 React UI
@@ -95,6 +97,13 @@ React UI
        +--> Extraction Warnings and Result Summary
        +--> Open in Viewer button after successful extraction
        +--> Client-side handoff of normalized Activity to Viewer/Process Page
+  |
+  +--> Route Builder Page later
+       +--> Create a new planned track
+       +--> Receive editable copy from Viewer/Process Page
+       +--> Add/remove points and discard sections
+       +--> Append another imported track to the editing track
+       +--> Export planned track through browser download APIs
   |
   +--> Telemetry Overlay Page later
        +--> Local Video Selection or Handoff from GoPro Extraction
@@ -149,14 +158,17 @@ The UI must depend on normalized domain objects, never on format-specific parser
 27. Settings may be opened as a modal from the header without navigating away from the viewer/process page or clearing activity state.
 28. Theme settings apply globally without reprocessing or clearing the current activity.
 29. Export controls serialize either the full normalized activity or the selected focused range into supported output formats.
-30. Route metadata updates document title and public meta tags without reading loaded activity data.
-31. In the GoPro milestone, the user opens a dedicated video telemetry extraction page from `Tools`, selects a local MP4/MOV file, and extracts telemetry without uploading the video.
-32. After successful GoPro extraction, the extraction page shows a button that navigates to the viewer and passes the normalized `Activity` plus safe auxiliary telemetry through client-side app state.
-33. The viewer renders the extracted GoPro activity through the same map, overview, charts, range focus, export, and reset-view contracts used for GPX/FIT/TCX activities.
-34. After GoPro extraction is stable, a later overlay page can consume the local video plus normalized `Activity`/auxiliary telemetry to render synchronized gauges, maps, and metric overlays.
-35. Overlay-only exports serialize the overlay timeline independently from the source video, for use in external editing applications.
-36. Burned-in video export composites video frames and overlay frames in the browser only after a feasibility spike confirms acceptable browser support, memory use, duration limits, and export quality.
-37. Later slices add synchronized hover/selection state between chart and map.
+30. From the viewer, a `Create Custom Track` action can create an editable copy of the current route and open the Route Builder page without mutating the original activity.
+31. In the Route Builder milestone, the user can create a new planned track, edit an existing route copy, remove points, add points, discard sections, and append another imported supported track to the end of the editing track.
+32. Route Builder exports the planned track through the exporter registry and local browser download APIs so the file can be copied to external GPS devices.
+33. Route metadata updates document title and public meta tags without reading loaded activity data.
+34. In the GoPro milestone, the user opens a dedicated video telemetry extraction page from `Tools`, selects a local MP4/MOV file, and extracts telemetry without uploading the video.
+35. After successful GoPro extraction, the extraction page shows a button that navigates to the viewer and passes the normalized `Activity` plus safe auxiliary telemetry through client-side app state.
+36. The viewer renders the extracted GoPro activity through the same map, overview, charts, range focus, export, and reset-view contracts used for GPX/FIT/TCX activities.
+37. After GoPro extraction is stable, a later overlay page can consume the local video plus normalized `Activity`/auxiliary telemetry to render synchronized gauges, maps, and metric overlays.
+38. Overlay-only exports serialize the overlay timeline independently from the source video, for use in external editing applications.
+39. Burned-in video export composites video frames and overlay frames in the browser only after a feasibility spike confirms acceptable browser support, memory use, duration limits, and export quality.
+40. Later slices add synchronized hover/selection state between chart and map.
 
 ## 8. Domain Model
 
@@ -211,6 +223,7 @@ below say how the rest of the app is expected to behave in the face of that.
 
 - Optional fields are expected. GPX files may lack HR/power/cadence. FIT files may lack GPS.
 - A GoPro video telemetry import should normalize GPS samples into ordinary `ActivityPoint` records, so maps, charts, stats, focused ranges, and export flows continue to use the same contracts.
+- Route Builder should work from an editable copy of route-oriented `ActivityPoint` data, whether the starting point is a loaded activity, a new blank planned track, or an appended imported track.
 - High-frequency GoPro telemetry that is not an activity point stream, such as accelerometer, gyroscope, gravity vector, camera orientation, ISO, shutter speed, and white balance, should be modeled as optional auxiliary streams instead of forcing everything into `ActivityPoint`.
 - Latitude and longitude are optional at the point level so indoor FIT activities can still be represented.
 - Derived values should be clearly separated from source values.
@@ -250,6 +263,10 @@ below say how the rest of the app is expected to behave in the face of that.
 - Exporters should consume normalized `Activity` or a derived focused activity slice, not parser-specific source data.
 - Direct conversion should be modeled as parse-to-`Activity` plus export-from-`Activity`, not as source-format-to-target-format shortcuts.
 - Direct conversion should offer only exporter-supported target formats and should normally exclude the source format unless the user is explicitly using export for cleanup/rewrite.
+- Route Builder should model edits as operations on a draft planned track, not mutations of the original viewed activity.
+- Appending another track in Route Builder should import it through the normal parser registry, normalize it into `Activity`, then append its route points to the draft in order.
+- Route Builder export should consume the same exporter registry as activity export where the target format can represent planned route data.
+- Planned track exports may omit workout-only streams such as heart rate, power, calories, and device metadata unless explicitly retained by a later product decision.
 - GoPro video extraction should be modeled as `local video -> dedicated extraction page -> metadata/GPMF extraction -> normalized Activity plus optional telemetry streams -> viewer handoff`, not as a server conversion job.
 - Telemetry overlay generation should be modeled as `local video + normalized Activity/telemetry streams -> synchronized overlay timeline -> preview -> overlay-only export or browser-side video render`, not as a backend render job.
 - Exporters may lose unsupported source-specific fields; any loss should be documented through warnings or UI copy.
@@ -297,6 +314,7 @@ Header rules:
 - The `Tools` dropdown should include `File viewer`, which routes to the current viewer/process page.
 - When GoPro video telemetry extraction is implemented, the `Tools` dropdown should also include a `Video telemetry` or `GoPro telemetry` entry that routes to the dedicated extraction page.
 - When telemetry overlays are implemented, the `Tools` dropdown should also include an `Overlays` or `Telemetry overlays` entry that routes to the overlay page.
+- When Route Builder is implemented, the `Tools` dropdown should also include a `Route Builder`, `Route planner`, or equivalent entry that routes to the dedicated route-building page.
 - The viewer/process page should not appear as a standalone top-level `Viewer` button when it is available through `Tools > File viewer`.
 - The `Tools` dropdown should use accessible menu/button semantics, keyboard navigation, outside-click/Escape close behavior, and a visible focus state.
 - Every page should expose Settings in the header as an icon-only button/control, including the homepage, viewer/process page, Terms and Conditions page, and future tool pages.
@@ -336,6 +354,7 @@ After an activity is successfully processed, the ready viewer should use a clear
 3. Map box, with laps beside the map on large screens when laps exist.
 4. Charts section.
 5. Later-stage export and advanced controls.
+6. Later-stage `Create Custom Track` action for opening an editable route copy in Route Builder.
 
 ### Global Loaded-Activity Layout
 
@@ -414,6 +433,7 @@ activity-viewer/
       AppShell.tsx
       HomePage.tsx
       ViewerPage.tsx
+      RouteBuilderPage.tsx
       TermsPage.tsx
       SettingsModal.tsx
       Seo.tsx
@@ -428,6 +448,8 @@ activity-viewer/
       ChartXAxisSwitch.tsx
       ChartRangeSelectionOverlay.tsx
       FocusRangeControls.tsx
+      RouteEditorMap.tsx
+      RouteBuilderToolbar.tsx
       EmptyState.tsx
       ErrorPanel.tsx
     domain/
@@ -437,6 +459,7 @@ activity-viewer/
       charts.ts
       series.ts
       activitySlice.ts
+      routeDraft.ts
       validation.ts
       units.ts
     parsers/
@@ -456,6 +479,10 @@ activity-viewer/
       exportGpx.ts
       exportFit.ts
       exportTcx.ts
+    route-builder/
+      draftRoute.ts
+      routeOperations.ts
+      appendTrack.ts
     state/
       activityStore.ts
       interactionStore.ts

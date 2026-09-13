@@ -24,6 +24,7 @@ The core promise is simple:
 - Move browser-side tool navigation into a `Tools` dropdown placed beside the title on the left side of the header.
 - The `Tools` dropdown should include a `File viewer` option that links to the current viewer/process page.
 - When the GoPro milestone is implemented, the `Tools` dropdown should also include a video telemetry extraction option that opens the dedicated GoPro extraction page.
+- When the Route Builder milestone is implemented, the `Tools` dropdown should also include a route planning/editing option that opens the dedicated Route Builder page.
 - Always show the settings entry in the global header, including the homepage, viewer/process page, Terms and Conditions page, and future tool pages.
 - Show Settings as an icon-only header control with an accessible name and visible focus state.
 - Load local activity files through file picker and drag/drop.
@@ -70,6 +71,11 @@ The core promise is simple:
 - In Stage 3, export the current activity or selected/focused activity section to GPX and FIT where technically feasible.
 - In Stage 3, support direct browser-side conversion between supported formats: after a user opens a supported activity file, they can download it as another supported export format without uploading it.
 - In Stage 4, support TCX files for both import and export.
+- In a later Route Builder milestone, let users create a custom planned track in the browser, export it, and use it on external devices.
+- From a loaded activity in the viewer, provide a clear action such as `Create Custom Track` that opens a dedicated route-building page with the current track as an editable starting point.
+- On the Route Builder page, let users remove points, add points, discard sections, and adjust the planned track without mutating the original loaded activity.
+- Let users import another supported track into the Route Builder and append it to the end of the editing track, so separate saved route sections can be joined before export.
+- Route Builder exports should use the same browser-side exporter registry where possible, starting with GPX and later FIT/TCX when appropriate for device compatibility.
 - In a later milestone, let users open local GoPro MP4/MOV videos on a dedicated extraction page and extract embedded GPS and telemetry data into the same viewer/export pipeline when browser performance allows it.
 - Homepage GoPro copy should make clear that video telemetry extraction happens on the dedicated page, not inside the generic file viewer, and that video files are not uploaded.
 - After GoPro video telemetry is extracted successfully, show a clear action that opens the viewer with the extracted activity data already loaded.
@@ -102,6 +108,8 @@ The core promise is simple:
 - No server-side video rendering, overlay rendering, transcoding, or cloud export queue for telemetry overlays.
 - No promise that burned-in video export is feasible for large files until a browser encoding feasibility spike is complete.
 - No full nonlinear video editor; overlay work should stay focused on telemetry gauges, maps, metrics, timing, styling, preview, and export.
+- No turn-by-turn navigation engine, cloud route optimization, routing API dependency, or account-synced route library in the first Route Builder milestone.
+- No automatic road snapping or map-provider routing until a separate privacy/product decision is made.
 - No attempt to support every activity format before GPX is solid.
 - No standalone settings page in the target navigation model.
 - No file upload controls on the homepage beyond navigation to the viewer/process page.
@@ -117,6 +125,8 @@ The core promise is simple:
 - Parsing must happen locally using browser APIs such as `File`, `Blob`, `FileReader`, `ArrayBuffer`, and `DOMParser`.
 - GoPro video telemetry extraction, if implemented, must happen locally from the selected MP4/MOV file using browser-side byte-range/blob reads and parser code that runs in the page or a Web Worker.
 - Handoff from the GoPro extraction page to the viewer must keep extracted activity data client-side, preferably in memory-owned app state. It must not require persistence, account state, backend storage, or a telemetry upload.
+- Handoff from the viewer to Route Builder must pass an editable copy of the normalized route client-side. It must not upload route points, file contents, or planned tracks.
+- Route Builder imports, edits, appended tracks, generated tracks, and exports must remain local to the browser unless the user explicitly downloads a file.
 - Telemetry overlay preview, overlay-only export, and burned-in video export must keep source video, extracted telemetry, generated overlay frames, and rendered output local to the browser.
 - If browser-side video rendering requires temporary blobs or object URLs, they must be revocable and must not be persisted without explicit user download.
 - The app must not log raw file contents.
@@ -159,6 +169,8 @@ The early implementation should stay intentionally small:
 - One responsive loaded-activity layout: max-width content, optional large-screen section sidebar, overview first, separate device card when available, map second, charts later.
 - Sport-specific overview metrics should prefer average pace for running and average speed for cycling.
 - GoPro/video telemetry activities should support a user-selected speed/pace display mode when sport cannot be confidently inferred.
+- Route Builder is later than the stable viewer/export flow. Its first scope is manual route/track editing and export, not cloud route generation or navigation.
+- Route Builder should support starting from an existing viewed track, creating a new track, deleting points/sections, adding points, appending another imported track, and exporting the result.
 - One chart panel with elevation first, then sport-specific charts: run pace/cadence for running and speed for cycling when the underlying data supports them.
 - Unavailable chart panels should not render placeholder titles or messages; they should be omitted from the chart list.
 - Laps are displayed only when lap data exists; missing laps should not create empty layout noise.
@@ -166,6 +178,7 @@ The early implementation should stay intentionally small:
 - One selected chart range at a time.
 - Range selection is an inspection/focus tool, not an activity edit or crop operation.
 - Export is Stage 3+ work, not part of the first GPX viewer slice.
+- Route editing/export is a separate later milestone and should not complicate the first viewer, chart, or GoPro extraction slices.
 - Telemetry overlay generation is post-GoPro-extraction work and should not block GPX/FIT/TCX viewing, conversion, or extraction.
 - Overlay-only export should be planned before burned-in video export because it is more likely to be feasible in the browser and useful with existing video editors.
 - No persistence.
