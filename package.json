@@ -11,6 +11,9 @@
   "bugs": {
     "url": "https://github.com/NYT87/opentrack-viewer/issues"
   },
+  "overrides": {
+    "glob": "^13.0.6"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
