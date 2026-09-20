@@ -502,3 +502,49 @@ describe('series built from a sensor stream (AV-905)', () => {
     expect(restrictSeries(series, { startIndex: 1, endIndex: 2 }).samples).toHaveLength(1);
   });
 });
+
+describe('the rolling window and a recording gap (AV-505, AV-513)', () => {
+  /**
+   * A ride stopped for ten seconds and restarted 200 m further on. The gap is
+   * shorter than the window, so the trailing edge would otherwise still be in
+   * the previous segment — and the 200 m travelled while stopped was never
+   * accumulated, by design.
+   *
+   * 0.0000089932 degrees of latitude is about a metre.
+   */
+  const METRE = 0.0000089932;
+  const pausedRide = () => {
+    const activity = makeActivity([
+      { lat: 0, lon: 0.0001, segmentIndex: 0, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 100 * METRE, lon: 0.0001, segmentIndex: 0, time: new Date('2024-01-01T10:00:10Z') },
+      // Recording restarts 200 m further along, ten seconds later.
+      { lat: 300 * METRE, lon: 0.0001, segmentIndex: 1, time: new Date('2024-01-01T10:00:20Z') },
+      // Then 40 m in 5 s: 8 m/s, which is the speed actually ridden here.
+      { lat: 340 * METRE, lon: 0.0001, segmentIndex: 1, time: new Date('2024-01-01T10:00:25Z') },
+    ]);
+    return activity;
+  };
+
+  const sampleAt = (key: 'speed' | 'pace', pointIndex: number) =>
+    buildSeries(pausedRide(), key, 'time').samples.find(
+      (sample) => sample.pointIndex === pointIndex,
+    );
+
+  it('measures speed within the segment, not across the pause', () => {
+    // Across the boundary the window sees 40 m over 15 s — 2.7 m/s — because
+    // the 200 m covered while stopped is deliberately not counted.
+    expect(sampleAt('speed', 3)?.y).toBeCloseTo(8, 0);
+  });
+
+  it('measures pace within the segment too', () => {
+    // 5 s for 40 m is 125 s/km. Reaching back over the gap gives 375.
+    expect(sampleAt('pace', 3)?.y).toBeCloseTo(125, -1);
+  });
+
+  it('gives the first point after a restart no value rather than zero', () => {
+    // Its only window would reach into the previous segment, where the
+    // cumulative distance is identical — a speed of exactly zero, invented.
+    expect(sampleAt('speed', 2)).toBeUndefined();
+    expect(sampleAt('pace', 2)).toBeUndefined();
+  });
+});

@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useMemo } from 'react';
 import { ChartPanel } from '../components/ChartPanel';
 import { DeviceInfoPanel } from '../components/DeviceInfoPanel';
 import { SensorStreamPanel } from '../components/SensorStreamPanel';
+import { resolvePerformanceMetric } from '../domain/performance';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { ExportPanel } from '../components/ExportPanel';
@@ -46,6 +47,9 @@ export function ViewerPage() {
   const setSelectedPoint = useInteractionStore((state) => state.setSelectedPoint);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
+  // AV-908. The overview's primary figure follows the same choice as the
+  // charts, so the page never shows pace above a speed chart.
+  const performanceMetric = useInteractionStore((state) => state.performanceMetric);
   const selectedRange = useInteractionStore((state) => state.selectedRange);
   const selectedLapIndex = useInteractionStore((state) => state.selectedLapIndex);
   const chartXAxisMode = useInteractionStore((state) => state.chartXAxisMode);
@@ -171,7 +175,11 @@ export function ViewerPage() {
         {/* AV-011: overview box, then map box, then charts — in that order. */}
         <div className="viewer__sections">
           <section className="box" id="activity-overview" aria-label="Activity overview">
-            <SummaryPanel activity={readyActivity} units={unitSystem} />
+            <SummaryPanel
+              activity={readyActivity}
+              units={unitSystem}
+              metric={resolvePerformanceMetric(readyActivity, performanceMetric)}
+            />
             <DeviceInfoPanel device={readyActivity.metadata.device} />
             <SensorStreamPanel streams={readyActivity.sensorStreams} />
             <WarningList warnings={readyActivity.warnings} />

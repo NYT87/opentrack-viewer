@@ -16,6 +16,11 @@ import type { UnitSystem } from '../domain/units';
 import { ActivityChart, type ChartRange } from './ActivityChart';
 import { SelectionSummary } from './SelectionSummary';
 import { ChartXAxisSwitch } from './ChartXAxisSwitch';
+import { PerformanceMetricSwitch } from './PerformanceMetricSwitch';
+import {
+  isPerformanceMetricSelectable,
+  resolvePerformanceMetric,
+} from '../domain/performance';
 
 /**
  * AV-515. Running cadence is strides per minute — one foot — which is what
@@ -74,10 +79,27 @@ export function ChartPanel({
   onSelectPoint,
 }: ChartPanelProps) {
   // Declared before the selection so the focus can be derived from it below.
+  /*
+   * AV-908. Speed or pace, for a file that never said which. Read here rather
+   * than passed in because it changes which charts exist, and it is resolved
+   * against the activity on every render — switching touches no `Activity` and
+   * re-reads no file (TD-006).
+   */
+  const metricPreference = useInteractionStore((state) => state.performanceMetric);
+  const setPerformanceMetric = useInteractionStore((state) => state.setPerformanceMetric);
+
+  /*
+   * Resolved once, from the whole activity. Availability below is asked about
+   * the focused slice when there is one, and a slice too short to have a pace
+   * would answer this question differently — leaving the charts showing speed
+   * under a switch still pressed on pace.
+   */
+  const metric = resolvePerformanceMetric(activity, metricPreference);
+
   const availabilitySourceFor = (source: Activity) => ({
     availability: getXAxisAvailability(source),
     resolved: resolveXAxis(source, xAxisPreference),
-    charts: getVisibleCharts(source),
+    charts: getVisibleCharts(source, metric),
   });
 
   /**
@@ -141,6 +163,9 @@ export function ChartPanel({
           activeMode={resolved.axis}
           onChange={onXAxisChange}
         />
+        {isPerformanceMetricSelectable(activity) && (
+          <PerformanceMetricSwitch activeMetric={metric} onChange={setPerformanceMetric} />
+        )}
         {resolved.fallbackReason && (
           <p className="chart-panel__notice" role="status">
             {resolved.fallbackReason}
@@ -172,6 +197,7 @@ export function ChartPanel({
             selection={focused}
             totalPoints={activity.points.length}
             units={units}
+            metric={metric}
           />
         </>
       )}

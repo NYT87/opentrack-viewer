@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { SummaryPanel } from './SummaryPanel';
 import { makeActivity } from '../test/helpers/activity';
+import { resolvePerformanceMetric } from '../domain/performance';
 import type { ActivitySport } from '../domain/activity';
 
 const statValue = (label: string): string => {
@@ -184,5 +185,57 @@ describe('SummaryPanel (AV-404)', () => {
 
     expect(within(container).queryByText(/parserVersion/i)).not.toBeInTheDocument();
     expect(container.textContent).not.toContain('test-activity');
+  });
+});
+
+describe('the chosen metric in the overview (AV-908)', () => {
+  /** A kilometre in five minutes: 5:00 /km, which is 12 km/h. */
+  const videoActivity = () => {
+    const activity = makeActivity([
+      { lat: 0, lon: 0.0001, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.0089932, lon: 0.0001, time: new Date('2024-01-01T10:05:00Z') },
+    ]);
+    return { ...activity, metadata: { ...activity.metadata, sport: 'unknown' as ActivitySport } };
+  };
+
+  it('shows speed by default for a file that never said what it was', () => {
+    render(<SummaryPanel activity={videoActivity()} />);
+
+    expect(statValue('Avg speed')).toMatch(/^12\.\d km\/h$/);
+  });
+
+  it('shows pace instead when the reader asks for it', () => {
+    render(<SummaryPanel activity={videoActivity()} metric="pace" />);
+
+    expect(statValue('Avg pace')).toMatch(/^5:0\d \/km$/);
+    expect(screen.queryByText('Avg speed')).not.toBeInTheDocument();
+  });
+
+  it('formats the chosen metric in the active unit system', () => {
+    render(<SummaryPanel activity={videoActivity()} metric="pace" units="imperial" />);
+
+    expect(statValue('Avg pace')).toMatch(/^8:0\d \/mi$/);
+  });
+
+  it('formats speed in the active unit system too', () => {
+    render(<SummaryPanel activity={videoActivity()} units="imperial" />);
+
+    expect(statValue('Avg speed')).toMatch(/^7\.\d mph$/);
+  });
+
+  it('ignores the choice for a run, which already reads in pace', () => {
+    const run = makeActivity([
+      { lat: 0, lon: 0.0001, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.0089932, lon: 0.0001, time: new Date('2024-01-01T10:05:00Z') },
+    ]);
+    run.metadata.sport = 'running';
+
+    // The preference is a session setting carried between files; a run must
+    // not silently adopt one made while looking at a video. The panel is given
+    // a resolved metric, so this goes through the resolution that guards it.
+    render(<SummaryPanel activity={run} metric={resolvePerformanceMetric(run, 'speed')} />);
+
+    expect(statValue('Avg pace')).toMatch(/^5:0\d \/km$/);
+    expect(screen.queryByText('Avg speed')).not.toBeInTheDocument();
   });
 });

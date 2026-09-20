@@ -1,6 +1,7 @@
 import type { Activity } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
 import { StatGrid } from './StatGrid';
+import type { PerformanceMetric } from '../domain/performance';
 import { buildSummaryStats } from './summaryStats';
 
 export interface SelectionSummaryProps {
@@ -9,6 +10,11 @@ export interface SelectionSummaryProps {
   /** How many points the whole activity has, for context. */
   totalPoints: number;
   units?: UnitSystem;
+  /**
+   * AV-908. The metric already resolved against the *whole* activity, so a
+   * short selection reads the same way as the charts above it.
+   */
+  metric?: PerformanceMetric;
 }
 
 /**
@@ -23,8 +29,13 @@ export interface SelectionSummaryProps {
  * Every figure is built by the same code as the activity summary, so a value is
  * formatted — and a missing one explained — identically in both.
  */
-export function SelectionSummary({ selection, totalPoints, units }: SelectionSummaryProps) {
-  const stats = buildSummaryStats(selection, units).filter((stat) => SHOWN.has(stat.key));
+export function SelectionSummary({
+  selection,
+  totalPoints,
+  units,
+  metric,
+}: SelectionSummaryProps) {
+  const stats = buildSummaryStats(selection, units, metric).filter((stat) => SHOWN.has(stat.key));
   const points = selection.derived?.pointCount ?? selection.points.length;
 
   return (

@@ -128,13 +128,36 @@ export const PACE_WINDOW_SECONDS = 15;
  */
 const MAX_PLAUSIBLE_SPEED_MPS = 10;
 
+/** The span between the two ends of a point's trailing window. */
+interface WindowSpan {
+  index: number;
+  meters: number;
+  seconds: number;
+}
+
 /**
- * AV-505. Pace in seconds per kilometre, derived from distance and time over a
- * rolling window rather than from instantaneous speed: `speedMetersPerSecond`
- * is often absent in GPX and TCX, and is itself device-smoothed when present,
- * so deriving keeps every format consistent (TD-002).
+ * Walks the points with a trailing window of `PACE_WINDOW_SECONDS`, handing
+ * each one the distance and time between the window's ends.
+ *
+ * **The window never reaches across a recording gap.** `computeDistance`
+ * deliberately does not accumulate the jump between two segments — that is
+ * ground covered while the recording was stopped, not while it was running —
+ * so the cumulative distance is flat across the boundary. A window spanning one
+ * would therefore divide the distance covered *since the restart* by a duration
+ * that also includes the pause: a third of the real speed at the point after a
+ * ten-second gap, and exactly zero at the first point of the new segment.
+ * Resetting the trailing edge at the boundary is what keeps the two halves of a
+ * paused ride from being averaged into each other.
+ *
+ * Shared by pace and speed because they are the same walk with a different
+ * final division, and because this bug was written twice.
  */
-function derivePace(activity: Activity): (number | undefined)[] {
+function eachWindowSpan(
+  activity: Activity,
+  visit: (span: WindowSpan) => void,
+  /** Points that already have an answer, and need no window. */
+  answered?: (index: number) => boolean,
+): void {
   const points = activity.points;
   const cumulative = computeDistance(points).cumulativeMeters;
   const times = points.map((point) =>
@@ -143,17 +166,24 @@ function derivePace(activity: Activity): (number | undefined)[] {
       : undefined,
   );
 
-  const out: (number | undefined)[] = new Array(points.length).fill(undefined);
   // Indexes of points that carry both a distance and a timestamp.
   const usable: number[] = [];
   for (let i = 0; i < points.length; i += 1) {
     if (cumulative[i] !== undefined && times[i] !== undefined) usable.push(i);
   }
 
+  const segmentOf = (index: number) => points[index]!.segmentIndex ?? 0;
+
   let windowStart = 0;
   for (let k = 0; k < usable.length; k += 1) {
     const i = usable[k]!;
+    if (answered?.(i)) continue;
     const timeAt = times[i]!;
+
+    // Never across a gap: see above.
+    while (windowStart < k && segmentOf(usable[windowStart]!) !== segmentOf(i)) {
+      windowStart += 1;
+    }
 
     // Advance the trailing edge until the window is no wider than it needs.
     while (
@@ -166,14 +196,25 @@ function derivePace(activity: Activity): (number | undefined)[] {
     const j = usable[windowStart]!;
     if (j === i) continue;
 
-    const seconds = timeAt - times[j]!;
-    const meters = cumulative[i]! - cumulative[j]!;
-    // Zero-duration or stationary intervals have no meaningful pace: gap them.
-    if (seconds <= 0 || meters <= 0) continue;
-    if (meters / seconds > MAX_PLAUSIBLE_SPEED_MPS) continue;
-
-    out[i] = (seconds / meters) * 1000;
+    visit({ index: i, meters: cumulative[i]! - cumulative[j]!, seconds: timeAt - times[j]! });
   }
+}
+
+/**
+ * AV-505. Pace in seconds per kilometre, derived from distance and time over a
+ * rolling window rather than from instantaneous speed: `speedMetersPerSecond`
+ * is often absent in GPX and TCX, and is itself device-smoothed when present,
+ * so deriving keeps every format consistent (TD-002).
+ */
+function derivePace(activity: Activity): (number | undefined)[] {
+  const out: (number | undefined)[] = new Array(activity.points.length).fill(undefined);
+
+  eachWindowSpan(activity, ({ index, meters, seconds }) => {
+    // Zero-duration or stationary intervals have no meaningful pace: gap them.
+    if (seconds <= 0 || meters <= 0) return;
+    if (meters / seconds > MAX_PLAUSIBLE_SPEED_MPS) return;
+    out[index] = (seconds / meters) * 1000;
+  });
 
   return out;
 }
@@ -184,52 +225,31 @@ function derivePace(activity: Activity): (number | undefined)[] {
  * A recorded `speedMetersPerSecond` is trusted when the device provides a
  * plausible one — a wheel sensor knows better than GPS positions do, but a
  * faulty reading is worse than none, so an implausible value falls through to
- * derivation like a missing one. Otherwise speed is derived
- * over the same rolling window as pace, for the same reason: point-to-point
- * speed from consumer GPS is mostly fix jitter.
+ * derivation like a missing one. Otherwise speed is derived over the same
+ * rolling window as pace, for the same reason: point-to-point speed from
+ * consumer GPS is mostly fix jitter.
  */
 function deriveSpeed(activity: Activity): (number | undefined)[] {
   const points = activity.points;
-  const cumulative = computeDistance(points).cumulativeMeters;
-  const times = points.map((point) =>
-    point.time instanceof Date && !Number.isNaN(point.time.getTime())
-      ? point.time.getTime() / 1000
-      : undefined,
-  );
-
   const out: (number | undefined)[] = new Array(points.length).fill(undefined);
-  const usable: number[] = [];
+
   for (let i = 0; i < points.length; i += 1) {
     const recorded = points[i]!.speedMetersPerSecond;
     if (isPlausibleSpeed(recorded)) out[i] = recorded;
-    if (cumulative[i] !== undefined && times[i] !== undefined) usable.push(i);
   }
 
-  let windowStart = 0;
-  for (let k = 0; k < usable.length; k += 1) {
-    const i = usable[k]!;
-    if (out[i] !== undefined) continue; // The device already told us.
-    const timeAt = times[i]!;
-
-    while (
-      windowStart < k &&
-      timeAt - times[usable[windowStart + 1]!]! >= PACE_WINDOW_SECONDS
-    ) {
-      windowStart += 1;
-    }
-
-    const j = usable[windowStart]!;
-    if (j === i) continue;
-
-    const seconds = timeAt - times[j]!;
-    const meters = cumulative[i]! - cumulative[j]!;
-    if (seconds <= 0 || meters < 0) continue;
-
-    const speed = meters / seconds;
-    // An interval that implies an impossible speed is a gap, not a data point.
-    if (!isPlausibleSpeed(speed)) continue;
-    out[i] = speed;
-  }
+  eachWindowSpan(
+    activity,
+    ({ index, meters, seconds }) => {
+      if (seconds <= 0 || meters < 0) return;
+      const speed = meters / seconds;
+      // An interval that implies an impossible speed is a gap, not a data point.
+      if (!isPlausibleSpeed(speed)) return;
+      out[index] = speed;
+    },
+    // The device already told us.
+    (index) => out[index] !== undefined,
+  );
 
   return out;
 }

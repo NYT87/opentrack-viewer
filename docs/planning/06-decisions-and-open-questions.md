@@ -238,6 +238,8 @@ Decision: The chart panel should render only available charts. Chart kinds that 
 
 Reason: A long list of unavailable chart messages creates visual noise and makes the activity look broken. The availability function still owns the decision, but the viewer should spend vertical space only on charts the user can inspect.
 
+**Not yet implemented.** `ChartPanel` still renders an `UnavailableChart` placeholder for every chart an activity cannot support. `AV-516` is the task that closes this, and it asks for more than a filter — no reserved space, the whole charts section omitted when nothing is chartable, and its own test matrix — so it was not folded into `AV-908`. `AV-908` made the gap more visible, since an activity with no stated sport now leaves a placeholder for whichever of speed and pace is not selected. Its tests assert on the drawn chart rather than on placeholder copy, so `AV-516` can delete the placeholders without rewriting them.
+
 ### TD-029: Homepage Surfaces GoPro as a Separate Tool
 
 Decision: Once the dedicated GoPro/video telemetry page exists, the homepage should include concise information and a route action for that page. The copy must present it as a separate browser-only tool, not as a capability of the generic file viewer.
@@ -304,7 +306,11 @@ Decision (`AV-517`, generalizing `AV-908`): `activity.metadata.sport` supplies t
 
 **The override belongs to the loaded activity.** It resets to Auto when that activity is closed or replaced, because carrying “View as cycling” into the next unrelated file is surprising. Nothing is written to the `Activity` (`TD-006`), and changing it never reparses a file or video.
 
+**The switch is offered only where both readings exist.** Pace needs ground actually covered, not merely a distance that could be computed: a recording made standing still has coordinates, timestamps and a total of zero, and pace's only possible answer for it is "no distance covered". Speed's answer, 0 km/h, is a real one. So a stationary activity is shown speed and not asked the question.
+
 **Derived speed needed no new code.** `deriveSpeed` already trusts a plausible recorded speed and otherwise derives one over a rolling window, skipping invalid coordinates, zero-duration intervals and implausible jumps (`AV-513`). A GoPro's `GPS5` does record a ground speed, so the derivation is the fallback rather than the rule; a test strips the recorded speed from a real HERO7 activity and confirms the chart still draws.
+
+**A rolling window never reaches across a recording gap.** `computeDistance` deliberately does not accumulate the jump between two segments — that is ground covered while the recording was stopped — so the cumulative distance is flat across the boundary. Dividing by a duration that *does* include the pause reported roughly a third of the real speed at the point after a ten-second gap, and exactly zero at the first point of the new segment. The trailing edge now resets at the boundary. The walk is shared between pace and speed rather than written twice, which is how the same bug came to exist in both.
 
 **Exports carry none of this.** `AV-908` asks that export consumers respect the selected mode. They already do by carrying neither: GPX, TCX and FIT record speed values, not a reading convention, and a file that encoded "show this as pace" would be describing this app's UI rather than the activity.
 

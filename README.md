@@ -239,6 +239,19 @@ exported or silently dropped (TD-034). `AV-908` then answers what a camera
 cannot: a file that states no sport reads in speed and offers the reader pace
 instead, which a GPX without a `<type>` now gets too (TD-035).
 
+### Known debt
+
+**Unavailable charts still render placeholders, against TD-028.** The chart
+panel draws a title and an explanatory message for every chart an activity
+cannot support — "Pace is shown for running activities", and so on — while
+TD-028 says those should be skipped entirely. The decision and the task that
+implements it (`AV-516`, *Hide Unavailable Chart Sections*) arrived in the same
+commit, and only the decision is in place so far. `AV-908` made this more
+visible, because a file with no stated sport now leaves a placeholder for
+whichever of speed and pace is not selected; it did not introduce it, and its
+tests deliberately assert on what is *drawn* rather than on placeholder copy,
+so `AV-516` can remove them without touching `AV-908`'s coverage.
+
 The generic file intake still refuses an MP4, deliberately: `AV-907`'s first
 criterion is that "extraction does not happen inside the generic file viewer
 page", because reading a multi-gigabyte file needs progress and a way to stop

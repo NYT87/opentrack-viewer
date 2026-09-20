@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChartPanel } from './ChartPanel';
 import { makeActivity } from '../test/helpers/activity';
@@ -62,15 +62,35 @@ describe('ChartPanel chart selection (AV-505, AV-506, AV-507)', () => {
   });
 
   it('explains why a run chart is unavailable instead of hiding it', () => {
-    render(<ChartPanel activity={withBothAxes} onXAxisChange={vi.fn()} />);
+    const ride = makeActivity(withBothAxes.points);
+    ride.metadata.sport = 'cycling';
+    render(<ChartPanel activity={ride} onXAxisChange={vi.fn()} />);
 
-    // withBothAxes has no sport, so the run charts do not apply.
+    // A file that said it was a ride is not asked again: pace and running
+    // cadence do not apply to it, and it is told why rather than shown nothing.
     expect(screen.getByRole('region', { name: 'Pace chart' })).toHaveTextContent(
       /shown for running activities/i,
     );
     expect(screen.getByRole('region', { name: 'Cadence chart' })).toHaveTextContent(
       /shown for running activities/i,
     );
+  });
+
+  it('charts speed by default for a file that never said what it was (AV-908)', () => {
+    // A kilometre in five minutes, and no sport: plausible enough to derive a
+    // speed from, which `withBothAxes` at 55 km in ten minutes is not.
+    const noSport = makeActivity([
+      { lat: 0, lon: 0.0001, elevationMeters: 10, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.0045, lon: 0.0001, elevationMeters: 12, time: new Date('2024-01-01T10:02:30Z') },
+      { lat: 0.0089932, lon: 0.0001, elevationMeters: 14, time: new Date('2024-01-01T10:05:00Z') },
+    ]);
+    render(<ChartPanel activity={noSport} onXAxisChange={vi.fn()} />);
+
+    // Asserted on what is drawn rather than on the unavailable chart's copy:
+    // TD-028 says unavailable charts should not be rendered at all, and
+    // AV-516 is the task that will stop rendering them.
+    expect(screen.getByTestId('speed-chart-svg')).toBeInTheDocument();
+    expect(screen.queryByTestId('pace-chart-svg')).not.toBeInTheDocument();
   });
 
   it('applies the x-axis to every chart in the panel', () => {
@@ -367,5 +387,90 @@ describe('sensor streams from a video (AV-905)', () => {
     render(<ChartPanel activity={withBothAxes} onXAxisChange={vi.fn()} />);
 
     expect(screen.queryByRole('region', { name: 'Acceleration chart' })).not.toBeInTheDocument();
+  });
+});
+
+describe('choosing speed or pace (AV-908)', () => {
+  const ambiguous = () => {
+    const activity = makeActivity([
+      { lat: 0, lon: 0.0001, elevationMeters: 10, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.0045, lon: 0.0001, elevationMeters: 12, time: new Date('2024-01-01T10:02:30Z') },
+      { lat: 0.0089932, lon: 0.0001, elevationMeters: 14, time: new Date('2024-01-01T10:05:00Z') },
+    ]);
+    activity.metadata.sport = 'unknown';
+    return activity;
+  };
+
+  // `reset()` deliberately keeps session preferences, the way it keeps the
+  // x-axis — so a choice made in one test would otherwise carry into the next.
+  beforeEach(() => {
+    useInteractionStore.setState({ performanceMetric: undefined });
+  });
+
+  const metricButton = (name: 'Speed' | 'Pace') =>
+    within(screen.getByRole('group', { name: 'Performance metric' })).getByRole('button', { name });
+
+  it('offers the switch for a file that never said what it was', () => {
+    render(<ChartPanel activity={ambiguous()} onXAxisChange={vi.fn()} />);
+
+    expect(screen.getByRole('group', { name: 'Performance metric' })).toBeInTheDocument();
+    expect(metricButton('Speed')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not offer it for a run, whose file already answered', () => {
+    render(<ChartPanel activity={runWithCadence} onXAxisChange={vi.fn()} />);
+
+    expect(screen.queryByRole('group', { name: 'Performance metric' })).not.toBeInTheDocument();
+  });
+
+  it('swaps which chart is drawn when the reader switches', async () => {
+    render(<ChartPanel activity={ambiguous()} onXAxisChange={vi.fn()} />);
+    expect(screen.getByRole('region', { name: 'Speed chart' })).toBeInTheDocument();
+
+    await userEvent.click(metricButton('Pace'));
+
+    expect(screen.getByRole('region', { name: 'Pace chart' })).toHaveTextContent(/Pace \(\/km\)/);
+    // And the one it replaced is no longer drawn. Whether it leaves a
+    // placeholder behind is TD-028's question, and AV-516's to answer.
+    expect(screen.queryByTestId('speed-chart-svg')).not.toBeInTheDocument();
+  });
+
+  it('keeps the focused section reading the way the switch says', async () => {
+    /*
+     * A camera records its own speed, so speed is chartable from the points
+     * alone. Pace is not: the last two points share a timestamp, so a
+     * selection covering them spans no time. Resolved against the slice, the
+     * question "pace or speed" gets a different answer from the one the switch
+     * is showing.
+     */
+    const sameInstant = new Date('2024-01-01T10:05:00Z');
+    const activity = makeActivity([
+      { lat: 0, lon: 0.0001, speedMetersPerSecond: 3, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.0045, lon: 0.0001, speedMetersPerSecond: 4, time: sameInstant },
+      { lat: 0.0089932, lon: 0.0001, speedMetersPerSecond: 5, time: sameInstant },
+    ]);
+    activity.metadata.sport = 'unknown';
+
+    render(<ChartPanel activity={activity} onXAxisChange={vi.fn()} />);
+    await userEvent.click(metricButton('Pace'));
+
+    act(() => {
+      useInteractionStore.getState().setSelectedRange({ startIndex: 1, endIndex: 2 });
+    });
+
+    expect(metricButton('Pace')).toHaveAttribute('aria-pressed', 'true');
+    // A drawn chart has an svg; an unavailable one does not. The bug drew
+    // speed here, under a switch still pressed on pace.
+    expect(screen.queryByTestId('speed-chart-svg')).not.toBeInTheDocument();
+  });
+
+  it('formats the chosen metric in the active unit system', async () => {
+    render(<ChartPanel activity={ambiguous()} units="imperial" onXAxisChange={vi.fn()} />);
+
+    expect(screen.getByRole('region', { name: 'Speed chart' })).toHaveTextContent(/Speed \(mph\)/);
+
+    await userEvent.click(metricButton('Pace'));
+
+    expect(screen.getByRole('region', { name: 'Pace chart' })).toHaveTextContent(/Pace \(\/mi\)/);
   });
 });

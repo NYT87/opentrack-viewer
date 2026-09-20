@@ -26,9 +26,12 @@ const heroVideo = () =>
  * fix, so the happy path needs a payload that actually has one — `hero7.raw`,
  * the same one `AV-904` normalizes.
  */
+let extractions = 0;
+
 function mockExtractionFrom(fixture: string) {
   vi.doMock('../parsers/gopro/extractGpmf', () => ({
     extractGpmf: (_file: File, options?: { onProgress?: (fraction: number) => void }) => {
+      extractions += 1;
       options?.onProgress?.(0.5);
       options?.onProgress?.(1);
       return Promise.resolve({
@@ -40,6 +43,7 @@ function mockExtractionFrom(fixture: string) {
 }
 
 beforeEach(() => {
+  extractions = 0;
   useActivityStore.getState().clear();
   window.location.hash = '';
   vi.resetModules();
@@ -170,6 +174,37 @@ describe('the rest of the telemetry, in the viewer (AV-905)', () => {
     const declared = screen.getByRole('region', { name: 'Other telemetry in this file' });
     expect(declared).toHaveTextContent('Face detection');
     expect(declared).toHaveTextContent('White balance');
+  }, 60_000);
+});
+
+describe('speed or pace for a video, in the viewer (AV-908)', () => {
+  it('shows speed, and switches to pace without going near the video again', async () => {
+    mockExtractionFrom('hero7.raw');
+    const { App: Fresh } = await import('./App');
+    const { useInteractionStore } = await import('../state/interactionStore');
+    // Units default from the browser's locale; pinned here so the assertion
+    // is about the metric rather than about where the test happens to run.
+    useInteractionStore.setState({ performanceMetric: undefined, unitSystem: 'metric' });
+
+    render(<Fresh />);
+    await goToTool();
+    await userEvent.upload(await screen.findByTestId('file-input'), heroVideo());
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Open in viewer' }, { timeout: 30_000 }),
+    );
+
+    // A camera cannot know whether it was running, riding or driving, so the
+    // viewer shows speed and offers the other reading.
+    expect(await screen.findByRole('region', { name: 'Speed chart' })).toBeInTheDocument();
+    const group = screen.getByRole('group', { name: 'Performance metric' });
+    expect(extractions).toBe(1);
+
+    await userEvent.click(within(group).getByRole('button', { name: 'Pace' }));
+
+    expect(screen.getByRole('region', { name: 'Pace chart' })).toHaveTextContent(/Pace \(\/km\)/);
+    // The whole point: the video was read once, and switching reads nothing.
+    // It is resolved against points already in memory (AV-908).
+    expect(extractions).toBe(1);
   }, 60_000);
 });
 

@@ -4,6 +4,10 @@ import { extractGpmf } from './extractGpmf';
 import { readBinaryFixture } from '../../test/helpers/fixtures';
 import { DISPLAYABLE_DEVICE_FIELDS } from '../../domain/activity';
 import { buildSeries } from '../../domain/series';
+import {
+  isPerformanceMetricSelectable,
+  resolvePerformanceMetric,
+} from '../../domain/performance';
 import { activityToRouteGeoJSON } from '../../domain/geojson';
 import { sliceActivity } from '../../domain/activitySlice';
 import { exportActivity, getExportAvailability } from '../../exporters';
@@ -247,5 +251,41 @@ describe('camera temperature is not the weather (AV-905)', () => {
     const activity = await fromRaw('hero7.raw', 'GH010042.mp4');
 
     expect(activity.sensorStreams?.find((s) => s.key === 'TMPC')).toBeUndefined();
+  }, 60_000);
+});
+
+describe('speed for a video, recorded or derived (AV-908)', () => {
+  it('uses the speed the camera recorded', async () => {
+    const activity = await fromRaw('hero7.raw', 'GH010042.mp4');
+
+    // GPS5 carries a 2D ground speed, so nothing needs deriving.
+    expect(activity.streams.hasSpeed).toBe(true);
+    expect(buildSeries(activity, 'speed', 'time').samples.length).toBeGreaterThan(50);
+  }, 60_000);
+
+  it('derives it from positions and time when the camera recorded none', async () => {
+    const activity = await fromRaw('hero7.raw', 'GH010042.mp4');
+    // A camera that wrote no speed field, or wrote one this app will not
+    // believe — either way the route and its timestamps are still there.
+    const withoutSpeed = {
+      ...activity,
+      points: activity.points.map((point) => ({ ...point, speedMetersPerSecond: undefined })),
+    };
+
+    const series = buildSeries(withoutSpeed, 'speed', 'time');
+
+    expect(series.samples.length).toBeGreaterThan(50);
+    expect(series.yMax).toBeGreaterThan(0);
+    // Derived from a real ride, so within the bounds a ride can reach.
+    expect(series.yMax).toBeLessThan(35);
+  }, 60_000);
+
+  it('offers the reader speed or pace, because a camera cannot know', async () => {
+    const activity = await fromRaw('hero7.raw', 'GH010042.mp4');
+
+    expect(activity.metadata.sport).toBe('unknown');
+    expect(isPerformanceMetricSelectable(activity)).toBe(true);
+    expect(resolvePerformanceMetric(activity)).toBe('speed');
+    expect(resolvePerformanceMetric(activity, 'pace')).toBe('pace');
   }, 60_000);
 });

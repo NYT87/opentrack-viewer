@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { ActivityPointRange, ChartXAxisMode } from '../domain/activity';
 import { localeUnitSystem, readStoredTheme, storeTheme } from '../domain/preferences';
 import type { ThemeMode } from '../domain/theme';
+import type { PerformanceMetric } from '../domain/performance';
 import type { UnitSystem } from '../domain/units';
 
 /**
@@ -41,6 +42,12 @@ interface InteractionState {
    * for that file and the preference applies again to the next one.
    */
   chartXAxisMode?: ChartXAxisMode;
+  /**
+   * AV-908. Speed or pace, for activities whose sport does not settle it.
+   * Undefined means "let the activity decide", and a preference an activity
+   * cannot honour is kept rather than cleared — exactly like the x-axis above.
+   */
+  performanceMetric?: PerformanceMetric;
 
   setHoveredPoint: (index: number | undefined, source?: 'map' | 'chart') => void;
   setSelectedPoint: (index: number | undefined) => void;
@@ -51,6 +58,7 @@ interface InteractionState {
   /** AV-407 follow-up: which lap the map should pick out, if any. */
   setSelectedLapIndex: (index: number | undefined) => void;
   setChartXAxisMode: (mode: ChartXAxisMode) => void;
+  setPerformanceMetric: (metric: PerformanceMetric) => void;
   reset: () => void;
 }
 
@@ -94,6 +102,10 @@ export const useInteractionStore = create<InteractionState>((set) => ({
 
   setChartXAxisMode(mode) {
     set({ chartXAxisMode: mode });
+  },
+
+  setPerformanceMetric(metric) {
+    set({ performanceMetric: metric });
   },
 
   reset() {

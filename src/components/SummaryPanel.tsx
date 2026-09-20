@@ -1,11 +1,14 @@
 import type { Activity } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
 import { StatGrid } from './StatGrid';
+import type { PerformanceMetric } from '../domain/performance';
 import { buildSummaryStats } from './summaryStats';
 
 export interface SummaryPanelProps {
   activity: Activity;
   units?: UnitSystem;
+  /** AV-908. The metric already resolved against this activity. */
+  metric?: PerformanceMetric;
 }
 
 /**
@@ -16,8 +19,8 @@ export interface SummaryPanelProps {
  * *activity* summary, and numbers that changed with a drag would make
  * "Distance" ambiguous at a glance. A selection gets its own panel (AV-605).
  */
-export function SummaryPanel({ activity, units = 'metric' }: SummaryPanelProps) {
-  const stats = buildSummaryStats(activity, units);
+export function SummaryPanel({ activity, units = 'metric', metric }: SummaryPanelProps) {
+  const stats = buildSummaryStats(activity, units, metric);
 
   return (
     <section className="summary" aria-label="Activity summary">

@@ -295,7 +295,7 @@ describe('App vertical slice (AV-304)', () => {
 
     // The preference is a session setting, so the next file keeps it.
     await loadFixture('flat-route.gpx');
-    expect(screen.getByText(/x-axis: elapsed time/)).toBeInTheDocument();
+    expect(screen.getAllByText(/x-axis: elapsed time/).length).toBeGreaterThan(0);
   });
 
   it('falls back per activity without discarding the preference', async () => {

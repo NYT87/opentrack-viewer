@@ -1,4 +1,9 @@
 import type { Activity, ChartXAxisMode } from './activity';
+import {
+  isAmbiguousSport,
+  resolvePerformanceMetric,
+  type PerformanceMetric,
+} from './performance';
 import { getXAxisAvailability } from './series';
 
 /** Every metric the chart panel knows how to plot. */
@@ -68,7 +73,19 @@ function isCycling(activity: Activity): boolean {
  * Every rule reads the normalized activity — never the source file format — so
  * a FIT run and a GPX run get the same answer.
  */
-export function getChartAvailability(activity: Activity): ActivityChartDefinition[] {
+export function getChartAvailability(
+  activity: Activity,
+  /**
+   * AV-908. The metric **already resolved**, not a raw preference.
+   *
+   * Resolved by the caller and passed in, because availability is often asked
+   * about a focused slice while the choice belongs to the whole activity: a
+   * selection too short to have a pace cannot answer "pace or speed", and
+   * re-resolving against it would silently swap the chart under a switch still
+   * pressed on the other one.
+   */
+  metric: PerformanceMetric = resolvePerformanceMetric(activity),
+): ActivityChartDefinition[] {
   const axes = getXAxisAvailability(activity);
   const supportedXAxisModes = axes.filter((axis) => axis.available).map((axis) => axis.mode);
   const hasDistance = supportedXAxisModes.includes('distance');
@@ -76,6 +93,18 @@ export function getChartAvailability(activity: Activity): ActivityChartDefinitio
   const defaultXAxisMode: ChartXAxisMode = hasDistance ? 'distance' : 'time';
   const running = isRunning(activity);
   const cycling = isCycling(activity);
+
+  /*
+   * AV-908. A file that never said what it was gets whichever of the two the
+   * reader asked for. A file that did say keeps exactly what it always showed:
+   * this adds a choice where there was none, rather than re-opening settled
+   * ones. A camera is the case in point — it records a moving track and cannot
+   * know whether it was running, riding or driving.
+   */
+  const ambiguous = isAmbiguousSport(activity);
+  const otherMetric = (kind: 'pace' | 'speed') =>
+    `Showing ${kind === 'pace' ? 'speed' : 'pace'} for this activity. ` +
+    `Switch to ${kind} to chart it.`;
 
   const define = (
     kind: ActivityChartKind,
@@ -100,18 +129,26 @@ export function getChartAvailability(activity: Activity): ActivityChartDefinitio
     ),
     define(
       'pace',
-      running && hasDistance && hasTime,
-      !running
-        ? 'Pace is shown for running activities.'
-        : 'Pace needs both distance and timestamps.',
+      (running || (ambiguous && metric === 'pace')) && hasDistance && hasTime,
+      ambiguous
+        ? metric === 'pace'
+          ? 'Pace needs both distance and timestamps.'
+          : otherMetric('pace')
+        : running
+          ? 'Pace needs both distance and timestamps.'
+          : 'Pace is shown for running activities.',
     ),
     define(
       // AV-513: speed answers for cycling what pace answers for running.
       'speed',
-      cycling && (streams.hasSpeed || (hasDistance && hasTime)),
-      !cycling
-        ? 'Speed is shown for cycling activities.'
-        : 'Speed needs recorded speed, or both distance and timestamps.',
+      (cycling || (ambiguous && metric === 'speed')) && (streams.hasSpeed || (hasDistance && hasTime)),
+      ambiguous
+        ? metric === 'speed'
+          ? 'Speed needs recorded speed, or both distance and timestamps.'
+          : otherMetric('speed')
+        : cycling
+          ? 'Speed needs recorded speed, or both distance and timestamps.'
+          : 'Speed is shown for cycling activities.',
     ),
     define(
       'cadence',
@@ -135,8 +172,11 @@ export function getChartAvailability(activity: Activity): ActivityChartDefinitio
 }
 
 /** The charts the panel should render, in display order. */
-export function getVisibleCharts(activity: Activity): ActivityChartDefinition[] {
-  const availability = getChartAvailability(activity);
+export function getVisibleCharts(
+  activity: Activity,
+  metric?: PerformanceMetric,
+): ActivityChartDefinition[] {
+  const availability = getChartAvailability(activity, metric);
   return VISIBLE_CHART_KINDS.map(
     (kind) => availability.find((entry) => entry.kind === kind)!,
   );

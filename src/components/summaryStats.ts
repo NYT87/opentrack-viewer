@@ -1,4 +1,5 @@
 import type { Activity } from '../domain/activity';
+import { resolvePerformanceMetric, type PerformanceMetric } from '../domain/performance';
 import {
   MISSING,
   formatDateTime,
@@ -26,11 +27,21 @@ export interface Stat {
  * and explains every missing one — exactly as the activity summary does, rather
  * than growing its own conventions.
  */
-export function buildSummaryStats(activity: Activity, units: UnitSystem = 'metric'): Stat[] {
+export function buildSummaryStats(
+  activity: Activity,
+  units: UnitSystem = 'metric',
+  /**
+   * AV-908. The metric **already resolved**, not a raw preference — resolved
+   * once against the whole activity by the caller. This function is also asked
+   * about a focused slice, and a slice too short to have a pace would resolve
+   * the question differently from the page around it.
+   */
+  metric: PerformanceMetric = resolvePerformanceMetric(activity),
+): Stat[] {
   const derived = activity.derived;
-  // Pace is a running convention. Anything else — cycling, or a file that never
-  // said what it was — gets speed, which is meaningful for any movement.
-  const usePace = activity.metadata.sport === 'running';
+  // Pace is a running convention; speed is meaningful for any movement. Which
+  // one appears is the sport's answer unless the sport had none (AV-908).
+  const usePace = metric === 'pace';
   const stats: Stat[] = [
     {
       key: 'distance',
