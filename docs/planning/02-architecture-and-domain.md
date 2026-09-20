@@ -106,8 +106,9 @@ React UI
        +--> Export planned track through browser download APIs
   |
   +--> Telemetry Overlay Page later
-       +--> Local Video Selection or Handoff from GoPro Extraction
+       +--> Local Activity Selection, Viewer Handoff, or Video Handoff
        +--> Overlay Template/Gauge Designer
+       +--> Static Activity/Route Overlay Preview
        +--> Video Preview with Telemetry Sync
        +--> Overlay-only Export
        +--> Burned-in Video Export after feasibility spike
@@ -125,7 +126,7 @@ React UI
        +--> Does not clear loaded activity state
 ```
 
-The UI must depend on normalized domain objects, never on format-specific parser output — GPX, FIT, TCX, or any format added later.
+The UI must depend on normalized domain objects, never on format-specific parser output — GPX, FIT, TCX, KML, or any format added later.
 
 ## 7. Core Data Flow
 
@@ -158,17 +159,21 @@ The UI must depend on normalized domain objects, never on format-specific parser
 27. Settings may be opened as a modal from the header without navigating away from the viewer/process page or clearing activity state.
 28. Theme settings apply globally without reprocessing or clearing the current activity.
 29. Export controls serialize either the full normalized activity or the selected focused range into supported output formats.
-30. From the viewer, a `Create Custom Track` action can create an editable copy of the current route and open the Route Builder page without mutating the original activity.
-31. In the Route Builder milestone, the user can create a new planned track, edit an existing route copy, remove points, add points, discard sections, and append another imported supported track to the end of the editing track.
-32. Route Builder exports the planned track through the exporter registry and local browser download APIs so the file can be copied to external GPS devices.
-33. Route metadata updates document title and public meta tags without reading loaded activity data.
-34. In the GoPro milestone, the user opens a dedicated video telemetry extraction page from `Tools`, selects a local MP4/MOV file, and extracts telemetry without uploading the video.
-35. After successful GoPro extraction, the extraction page shows a button that navigates to the viewer and passes the normalized `Activity` plus safe auxiliary telemetry through client-side app state.
-36. The viewer renders the extracted GoPro activity through the same map, overview, charts, range focus, export, and reset-view contracts used for GPX/FIT/TCX activities.
-37. After GoPro extraction is stable, a later overlay page can consume the local video plus normalized `Activity`/auxiliary telemetry to render synchronized gauges, maps, and metric overlays.
-38. Overlay-only exports serialize the overlay timeline independently from the source video, for use in external editing applications.
-39. Burned-in video export composites video frames and overlay frames in the browser only after a feasibility spike confirms acceptable browser support, memory use, duration limits, and export quality.
-40. Later slices add synchronized hover/selection state between chart and map.
+30. KML input follows the same parser boundary: safe XML parsing maps activity-relevant geometry and time data into `Activity`, while unsupported KML features become explicit warnings.
+31. Once KML is normalized, direct conversion offers each compatible target from the exporter registry; target requirements such as mandatory timestamps are validated without fabricating missing data.
+32. From the viewer, a `Create Custom Track` action can create an editable copy of the current route and open the Route Builder page without mutating the original activity.
+33. In the Route Builder milestone, the user can create a new planned track, edit an existing route copy, remove points, add points, discard sections, and append another imported supported track to the end of the editing track.
+34. Route Builder exports the planned track through the exporter registry and local browser download APIs so the file can be copied to external GPS devices.
+35. Route metadata updates document title and public meta tags without reading loaded activity data.
+36. In the GoPro milestone, the user opens a dedicated video telemetry extraction page from `Tools`, selects a local MP4/MOV file, and extracts telemetry without uploading the video.
+37. After successful GoPro extraction, the extraction page shows a button that navigates to the viewer and passes the normalized `Activity` plus safe auxiliary telemetry through client-side app state.
+38. The viewer renders the extracted GoPro activity through the same map, overview, charts, range focus, export, and reset-view contracts used for GPX/FIT/TCX/KML activities.
+39. After GoPro extraction is stable, a later overlay page can consume the local video plus normalized `Activity`/auxiliary telemetry to render synchronized gauges, maps, and metric overlays.
+40. Overlay-only exports serialize the overlay timeline independently from the source video, for use in external editing applications.
+41. Burned-in video export composites video frames and overlay frames in the browser only after a feasibility spike confirms acceptable browser support, memory use, duration limits, and export quality.
+42. The overlay page can also consume a normalized activity directly, including one parsed from GPX, to render and export static activity graphics without a video timeline.
+43. Static route overlays render route geometry, markers, and selected activity details onto a transparent export surface without baking external map tiles into the minimum supported output.
+44. Later slices add synchronized hover/selection state between chart and map.
 
 ## 8. Domain Model
 
@@ -263,12 +268,15 @@ below say how the rest of the app is expected to behave in the face of that.
 - Exporters should consume normalized `Activity` or a derived focused activity slice, not parser-specific source data.
 - Direct conversion should be modeled as parse-to-`Activity` plus export-from-`Activity`, not as source-format-to-target-format shortcuts.
 - Direct conversion should offer only exporter-supported target formats and should normally exclude the source format unless the user is explicitly using export for cleanup/rewrite.
+- KML import should normalize activity-relevant `LineString`, `gx:Track`, `MultiGeometry`, and supported waypoint data through the parser registry; it must not introduce KML-to-target shortcuts.
+- KML URLs and external-resource elements are inert input metadata and must never trigger implicit network requests during parsing or preview.
+- KML features that do not fit the activity model or selected exporter must produce structured warnings rather than being silently presented as lossless conversion.
 - Route Builder should model edits as operations on a draft planned track, not mutations of the original viewed activity.
 - Appending another track in Route Builder should import it through the normal parser registry, normalize it into `Activity`, then append its route points to the draft in order.
 - Route Builder export should consume the same exporter registry as activity export where the target format can represent planned route data.
 - Planned track exports may omit workout-only streams such as heart rate, power, calories, and device metadata unless explicitly retained by a later product decision.
 - GoPro video extraction should be modeled as `local video -> dedicated extraction page -> metadata/GPMF extraction -> normalized Activity plus optional telemetry streams -> viewer handoff`, not as a server conversion job.
-- Telemetry overlay generation should be modeled as `local video + normalized Activity/telemetry streams -> synchronized overlay timeline -> preview -> overlay-only export or browser-side video render`, not as a backend render job.
+- Overlay generation should be modeled as either `normalized Activity -> static activity overlay -> transparent image export` or `local video + normalized Activity/telemetry streams -> synchronized overlay timeline -> preview -> overlay-only export or browser-side video render`, not as a backend render job.
 - Exporters may lose unsupported source-specific fields; any loss should be documented through warnings or UI copy.
 - Exporting a selected range should not mutate the original activity and should be clearly presented as exporting the selected section.
 
@@ -301,7 +309,7 @@ The app should separate project description from activity processing:
 - `/`: homepage/main page. Describes OpenTrack Viewer, supported/planned formats, privacy model, links to the viewer/process page and Terms and Conditions, and includes GoPro/video telemetry page information when that tool is available or explicitly marked as planned.
 - `/viewer`: activity processing page. Owns file selection, parsing, map, details, charts, focused ranges, and export controls.
 - `/video-telemetry` or equivalent: GoPro video telemetry extraction page. Owns local MP4/MOV selection, extraction progress, cancellation, extracted telemetry summary, warnings, and the post-success button that opens the viewer with extracted data.
-- `/overlays` or equivalent later: telemetry overlay page. Owns overlay template selection/customization, synchronized video preview, overlay-only export, and burned-in video export when feasible.
+- `/overlays` or equivalent later: activity and telemetry overlay page. Owns activity-file/viewer handoff, static activity overlay export, overlay template selection/customization, synchronized video preview, overlay-only export, and burned-in video export when feasible.
 - `/terms`: Terms and Conditions page. Provides stable legal/usage terms and must be safe to link from footer, homepage, and repository docs.
 - Settings: modal state opened from the global header on every page. It should not be a route, should not unmount the current page, and should not clear loaded activity data.
 
@@ -471,6 +479,9 @@ activity-viewer/
       fit/
         parseFit.ts
         fitTypes.ts
+      kml/
+        parseKml.ts
+        kmlTypes.ts
       tcx/
         parseTcx.ts
         tcxTypes.ts

@@ -127,12 +127,26 @@ Outcome:
 - TCX data feeds existing map, stats, charts, focused range, and export flows.
 - TCX support remains entirely browser-side.
 
+### Stage 5: KML Import and Cross-Format Conversion
+
+Goal: Import activity-relevant KML data in the browser and convert it to every compatible format exposed by the existing exporter registry.
+
+Outcome:
+- `.kml` files are detected by extension and XML namespace/root, parsed locally, and normalized into the format-independent `Activity` model.
+- Initial geometry support covers route `LineString`, timed `gx:Track`, multiple route segments through supported `MultiGeometry` content, and a documented policy for standalone `Point` placemarks.
+- The viewer displays normalized KML route extent, summary data, and conversion warnings before export.
+- Direct conversion dynamically offers GPX, FIT, TCX, and future registered exporters only when their requirements can be satisfied by the normalized KML data.
+- Missing timestamps or unsupported target fields disable incompatible targets or produce explicit loss warnings; the converter never invents time or sensor data.
+- KML styles, polygons, overlays, models, tours, folders, descriptions, and external resources are either mapped through a documented safe rule or reported as unsupported/lost.
+- KMZ and other archive containers remain out of scope until archive size, entry-count, compression-ratio, and external-asset handling are designed separately.
+- KML import and conversion remain entirely client-side and never fetch external references embedded in the source document.
+
 ### M6: Additional Formats and PWA Hardening
 
 Goal: Expand format support and offline app-shell behavior.
 
 Outcome:
-- Evaluate KML/GeoJSON/CSV based on user need after TCX.
+- Evaluate GeoJSON/CSV based on user need after KML.
 - App installability works.
 - App shell caches offline.
 - Offline maps remain a separate project.
@@ -165,6 +179,8 @@ Outcome:
 - Overlay page can receive a local video and extracted `Activity`/auxiliary telemetry from the GoPro extraction flow.
 - User can preview synchronized overlays on the video timeline without uploading video, telemetry, generated frames, or output files.
 - Initial overlay templates cover a small useful set: speed or pace, distance/time, elevation, route/map inset, and optional heart rate/cadence/power/sensor gauges when data exists.
+- User can create a standalone activity overlay from a normalized activity, initially including GPX input, without selecting a video.
+- The minimum standalone export is the activity route rendered as a downloadable image on a transparent background, with configurable output size, padding, route style, and optional start/end markers.
 - User can choose basic styling/layout options such as position, size, colors, unit system, and visibility per overlay component.
 - User can export overlay-only assets, such as transparent WebM where supported, chroma-key background video, or PNG/WebP frame sequences, for use in external video editing applications.
 - Browser-side burned-in video export is implemented only after a feasibility spike confirms the encoding stack, browser support, memory profile, export duration limits, and quality are acceptable.

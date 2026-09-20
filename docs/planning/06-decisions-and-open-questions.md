@@ -256,6 +256,18 @@ Decision: Route Builder should operate on a separate draft planned-track model. 
 
 Reason: Recorded activities and planned routes have different meanings. A recorded activity contains what happened; a planned track is instructions or intent for a device. Keeping a separate draft model protects the viewer, lets route editing drop activity-only fields intentionally, and keeps export behavior testable through the existing browser-side exporter registry.
 
+### TD-032: Static Activity Overlays Reuse the Normalized Activity Model
+
+Decision: Standalone activity overlays should consume the format-independent `Activity` model through viewer handoff or normal local-file parsing. The minimum route export should draw normalized route geometry directly to a transparent image surface instead of capturing the interactive map or compositing external basemap tiles.
+
+Reason: GPX, FIT, TCX, and future sources should produce the same overlay output once normalized. Direct geometry rendering gives deterministic dimensions and transparency, avoids tile-provider attribution/licensing ambiguity in exported assets, and keeps the feature independent from video decoding and map-network availability.
+
+### TD-033: KML Is an Input Adapter, Not a Pairwise Converter
+
+Decision: KML import should map activity-relevant KML geometry into the normalized `Activity` model, then use the existing exporter registry for downloads. The initial scope supports route `LineString` and timed `gx:Track` data, preserves multiple supported geometries as segments, and requires an explicit waypoint decision for standalone `Point` placemarks. It does not fetch or render external KML resources.
+
+Reason: KML is a broad geographic-visualization language, while GPX, FIT, and TCX have different activity-data constraints. A normalized adapter avoids a separate KML-to-GPX, KML-to-FIT, and KML-to-TCX implementation, keeps conversion behavior consistent, and lets exporter validation explain why an untimed or otherwise incomplete KML route cannot be represented by a target without fabricated data.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.

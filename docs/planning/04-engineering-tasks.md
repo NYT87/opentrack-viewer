@@ -817,6 +817,59 @@ Acceptance criteria:
 - Round-trip tests cover import TCX, export TCX, and re-import exported TCX.
 - Tests confirm TCX data feeds existing summary, chart, and map adapters.
 
+### Epic E7.6: Stage 5 KML Import and Cross-Format Conversion
+
+#### AV-760: Define KML Activity Mapping and Conversion Scope
+
+Dependencies: AV-101, AV-550
+
+Acceptance criteria:
+- Document supported KML 2.2/2.3 namespace handling and the Google `gx` extension elements required for timed tracks.
+- Define mappings for `Placemark` names, `LineString` coordinates, `gx:Track` time/coordinate pairs, supported `MultiGeometry` members, altitude, route segments, and standalone `Point` placemarks.
+- Decide whether standalone points extend the normalized domain as waypoints or are reported as unsupported until a format-independent waypoint model exists.
+- Define deterministic behavior for multiple placemarks/tracks, mismatched `gx:Track` time and coordinate counts, missing altitude/time, invalid coordinates, and antimeridian-crossing routes.
+- Publish a compatibility matrix for normalized KML data against each registered exporter, including required fields and expected loss.
+- Explicitly exclude or warn for polygons, image/ground overlays, 3D models, tours, visual styles, arbitrary description HTML, and remote resources in the initial scope.
+- Record `.kmz` and archive ingestion as out of scope for this milestone rather than accepting compressed files without archive-specific safety limits.
+
+#### AV-761: Implement Safe KML Detection and Parser Adapter
+
+Dependencies: AV-103, AV-760
+
+Acceptance criteria:
+- `.kml` files are detected by extension plus a valid KML XML root/namespace; MIME type alone is not trusted.
+- Browser parses KML with structured XML APIs and normalizes supported route, timing, altitude, segment, name, and waypoint data according to `AV-760`.
+- Standard `<coordinates>` tuples use longitude, latitude, optional altitude; `gx:Track` aligns `<when>` with space-separated `<gx:coord>` values.
+- Multiple supported geometries preserve deterministic source order and segment boundaries without drawing fabricated connector lines.
+- Parser rejects malformed XML, DTD/entity declarations, non-finite/out-of-range coordinates, and files with no usable activity geometry using typed errors or warnings.
+- `NetworkLink`, icons, overlays, models, and all other external references are never fetched or evaluated.
+- Parsed KML feeds the existing viewer map, summary, focused-range, Route Builder handoff, overlay, and export paths through normalized `Activity` only.
+
+#### AV-762: Add KML Conversion Review and Target Selection
+
+Dependencies: AV-555, AV-760, AV-761
+
+Acceptance criteria:
+- After KML import succeeds, the viewer shows route extent/preview, available summary information, and a concise list of conversion losses or unsupported source features.
+- Export controls list every currently registered target whose validator accepts the normalized activity, including GPX and later FIT/TCX when their exporters are available and requirements are met.
+- Incompatible targets remain disabled or omitted with an accessible reason; for example, an untimed `LineString` is not converted to a timestamp-required target by inventing times.
+- Conversion follows `KML -> Activity -> selected exporter`; no KML-specific target serialization shortcuts are introduced.
+- The source KML format is not offered as an output until a KML exporter is separately implemented and registered.
+- Downloaded files use the normal exporter filename, warning, Blob, object-URL, and cleanup behavior.
+- Homepage format status and viewer/SEO capability copy include KML only when KML import is available; they do not claim that KML export exists.
+
+#### AV-763: Add KML Fixtures, Security Tests, and Conversion Coverage
+
+Dependencies: AV-761, AV-762
+
+Acceptance criteria:
+- Add small synthetic fixtures for basic `LineString`, timed `gx:Track`, multiple segments/placemarks, `MultiGeometry`, optional altitude, and the chosen standalone-point behavior.
+- Add malformed and hostile fixtures covering invalid coordinate tuples, mismatched track arrays, DTD/entity declarations, description markup, `NetworkLink`, and external icon/overlay/model URLs.
+- Tests verify no embedded URL is requested and no KML description markup is executed or inserted as unsanitized HTML.
+- Conversion tests cover KML to GPX and each other available compatible exporter; generated output is re-imported where an importer exists and compared at the normalized route level.
+- Tests verify incompatible targets, field loss, unsupported geometry, and empty usable geometry produce clear warnings/errors without crashing.
+- Browser tests cover drag/drop or file selection, map review, target selection, download, and no POST/PUT requests.
+
 ### Epic E8: PWA and Offline App Shell
 
 #### AV-801: Add Web App Manifest
@@ -1037,6 +1090,21 @@ Acceptance criteria:
 - Add browser tests for opening the overlay page, previewing overlays, and exporting a short overlay-only asset.
 - Add performance checks for longer timeline simulation without committing large videos.
 - Add privacy regression tests to ensure no network requests contain video bytes, telemetry samples, rendered frames, file names, or output metadata.
+
+#### AV-1009: Export Standalone Activity and Route Overlays
+
+Dependencies: AV-101, AV-201, AV-1002, AV-1003, AV-1005
+
+Acceptance criteria:
+- The overlay tool accepts a normalized `Activity` through viewer handoff or local supported-file intake without requiring a source video; GPX is the first required input format.
+- User can preview a static activity overlay using the same reusable template/style model as telemetry video overlays where applicable.
+- User can select a route-only template and export the complete activity route on a transparent background.
+- The minimum required output is a transparent PNG with configurable dimensions or preset aspect ratio, padding, route color, route width, and optional start/end markers.
+- Transparent route export renders route geometry directly and does not bake external basemap tiles, provider attribution, or an opaque canvas background into the image.
+- The route is fitted within the export bounds without clipping; single-point, antimeridian-crossing, empty-route, and invalid-coordinate inputs are handled explicitly.
+- Export uses the complete activity by default and can use the viewer's focused activity slice when that slice is intentionally handed off.
+- Generated overlays and source activity data remain in the browser; no file contents, coordinates, preview pixels, or exported images are uploaded.
+- Unit tests cover route projection/bounds, transparent pixels, styling options, deterministic dimensions, and error handling; browser tests cover GPX selection or viewer handoff, preview, and download.
 
 ### Epic E11: Route Builder and Custom Track Export
 

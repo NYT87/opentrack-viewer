@@ -71,6 +71,8 @@ The core promise is simple:
 - In Stage 3, export the current activity or selected/focused activity section to GPX and FIT where technically feasible.
 - In Stage 3, support direct browser-side conversion between supported formats: after a user opens a supported activity file, they can download it as another supported export format without uploading it.
 - In Stage 4, support TCX files for both import and export.
+- In Stage 5, import KML files, review their normalized route in the viewer, and convert them to every compatible output format currently available in the exporter registry.
+- KML conversion must report geometry, styling, metadata, waypoint, and timing information that the selected activity format cannot represent.
 - In a later Route Builder milestone, let users create a custom planned track in the browser, export it, and use it on external devices.
 - From a loaded activity in the viewer, provide a clear action such as `Create Custom Track` that opens a dedicated route-building page with the current track as an editable starting point.
 - On the Route Builder page, let users remove points, add points, discard sections, and adjust the planned track without mutating the original loaded activity.
@@ -84,6 +86,7 @@ The core promise is simple:
 - After the GoPro extraction milestone is complete, add a later overlay milestone that can generate telemetry overlays from local video plus extracted activity/sensor data.
 - Let users preview synchronized telemetry overlays on top of the selected video without uploading the video or telemetry.
 - Let users export overlay-only assets, such as transparent or chroma-key video/image-sequence overlays, so they can use them in external video editing applications.
+- Let users create standalone visual overlays from a normalized activity without requiring a video, starting with GPX-backed activities and a route-map graphic on a transparent background.
 - Evaluate browser-side burned-in video export where the generated overlay is integrated into the source video and downloaded as a new video file.
 - Add FIT support after the GPX vertical slice validates the domain model and UI contract.
 - Keep all activity-file parsing, normalization, calculations, and privacy-sensitive processing in the browser.
@@ -102,6 +105,8 @@ The core promise is simple:
 - No editing/exporting activity files in the first vertical slice.
 - No export workflow before the viewer has a stable normalized activity model and chart/map focus behavior.
 - No direct conversion to formats that are not supported by the exporter registry yet.
+- No claim that every KML feature can become activity data; polygons, image overlays, 3D models, tours, styles, and remote resources are outside the initial KML activity-conversion scope.
+- No KMZ/archive import in the first KML milestone; compressed containers require separate archive limits and security handling.
 - No promise of lossless conversion when the target format cannot represent all normalized fields; expected loss must be reported.
 - No server-side video upload, transcoding, telemetry extraction, or FFmpeg service for GoPro files.
 - No full video playback/editing suite in the GoPro telemetry milestone; the scope is extracting and visualizing embedded telemetry.
@@ -127,10 +132,11 @@ The core promise is simple:
 - Handoff from the GoPro extraction page to the viewer must keep extracted activity data client-side, preferably in memory-owned app state. It must not require persistence, account state, backend storage, or a telemetry upload.
 - Handoff from the viewer to Route Builder must pass an editable copy of the normalized route client-side. It must not upload route points, file contents, or planned tracks.
 - Route Builder imports, edits, appended tracks, generated tracks, and exports must remain local to the browser unless the user explicitly downloads a file.
-- Telemetry overlay preview, overlay-only export, and burned-in video export must keep source video, extracted telemetry, generated overlay frames, and rendered output local to the browser.
+- Telemetry and activity overlay preview, overlay-only export, and burned-in video export must keep source activity files, source video, extracted telemetry, generated overlay frames, and rendered output local to the browser.
 - If browser-side video rendering requires temporary blobs or object URLs, they must be revocable and must not be persisted without explicit user download.
 - The app must not log raw file contents.
 - The app must not send route coordinates, timestamps, device IDs, athlete metadata, or sensor streams to analytics services.
+- KML parsing must not automatically fetch `NetworkLink`, icon, image-overlay, model, or other external resource URLs found in the document.
 - Device serial numbers, product IDs, and other stable identifiers should be treated as sensitive metadata and hidden by default unless there is a clear user-facing reason to expose them.
 - Error reporting, if added later, must be opt-in or scrubbed of activity data.
 
@@ -202,4 +208,4 @@ Also document the map tile caveat:
 
 The public SEO description should reinforce the same privacy promise:
 
-> Open GPX, FIT, and TCX activity files locally in your browser. OpenTrack Viewer does not upload your activity file to a backend.
+> Open GPX, FIT, TCX, and KML activity routes locally in your browser. OpenTrack Viewer does not upload your activity file to a backend.

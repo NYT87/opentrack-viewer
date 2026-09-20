@@ -148,6 +148,10 @@ Cover:
 - Confirm direct conversion can export an opened GPX activity to FIT once FIT export is available.
 - Confirm direct conversion can export an opened FIT activity to GPX once FIT import and GPX export are available.
 - Confirm conversion warnings explain target-format data loss, approximations, and privacy removals.
+- Confirm KML `LineString` and timed `gx:Track` fixtures normalize into the same viewer/map/export paths as other activity formats.
+- Confirm KML conversion offers every compatible registered target and explains why targets with unmet requirements are unavailable.
+- Confirm KML conversion never fabricates timestamps, sensor values, laps, or sport metadata merely to satisfy an exporter.
+- Confirm unsupported KML geometry and styling produce bounded warnings rather than silent loss or viewer failure.
 - Confirm run fixture shows pace when sufficient time/distance data exists.
 - Confirm running cadence chart appears only when `runningCadenceSpm` data exists.
 - Confirm running cadence labels and axis units use strides per minute, not RPM.
@@ -160,7 +164,7 @@ Cover:
 - Confirm successful extraction reveals an `Open in viewer` or equivalent button.
 - Confirm the button navigates to the viewer and renders the extracted activity data through the same map, stats, charts, range focus, reset-view, and export flows.
 - Confirm viewer reload or direct entry without handoff state returns to the normal empty upload state.
-- Confirm GoPro GPS telemetry normalizes into the same map, stats, chart, focus-range, and export adapters as GPX/FIT/TCX.
+- Confirm GoPro GPS telemetry normalizes into the same map, stats, chart, focus-range, and export adapters as GPX/FIT/TCX/KML.
 - Confirm GoPro/video activities without source speed derive speed from valid GPS point distance and time.
 - Confirm GoPro/video activities default to speed display in the active unit system and can switch between speed and pace when distance/time are sufficient.
 - Confirm switching between speed and pace does not re-read or re-parse the video file.
@@ -169,6 +173,8 @@ Cover:
 - Confirm telemetry overlay preview, when implemented, runs on its own page and can receive local video plus extracted `Activity`/auxiliary telemetry through client-side handoff.
 - Confirm overlay preview stays synchronized on play, pause, seek, and manual offset adjustment.
 - Confirm overlay-only export produces the selected local output format with expected dimensions, duration/timeline length, and template settings.
+- Confirm a GPX-backed or viewer-handed-off activity can create a static overlay without requiring a video.
+- Confirm route-only export has a genuinely transparent background, deterministic dimensions, configured padding/style, no clipped route geometry, and no baked map tiles.
 - Confirm burned-in video export is tested only after the browser-side feasibility task chooses an acceptable encoding path.
 - Confirm a loaded route in the viewer can open Route Builder through `Create Custom Track` or the agreed label.
 - Confirm Route Builder receives an editable copy and the original viewer activity is not mutated.
@@ -187,9 +193,10 @@ Add browser tests or request interception checks for:
 - No SEO metadata contains coordinates, timestamps, file names, device identifiers, serial numbers, manufacturer/model fields, sensor values, or derived activity stats.
 - No export operation uploads activity contents or derived activity contents.
 - No direct conversion operation uploads activity contents, normalized activity contents, or converted file contents.
+- No KML import/conversion uploads the source document, normalized geometry, warnings, or generated output, and no embedded KML URL triggers a request.
 - No GoPro video telemetry operation uploads video bytes, raw GPMF payloads, extracted coordinates, device metadata, or derived activity values.
 - No GoPro extraction-to-viewer handoff uses backend storage, account state, or cloud persistence.
-- No telemetry overlay preview or export uploads source video frames, telemetry samples, generated overlay frames, rendered video output, file names, or output metadata.
+- No telemetry or activity overlay preview/export uploads activity files, coordinates, source video frames, telemetry samples, generated overlay frames, rendered output, file names, or output metadata.
 - No Route Builder operation uploads source activity points, imported track contents, route draft points, edit operations, generated planned tracks, or exported route files.
 - Map tile requests are limited to configured tile provider URLs.
 
@@ -210,6 +217,7 @@ Add browser tests or request interception checks for:
 - Do not decode video frames for the telemetry milestone unless a later feature explicitly requires video playback or frame synchronization.
 - Telemetry overlay preview should use efficient canvas or GPU-backed rendering where needed and avoid per-frame React renders.
 - Overlay-only export should be planned before burned-in video export because it avoids decoding/re-encoding the source video and is more likely to work across browsers.
+- Static activity overlays should render normalized route geometry directly into a bounded off-screen surface; transparent route export must not depend on capturing the interactive MapLibre canvas or downloading map tiles.
 - Burned-in video export must be gated by measured feasibility for WebCodecs, MediaRecorder, ffmpeg.wasm, or the selected encoder path, including memory use, duration limits, audio handling, and mobile behavior.
 - Route Builder preview should avoid full map/source rebuilds on every pointer move for large drafts; defer expensive recalculation until edit commit where possible.
 - Appending another track should stream or parse through existing intake paths and avoid duplicating large arrays beyond the editable draft and source parse result.
@@ -225,6 +233,7 @@ Add browser tests or request interception checks for:
 - FIT parsing may be CPU-heavy; plan to move parser work to a Web Worker if UI stalls.
 - FIT export can be correctness-sensitive because FIT is binary and schema-driven; prefer a proven browser-compatible encoder if one satisfies license and bundle constraints.
 - XML export for GPX/TCX should use structured serialization instead of string concatenation when practical.
+- KML parsing should cap file size, geometry/point counts, XML depth or equivalent traversal work, warning counts, and description/metadata length so adversarial XML cannot freeze the main thread or exhaust memory.
 - Planned-track export should reuse exporter validation and warnings instead of bypassing the exporter registry.
 
 ## 15. Error Handling Principles
