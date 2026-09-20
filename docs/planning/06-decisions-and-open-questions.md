@@ -294,6 +294,28 @@ The length is the **longer of two spans**: what the GPS points cover, and what t
 
 **Camera temperature is not the weather.** This is the one stream whose *meaning* could be misread. A GoPro measures its own sensor board, sealed in a black body in the sun: the HERO11 fixture reads 52 °C on a September afternoon. It is therefore never written to `ActivityPoint.temperatureCelsius`, which the viewer labels "Temperature" and a reader takes for air temperature. It is a named stream with the caveat attached to it. From the HERO8 on it arrives as a **sticky** value on the IMU streams — stated once and implied thereafter, the same trap the GPS fix set in `AV-904` — so it is carried forward. Read per sample instead, a HERO11 would show a temperature for 11 points out of 110; a test pins exactly that.
 
+### TD-035: Every Activity Can Override Its Presentation Type
+
+Decision (`AV-517`, generalizing `AV-908`): `activity.metadata.sport` supplies the default presentation but never locks the viewer. Every loaded activity gets a `View as` selector with Auto/source sport and every supported presentation type. The effective type drives overview defaults and chart recommendations without mutating the normalized activity or exported sport metadata.
+
+**Why the sport and not the format.** A GoPro video is the case this came from: a camera records a moving track and cannot know whether it was strapped to a runner, a bicycle or a car, so `parseGopro` says `sport: 'unknown'` rather than guessing. But the rule is written against the normalized activity, not against the source format (`TD-002`): a GPX file with no `<type>` is in exactly the same position and now gets exactly the same treatment. A branch on "is this a video" would have been a format-aware decision in a layer that has none.
+
+**Why explicit sports can still be overridden.** Files are often mislabeled, reused as route recordings, or produced by devices that apply a coarse sport category. Presentation is a reader preference, not a correction to source history. A run can therefore be viewed with cycling defaults and a ride with running defaults while the original sport remains intact.
+
+**The override belongs to the loaded activity.** It resets to Auto when that activity is closed or replaced, because carrying “View as cycling” into the next unrelated file is surprising. Nothing is written to the `Activity` (`TD-006`), and changing it never reparses a file or video.
+
+**Derived speed needed no new code.** `deriveSpeed` already trusts a plausible recorded speed and otherwise derives one over a rolling window, skipping invalid coordinates, zero-duration intervals and implausible jumps (`AV-513`). A GoPro's `GPS5` does record a ground speed, so the derivation is the fallback rather than the rule; a test strips the recorded speed from a real HERO7 activity and confirms the chart still draws.
+
+**Exports carry none of this.** `AV-908` asks that export consumers respect the selected mode. They already do by carrying neither: GPX, TCX and FIT record speed values, not a reading convention, and a file that encoded "show this as pace" would be describing this app's UI rather than the activity.
+
+### TD-036: Sport Recommends Charts; Data Enables Them; the User Chooses Them
+
+Decision (`AV-518`): chart capability, default visibility, and selected visibility are separate concepts. Capability comes only from normalized data. The effective activity type recommends an initial set. The user's checkbox/toggle choices decide which capable charts render.
+
+Reason: pace and speed are two views of compatible time/distance data, not measurements owned by running and cycling. A cyclist may train by pace and a runner may want speed; neither request should require changing the file. Running cadence and pedal cadence remain separate because their units and normalized fields differ, but either may be shown under any presentation type when its actual stream exists.
+
+The selector may explain an incapable option, but the chart area stays quiet: no title, no placeholder and no reserved space. Visibility customization is per loaded activity and resets on replacement. Changing `View as` reapplies recommendations only before the user customizes the chart set, so a deliberate selection is not silently overwritten.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.

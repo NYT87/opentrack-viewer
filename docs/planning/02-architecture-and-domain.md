@@ -81,12 +81,13 @@ React UI
                  +--> Activity Details Panel
                  +--> MapLibre Route Map
             +--> Device Info Card when available
+            +--> Activity presentation control: auto/source sport or View as
             +--> Chart Panel
                  +--> X-axis switch: distance/time
+                 +--> Chart visibility selector
                  +--> Elevation
-                 +--> Pace for runs
-                 +--> Cadence for runs when data exists
-                 +--> Speed for cycling
+                 +--> Pace or speed for any activity when derivable
+                 +--> Running cadence or pedal cadence when the matching stream exists
                  +--> Range selection overlay
             +--> Reset View button when focused on a selected range
        +--> Export Controls
@@ -149,31 +150,33 @@ The UI must depend on normalized domain objects, never on format-specific parser
 17. Laps render beside the map on large screens when lap data exists.
 18. On medium/small/mobile screens, the section sidebar is hidden and laps render after the map.
 19. Device information card displays optional device metadata separately from the summary/activity overview when available.
-20. Chart availability logic decides which charts can be shown for the activity.
-21. Chart series adapters generate elevation, running pace, running cadence, cycling speed, and future sensor series.
-22. Chart panel renders available charts with a user-selected x-axis mode below the map/laps area.
-23. User may click-drag-release on the chart to select an x-axis range.
-24. Range selection maps the selected chart domain back to start/end point indexes.
-25. A focused activity view is derived from the original `Activity` for charts, stats-in-selection, and map route bounds.
-26. Reset View clears the selected range and restores full-activity chart data, map route, map bounds, and summary stats.
-27. Settings may be opened as a modal from the header without navigating away from the viewer/process page or clearing activity state.
-28. Theme settings apply globally without reprocessing or clearing the current activity.
-29. Export controls serialize either the full normalized activity or the selected focused range into supported output formats.
-30. KML input follows the same parser boundary: safe XML parsing maps activity-relevant geometry and time data into `Activity`, while unsupported KML features become explicit warnings.
-31. Once KML is normalized, direct conversion offers each compatible target from the exporter registry; target requirements such as mandatory timestamps are validated without fabricating missing data.
-32. From the viewer, a `Create Custom Track` action can create an editable copy of the current route and open the Route Builder page without mutating the original activity.
-33. In the Route Builder milestone, the user can create a new planned track, edit an existing route copy, remove points, add points, discard sections, and append another imported supported track to the end of the editing track.
-34. Route Builder exports the planned track through the exporter registry and local browser download APIs so the file can be copied to external GPS devices.
-35. Route metadata updates document title and public meta tags without reading loaded activity data.
-36. In the GoPro milestone, the user opens a dedicated video telemetry extraction page from `Tools`, selects a local MP4/MOV file, and extracts telemetry without uploading the video.
-37. After successful GoPro extraction, the extraction page shows a button that navigates to the viewer and passes the normalized `Activity` plus safe auxiliary telemetry through client-side app state.
-38. The viewer renders the extracted GoPro activity through the same map, overview, charts, range focus, export, and reset-view contracts used for GPX/FIT/TCX/KML activities.
-39. After GoPro extraction is stable, a later overlay page can consume the local video plus normalized `Activity`/auxiliary telemetry to render synchronized gauges, maps, and metric overlays.
-40. Overlay-only exports serialize the overlay timeline independently from the source video, for use in external editing applications.
-41. Burned-in video export composites video frames and overlay frames in the browser only after a feasibility spike confirms acceptable browser support, memory use, duration limits, and export quality.
-42. The overlay page can also consume a normalized activity directly, including one parsed from GPX, to render and export static activity graphics without a video timeline.
-43. Static route overlays render route geometry, markers, and selected activity details onto a transparent export surface without baking external map tiles into the minimum supported output.
-44. Later slices add synchronized hover/selection state between chart and map.
+20. The effective activity display type resolves from the source sport unless the user chooses a temporary `View as` override.
+21. Chart capability logic decides which charts can be built from normalized data, independently from the effective activity type.
+22. Sport-aware defaults choose an initial visible chart set, and the user's chart visibility selection determines which capable charts render.
+23. Chart series adapters generate elevation, pace, speed, running cadence, pedal cadence, and future sensor series without source-format checks.
+24. Chart panel renders selected capable charts with a user-selected x-axis mode below the map/laps area.
+25. User may click-drag-release on the chart to select an x-axis range.
+26. Range selection maps the selected chart domain back to start/end point indexes.
+27. A focused activity view is derived from the original `Activity` for charts, stats-in-selection, and map route bounds.
+28. Reset View clears the selected range and restores full-activity chart data, map route, map bounds, and summary stats.
+29. Settings may be opened as a modal from the header without navigating away from the viewer/process page or clearing activity state.
+30. Theme settings apply globally without reprocessing or clearing the current activity.
+31. Export controls serialize either the full normalized activity or the selected focused range into supported output formats.
+32. KML input follows the same parser boundary: safe XML parsing maps activity-relevant geometry and time data into `Activity`, while unsupported KML features become explicit warnings.
+33. Once KML is normalized, direct conversion offers each compatible target from the exporter registry; target requirements such as mandatory timestamps are validated without fabricating missing data.
+34. From the viewer, a `Create Custom Track` action can create an editable copy of the current route and open the Route Builder page without mutating the original activity.
+35. In the Route Builder milestone, the user can create a new planned track, edit an existing route copy, remove points, add points, discard sections, and append another imported supported track to the end of the editing track.
+36. Route Builder exports the planned track through the exporter registry and local browser download APIs so the file can be copied to external GPS devices.
+37. Route metadata updates document title and public meta tags without reading loaded activity data.
+38. In the GoPro milestone, the user opens a dedicated video telemetry extraction page from `Tools`, selects a local MP4/MOV file, and extracts telemetry without uploading the video.
+39. After successful GoPro extraction, the extraction page shows a button that navigates to the viewer and passes the normalized `Activity` plus safe auxiliary telemetry through client-side app state.
+40. The viewer renders the extracted GoPro activity through the same map, overview, charts, range focus, export, and reset-view contracts used for GPX/FIT/TCX/KML activities.
+41. After GoPro extraction is stable, a later overlay page can consume the local video plus normalized `Activity`/auxiliary telemetry to render synchronized gauges, maps, and metric overlays.
+42. Overlay-only exports serialize the overlay timeline independently from the source video, for use in external editing applications.
+43. Burned-in video export composites video frames and overlay frames in the browser only after a feasibility spike confirms acceptable browser support, memory use, duration limits, and export quality.
+44. The overlay page can also consume a normalized activity directly, including one parsed from GPX, to render and export static activity graphics without a video timeline.
+45. Static route overlays render route geometry, markers, and selected activity details onto a transparent export surface without baking external map tiles into the minimum supported output.
+46. Later slices add synchronized hover/selection state between chart and map.
 
 ## 8. Domain Model
 
@@ -239,7 +242,10 @@ below say how the rest of the app is expected to behave in the face of that.
 - Device information should render in its own card rather than inside the summary/activity overview card.
 - Stable identifiers such as serial number should not be displayed by default and should never be sent to telemetry.
 - Chart configuration should be derived from normalized `Activity` data, not source file format.
-- Chart panels should render only available charts. Unavailable chart kinds should be hidden entirely instead of rendering explanatory placeholders.
+- Source sport and a user-selected `View as` override should influence defaults and overview presentation, not technical chart capability.
+- Chart capability and chart visibility are separate: capability answers whether the data can produce a meaningful series; visibility answers whether the user wants that capable chart on screen.
+- Chart panels should render only selected capable charts. Incapable chart kinds should be absent from the chart area instead of rendering explanatory placeholders.
+- The chart selector may list incapable chart kinds as disabled with a concise reason, but must not create an empty chart section or reserved chart space.
 - Use explicit non-chart warnings only for file-level problems or data-quality issues that affect the user's trust in the loaded activity.
 - Time-based charts require enough timestamped points to build a useful x-axis.
 - Distance-based charts require point distances or enough GPS points to derive cumulative distance.
@@ -248,19 +254,19 @@ below say how the rest of the app is expected to behave in the face of that.
 - Time x-axis ticks should be generated at 5 minute intervals.
 - Tick label density may be reduced responsively if labels would overlap, but the underlying target intervals should remain 1 km and 5 minutes.
 - Pace should be represented as duration per distance, derived from speed/time-distance data, and only shown when the result is meaningful for the activity.
-- The activity overview's primary performance metric should be sport-aware: average pace for running and average speed for cycling.
+- The activity overview's primary performance metric should use the effective display type: source sport by default, or the user's temporary `View as` override.
 - Running overview should not foreground average speed when average pace is available.
 - Cycling overview should not foreground average pace when average speed is available.
 - GoPro/video activities without source speed should derive speed from neighboring GPS points when timestamps and valid coordinates are available.
-- GoPro/video activities should expose a user-selectable performance display mode between speed and pace when the activity type is ambiguous or user-overridden.
+- Every activity should expose a user-selectable display type; the GoPro speed/pace switch is the first narrower implementation and must be generalized beyond ambiguous activities.
 - Default GoPro/video performance display should be speed in the active unit system; pace remains available when distance/time are sufficient.
-- If sport cannot be determined, use a neutral fallback such as distance and duration without inventing a sport-specific primary metric.
+- If sport cannot be determined, `Auto` defaults to speed when distance and duration can produce it, following `TD-030`; otherwise use neutral figures such as distance and duration without inventing a value the data cannot support.
 - Running cadence should only be offered when running cadence data exists and must be represented as strides per minute.
 - Avoid labeling running cadence as RPM; RPM is reserved for cycling cadence or other rotational sensor data.
-- Cycling activities should show speed instead of the running-oriented pace/cadence chart set.
+- Cycling activities should show speed by default, but pace remains user-selectable when derivable; running activities should show pace by default, but speed remains user-selectable when derivable.
 - Speed should be represented as distance per time, using source speed when reliable or derived distance/time when needed.
 - Derived speed and derived pace should use the same unit-system settings as the rest of the viewer and should not require re-parsing the video.
-- Cycling cadence can be reconsidered later as a separate chart, but the initial cycling-specific chart should be speed.
+- Running cadence and pedal cadence are distinct chart kinds. Either can be selected for any effective activity type when the matching normalized stream exists.
 - Range selection should be represented as point indexes after translating from the active chart x-axis domain.
 - The original `Activity` should remain immutable; focused views should be derived from it.
 - A selected range should preserve point order and include all points between the resolved start and end indexes.
@@ -420,8 +426,8 @@ If moving time cannot be calculated reliably in the first GPX slice, show it as 
 
 Average pace and average speed are derived display metrics:
 
-- `Average Pace`: duration per distance, shown for running activities when distance and usable duration exist.
-- `Average Speed`: distance per duration, shown for cycling activities when distance and usable duration exist.
+- `Average Pace`: duration per distance, preferred by running presentation and available to other presentation types when distance and usable duration exist.
+- `Average Speed`: distance per duration, preferred by cycling presentation and available to other presentation types when distance and usable duration exist.
 - When both moving and elapsed duration are available, the chosen duration source for these averages should be documented and consistent with the summary's primary `Time` value.
 
 ## 9. Proposed Repository Structure

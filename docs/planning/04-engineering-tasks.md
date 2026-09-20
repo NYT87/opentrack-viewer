@@ -407,7 +407,7 @@ Acceptance criteria:
 - Average Pace uses duration per distance formatting, such as `min/km` or `min/mi`, according to the active unit system.
 - Average Speed uses distance per duration formatting, such as `km/h` or `mph`, according to the active unit system.
 - The duration source used for Average Pace and Average Speed is documented and consistent with the overview's primary `Time` value.
-- Activities with unknown or unsupported sport fall back to neutral overview stats without inventing a sport-specific primary metric.
+- Activities with unknown or unsupported sport default to Average Speed when distance and duration are sufficient, following `TD-030`; otherwise they fall back to neutral overview stats without inventing a value the data cannot support.
 - Missing distance or duration shows an unavailable state rather than an incorrect average.
 - Tests cover running, cycling, unknown sport, missing distance, missing duration, metric units, and imperial units.
 
@@ -476,23 +476,23 @@ Acceptance criteria:
 - Axis rendering works in light, dark, and system themes.
 - Visual/component regression tests cover the cramped Y-axis case shown in the reference screenshot.
 
-#### AV-505: Build Pace Series for Running Activities
+#### AV-505: Build Pace Series
 
 Dependencies: AV-101, AV-401, AV-402, AV-501
 
 Acceptance criteria:
-- Pace series is available for activities classified as `running` when distance and time data are sufficient.
+- Pace series is technically available for any activity when distance and time data are sufficient.
 - Pace is derived from normalized points, not parser-specific GPX or FIT structures.
 - Pace units are consistent with the app unit system, such as min/km or min/mi.
 - Implausible or zero-duration intervals are filtered or represented as gaps.
-- Non-run activities do not show the pace chart by default.
+- Running presentation shows pace by default; other presentation types may leave it hidden initially without preventing the user from enabling it.
 
 #### AV-506: Build Cadence Series for Running Activities
 
 Dependencies: AV-101, AV-501
 
 Acceptance criteria:
-- Cadence chart is available for run activities when `runningCadenceSpm` is present.
+- Running cadence chart is available whenever `runningCadenceSpm` is present, independent of source or effective activity type.
 - Cadence chart is hidden when cadence data is absent.
 - Running cadence labels use strides per minute, not RPM.
 - FIT-derived running cadence and GPX-extension running cadence can feed the same chart adapter after parser mapping normalizes them to `runningCadenceSpm`.
@@ -515,12 +515,12 @@ Acceptance criteria:
 Dependencies: AV-101, AV-501, AV-505, AV-506, AV-513, AV-515
 
 Acceptance criteria:
-- A central chart availability function returns which chart kinds are available for the current activity.
+- A central chart capability function returns which chart kinds can be built from the current activity's normalized data.
 - Elevation availability depends on elevation data.
-- Pace availability depends on running sport plus usable time/distance data.
-- Cadence availability depends on running sport plus `runningCadenceSpm` data.
-- Speed availability depends on cycling sport plus usable speed or time/distance data.
-- Cycling activities do not show running pace/cadence charts by default.
+- Pace capability depends on usable time/distance data, not sport.
+- Speed capability depends on usable speed or time/distance data, not sport.
+- Running cadence capability depends on `runningCadenceSpm`; pedal cadence capability depends on `cyclingCadenceRpm`. Neither is blocked solely by sport.
+- A separate default-visibility policy recommends pace/running cadence for running and speed/pedal cadence for cycling.
 - The UI does not hard-code source format checks for chart visibility.
 
 #### AV-516: Hide Unavailable Chart Sections
@@ -528,26 +528,59 @@ Acceptance criteria:
 Dependencies: AV-507, AV-502, AV-505, AV-506, AV-513
 
 Acceptance criteria:
-- Chart panel renders only chart kinds returned as available by the central chart availability function.
+- Chart panel renders only capable chart kinds; after AV-518, it further restricts rendering to the user's selected capable chart set.
 - Unavailable charts do not render a title, explanatory message, empty chart, disabled chart, or reserved vertical space.
 - Non-running activities do not render placeholder messages for Pace or running Cadence.
 - Non-cycling activities do not render placeholder messages for cycling Speed or Pedal cadence.
 - Activities without heart rate, power, temperature, or other optional streams do not render no-data chart messages for those streams.
 - If no charts are available at all, the entire charts section is omitted or replaced by a single compact page-level fallback only if product copy explicitly requires it; do not show one message per unavailable chart.
-- Chart count/order remains stable for available charts, with elevation first and sport-specific/sensor charts after it.
+- Chart count/order remains stable for selected capable charts, with elevation first and performance/sensor charts after it.
 - Tests cover a running activity, cycling activity, activity with elevation only, activity with no optional sensors, and an activity with no chartable data.
 
-#### AV-513: Build Speed Series for Cycling Activities
+#### AV-517: Add User-Selected Activity Display Type
+
+Dependencies: AV-101, AV-407, AV-507, AV-908
+
+Acceptance criteria:
+- The loaded viewer exposes a compact `View as` selector with `Auto` plus every meaningful user-facing `ActivitySport` presentation option: running, cycling, hiking, walking, swimming, skiing, rowing, and other. Internal `unknown` state is represented by `Auto`, not presented as a user choice.
+- `Auto` uses the sport parsed from the source activity and remains the default.
+- When `Auto` resolves to unknown or unsupported sport, the presentation defaults to speed when derivable and otherwise keeps only neutral overview metrics; the user can still choose another explicit presentation type.
+- The selector is available even when the source explicitly declares a sport; a file marked as running can be viewed as cycling, walking, or any other supported option.
+- The effective display type controls presentation defaults such as Average Pace versus Average Speed and the initially recommended chart set.
+- Changing display type does not mutate `Activity.metadata.sport`, reparse the source file, change exported sport metadata, or discard chart/map range focus.
+- The override belongs to the currently loaded activity and resets to `Auto` when that activity is closed or replaced.
+- The control is keyboard accessible, responsive, and does not resize surrounding layout when its value changes.
+- Tests cover every option, explicit running-to-cycling and cycling-to-running overrides, Auto restoration, overview changes, unchanged source metadata, unchanged export metadata, and no source reparse.
+
+#### AV-518: Add Per-Chart Visibility Controls
+
+Dependencies: AV-507, AV-516, AV-517
+
+Acceptance criteria:
+- The chart panel provides an accessible selector of known chart kinds using checkboxes or toggles, not a single mutually exclusive choice.
+- Capability is determined only by normalized data. Activity type selects recommended defaults but never makes an otherwise derivable chart impossible.
+- Running defaults to pace and running cadence when capable; cycling defaults to speed and pedal cadence when capable; shared charts such as elevation, heart rate, power, and temperature follow their documented defaults.
+- Unknown or unsupported `Auto` presentation recommends speed when capable, preserving the neutral default established for ambiguous GoPro and untyped activity files.
+- A user can enable speed for running, pace for cycling, and either pace or speed for walking, hiking, other, or another display type when sufficient data exists.
+- Pace and speed may be displayed at the same time.
+- Running cadence and pedal cadence remain separate options and may be enabled for any display type only when the corresponding normalized stream exists.
+- Incapable options are disabled or omitted from the selector with an accessible reason; they never render an empty chart, placeholder message, or reserved chart space.
+- Deselecting a chart removes only that chart. It does not discard the activity, selected range, map focus, x-axis mode, or other chart selections.
+- Selections apply to the currently loaded activity and reset to recommendations when that activity is closed or replaced; changing `View as` reapplies recommendations only until the user explicitly customizes chart visibility.
+- The control remains usable on mobile and with a long list of sensor charts without causing overflow or layout shifts.
+- Tests cover sport-aware defaults, cross-sport pace/speed enabling, simultaneous pace and speed, cadence stream distinctions, select/deselect behavior, all-charts-hidden state, focused-range preservation, activity replacement, keyboard access, and responsive layout.
+
+#### AV-513: Build Speed Series
 
 Dependencies: AV-101, AV-401, AV-402, AV-501
 
 Acceptance criteria:
-- Speed series is available for activities classified as `cycling` when speed data or sufficient distance/time data exists.
+- Speed series is technically available for any activity when speed data or sufficient distance/time data exists.
 - Speed is derived from normalized points, not parser-specific GPX or FIT structures.
 - Source `speedMetersPerSecond` is used when available and reliable; otherwise speed can be derived from distance/time intervals.
 - Speed units are consistent with the app unit system, such as km/h or mph.
 - Implausible or zero-duration intervals are filtered or represented as gaps.
-- Running activities do not show the cycling speed chart by default.
+- Cycling presentation shows speed by default; other presentation types may leave it hidden initially without preventing the user from enabling it.
 
 #### AV-508: Add Chart Range Selection Gesture
 

@@ -54,15 +54,20 @@ The core promise is simple:
 - In the activity overview, show average pace as the primary performance metric for running activities.
 - In the activity overview, show average speed as the primary performance metric for cycling activities.
 - Do not show average speed as the primary running metric when average pace can be calculated.
+- Let the user override how any loaded activity is presented with a `View as` control, even when the source file explicitly marks the activity as running, cycling, or another supported sport.
+- Treat the source sport as the default, not an unchangeable UI restriction; presentation overrides must not rewrite the parsed `Activity` or exported source metadata.
 - Display device information in its own card, separate from the summary/activity overview card, when the file provides it and when it can be shown without exposing sensitive identifiers unnecessarily.
 - Add an elevation chart after the map slice is working.
 - Let users switch chart x-axis mode between distance and time.
 - Render chart axes with readable spacing so Y-axis labels are not cramped and X-axis tick marks provide useful orientation.
 - On distance-based charts, show X-axis tick marks every 1 km where layout space permits.
 - On time-based charts, show X-axis tick marks every 5 minutes where layout space permits.
-- For run activities, add pace and cadence charts when the normalized activity has enough data.
+- For run activities, default to pace and running cadence charts when the normalized activity has enough data.
 - Running cadence must be displayed as strides per minute, not revolutions per minute.
-- For cycling activities, add a speed chart instead of the running-oriented pace/cadence chart set.
+- For cycling activities, default to speed and pedal cadence when available instead of the running-oriented chart set.
+- Let users select and deselect which technically available charts are displayed.
+- Use activity type only to choose the initial chart set. Do not prevent a user from enabling pace for cycling, speed for running, or either chart for another activity type when the normalized data can produce it.
+- Keep running cadence and pedal cadence as distinct chart kinds and enable each only when its corresponding normalized stream exists, regardless of the activity's type label.
 - When a chart is not available for the loaded activity, skip that chart section entirely instead of showing a message such as no data or shown only for another sport.
 - Let users select a range directly on a chart by click-drag-release.
 - When a chart range is selected, focus charts and map on only that activity section while preserving the original full activity in memory.
@@ -82,7 +87,7 @@ The core promise is simple:
 - Homepage GoPro copy should make clear that video telemetry extraction happens on the dedicated page, not inside the generic file viewer, and that video files are not uploaded.
 - After GoPro video telemetry is extracted successfully, show a clear action that opens the viewer with the extracted activity data already loaded.
 - For GoPro/video activities without source speed data, derive speed from GPS point distance and time when enough reliable points exist.
-- For GoPro/video activities, default to speed display in the active unit system, and let users switch between speed and pace when the video could represent running, walking, cycling, driving, or another ambiguous activity type.
+- For GoPro/video activities, default to speed display in the active unit system when sport is ambiguous; the general `View as` and chart controls then allow speed or pace for any loaded activity.
 - After the GoPro extraction milestone is complete, add a later overlay milestone that can generate telemetry overlays from local video plus extracted activity/sensor data.
 - Let users preview synchronized telemetry overlays on top of the selected video without uploading the video or telemetry.
 - Let users export overlay-only assets, such as transparent or chroma-key video/image-sequence overlays, so they can use them in external video editing applications.
@@ -173,11 +178,12 @@ The early implementation should stay intentionally small:
 - GPX only until route rendering and summary stats are solid.
 - One map view.
 - One responsive loaded-activity layout: max-width content, optional large-screen section sidebar, overview first, separate device card when available, map second, charts later.
-- Sport-specific overview metrics should prefer average pace for running and average speed for cycling.
-- GoPro/video telemetry activities should support a user-selected speed/pace display mode when sport cannot be confidently inferred.
+- Sport-specific overview metrics should prefer average pace for running and average speed for cycling, while allowing a per-activity `View as` override for every source sport.
+- GoPro/video telemetry activities should use the same general activity display-type override and chart visibility controls as every other normalized activity.
 - Route Builder is later than the stable viewer/export flow. Its first scope is manual route/track editing and export, not cloud route generation or navigation.
 - Route Builder should support starting from an existing viewed track, creating a new track, deleting points/sections, adding points, appending another imported track, and exporting the result.
-- One chart panel with elevation first, then sport-specific charts: run pace/cadence for running and speed for cycling when the underlying data supports them.
+- One chart panel with sport-aware defaults and user-selectable visibility. Sport recommends the initial set; normalized data decides whether each chart can exist.
+- Pace and speed may be enabled for any activity type when distance/time or reliable speed data supports them; running cadence and pedal cadence remain separate data-dependent charts.
 - Unavailable chart panels should not render placeholder titles or messages; they should be omitted from the chart list.
 - Laps are displayed only when lap data exists; missing laps should not create empty layout noise.
 - No empty map/chart/stat placeholders before a valid activity is loaded.

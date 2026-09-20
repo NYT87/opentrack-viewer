@@ -227,7 +227,7 @@ The plan grew in `f42a152` with two new epics:
 | **E9** GoPro video telemetry | `AV-906` | Add the browser and performance tests `AV-906` asks for, including a large-video simulation |
 | **E10** Telemetry video overlays | `AV-1001`–`AV-1008` | An overlay tool page: a timeline and template model, a synchronized preview, and export of overlay assets or burned-in video where feasible |
 
-`AV-901`–`AV-905` and `AV-907` are done: the strategy is in TD-025, detection
+`AV-901`–`AV-905`, `AV-907` and `AV-908` are done: the strategy is in TD-025, detection
 tells a GoPro video from an ordinary one, `extractGpmf` streams the GPMF
 payload out of a real clip, `parseGopro` turns its GPS into a plain `Activity`,
 and **Tools → Video telemetry** is a page of its own that reads a video and
@@ -235,7 +235,9 @@ hands the result to the viewer. `AV-905` adds what the camera recorded beside
 the route: acceleration, rotation rate and camera temperature are charted
 against the same points as everything else, and the rest — orientation,
 exposure, colour, face detection — is listed by name rather than charted,
-exported or silently dropped (TD-034).
+exported or silently dropped (TD-034). `AV-908` then answers what a camera
+cannot: a file that states no sport reads in speed and offers the reader pace
+instead, which a GPX without a `<type>` now gets too (TD-035).
 
 The generic file intake still refuses an MP4, deliberately: `AV-907`'s first
 criterion is that "extraction does not happen inside the generic file viewer

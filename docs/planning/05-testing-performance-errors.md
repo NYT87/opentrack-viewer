@@ -18,8 +18,10 @@ Cover:
 - Chart x-axis series generation for distance and time.
 - Pace derivation, including missing and invalid intervals.
 - Running cadence normalization as strides per minute.
-- Running cadence chart availability rules.
-- Cycling speed derivation and chart availability rules.
+- Chart capability independent of source/effective sport, including pace and speed derivation for cross-sport display.
+- Running cadence and pedal cadence capability from their distinct normalized streams.
+- Effective display-type resolution from Auto/source sport and every user override.
+- Recommended chart defaults versus explicit per-chart visibility selections.
 - Chart range selection domain-to-point mapping.
 - Focused activity slice derivation without mutating the original activity.
 - GPX export serialization and GPX re-import round trip.
@@ -61,8 +63,9 @@ Cover:
 - Section sidebar links scroll or jump to viewer sections without clearing loaded activity state.
 - Summary panel missing values.
 - Summary panel displays Distance, Time, Moving Time, and Elapsed Time as separate fields.
-- Summary/overview displays Average Pace for running activities.
-- Summary/overview displays Average Speed for cycling activities.
+- Summary/overview displays Average Pace for running activities by default.
+- Summary/overview displays Average Speed for cycling activities by default.
+- `View as` can override every explicitly declared activity type without mutating source metadata.
 - Summary/overview does not foreground Average Speed for running when Average Pace is available.
 - Summary/overview does not foreground Average Pace for cycling when Average Speed is available.
 - Device information present/missing states, including separate-card layout.
@@ -74,11 +77,13 @@ Cover:
 - Chart Y-axis label gutter and clipping regression.
 - Chart distance x-axis tick marks at 1 km intervals.
 - Chart time x-axis tick marks at 5 minute intervals.
-- Run-specific chart visibility for pace and cadence.
+- Sport-aware default chart visibility for pace, speed, running cadence, and pedal cadence.
+- Per-chart select/deselect controls, including simultaneous pace and speed.
+- Cross-sport chart selection when normalized data supports the series.
 - Running cadence labels and Y-axis units display strides per minute, not RPM.
-- Cycling-specific chart visibility for speed.
-- Running activities hide cycling-specific speed charts without placeholder messages.
-- Non-run and non-cycling activities hide sport-specific charts without placeholder messages.
+- Cycling default chart visibility for speed and pedal cadence.
+- Running activities hide speed by default but can enable it without placeholder messages when capable.
+- Cycling activities hide pace by default but can enable it without placeholder messages when capable.
 - Chart drag selection overlay and clear-selection controls.
 - Reset View button visibility and behavior.
 - Focused range chart redraw behavior.
@@ -157,6 +162,13 @@ Cover:
 - Confirm running cadence labels and axis units use strides per minute, not RPM.
 - Confirm cycling fixture shows speed when sufficient speed or time/distance data exists.
 - Confirm cycling fixture does not show running pace/cadence charts by default.
+- Confirm `View as` changes presentation defaults for an explicitly typed activity and Auto restores source-sport behavior.
+- Confirm changing `View as` does not mutate the normalized activity, exported sport, selected range, or source parsing count.
+- Confirm the chart selector can hide any visible chart and can show both pace and speed for the same activity when capable.
+- Confirm a running activity can enable speed and a cycling activity can enable pace.
+- Confirm running cadence and pedal cadence options depend on their matching data streams rather than the selected display type.
+- Confirm an incapable chart remains absent from the chart area and is disabled or omitted accessibly in the selector.
+- Confirm chart visibility selections reset for a newly loaded activity and controls remain usable on mobile.
 - Confirm malformed GPX produces a useful error.
 - Confirm no request is made with the raw file content.
 - Confirm GoPro video telemetry extraction, when implemented, opens a local MP4/MOV fixture without upload.

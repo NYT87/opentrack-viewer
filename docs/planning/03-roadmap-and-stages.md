@@ -69,9 +69,9 @@ Outcome:
 - Chart handles missing/partial elevation.
 - Route rendering remains stable.
 
-### M3.5: Sport-Specific Charts
+### M3.5: Activity-Aware, User-Configurable Charts
 
-Goal: Add charts that are useful for specific activity types without making them mandatory for every file.
+Goal: Provide useful activity-type defaults while allowing the user to override the display type and visible chart set.
 
 Outcome:
 - Run activities can show pace when time and distance data are sufficient.
@@ -79,6 +79,10 @@ Outcome:
 - Cycling activities can show speed when speed or time/distance data is sufficient.
 - Cycling activities do not show the running-oriented pace/cadence chart set by default.
 - Non-run and non-cycling activities do not show sport-specific charts by default.
+- Any loaded activity can be temporarily viewed as any supported activity type without mutating parsed metadata.
+- Users can select or deselect every technically capable chart.
+- Pace can be enabled for cycling and speed can be enabled for running when data supports them; activity type controls defaults, not capability.
+- Running cadence and pedal cadence can be enabled outside their usual activity type when their distinct normalized streams exist.
 - Unavailable chart sections are omitted without placeholder messages.
 
 ### M4: Map/Chart Synchronization
