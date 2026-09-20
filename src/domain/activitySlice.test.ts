@@ -149,3 +149,32 @@ describe('slicing an activity that carries its own distance stream', () => {
     expect(sliced.activity.points[0]?.distanceMeters).toBe(160);
   });
 });
+
+describe('sensor streams and a focused section (AV-905)', () => {
+  it('does not carry point-indexed sensor values onto a subset of points', () => {
+    const activity = makeActivity([
+      { lat: 0, lon: 0, elevationMeters: 10 },
+      { lat: 0.001, lon: 0, elevationMeters: 12 },
+      { lat: 0.002, lon: 0, elevationMeters: 14 },
+    ]);
+    activity.sensorStreams = [
+      {
+        key: 'ACCL',
+        label: 'Acceleration',
+        unit: 'm/s²',
+        display: 'chart',
+        sourceSampleCount: 300,
+        valuesByPoint: [9.8, 11.2, 10.1],
+      },
+    ];
+
+    const result = sliceActivity(activity, { startIndex: 1, endIndex: 2 });
+
+    // Kept as they are, the three values would line up against the two points
+    // that remain — acceleration from point 0 shown at point 1, silently.
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.activity.sensorStreams).toBeUndefined();
+    // And the original is untouched, as TD-006 requires.
+    expect(activity.sensorStreams?.[0]?.valuesByPoint).toEqual([9.8, 11.2, 10.1]);
+  });
+});

@@ -24,14 +24,27 @@ import {
 const MAX_RENDERED_SAMPLES = 900;
 
 /**
- * Y-axis presentation per series kind. Elevation and pace convert into the
- * user's unit system; everything else is plotted in the unit it was recorded in.
+ * A series measuring temperature, whichever it is.
+ *
+ * Matched on the recorded unit rather than on a list of keys: `AV-905` added a
+ * camera-temperature stream whose key is not `temperature`, and a reader who
+ * has chosen imperial wants Fahrenheit from every temperature on the page, not
+ * from the ones this function happened to have heard of.
+ */
+function isTemperature(series: ChartSeries): boolean {
+  return series.unit === '°C';
+}
+
+/**
+ * Y-axis presentation per series kind. Elevation, pace and temperature convert
+ * into the user's unit system; everything else is plotted in the unit it was
+ * recorded in.
  */
 function yUnitLabel(series: ChartSeries, units: UnitSystem): string {
   if (series.key === 'elevation') return elevationUnitLabel(units);
   if (series.key === 'pace') return paceUnitLabel(units);
   if (series.key === 'speed') return speedUnitLabel(units);
-  if (series.key === 'temperature') return temperatureUnitLabel(units);
+  if (isTemperature(series)) return temperatureUnitLabel(units);
   return series.unit;
 }
 
@@ -39,7 +52,7 @@ function toDisplayY(value: number, series: ChartSeries, units: UnitSystem): numb
   if (series.key === 'elevation') return toDisplayElevation(value, units);
   if (series.key === 'pace') return toDisplayPace(value, units);
   if (series.key === 'speed') return toDisplaySpeed(value, units);
-  if (series.key === 'temperature') return toDisplayTemperature(value, units);
+  if (isTemperature(series)) return toDisplayTemperature(value, units);
   return value;
 }
 
@@ -47,8 +60,12 @@ function formatY(value: number, series: ChartSeries, units: UnitSystem): string 
   if (series.key === 'elevation') return formatElevation(value, units);
   if (series.key === 'pace') return formatPace(value, units);
   if (series.key === 'speed') return formatSpeed(value, units);
-  if (series.key === 'temperature') return formatTemperature(value, units);
-  return `${Math.round(value)} ${series.unit}`;
+  if (isTemperature(series)) return formatTemperature(value, units);
+  // AV-905: a sensor stream can be small — rotation rate lives between 0 and a
+  // few rad/s — and rounding those to whole numbers would show a flat line of
+  // zeros. Larger readings, like heart rate or power, stay whole.
+  const rounded = Math.abs(value) < 10 ? value.toFixed(2) : String(Math.round(value));
+  return `${rounded} ${series.unit}`;
 }
 
 /** Pace ticks read as M:SS; other kinds are plain numbers. */

@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useMemo } from 'react';
 import { ChartPanel } from '../components/ChartPanel';
 import { DeviceInfoPanel } from '../components/DeviceInfoPanel';
+import { SensorStreamPanel } from '../components/SensorStreamPanel';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { ExportPanel } from '../components/ExportPanel';
@@ -172,6 +173,7 @@ export function ViewerPage() {
           <section className="box" id="activity-overview" aria-label="Activity overview">
             <SummaryPanel activity={readyActivity} units={unitSystem} />
             <DeviceInfoPanel device={readyActivity.metadata.device} />
+            <SensorStreamPanel streams={readyActivity.sensorStreams} />
             <WarningList warnings={readyActivity.warnings} />
           </section>
 

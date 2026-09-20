@@ -5,6 +5,13 @@ import {
   type ActivityPoint,
   type ActivityWarning,
 } from '../../domain/activity';
+import {
+  chartableStreamKeys,
+  decideSensorRead,
+  pointIntervalMs,
+  readSensorStreams,
+  type GoproStream,
+} from './sensorStreams';
 import { ActivityError } from '../../domain/errors';
 import { withDerivedStats } from '../../domain/stats';
 import type { GpmfPayload } from './extractGpmf';
@@ -54,31 +61,48 @@ export async function parseGopro(
   const { default: goproTelemetry } = await import('gopro-telemetry');
   const warnings: ActivityWarning[] = [];
 
-  /*
-   * The library's own types describe its many option-dependent shapes; this
-   * reads the one shape these options produce, so the cast is through
-   * `unknown` deliberately rather than pretending the two types overlap.
-   */
-  const parsed = (await goproTelemetry(
-    {
-      rawData: payload.rawData,
-      timing: {
-        videoDuration: payload.timing.videoDurationSeconds,
-        frameDuration: payload.timing.frameDurationMs,
-        start: payload.timing.start ?? new Date(0),
-        samples: payload.timing.samples,
-      },
+  const source = {
+    rawData: payload.rawData,
+    timing: {
+      videoDuration: payload.timing.videoDurationSeconds,
+      frameDuration: payload.timing.frameDurationMs,
+      start: payload.timing.start ?? new Date(0),
+      samples: payload.timing.samples,
     },
-    { stream: ['GPS9', 'GPS5'] },
-  )) as unknown as Record<
+  };
+
+  /*
+   * The library's own types describe its many option-dependent shapes; these
+   * casts read the one shape each set of options produces, through `unknown`
+   * deliberately rather than pretending the two types overlap.
+   *
+   * **Two passes, and the first one is why.** `streamList` stops parsing as
+   * soon as it has each stream's key and name, which is all `AV-905` needs to
+   * *declare* one. The second pass then reads only the GPS track and the three
+   * streams that earn a chart. The library filters at the KLV level, so the
+   * rest is skipped while parsing rather than built and discarded — and a
+   * GoPro writes acceleration at ~200 Hz, so an hour of video is 720,000
+   * samples per IMU stream. Parsing everything would hold all of that in
+   * memory, on the main thread, to throw nearly all of it away (TD-034).
+   */
+  const declared = (await goproTelemetry(source, { streamList: true })) as unknown as Record<
+    string,
+    { 'device name'?: string; streams?: Record<string, string> }
+  >;
+
+  const declaredDevice = Object.values(declared)[0];
+  const declaredStreams = declaredDevice?.streams ?? {};
+
+  // GPS9 where the camera writes it (HERO11 onward), GPS5 otherwise. They are
+  // the same measurements in a different shape, which `readSample` reconciles.
+  const streamKey = declaredStreams.GPS9 ? 'GPS9' : 'GPS5';
+
+  const parsed = (await readStreams(goproTelemetry, source, [streamKey])) as Record<
     string,
     { 'device name'?: string; streams?: Record<string, { samples?: GoproSample[] }> }
   >;
 
   const device = Object.values(parsed)[0];
-  // GPS9 where the camera writes it (HERO11 onward), GPS5 otherwise. They are
-  // the same measurements in a different shape, which `readSample` reconciles.
-  const streamKey = device?.streams?.GPS9 ? 'GPS9' : 'GPS5';
   const samples = device?.streams?.[streamKey]?.samples ?? [];
 
   if (samples.length === 0) {
@@ -88,7 +112,7 @@ export async function parseGopro(
     );
   }
 
-  const { points, rejected } = readPoints(samples, streamKey);
+  const { points, pointCtsMs, rejected } = readPoints(samples, streamKey);
 
   if (points.length === 0) {
     throw new ActivityError(
@@ -108,6 +132,65 @@ export async function parseGopro(
     });
   }
 
+  /*
+   * AV-905. Everything beside the route: acceleration, rotation and camera
+   * temperature charted against the same points, the rest declared so the
+   * reader knows the video holds them.
+   */
+  const declaredChartable = chartableStreamKeys(declaredStreams);
+  const decision = decideSensorRead(pointCtsMs, payload.timing.videoDurationSeconds);
+  const chartable = decision.read ? declaredChartable : [];
+
+  if (!decision.read && declaredChartable.length > 0) {
+    warnings.push(
+      decision.reason === 'too_long'
+        ? {
+            code: 'gopro_sensor_streams_skipped',
+            message:
+              `This recording runs for ${decision.minutes} minutes, so its motion sensors were ` +
+              'left unread: they are written about two hundred times a second, and reading that ' +
+              'much in a browser tab would stall it. The route and its charts are unaffected.',
+            severity: 'info',
+          }
+        : {
+            code: 'gopro_sensor_streams_unaligned',
+            message:
+              'The motion sensors in this video could not be lined up with its route, because ' +
+              'the camera clock is missing from the GPS track. They are listed but not charted.',
+            severity: 'info',
+          },
+    );
+  }
+
+  /*
+   * Read on their own, without dates, and grouped as they are interpreted.
+   *
+   * Without dates because these streams are aligned by the camera clock, so a
+   * `Date` per sample is an object built for nothing. Grouped because they
+   * arrive at ~200 Hz and are charted against points that arrive at ~18 Hz:
+   * asking the library to merge each slot hands back roughly what the
+   * reduction would have produced anyway, some twenty times smaller. Empty
+   * slots are left empty rather than interpolated — an invented sample is not
+   * a measurement (TD-034).
+   */
+  const sensorSource =
+    chartable.length > 0
+      ? ((await readStreams(goproTelemetry, source, chartable, {
+          timeOut: 'cts',
+          groupTimes: Math.max(10, Math.round(pointIntervalMs(pointCtsMs ?? []) / 2)),
+          disableInterpolation: true,
+        })) as Record<string, { streams?: Record<string, GoproStream> }>)
+      : {};
+
+  const { sensorStreams, warnings: streamWarnings } = readSensorStreams(
+    declaredStreams,
+    Object.values(sensorSource)[0]?.streams ?? {},
+    pointCtsMs,
+  );
+  warnings.push(...streamWarnings);
+
+  const deviceName = device?.['device name'] ?? declaredDevice?.['device name'];
+
   const activity: Activity = {
     id: (options.idFactory ?? defaultId)(),
     source: {
@@ -120,10 +203,10 @@ export async function parseGopro(
       name: options.fileName?.replace(/\.(mp4|mov)$/i, ''),
       // The camera model, and nothing that identifies the camera itself
       // (TD-020): GPMF's device id is not carried into the model at all.
-      ...(device?.['device name']
+      ...(deviceName
         ? {
-            deviceName: device['device name'],
-            device: { name: device['device name'], source: 'gopro_device' as const },
+            deviceName,
+            device: { name: deviceName, source: 'gopro_device' as const },
           }
         : {}),
       // A camera records what it sees, not what the athlete was doing.
@@ -131,6 +214,7 @@ export async function parseGopro(
     },
     points,
     streams: computeStreams(points),
+    ...(sensorStreams.length > 0 ? { sensorStreams } : {}),
     warnings,
   };
 
@@ -138,6 +222,24 @@ export async function parseGopro(
   withStats.metadata.startTime = withStats.derived?.startTime;
   withStats.metadata.endTime = withStats.derived?.endTime;
   return withStats;
+}
+
+/**
+ * One parsing pass, restricted to the streams named.
+ *
+ * The library filters at the KLV level, so an unlisted stream is skipped while
+ * parsing rather than built and then discarded. Its `stream` option is typed as
+ * its own union of known four-character codes; these came out of the file,
+ * which is the same set by a longer road.
+ */
+async function readStreams(
+  goproTelemetry: typeof import('gopro-telemetry').default,
+  source: Parameters<typeof import('gopro-telemetry').default>[0],
+  streams: string[],
+  extra: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const options = { ...extra, stream: streams } as Parameters<typeof goproTelemetry>[1];
+  return (await goproTelemetry(source, options)) as unknown as Record<string, unknown>;
 }
 
 function defaultId(): string {
@@ -178,9 +280,15 @@ class QualityReader {
 function readPoints(
   samples: GoproSample[],
   streamKey: string,
-): { points: ActivityPoint[]; rejected: number } {
+): { points: ActivityPoint[]; pointCtsMs: number[] | undefined; rejected: number } {
   const points: ActivityPoint[] = [];
+  // The camera clock reading each kept point came from, which is what the
+  // other streams are aligned against (AV-905).
+  const pointCtsMs: number[] = [];
   const quality = new QualityReader(streamKey);
+  // A point without one cannot anchor a window, and a partial timeline would
+  // align the other streams to the wrong places rather than to none.
+  let ctsComplete = true;
   let rejected = 0;
 
   for (const sample of samples) {
@@ -217,7 +325,9 @@ function readPoints(
     }
 
     points.push(point);
+    if (Number.isFinite(sample.cts)) pointCtsMs.push(sample.cts!);
+    else ctsComplete = false;
   }
 
-  return { points, rejected };
+  return { points, pointCtsMs: ctsComplete ? pointCtsMs : undefined, rejected };
 }

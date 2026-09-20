@@ -72,6 +72,14 @@ export function sliceActivity(
     // Laps describe the whole recording. A lap that runs past the focused
     // section would misrepresent it, so they are left to the full view.
     laps: undefined,
+    /*
+     * AV-905. Sensor values are positional against the *full* points array, so
+     * carrying them onto a subset would line acceleration up against the wrong
+     * points — quietly, and only inside a focus. The charts do not need them
+     * here: `ChartPanel` builds every sensor series from the whole activity and
+     * narrows it with `restrictSeries`, exactly as it does for pace.
+     */
+    sensorStreams: undefined,
     // Stats are recomputed below; drop the full-activity ones so they cannot be
     // mistaken for the slice's.
     derived: undefined,

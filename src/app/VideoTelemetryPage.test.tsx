@@ -147,6 +147,32 @@ describe('reading a video, and handing it over (AV-907)', () => {
   }, 60_000);
 });
 
+describe('the rest of the telemetry, in the viewer (AV-905)', () => {
+  it('charts the camera streams and declares the ones it does not', async () => {
+    mockExtractionFrom('hero7.raw');
+    const { App: Fresh } = await import('./App');
+    render(<Fresh />);
+    await goToTool();
+    await userEvent.upload(await screen.findByTestId('file-input'), heroVideo());
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Open in viewer' }, { timeout: 30_000 }),
+    );
+
+    // Through the ordinary viewer, with no video-specific branch: the same
+    // chart component that draws elevation draws these.
+    expect(
+      await screen.findByRole('region', { name: 'Acceleration chart' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Rotation rate chart' })).toBeInTheDocument();
+
+    // And the reader is told what the file holds that is not charted, rather
+    // than being left to assume there was nothing else in it.
+    const declared = screen.getByRole('region', { name: 'Other telemetry in this file' });
+    expect(declared).toHaveTextContent('Face detection');
+    expect(declared).toHaveTextContent('White balance');
+  }, 60_000);
+});
+
 describe('the handoff is memory only (AV-907)', () => {
   it('leaves the viewer empty when opened without one', async () => {
     // What a reload looks like: the store starts empty, so the viewer shows

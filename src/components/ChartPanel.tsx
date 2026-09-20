@@ -4,10 +4,12 @@ import { useInteractionStore } from '../state/interactionStore';
 import { sliceActivity } from '../domain/activitySlice';
 import { getVisibleCharts, type ActivityChartKind } from '../domain/charts';
 import {
+  buildSensorSeries,
   buildSeries,
   getXAxisAvailability,
   resolveXAxis,
   restrictSeries,
+  type ChartSeries,
   type ChartSeriesKey,
 } from '../domain/series';
 import type { UnitSystem } from '../domain/units';
@@ -110,6 +112,27 @@ export function ChartPanel({
 
   const resetView = () => setSelectedRange(undefined);
 
+  /*
+   * AV-905. Streams with no `ActivityPoint` field of their own, already reduced
+   * to one value per point by the parser. They render through the same chart as
+   * everything else — same axis, same focus range, same map synchronization —
+   * because by this stage there is nothing left about them that differs.
+   */
+  const focusSeries = (series: ChartSeries) =>
+    pointRange && focused ? restrictSeries(series, pointRange) : series;
+
+  /*
+   * Narrowed to the focus *before* deciding whether to show them, the same way
+   * `getVisibleCharts` recalculates availability against the slice: a section
+   * that no acceleration sample falls in should lose the chart, not show an
+   * empty one. Built from the whole activity and then restricted, so the axis
+   * keeps absolute values (AV-511).
+   */
+  const sensorCharts = (activity.sensorStreams ?? [])
+    .filter((stream) => stream.display === 'chart')
+    .map((stream) => ({ stream, series: focusSeries(buildSensorSeries(activity, stream, resolved)) }))
+    .filter(({ series }) => !series.isEmpty);
+
   return (
     <section className="chart-panel" aria-label="Activity charts">
       <header className="chart-panel__header">
@@ -163,10 +186,7 @@ export function ChartPanel({
         chart.available ? (
           <ActivityChart
             key={chart.kind}
-            series={(() => {
-              const series = buildSeries(activity, chart.kind as ChartSeriesKey, resolved);
-              return pointRange && focused ? restrictSeries(series, pointRange) : series;
-            })()}
+            series={focusSeries(buildSeries(activity, chart.kind as ChartSeriesKey, resolved))}
             units={units}
             note={CHART_NOTES[chart.kind]}
             activePointIndex={activePointIndex}
@@ -179,6 +199,20 @@ export function ChartPanel({
           <UnavailableChart key={chart.kind} kind={chart.kind} label={chart.label} reason={chart.unavailableReason} />
         ),
       )}
+
+      {sensorCharts.map(({ stream, series }) => (
+        <ActivityChart
+          key={stream.key}
+          series={series}
+          units={units}
+          note={stream.note}
+          activePointIndex={activePointIndex}
+          {...(focused ? {} : { selectedRange })}
+          onHoverPoint={onHoverPoint}
+          onSelectPoint={onSelectPoint}
+          onSelectRange={handleSelectRange}
+        />
+      ))}
     </section>
   );
 }

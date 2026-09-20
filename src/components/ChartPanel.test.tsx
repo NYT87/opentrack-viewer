@@ -270,3 +270,102 @@ describe('ChartPanel x-axis switch (AV-504)', () => {
     expect(withBothAxes.source.fileName).toBeUndefined();
   });
 });
+
+describe('sensor streams from a video (AV-905)', () => {
+  const withSensors = () => {
+    const activity = makeActivity([
+      { lat: 0, lon: 0.0001, elevationMeters: 100, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.5, lon: 0.0001, elevationMeters: 150, time: new Date('2024-01-01T10:05:00Z') },
+      { lat: 1, lon: 0.0001, elevationMeters: 120, time: new Date('2024-01-01T10:10:00Z') },
+    ]);
+    activity.sensorStreams = [
+      {
+        key: 'ACCL',
+        label: 'Acceleration',
+        unit: 'm/s²',
+        display: 'chart',
+        note: 'Total acceleration the camera felt, gravity included.',
+        sampleRateHz: 200,
+        sourceSampleCount: 600,
+        valuesByPoint: [9.8, 11.2, 10.1],
+      },
+      {
+        key: 'CORI',
+        label: 'Camera orientation',
+        display: 'hidden',
+        sampleRateHz: 30,
+        sourceSampleCount: 90,
+      },
+    ];
+    return activity;
+  };
+
+  it('charts a stream the parser aligned to the points', () => {
+    render(<ChartPanel activity={withSensors()} onXAxisChange={vi.fn()} />);
+
+    const chart = screen.getByRole('region', { name: 'Acceleration chart' });
+    expect(chart).toHaveTextContent(/Acceleration \(m\/s²\)/);
+  });
+
+  it('carries the caveat that makes the numbers readable', () => {
+    render(<ChartPanel activity={withSensors()} onXAxisChange={vi.fn()} />);
+
+    expect(screen.getByRole('region', { name: 'Acceleration chart' })).toHaveTextContent(
+      /gravity included/i,
+    );
+  });
+
+  it('does not chart a stream that is only declared', () => {
+    render(<ChartPanel activity={withSensors()} onXAxisChange={vi.fn()} />);
+
+    expect(
+      screen.queryByRole('region', { name: 'Camera orientation chart' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('drops a sensor chart the focused section has no samples for', async () => {
+    const activity = withSensors();
+    activity.sensorStreams![0]!.valuesByPoint = [9.8, undefined, undefined];
+    render(<ChartPanel activity={activity} onXAxisChange={vi.fn()} />);
+
+    expect(screen.getByRole('region', { name: 'Acceleration chart' })).toBeInTheDocument();
+
+    // Focus on the two points the stream says nothing about. An empty chart
+    // here would claim the section had acceleration data and none to show.
+    act(() => {
+      useInteractionStore.getState().setSelectedRange({ startIndex: 1, endIndex: 2 });
+    });
+
+    expect(
+      screen.queryByRole('region', { name: 'Acceleration chart' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('converts camera temperature to the chosen unit system', () => {
+    const activity = withSensors();
+    activity.sensorStreams = [
+      {
+        key: 'TMPC',
+        label: 'Camera temperature',
+        unit: '°C',
+        display: 'chart',
+        sourceSampleCount: 11,
+        valuesByPoint: [50, 52, 51],
+      },
+    ];
+
+    render(<ChartPanel activity={activity} units="imperial" onXAxisChange={vi.fn()} />);
+
+    // A reader who chose imperial wants Fahrenheit from every temperature on
+    // the page, not only from the one whose series key happens to say so.
+    expect(screen.getByRole('region', { name: 'Camera temperature chart' })).toHaveTextContent(
+      /Camera temperature \(°F\)/,
+    );
+  });
+
+  it('adds nothing for an activity that carries no sensor streams', () => {
+    render(<ChartPanel activity={withBothAxes} onXAxisChange={vi.fn()} />);
+
+    expect(screen.queryByRole('region', { name: 'Acceleration chart' })).not.toBeInTheDocument();
+  });
+});

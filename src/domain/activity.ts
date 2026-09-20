@@ -157,6 +157,56 @@ export interface ActivityStreams {
   hasTemperature: boolean;
 }
 
+/**
+ * `AV-905`. A measurement that has no field of its own on `ActivityPoint`.
+ *
+ * `ActivityPoint` names the quantities an *activity* is made of — position,
+ * elevation, heart rate, cadence. A camera also records things that are about
+ * the camera rather than the athlete: how hard it was shaken, how fast it was
+ * turning, how warm its own sensor board was. Those deserve to be seen, but
+ * they do not deserve a field each on the type every parser has to satisfy, so
+ * they arrive as named streams instead.
+ *
+ * **Aligned to points, not to their own clock.** A GoPro writes acceleration
+ * at roughly 200 Hz and positions at 18 Hz. `valuesByPoint` holds one value per
+ * `activity.points` entry, reduced over the interval that point covers, so a
+ * stream plots on the same x-axis as every other chart and a hover on the map
+ * still lands on a point. The alternative — a second timeline with its own
+ * charts — would need a source-specific branch through the whole viewer, which
+ * `TD-002` exists to prevent.
+ */
+export type SensorStreamDisplay = 'chart' | 'hidden';
+
+export interface ActivitySensorStream {
+  /** Stable identifier from the source; a GPMF four-character code today. */
+  key: string;
+  label: string;
+  unit?: string;
+  /**
+   * Whether the viewer charts this stream. `hidden` streams are *declared* —
+   * the reader is told the video contains them — but carry no values: a
+   * per-frame quaternion is megabytes of data with nothing to say on a chart.
+   */
+  display: SensorStreamDisplay;
+  /** A caveat without which the numbers would be read wrongly. */
+  note?: string;
+  /**
+   * Sample rate in the source, where the samples establish one. Absent for a
+   * stream that was declared without being read.
+   */
+  sampleRateHz?: number;
+  /**
+   * How many samples the source carried, before alignment. Absent for the same
+   * reason: counting them would mean parsing them.
+   */
+  sourceSampleCount?: number;
+  /**
+   * One entry per `activity.points` index, `undefined` where the stream has
+   * nothing covering that point. Present only when `display` is `chart`.
+   */
+  valuesByPoint?: (number | undefined)[];
+}
+
 export interface ActivityDerivedStats {
   pointCount: number;
   startTime?: Date;
@@ -212,6 +262,8 @@ export interface Activity {
   laps?: ActivityLap[];
   events?: ActivityEvent[];
   streams: ActivityStreams;
+  /** AV-905. Named measurements with no `ActivityPoint` field of their own. */
+  sensorStreams?: ActivitySensorStream[];
   derived?: ActivityDerivedStats;
   warnings: ActivityWarning[];
 }

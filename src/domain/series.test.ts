@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildSensorSeries,
   buildSeries,
   downsampleSeries,
   findNearestSample,
   getXAxisAvailability,
   resolveXAxis,
+  restrictSeries,
 } from './series';
 import { makeActivity } from '../test/helpers/activity';
+import type { ActivitySensorStream } from './activity';
 
 describe('buildSeries (AV-501)', () => {
   it('builds an elevation series against distance when coordinates exist', () => {
@@ -447,5 +450,55 @@ describe('findNearestSample', () => {
   it('returns undefined for an empty series', () => {
     const empty = buildSeries(makeActivity([{ lat: 1, lon: 1 }]), 'elevation', 'index');
     expect(findNearestSample(empty, 0)).toBeUndefined();
+  });
+});
+
+describe('series built from a sensor stream (AV-905)', () => {
+  const activity = makeActivity([
+    { lat: 0, lon: 0, elevationMeters: 10, time: new Date('2024-01-01T10:00:00Z') },
+    { lat: 0.001, lon: 0, elevationMeters: 12, time: new Date('2024-01-01T10:00:10Z') },
+    { lat: 0.002, lon: 0, elevationMeters: 14, time: new Date('2024-01-01T10:00:20Z') },
+  ]);
+
+  const stream: ActivitySensorStream = {
+    key: 'GYRO',
+    label: 'Rotation rate',
+    unit: 'rad/s',
+    display: 'chart',
+    sourceSampleCount: 600,
+    valuesByPoint: [0.2, undefined, 1.4],
+  };
+
+  it('plots against the same axis as every other series', () => {
+    const series = buildSensorSeries(activity, stream, 'time');
+
+    expect(series.key).toBe('sensor:GYRO');
+    expect(series.label).toBe('Rotation rate');
+    expect(series.unit).toBe('rad/s');
+    expect(series.xAxis).toBe('time');
+    expect(series.samples.map((sample) => sample.x)).toEqual([0, 20]);
+  });
+
+  it('carries the point index, so a hover still reaches the map', () => {
+    const series = buildSensorSeries(activity, stream, 'time');
+
+    // The point with no value is skipped rather than plotted as zero, and the
+    // ones that remain keep their own indices (AV-601).
+    expect(series.samples.map((sample) => sample.pointIndex)).toEqual([0, 2]);
+    expect(series.yMin).toBe(0.2);
+    expect(series.yMax).toBe(1.4);
+  });
+
+  it('is empty, not broken, when the stream covers no point', () => {
+    const series = buildSensorSeries(activity, { ...stream, valuesByPoint: undefined });
+
+    expect(series.isEmpty).toBe(true);
+    expect(series.samples).toEqual([]);
+  });
+
+  it('narrows to a focused range like any other series (AV-511)', () => {
+    const series = buildSensorSeries(activity, stream, 'time');
+
+    expect(restrictSeries(series, { startIndex: 1, endIndex: 2 }).samples).toHaveLength(1);
   });
 });

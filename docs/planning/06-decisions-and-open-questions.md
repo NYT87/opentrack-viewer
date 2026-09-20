@@ -268,6 +268,32 @@ Decision: KML import should map activity-relevant KML geometry into the normaliz
 
 Reason: KML is a broad geographic-visualization language, while GPX, FIT, and TCX have different activity-data constraints. A normalized adapter avoids a separate KML-to-GPX, KML-to-FIT, and KML-to-TCX implementation, keeps conversion behavior consistent, and lets exporter validation explain why an untimed or otherwise incomplete KML route cannot be represented by a target without fabricated data.
 
+### TD-034: Non-GPS Camera Streams Are Point-Aligned Named Streams, Mostly Declared Rather Than Charted
+
+Decision (`AV-905`): the streams a GoPro records beside its GPS track become `ActivitySensorStream`s on the normalized `Activity` — a key, a label, a unit, a sample rate, and one value per activity point. They are **aligned to the activity's own points** by the camera's composition timestamp, not carried on a timeline of their own. Three are charted: acceleration, rotation rate and camera temperature. Every other recognized stream is **declared and not carried**; anything unrecognized is named in an `info` warning. None of it is exported.
+
+**Why align rather than keep a second timeline.** A HERO8 writes acceleration at ~200 Hz and positions at ~18 Hz. Keeping the fast streams at their own rate would mean a second chart stack with its own axis, its own hover model and no point index to give the map — a source-specific branch through the whole viewer, which `TD-002` exists to prevent. Reduced to one value per point, a stream is indistinguishable downstream from elevation: same axis, same focused range, same downsampler, same map synchronization. That reduction *is* the windowing `AV-905` asks for; 3,369 accelerometer samples become 308 chart points before any chart code runs.
+
+The reduction is the **mean of the magnitude** over each point's interval. Magnitude because a HERO7 labels its accelerometer `(z,x,y)` and a HERO11 does not, and a measurement should not change when the camera relabels its axes. Mean rather than peak because a peak turns every chart into isolated spikes, while the mean of a second of 200 Hz acceleration is a number a reader can compare with the second before it.
+
+**What is parsed, and what is only listed.** Interpretation runs in three passes rather than one. The first uses `streamList`, which stops as soon as it has each stream's key and name — all that declaring one requires. The second reads the GPS track. The third reads only the streams that earn a chart, with `timeOut: 'cts'`, because they are aligned by the camera clock and a `Date` per sample is an object built for nothing. `gopro-telemetry` filters at the KLV level, so everything unlisted is skipped *while parsing* rather than built and discarded: on the HERO11 fixture that is 3 streams read instead of 20. Each pass re-reads the payload already in memory, so the cost is CPU that the filtering more than returns.
+
+The third pass also asks the library to **group while interpreting**, at half the interval the activity's own points run at, with interpolation disabled so empty slots stay empty rather than being filled with invented samples. That hands back roughly what the reduction would have produced anyway: on the HERO11 fixture, 2,192 accelerometer samples become 106, and the sticky temperature statements all survive. So the native rate is never what this app holds.
+
+It is still what the library builds, because `groupTimes` runs after the samples exist. That leaves a transient cost that rises with the length of the video, on the main thread, so there is a **limit**: past twenty minutes the IMU streams are not read at all. They are declared like any other uncharted stream, with a warning saying why, and the route and every chart derived from the GPS pass are untouched. The limit can rise when extraction moves into an app-owned worker (`TD-025`).
+
+The length is the **longer of two spans**: what the GPS points cover, and what the container says the video runs for. The points alone are not enough, because a fix comes and goes — a two-hour ride that held satellites for five minutes has a five-minute point span and two hours of accelerometer behind it. The container alone is not enough either, since it may state nothing useful. A missing camera clock is not a short recording but a different situation, so it takes its own path and its own warning rather than being reported as a zero-minute video.
+
+**Temperature converts like any other.** A reader who has chosen imperial gets Fahrenheit from the camera-temperature chart too. `ActivityChart` decides that from the series' recorded unit rather than from a list of known keys, because a list is a thing to forget to add to.
+
+**Why so few charts.** A stream earns one by saying something about the *activity*. White balance, predominant hue and scene classification describe the picture; a per-frame orientation quaternion is an input to a renderer (`E10`), not a line. Charting them would bury the ride under the camera. Dropping them silently would be worse — a reader would have no way to know their file held them — so they are listed by name, unit and rate, and left at that. `FACE` is hidden for a stronger reason than uninterestingness: it locates people in frame, and nothing here has any business plotting that.
+
+**Highlight tags are recognized but unproven.** `HLMT` is a catalog entry, so a video carrying highlights is declared rather than reported as unrecognized. The library lifts it from the MP4 header rather than from the GPMF payload, and none of the three fixtures has one — so unlike every other stream here, nothing tests it against real bytes. Turning highlights into `ActivityEvent` markers, where they would genuinely belong, waits for a fixture that has some.
+
+**Nothing is export-only.** `AV-905` asks which streams are exposed only through export; the honest answer is none. GPX, TCX and FIT have nowhere to put a camera quaternion, and inventing extensions no other tool would read is what `TD-019` refuses.
+
+**Camera temperature is not the weather.** This is the one stream whose *meaning* could be misread. A GoPro measures its own sensor board, sealed in a black body in the sun: the HERO11 fixture reads 52 °C on a September afternoon. It is therefore never written to `ActivityPoint.temperatureCelsius`, which the viewer labels "Temperature" and a reader takes for air temperature. It is a named stream with the caveat attached to it. From the HERO8 on it arrives as a **sticky** value on the IMU streams — stated once and implied thereafter, the same trap the GPS fix set in `AV-904` — so it is carried forward. Read per sample instead, a HERO11 would show a temperature for 11 points out of 110; a test pins exactly that.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -294,7 +320,7 @@ ISC and MIT are both permissive and near-identical in effect, so nothing turns o
 **Reading the metadata track without loading the video.** This was the criterion that decided the approach, and `gpmf-extract` already answers it — verified by reading its source, not its README:
 
 - It reads with `file.stream().pipeTo(new WritableStream(…))`, applying backpressure at a 2 MB chunk size. The video is never held in memory; it flows past.
-- It streams the read in chunks with backpressure. The library's own inline Web Worker is intentionally disabled for now; current Chromium can misread a valid GoPro file through that worker path, so extraction stays on the main thread until it can move into an app-owned worker.
+- The library's own inline Web Worker is **disabled** (`useWorker: false`): current Chromium misreads a valid GoPro file through that path (defect 4 below). Extraction therefore streams with backpressure on the main thread — released between chunks — until it can move into an app-owned worker.
 - It reports **progress** by byte offset, and accepts a **cancellation token** checked on every chunk.
 - `mp4box.onReady` finds the track whose codec is `gpmd`; when there is none it terminates early rather than reading on.
 - Only the metadata samples are retained. **Peak memory is proportional to the GPMF payload — a few MB for a long recording — not to the video.**
@@ -308,7 +334,7 @@ ISC and MIT are both permissive and near-identical in effect, so nothing turns o
 
 **Bundle.** ~81 KB gzipped for the whole path — `mp4box` 54 KB, `gopro-telemetry` 18 KB, `gpmf-extract` and `binary-parser` the rest. Comparable to the FIT parser's 61 KB, and loaded on demand behind the tool page, so nobody who never opens a video pays for it.
 
-**First supported scope.** MP4/MOV carrying a `gpmd` track from HERO5 onward: `GPS5` or `GPS9` into `lat`, `lon`, `elevationMeters`, `time` and `speedMetersPerSecond`. A file with no `gpmd` track is reported as unsupported with a typed error, never half-parsed. The IMU streams (`ACCL`, `GYRO`, `GRAV`, `CORI`, `MAGN`) have no home in `Activity` today and belong to `AV-905`.
+**First supported scope.** MP4/MOV carrying a `gpmd` track from HERO5 onward: `GPS5` or `GPS9` into `lat`, `lon`, `elevationMeters`, `time` and `speedMetersPerSecond`. A file with no `gpmd` track is reported as unsupported with a typed error, never half-parsed. The streams beside the route — the IMU, the orientation quaternions, the exposure and colour metadata — are `AV-905`'s, and `TD-034` records what became of them.
 
 **One semantic trap, recorded before it bites.** `TMPC` is the *camera's* temperature, not the air's. It must not become `temperatureCelsius` unremarked — that field means ambient temperature everywhere else in this app, and a camera in the sun reads far above it. The same class of mistake as GPX cadence with no unit.
 

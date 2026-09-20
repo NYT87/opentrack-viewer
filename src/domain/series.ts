@@ -1,6 +1,7 @@
 import {
   isPlausibleSpeed,
   type Activity,
+  type ActivitySensorStream,
   type ActivityPoint,
   type ActivityPointRange,
   type ChartXAxisMode,
@@ -20,6 +21,15 @@ export type ChartSeriesKey =
   | 'power'
   | 'temperature';
 
+/**
+ * A sensor stream plotted as a series (`AV-905`). Namespaced so it can never
+ * collide with a built-in key, and so a consumer can tell the two apart
+ * without consulting a table.
+ */
+export type SensorSeriesKey = `sensor:${string}`;
+
+export type SeriesKey = ChartSeriesKey | SensorSeriesKey;
+
 export interface SeriesSample {
   /** Meters, seconds since the activity start, or the point index. */
   x: number;
@@ -29,7 +39,7 @@ export interface SeriesSample {
 }
 
 export interface ChartSeries {
-  key: ChartSeriesKey;
+  key: SeriesKey;
   label: string;
   unit: string;
   /** The axis actually plotted, which may be the `index` fallback. */
@@ -304,10 +314,62 @@ export function buildSeries(
   axisOrResolved: SeriesXAxis | ResolvedXAxis = 'distance',
 ): ChartSeries {
   const definition = DEFINITIONS[key];
-  const resolved: ResolvedXAxis =
-    typeof axisOrResolved === 'string' ? { axis: axisOrResolved } : axisOrResolved;
-  const xs = pointXValues(activity, resolved.axis);
+  const resolved = toResolved(axisOrResolved);
   const derived = definition.derived?.(activity);
+  const values = activity.points.map((point, index) =>
+    derived ? derived[index] : definition.read?.(point),
+  );
+
+  return assembleSeries(
+    {
+      key: definition.key,
+      label: definition.label,
+      unit: definition.unit,
+      ...(definition.invertY ? { invertY: true } : {}),
+    },
+    values,
+    activity,
+    resolved,
+  );
+}
+
+/**
+ * AV-905. The same series, built from a sensor stream instead of a point field.
+ *
+ * It shares every step below with `buildSeries` deliberately: a stream is
+ * already aligned to `activity.points`, so once its values are in hand there is
+ * nothing about it left for the chart, the focus range, the downsampler or the
+ * map synchronization to treat differently.
+ */
+export function buildSensorSeries(
+  activity: Activity,
+  stream: ActivitySensorStream,
+  axisOrResolved: SeriesXAxis | ResolvedXAxis = 'distance',
+): ChartSeries {
+  return assembleSeries(
+    {
+      key: `sensor:${stream.key}` as SensorSeriesKey,
+      label: stream.label,
+      unit: stream.unit ?? '',
+    },
+    stream.valuesByPoint ?? [],
+    activity,
+    toResolved(axisOrResolved),
+  );
+}
+
+function toResolved(axisOrResolved: SeriesXAxis | ResolvedXAxis): ResolvedXAxis {
+  return typeof axisOrResolved === 'string' ? { axis: axisOrResolved } : axisOrResolved;
+}
+
+/** Pairs values with their x positions and measures the result. */
+function assembleSeries(
+  identity: { key: SeriesKey; label: string; unit: string; invertY?: true },
+  values: (number | undefined)[],
+  activity: Activity,
+  resolved: ResolvedXAxis,
+): ChartSeries {
+  const xs = pointXValues(activity, resolved.axis);
 
   const samples: SeriesSample[] = [];
   let yMin = Infinity;
@@ -316,13 +378,12 @@ export function buildSeries(
   let xMax = -Infinity;
 
   for (let i = 0; i < activity.points.length; i += 1) {
-    const point = activity.points[i]!;
-    const y = derived ? derived[i] : definition.read?.(point);
+    const y = values[i];
     const x = xs[i];
     if (!Number.isFinite(y) || x === undefined) continue;
 
     const value = y as number;
-    samples.push({ x, y: value, pointIndex: point.index });
+    samples.push({ x, y: value, pointIndex: activity.points[i]!.index });
     if (value < yMin) yMin = value;
     if (value > yMax) yMax = value;
     if (x < xMin) xMin = x;
@@ -330,10 +391,7 @@ export function buildSeries(
   }
 
   const base = {
-    key: definition.key,
-    label: definition.label,
-    unit: definition.unit,
-    ...(definition.invertY ? { invertY: true } : {}),
+    ...identity,
     xAxis: resolved.axis,
     ...(resolved.requested ? { requestedXAxis: resolved.requested } : {}),
     ...(resolved.fallbackReason ? { xAxisFallbackReason: resolved.fallbackReason } : {}),
