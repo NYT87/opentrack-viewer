@@ -1,6 +1,7 @@
 import { useMemo, type CSSProperties } from 'react';
 import type { Activity } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
+import { BASE_FONT_CQW } from '../overlay/presets';
 import { projectRoute } from '../overlay/routeProjection';
 import {
   resolveOverlayComponent,
@@ -63,7 +64,7 @@ function boxStyle(component: OverlayComponent, resolved: Extract<ResolvedOverlay
     height: `${rect.height * 100}%`,
     color: style.textColor,
     background: `rgb(0 0 0 / ${style.backgroundOpacity})`,
-    fontSize: `calc(${style.fontScale} * 2.2cqw)`,
+    fontSize: `calc(${style.fontScale} * ${BASE_FONT_CQW}cqw)`,
     ['--overlay-accent' as string]: style.accentColor,
   };
 }

@@ -229,7 +229,7 @@ function derivePace(activity: Activity): (number | undefined)[] {
  * rolling window as pace, for the same reason: point-to-point speed from
  * consumer GPS is mostly fix jitter.
  */
-function deriveSpeed(activity: Activity): (number | undefined)[] {
+export function deriveSpeed(activity: Activity): (number | undefined)[] {
   const points = activity.points;
   const out: (number | undefined)[] = new Array(points.length).fill(undefined);
 

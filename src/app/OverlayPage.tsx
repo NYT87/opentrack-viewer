@@ -41,6 +41,8 @@ export function OverlayPage() {
   const clear = useOverlayStore((state) => state.clear);
   const offsetSeconds = useOverlayStore((state) => state.offsetSeconds);
   const setOffsetSeconds = useOverlayStore((state) => state.setOffsetSeconds);
+  const controls = useOverlayStore((state) => state.controls);
+  const setControls = useOverlayStore((state) => state.setControls);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
 
   const [busy, setBusy] = useState<Busy>({ status: 'idle' });
@@ -129,6 +131,8 @@ export function OverlayPage() {
             offsetSeconds={offsetSeconds}
             onOffsetChange={setOffsetSeconds}
             units={unitSystem}
+            controls={controls}
+            onControlsChange={setControls}
           />
         )}
 

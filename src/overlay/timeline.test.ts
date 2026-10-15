@@ -43,13 +43,15 @@ describe('buildOverlayTimeline (AV-1003)', () => {
     expect(timeline.sampleAt(0)!.progress).toBe(0);
     expect(timeline.sampleAt((count - 1) / 2)!.progress).toBeCloseTo(0.5);
 
+    // A decreasing odometer is corrupt, as the viewer's charts decide too: it
+    // is ignored, and with no positions either, progress runs by time.
     const dip = makeActivity([
       { time: at(0), distanceMeters: 1000 },
       { time: at(1), distanceMeters: 900 },
       { time: at(2), distanceMeters: 2000 },
     ]);
-    expect(buildOverlayTimeline(dip).sampleAt(0)!.progress).toBe(0);
-    expect(buildOverlayTimeline(dip).sampleAt(1)!.progress).toBe(0);
+    expect(buildOverlayTimeline(dip).available.has('metric:distance')).toBe(false);
+    expect(buildOverlayTimeline(dip).sampleAt(1)!.progress).toBeCloseTo(0.5);
   });
 
   it('keeps one progress basis: absent where distance is missing, never a time fallback', () => {
@@ -69,6 +71,30 @@ describe('buildOverlayTimeline (AV-1003)', () => {
       { time: at(2), distanceMeters: 100 },
     ]);
     expect(buildOverlayTimeline(dropout).sampleAt(1)!.progress).toBeUndefined();
+  });
+
+  it('derives distance, speed and pace from positions when the file states none', () => {
+    // A GPX typically carries only positions and times. About 11 m a second north.
+    const activity = makeActivity(
+      Array.from({ length: 31 }, (_, i) => ({ time: at(i), lat: 51.5 + i * 0.0001, lon: 0 })),
+    );
+    const timeline = buildOverlayTimeline(activity);
+    for (const key of ['metric:distance', 'metric:speed', 'metric:pace']) {
+      expect(timeline.available.has(key), key).toBe(true);
+    }
+    const sample = timeline.sampleAt(20)!;
+    expect(sample.values['metric:distance']).toBeCloseTo(222.4, 0);
+    expect(sample.values['metric:speed']).toBeCloseTo(11.12, 1);
+    expect(sample.values['metric:pace']).toBeCloseTo(1000 / 11.12, 0);
+    expect(sample.progress).toBeCloseTo(20 / 30, 2);
+  });
+
+  it('counts distance from the first reading of a recorded odometer', () => {
+    const activity = makeActivity([
+      { time: at(0), distanceMeters: 5000 },
+      { time: at(10), distanceMeters: 5100 },
+    ]);
+    expect(buildOverlayTimeline(activity).sampleAt(5)!.values['metric:distance']).toBeCloseTo(50);
   });
 
   it('falls back to time for progress when there is no distance', () => {
@@ -205,5 +231,16 @@ describe('buildOverlayTimeline (AV-1003)', () => {
     expect(timeline.available.has('sensor:GRAV')).toBe(false);
     expect(timeline.sampleAt(2)!.values['sensor:ACCL']).toBeCloseTo(2);
     expect(timeline.sampleAt(6)!.values['sensor:ACCL']).toBeUndefined();
+  });
+
+  it('reports whether there is a route, and the range of each charted stream', () => {
+    const streams: ActivitySensorStream[] = [
+      { key: 'ACCL', label: 'Acceleration', unit: 'm/s²', display: 'chart', valuesByPoint: [4, undefined, -2] },
+    ];
+    const timeline = buildOverlayTimeline({ ...ride(), sensorStreams: streams });
+    expect(timeline.hasRoute).toBe(true);
+    expect(timeline.sensorLabels.get('sensor:ACCL')).toMatchObject({ min: -2, max: 4 });
+    expect(buildOverlayTimeline(makeActivity([{ time: at(0) }, { time: at(1) }])).hasRoute).toBe(false);
+    expect(buildOverlayTimeline(undefined).hasRoute).toBe(false);
   });
 });

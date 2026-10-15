@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Activity } from '../domain/activity';
+import { DEFAULT_OVERLAY_CONTROLS, type OverlayControls } from '../overlay/presets';
 
 /**
  * What the overlay page knows about a video's clock, as its container states
@@ -60,6 +61,14 @@ interface OverlayState {
   offsetSeconds: number;
   setOffsetSeconds: (seconds: number) => void;
   /**
+   * AV-1005. Template, component, layout and style choices. Kept for the
+   * session — across template switches and replaced files, so a reader's
+   * accent colour is not lost with the video — and in memory only, like the
+   * rest: nothing but the theme is ever written to storage.
+   */
+  controls: OverlayControls;
+  setControls: (patch: Partial<OverlayControls>) => void;
+  /**
    * Sets the video. Replacing or removing a video takes with it an activity
    * that was that video's own telemetry; one chosen by hand stays.
    */
@@ -79,6 +88,9 @@ interface OverlayState {
 export const useOverlayStore = create<OverlayState>((set, get) => ({
   source: {},
   offsetSeconds: 0,
+  controls: DEFAULT_OVERLAY_CONTROLS,
+
+  setControls: (patch) => set((state) => ({ controls: { ...state.controls, ...patch } })),
 
   setOffsetSeconds: (seconds) => set({ offsetSeconds: Number.isFinite(seconds) ? seconds : 0 }),
 
@@ -110,7 +122,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
     return true;
   },
 
-  clear: () => set({ source: {}, offsetSeconds: 0 }),
+  clear: () => set({ source: {}, offsetSeconds: 0, controls: DEFAULT_OVERLAY_CONTROLS }),
 }));
 
 /** Whether there is anything on the page to make an overlay from. */

@@ -505,6 +505,8 @@ Decision (`AV-1003`): `src/overlay/timeline.ts` turns an `Activity` and a video'
 
 **Offset.** Video time `t` is the video's wall-clock start plus `t`, or the activity's first point when the container states no clock. A positive `offsetSeconds` delays the telemetry — the activity shown at `t` is the one from `t - offset` — so the reader nudges it later when the watch ran ahead of the camera.
 
+**Distance and speed are read as the viewer's charts read them** — from the file where it states them, derived from positions and time where it does not (a decreasing odometer is ignored, as there). Found by the browser check of `AV-1005` on a real GPX: reading only the raw fields drew no distance, speed or pace for a file that has none recorded, which is most of them.
+
 **Missing data is missing.** A value is interpolated only between two points that both carry it, in the same recorded segment, no more than 10 s apart; across a pause, a dropout or a segment boundary it is absent, and outside the recording there is no sample at all rather than the nearest one. Pace is derived from the interpolated speed and absent when standing still. Longitude interpolates along the short arc across the antimeridian. Charted camera streams (TD-034) interpolate like any metric; `hidden` ones carry no values and are not offered.
 
 **Template.** Five component types — `text`, `gauge`, `routeInset`, `progress`, `sensorChart` — each with visibility, a rectangle in frame fractions (so one template fits any resolution), a unit mode (`auto` follows Settings), style tokens merged over the template's, and a data source: a built-in metric or a named sensor stream. `parseOverlayTemplate` rejects a malformed file or unknown version but drops a single bad component with a warning, keeping the rest. A component whose data does not exist is `hidden`, never drawn with a dash, and `unavailableBindings` names it so the page can warn once.
@@ -519,7 +521,19 @@ Decision (`AV-1004`): the overlay page previews the local video with the overlay
 
 **Why DOM, not canvas.** A handful of absolutely positioned boxes and one SVG, sized in container units, scale with the video and cost one binary search per frame. The export path (`AV-1006`) draws the same template on a canvas from the same samples; the preview does not have to be that renderer to agree with it.
 
-**Template.** `PREVIEW_TEMPLATE` is the single fixed layout the preview draws until `AV-1005` brings a set to choose from. **Missing data** is said once, beside the preview: no activity, no timestamps, a moment the activity does not cover, and each component bound to data the activity lacks.
+**Template.** The preview draws whatever template the controls build (TD-043). **Missing data** is said once, beside the preview: no activity, no timestamps, a moment the activity does not cover, and each component bound to data the activity lacks.
+
+### TD-043: A Template Preset Is a Rule for Placing Components, Not a Stored Layout
+
+Decision (`AV-1005`): `src/overlay/presets.ts` offers three templates — Compact HUD, Route inset, Metric strip — as *defaults plus a placement rule*. `buildOverlay(controls, timeline, frameAspect)` turns the reader's controls and what the activity has into an ordinary `OverlayTemplate` (TD-041), which is all the preview and any export will see.
+
+**Why not fixed rectangles.** With fixed positions, turning a component off leaves a hole and a component the activity lacks leaves a dash-shaped gap. Placing only what is on *and* supported closes the gap by construction. Rectangles are frame fractions but type is sized in frame widths, so tile height takes the frame's aspect ratio as an input; every preset, edge, size and aspect keeps every rectangle inside the frame and clear of every other (tested over the cross-product). A figure keeps the width a value like "100.0 km/h" needs: a long list wraps onto further rows, or columns in the HUD, and tiles get shorter only if the frame's height runs out, in which case their type shrinks with them (a tile needs 3.2 ems of height; `fitScale` settles it from the aspect ratio) — squeezing them into one row, or cutting their height alone, would clip the text. `e2e/overlay-layout.spec.ts` measures it in Chromium: the real HERO8 clip and an activity with the widest values, all ten figures on in each template at the largest size, in 3:1, 16:9 and 9:16 frames on a desktop and a phone, asserting nothing overflows its own tile (it fails with the type shrink removed).
+
+**Controls.** A checkbox per component — speed, pace, distance, time, elevation, heart rate, either cadence, power, each charted camera stream, the route inset and a progress bar — plus template, top/bottom, size, accent colour, background opacity and units. Camera streams are gauges over the range their own values span, since the source states no bounds. Not a design editor: no dragging, no per-component style.
+
+**Unsupported is disabled and said once.** A component with no data is a disabled checkbox marked "not in this activity", never drawn; if the reader has it *on* (heart rate is on in two templates) a warning names it. Nothing is drawn empty (TD-041).
+
+**Session, not storage.** The choices live in `useOverlayStore` (TD-040): they survive switching templates and replacing files, are lost on reload, and **Start over** resets them. A component the reader switched is remembered by key across templates; nothing is written to `localStorage`, which still holds only the theme.
 
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 

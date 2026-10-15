@@ -712,10 +712,15 @@ test('offers overlays in the Tools menu, and takes files by hand after a reload 
   await expect(page.getByRole('region', { name: 'Activity' })).toContainText('simple-route.gpx');
   await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
 
-  // Nothing left the device, whatever the outcome.
-  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
-    [],
-  );
+  // Nothing left the device, whatever the outcome. The preview (AV-1004) plays
+  // the chosen file through a `blob:` URL — a reference to bytes already in this
+  // tab, which the browser resolves without a network request — so those are
+  // the one local scheme set aside; anything else off this origin still fails.
+  expect(
+    requests
+      .map((request) => request.url())
+      .filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
+  ).toEqual([]);
 });
 
 test('navigates to the viewer from the Tools menu (AV-012)', async ({ page }) => {

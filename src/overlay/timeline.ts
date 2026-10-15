@@ -1,5 +1,7 @@
 import type { Activity, ActivityPoint, Coordinate } from '../domain/activity';
 import { toValidCoordinate } from '../domain/activity';
+import { deriveSpeed } from '../domain/series';
+import { computeDistance } from '../domain/stats';
 
 /**
  * AV-1003. The overlay timeline: video time in, normalized activity values out.
@@ -77,6 +79,13 @@ export interface OverlayTimelineOptions {
   maxInterpolationGapSeconds?: number;
 }
 
+export interface OverlaySensorInfo {
+  label: string;
+  unit?: string;
+  min: number;
+  max: number;
+}
+
 export const DEFAULT_MAX_INTERPOLATION_GAP_SECONDS = 10;
 
 /** Why a timeline has nothing to sample. */
@@ -102,8 +111,13 @@ export interface OverlayTimeline {
   offsetSeconds: number;
   /** Data sources that have a value somewhere in the activity. */
   available: ReadonlySet<string>;
-  /** Names of the activity's charted camera streams, keyed by `sensor:` id. */
-  sensorLabels: ReadonlyMap<string, { label: string; unit?: string }>;
+  /** Whether any point carries a valid position, so a route can be drawn. */
+  hasRoute: boolean;
+  /**
+   * The activity's charted camera streams, keyed by `sensor:` id, with the
+   * range their values span (a gauge needs bounds the source does not state).
+   */
+  sensorLabels: ReadonlyMap<string, OverlaySensorInfo>;
   sampleAt: (videoTimeSeconds: number) => OverlaySample | undefined;
 }
 
@@ -118,12 +132,23 @@ type Reader = (timed: TimedPoint) => number | undefined;
 const finite = (value: number | undefined): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
-function metricReaders(): Record<OverlayMetricKey, Reader> {
+/**
+ * Distance and speed are read the way the viewer's charts read them: from the
+ * file where it states them, and derived from positions and time where it does
+ * not. Most GPX files state neither, so reading the raw fields alone would draw
+ * no distance, speed or pace for them — while the viewer shows all three.
+ */
+interface DerivedStreams {
+  distance: (number | undefined)[];
+  speed: (number | undefined)[];
+}
+
+function metricReaders({ distance, speed }: DerivedStreams): Record<OverlayMetricKey, Reader> {
   return {
-    speed: ({ point }) => finite(point.speedMetersPerSecond),
+    speed: ({ index }) => finite(speed[index]),
     // Pace is derived from the interpolated speed, not stored per point.
-    pace: ({ point }) => finite(point.speedMetersPerSecond),
-    distance: ({ point }) => finite(point.distanceMeters),
+    pace: ({ index }) => finite(speed[index]),
+    distance: ({ index }) => finite(distance[index]),
     elevation: ({ point }) => finite(point.elevationMeters),
     heartRate: ({ point }) => finite(point.heartRateBpm),
     runningCadence: ({ point }) => finite(point.runningCadenceSpm),
@@ -172,6 +197,7 @@ export function buildOverlayTimeline(
     durationSeconds,
     offsetSeconds,
     available: new Set(),
+    hasRoute: false,
     sensorLabels: new Map(),
     sampleAt: () => undefined,
   });
@@ -204,18 +230,30 @@ export function buildOverlayTimeline(
     typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? (anchorMs - firstMs) / 1000 : 0;
   const toActivitySeconds = (videoTime: number) => anchorSeconds + videoTime - offsetSeconds;
 
-  const readers = metricReaders();
+  const derived: DerivedStreams = {
+    distance: computeDistance(activity.points).cumulativeMeters,
+    speed: deriveSpeed(activity),
+  };
+  const readers = metricReaders(derived);
   const sources: { id: string; read: Reader }[] = OVERLAY_METRIC_KEYS.map((metric) => ({
     id: dataSourceId({ kind: 'metric', metric }),
     read: readers[metric],
   }));
-  const sensorLabels = new Map<string, { label: string; unit?: string }>();
+  const sensorLabels = new Map<string, OverlaySensorInfo>();
   for (const stream of activity.sensorStreams ?? []) {
     if (stream.display !== 'chart' || !stream.valuesByPoint) continue;
     const id = dataSourceId({ kind: 'sensor', key: stream.key });
     const values = stream.valuesByPoint;
     sources.push({ id, read: ({ index }) => finite(values[index]) });
-    sensorLabels.set(id, { label: stream.label, unit: stream.unit });
+    // By iteration: spreading a long recording into Math.min would overflow.
+    let min = Infinity;
+    let max = -Infinity;
+    for (const value of values) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    if (min <= max) sensorLabels.set(id, { label: stream.label, unit: stream.unit, min, max });
   }
 
   const available = new Set<string>();
@@ -223,7 +261,7 @@ export function buildOverlayTimeline(
     if (points.some((timedPoint) => read(timedPoint) !== undefined)) available.add(id);
   }
   // Pace needs speed *and* movement; elapsed needs nothing but time.
-  if (!points.some(({ point }) => paceFromSpeed(finite(point.speedMetersPerSecond)) !== undefined)) {
+  if (!points.some(({ index }) => paceFromSpeed(finite(derived.speed[index])) !== undefined)) {
     available.delete('metric:pace');
   }
 
@@ -233,8 +271,8 @@ export function buildOverlayTimeline(
   // `Math.min` would overflow the call stack.
   let startDistance: number | undefined;
   let endDistance: number | undefined;
-  for (const { point } of points) {
-    const distance = finite(point.distanceMeters);
+  for (const { index } of points) {
+    const distance = finite(derived.distance[index]);
     if (distance === undefined) continue;
     startDistance ??= distance;
     endDistance = distance;
@@ -324,5 +362,7 @@ export function buildOverlayTimeline(
     };
   };
 
-  return { durationSeconds, offsetSeconds, available, sensorLabels, sampleAt };
+  const hasRoute = points.some(({ point }) => toValidCoordinate(point.lat, point.lon) !== undefined);
+
+  return { durationSeconds, offsetSeconds, available, hasRoute, sensorLabels, sampleAt };
 }

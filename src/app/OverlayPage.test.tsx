@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // The viewer mounts a map once an activity loads, and jsdom has no WebGL.
@@ -415,6 +415,38 @@ describe('the preview on the page (AV-1004)', () => {
       act(() => useOverlayStore.getState().setVideo(undefined));
       expect(useOverlayStore.getState().offsetSeconds).toBe(0);
       expect(screen.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the reader\'s template and style for the session, and drops them on Start over', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:clip', revokeObjectURL: () => {} }));
+    try {
+      window.location.hash = '#/overlays';
+      render(<App />);
+      act(() => {
+        useOverlayStore.getState().setVideo({
+          file: heroVideo(),
+          timing: { durationSeconds: 17, frameIntervalSeconds: 1 / 30 },
+        });
+      });
+      await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
+      const controls = await screen.findByRole('region', { name: 'Overlay controls' });
+      await userEvent.click(within(controls).getByRole('radio', { name: /Compact HUD/ }));
+      fireEvent.change(within(controls).getByLabelText('Accent colour'), { target: { value: '#00ff00' } });
+
+      // Away to another page and back: nothing is stored, but the session remembers.
+      await goToTool('Video telemetry');
+      await goToTool('Overlays');
+      const back = await screen.findByRole('region', { name: 'Overlay controls' });
+      expect(within(back).getByRole('radio', { name: /Compact HUD/ })).toBeChecked();
+      expect(within(back).getByLabelText('Accent colour')).toHaveValue('#00ff00');
+      expect(window.localStorage.getItem('opentrack-viewer:overlay')).toBeNull();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+      expect(useOverlayStore.getState().controls.presetId).toBe('metric-strip');
+      expect(useOverlayStore.getState().controls.accentColor).not.toBe('#00ff00');
     } finally {
       vi.unstubAllGlobals();
     }

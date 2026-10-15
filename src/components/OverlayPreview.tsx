@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
-import { PREVIEW_TEMPLATE } from '../overlay/previewTemplate';
-import { unavailableBindings } from '../overlay/template';
+import { buildOverlay, type OverlayControls as Controls } from '../overlay/presets';
 import { buildOverlayTimeline } from '../overlay/timeline';
 import type { OverlayVideo } from '../state/overlayStore';
+import { OverlayControls } from './OverlayControls';
 import { OverlayLayer } from './OverlayLayer';
 
 interface OverlayPreviewProps {
@@ -13,6 +13,8 @@ interface OverlayPreviewProps {
   offsetSeconds: number;
   onOffsetChange: (seconds: number) => void;
   units: UnitSystem;
+  controls: Controls;
+  onControlsChange: (patch: Partial<Controls>) => void;
 }
 
 const UNAVAILABLE_MESSAGES = {
@@ -58,6 +60,8 @@ export function OverlayPreview({
   offsetSeconds,
   onOffsetChange,
   units,
+  controls,
+  onControlsChange,
 }: OverlayPreviewProps) {
   const element = useRef<HTMLVideoElement>(null);
   useLocalSource(element, video.file);
@@ -77,12 +81,14 @@ export function OverlayPreview({
     [activity, durationSeconds, video.timing?.start, offsetSeconds],
   );
   const sample = timeline.sampleAt(time);
-  // With no usable timeline the status line already says why; listing every
+  // The template follows the controls and what the activity has. With no
+  // usable timeline the status line already says why, and listing every
   // component as "not in this activity" on top of it would be misleading.
-  const warnings = useMemo(
-    () => (timeline.unavailable ? [] : unavailableBindings(PREVIEW_TEMPLATE, timeline)),
-    [timeline],
+  const built = useMemo(
+    () => buildOverlay(controls, timeline, frameAspect),
+    [controls, timeline, frameAspect],
   );
+  const warnings = timeline.unavailable ? [] : built.unsupported;
 
   const readClock = useCallback(() => {
     const media = element.current;
@@ -186,7 +192,7 @@ export function OverlayPreview({
         />
         {activity && !unavailable && (
           <OverlayLayer
-            template={PREVIEW_TEMPLATE}
+            template={built.template}
             timeline={timeline}
             sample={sample}
             activity={activity}
@@ -221,6 +227,10 @@ export function OverlayPreview({
         <OffsetControl offsetSeconds={offsetSeconds} onChange={onOffsetChange} />
       )}
 
+      {activity && !unavailable && (
+        <OverlayControls controls={controls} timeline={timeline} onChange={onControlsChange} />
+      )}
+
       {unavailable && <p role="status">{UNAVAILABLE_MESSAGES[unavailable]}</p>}
       {outsideRecording && (
         <p role="status">
@@ -231,7 +241,7 @@ export function OverlayPreview({
       {warnings.length > 0 && (
         <ul className="overlay-preview__warnings" aria-label="Overlay warnings">
           {warnings.map((warning) => (
-            <li key={warning.componentId}>{warning.message}</li>
+            <li key={warning.key}>{warning.message}</li>
           ))}
         </ul>
       )}

@@ -842,3 +842,12 @@ body {
 .overlay-preview__offset input[type='number'] { width: 6em; }
 .overlay-preview__hint { flex-basis: 100%; margin: 0; color: var(--text-muted); font-size: 12px; }
 .overlay-preview__warnings { color: var(--warn); font-size: 13px; }
+
+/* Overlay controls (AV-1005): groups wrap, so they stack on a phone. */
+.overlay-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 16px; }
+.overlay-controls > .prose__title, .overlay-controls > p { grid-column: 1 / -1; }
+.overlay-controls__group { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.overlay-controls__choice { display: flex; align-items: flex-start; gap: 8px; min-height: 28px; }
+.overlay-controls__field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
+.overlay-controls__field input[type='range'] { flex: 1 1 120px; min-width: 0; }
+.overlay-controls__hint { color: var(--text-muted); font-size: 12px; }
