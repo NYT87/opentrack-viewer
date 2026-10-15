@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FileDropZone } from '../components/FileDropZone';
 import { WarningList } from '../components/ErrorPanel';
+import { OverlayPreview } from '../components/OverlayPreview';
 import { VideoReadProgress } from '../components/VideoReadProgress';
 import type { Activity } from '../domain/activity';
 import { ActivityError, toActivityError } from '../domain/errors';
@@ -22,9 +23,10 @@ type Busy =
  * that holds a local video, a normalized activity, or both.
  *
  * It renders nothing of the viewer — no map, no charts, no export controls —
- * because there is nothing to view here, only something to draw over. Until
- * `AV-1003` and `AV-1004` bring the timeline and the preview, what it does is
- * take the files in, say what it has, and keep them in memory for the rest.
+ * because there is nothing to view here, only something to draw over. The
+ * preview (AV-1004) is the one thing it draws: the video, with the overlay over
+ * it at the video's current time. Besides that it takes the files in, says what
+ * it has, and keeps them in memory.
  *
  * Two ways in. The extraction page hands over what it read; or the files are
  * chosen here, which is also what a reload needs, since the handoff is memory
@@ -37,6 +39,8 @@ export function OverlayPage() {
   const clearActivity = useOverlayStore((state) => state.clearActivity);
   const offerVideoActivity = useOverlayStore((state) => state.offerVideoActivity);
   const clear = useOverlayStore((state) => state.clear);
+  const offsetSeconds = useOverlayStore((state) => state.offsetSeconds);
+  const setOffsetSeconds = useOverlayStore((state) => state.setOffsetSeconds);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
 
   const [busy, setBusy] = useState<Busy>({ status: 'idle' });
@@ -118,6 +122,16 @@ export function OverlayPage() {
           </section>
         )}
 
+        {idle && source.video && (
+          <OverlayPreview
+            video={source.video}
+            activity={source.activity}
+            offsetSeconds={offsetSeconds}
+            onOffsetChange={setOffsetSeconds}
+            units={unitSystem}
+          />
+        )}
+
         {idle && (
           <>
             <VideoSlot
@@ -139,7 +153,7 @@ export function OverlayPage() {
             <h3 className="prose__title">Held here, for the next steps</h3>
             <p>
               {source.video && source.activity
-                ? 'Templates, a synchronized preview and export follow. Both files stay in memory on this page until then, or until you start over.'
+                ? 'Export follows. Both files stay in memory on this page until then, or until you start over.'
                 : source.video
                   ? 'This video supplies no activity of its own. Add an activity file — from a watch, say — to draw over it.'
                   : 'Without a video, this activity can become a standalone overlay: the route on a transparent background. Add a video to draw its telemetry over the picture.'}

@@ -511,6 +511,16 @@ Decision (`AV-1003`): `src/overlay/timeline.ts` turns an `Activity` and a video'
 
 **Not here.** No rendering, no preview, no preset templates (`AV-1004`, `AV-1005`).
 
+### TD-042: The Video Element Is the Only Clock, and the Overlay Is Drawn From a Sample
+
+Decision (`AV-1004`): the overlay page previews the local video with the overlay as DOM over it (`OverlayPreview`, `OverlayLayer`). The `<video>` element's `currentTime` is the one clock. It is read on `timeupdate`, `seeking`, `seeked`, `loadedmetadata` and `durationchange`, and, while playing, on every presented frame — `requestVideoFrameCallback` where the browser has it, `requestAnimationFrame` where it does not. Scrubbing writes the new time to the element and to state together, so the overlay does not wait for a seek to finish. `OverlayLayer` takes a sample, not a video, so play, pause, seek and scrub reach one drawing path, and a component with no data for the moment renders nothing (TD-041).
+
+**Offset.** `offsetSeconds` lives in `useOverlayStore` beside the files and is forgotten whenever either is replaced, since it records how *those two* disagree. The control nudges by 1 s or 0.1 s, takes a typed value without rewriting a half-typed one, and says which way is which: positive delays the telemetry.
+
+**Why DOM, not canvas.** A handful of absolutely positioned boxes and one SVG, sized in container units, scale with the video and cost one binary search per frame. The export path (`AV-1006`) draws the same template on a canvas from the same samples; the preview does not have to be that renderer to agree with it.
+
+**Template.** `PREVIEW_TEMPLATE` is the single fixed layout the preview draws until `AV-1005` brings a set to choose from. **Missing data** is said once, beside the preview: no activity, no timestamps, a moment the activity does not cover, and each component bound to data the activity lacks.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.

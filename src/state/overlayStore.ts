@@ -53,6 +53,13 @@ export interface OverlaySource {
 interface OverlayState {
   source: OverlaySource;
   /**
+   * AV-1004. Seconds the telemetry is late against the video (see
+   * `OverlayTimelineOptions.offsetSeconds`). It describes how this video and
+   * this activity disagree, so it is forgotten when either is replaced.
+   */
+  offsetSeconds: number;
+  setOffsetSeconds: (seconds: number) => void;
+  /**
    * Sets the video. Replacing or removing a video takes with it an activity
    * that was that video's own telemetry; one chosen by hand stays.
    */
@@ -71,11 +78,15 @@ interface OverlayState {
 
 export const useOverlayStore = create<OverlayState>((set, get) => ({
   source: {},
+  offsetSeconds: 0,
+
+  setOffsetSeconds: (seconds) => set({ offsetSeconds: Number.isFinite(seconds) ? seconds : 0 }),
 
   setVideo: (video) =>
     set((state) => {
       const keepsActivity = state.source.activityOrigin === 'hand';
       return {
+        offsetSeconds: 0,
         source: {
           video,
           activity: keepsActivity ? state.source.activity : undefined,
@@ -85,10 +96,13 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
     }),
 
   setActivity: (activity, origin) =>
-    set((state) => ({ source: { ...state.source, activity, activityOrigin: origin } })),
+    set((state) => ({
+      offsetSeconds: 0,
+      source: { ...state.source, activity, activityOrigin: origin },
+    })),
 
   clearActivity: () =>
-    set((state) => ({ source: { video: state.source.video } })),
+    set((state) => ({ offsetSeconds: 0, source: { video: state.source.video } })),
 
   offerVideoActivity: (activity) => {
     if (get().source.activityOrigin === 'hand') return false;
@@ -96,7 +110,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
     return true;
   },
 
-  clear: () => set({ source: {} }),
+  clear: () => set({ source: {}, offsetSeconds: 0 }),
 }));
 
 /** Whether there is anything on the page to make an overlay from. */

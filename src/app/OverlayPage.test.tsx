@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // The viewer mounts a map once an activity loads, and jsdom has no WebGL.
@@ -390,5 +390,33 @@ describe('the handoff is memory only (AV-1002)', () => {
     // video, an activity or their names joins it.
     expect(Object.keys(localStorage).filter((key) => key !== 'opentrack-viewer:theme')).toEqual([]);
     expect(Object.keys(sessionStorage)).toEqual([]);
+  });
+});
+
+describe('the preview on the page (AV-1004)', () => {
+  it('appears once there is a video, and its offset is forgotten when the video is replaced', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:clip', revokeObjectURL: () => {} }));
+    try {
+      window.location.hash = '#/overlays';
+      render(<App />);
+      expect(screen.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument();
+
+      act(() => {
+        useOverlayStore.getState().setVideo({
+          file: heroVideo(),
+          timing: { durationSeconds: 17, frameIntervalSeconds: 1 / 30 },
+        });
+        useOverlayStore.getState().setOffsetSeconds(2.5);
+      });
+      expect(await screen.findByRole('region', { name: 'Preview' })).toBeInTheDocument();
+      expectNoViewerPanels();
+
+      // A different video disagrees with the activity differently.
+      act(() => useOverlayStore.getState().setVideo(undefined));
+      expect(useOverlayStore.getState().offsetSeconds).toBe(0);
+      expect(screen.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
