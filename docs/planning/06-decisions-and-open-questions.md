@@ -499,6 +499,18 @@ Decision (`AV-1002`): the overlay page reads from `useOverlayStore`, a second in
 
 **Not here.** No map, no charts, no export panel: the viewer's regions are asserted absent before and after files arrive. Templates, the timeline, the preview and export are `AV-1003` to `AV-1007`.
 
+### TD-041: The Overlay Timeline Never Invents a Value, and a Template Is Plain Data
+
+Decision (`AV-1003`): `src/overlay/timeline.ts` turns an `Activity` and a video's clock into `sampleAt(videoTime)`; `src/overlay/template.ts` holds the template model, its JSON round-trip and the resolution of a component against a sample. Both are pure and know nothing of any file format.
+
+**Offset.** Video time `t` is the video's wall-clock start plus `t`, or the activity's first point when the container states no clock. A positive `offsetSeconds` delays the telemetry — the activity shown at `t` is the one from `t - offset` — so the reader nudges it later when the watch ran ahead of the camera.
+
+**Missing data is missing.** A value is interpolated only between two points that both carry it, in the same recorded segment, no more than 10 s apart; across a pause, a dropout or a segment boundary it is absent, and outside the recording there is no sample at all rather than the nearest one. Pace is derived from the interpolated speed and absent when standing still. Longitude interpolates along the short arc across the antimeridian. Charted camera streams (TD-034) interpolate like any metric; `hidden` ones carry no values and are not offered.
+
+**Template.** Five component types — `text`, `gauge`, `routeInset`, `progress`, `sensorChart` — each with visibility, a rectangle in frame fractions (so one template fits any resolution), a unit mode (`auto` follows Settings), style tokens merged over the template's, and a data source: a built-in metric or a named sensor stream. `parseOverlayTemplate` rejects a malformed file or unknown version but drops a single bad component with a warning, keeping the rest. A component whose data does not exist is `hidden`, never drawn with a dash, and `unavailableBindings` names it so the page can warn once.
+
+**Not here.** No rendering, no preview, no preset templates (`AV-1004`, `AV-1005`).
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
