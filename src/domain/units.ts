@@ -127,5 +127,7 @@ export function formatFileSize(bytes: number | undefined): string {
   const value = bytes as number;
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  // Videos are the one input that reaches gigabytes (AV-1002).
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

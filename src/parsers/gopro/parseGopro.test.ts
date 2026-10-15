@@ -23,7 +23,7 @@ const fromRaw = (fixture: string, fileName: string) =>
     {
       // `readBinaryFixture` hands back an ArrayBuffer; the payload is bytes.
       rawData: new Uint8Array(readBinaryFixture(fixture)),
-      timing: { videoDurationSeconds: 0, frameDurationMs: 0, samples: [] },
+      timing: { videoDurationSeconds: 0, frameIntervalSeconds: 0, samples: [] },
     },
     { fileName, idFactory: () => 'fixed-id' },
   );

@@ -1,6 +1,7 @@
 import { HashRouter, Route, Routes } from 'react-router-dom';
 import { AppShell } from './AppShell';
 import { HomePage } from './HomePage';
+import { OverlayPage } from './OverlayPage';
 import { TermsPage } from './TermsPage';
 import { VideoTelemetryPage } from './VideoTelemetryPage';
 import { ViewerPage } from './ViewerPage';
@@ -20,6 +21,7 @@ export function App() {
           <Route path={ROUTES.viewer} element={<ViewerPage />} />
           <Route path={ROUTES.terms} element={<TermsPage />} />
           <Route path={ROUTES.videoTelemetry} element={<VideoTelemetryPage />} />
+          <Route path={ROUTES.overlays} element={<OverlayPage />} />
           {/* Unknown hashes land on the homepage rather than a blank screen. */}
           <Route path="*" element={<HomePage />} />
         </Route>

@@ -53,6 +53,13 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
       'Read the GPS track a GoPro recorded alongside the picture, and view it as an activity. ' +
       'The video is read in this browser tab and never uploaded.',
   },
+  [ROUTES.overlays]: {
+    title: `Make telemetry overlays — ${SITE_NAME}`,
+    // Describes local generation, never a video or activity someone has open.
+    description:
+      'Draw the telemetry inside a GoPro video, or an activity file, over the picture for your ' +
+      'own video editor. Everything is drawn in this browser tab; nothing is uploaded.',
+  },
   [ROUTES.terms]: {
     title: `Terms and Conditions — ${SITE_NAME}`,
     description:

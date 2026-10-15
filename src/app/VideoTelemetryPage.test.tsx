@@ -36,7 +36,7 @@ function mockExtractionFrom(fixture: string) {
       options?.onProgress?.(1);
       return Promise.resolve({
         rawData: new Uint8Array(readBinaryFixture(fixture)),
-        timing: { videoDurationSeconds: 12, frameDurationMs: 33, samples: [] },
+        timing: { videoDurationSeconds: 12, frameIntervalSeconds: 1 / 30, samples: [] },
       });
     },
   }));

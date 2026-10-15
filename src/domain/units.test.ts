@@ -87,5 +87,7 @@ describe('formatFileSize', () => {
     expect(formatFileSize(512)).toBe('512 B');
     expect(formatFileSize(2048)).toBe('2.0 KB');
     expect(formatFileSize(5 * 1024 * 1024)).toBe('5.0 MB');
+    // A camera's file: gigabytes, where an activity file never goes.
+    expect(formatFileSize(3.5 * 1024 * 1024 * 1024)).toBe('3.50 GB');
   });
 });

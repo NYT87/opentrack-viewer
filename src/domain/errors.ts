@@ -13,6 +13,7 @@ export type ActivityErrorCode =
   | 'invalid_kml_xml'
   | 'gopro_extract_failed'
   | 'no_telemetry_track'
+  | 'no_video_index'
   | 'extraction_cancelled'
   | 'large_file_slow_parse'
   | 'invalid_selected_range'
@@ -29,6 +30,7 @@ const HINTS: Record<ActivityErrorCode, string> = {
   invalid_kml_xml: 'The file could not be read as KML XML. It may be truncated, corrupted, or carry a DTD.',
   gopro_extract_failed: 'The GoPro telemetry in this video could not be read.',
   no_telemetry_track: 'This video carries no GoPro telemetry track.',
+  no_video_index: 'This video has no index of its tracks. The recording may never have been finished.',
   extraction_cancelled: 'Reading the video was stopped.',
   large_file_slow_parse: 'This file is large and may take a moment to parse.',
   invalid_selected_range: 'Select a longer section of the activity.',

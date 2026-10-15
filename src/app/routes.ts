@@ -14,6 +14,12 @@ export const ROUTES = {
    * to stop, and the viewer has nowhere to put either.
    */
   videoTelemetry: '/video-telemetry',
+  /**
+   * AV-1002. Overlays are made on a page of their own: neither the viewer nor
+   * the extraction page draws anything over a picture, and this one shows no
+   * map, charts or export controls of the viewer's.
+   */
+  overlays: '/overlays',
 } as const;
 
 /**
@@ -23,4 +29,5 @@ export const ROUTES = {
 export const TOOLS_ITEMS = [
   { to: ROUTES.viewer, label: 'File viewer' },
   { to: ROUTES.videoTelemetry, label: 'Video telemetry' },
+  { to: ROUTES.overlays, label: 'Overlays' },
 ] as const;

@@ -389,7 +389,7 @@ Decision (`AV-906`): the browser no longer streams a GoPro video through `gpmf-e
 
 **Behaviour that changed with it**
 
-- A file that is not a container fails on its first box header with `gopro_extract_failed` ("not an MP4 or MOV container"), where before it read to the end and relied on a grace timer to give up. A container with no `moov` — a recording the camera never finished — is `no_telemetry_track`, naming the missing index.
+- A file that is not a container fails on its first box header with `gopro_extract_failed` ("not an MP4 or MOV container"), where before it read to the end and relied on a grace timer to give up. A container with no `moov` — a recording the camera never finished — is `no_video_index`, naming the missing index: its own code since `AV-1002`, because a page that keeps a telemetry-less video as a video to draw over must be able to tell "no telemetry track" from "nothing can be read from this at all" without matching on prose.
 - The sample table is checked against the file before any read: an index pointing past the end is refused rather than read short.
 - Cancellation is checked before every read, so a stop lands within one sample rather than one two-megabyte chunk.
 - The track's creation time is passed as the container states it. `gpmf-extract` shifted it by the *viewer's* time-zone offset, so the same file read differently in different places.
@@ -486,6 +486,18 @@ Burned-in export is therefore feasible without a server, and `AV-1007` can be sc
 1. **`AV-1006`, overlay-only.** PNG sequence in a store-only ZIP, everywhere; transparent VP9 WebM via `MediaRecorder`, offered only after a sub-second probe at export time records a transparent frame and reads a pixel back — never by sniffing the browser's name. Both run on an `OffscreenCanvas` in a worker, with progress and a stop button. No new dependency.
 2. **`AV-1007`, burned-in.** WebCodecs decode through `mp4box`'s sample table (the reader `TD-038` built, extended from one track to two), composite on canvas, hardware H.264 through `VideoEncoder` with `prefer-hardware` and a refusal if only software answers, audio copied through, Mediabunny writing MP4 to the origin-private file system. Desktop only; 4K accepted with the slower estimate shown first.
 3. **Template JSON** is not an export mode but a serialisation `AV-1003` needs for its own tests, so it ships with the model and costs nothing further.
+
+### TD-040: The Overlay Page Has a Store of Its Own, and Never Overrules a Chosen Activity
+
+Decision (`AV-1002`): the overlay page reads from `useOverlayStore`, a second in-memory store beside the viewer's, holding a local video (`File` plus the container's clock) and a normalized `Activity`. The extraction page writes the video with **Create overlays**, and the activity only if that slot is empty; the overlay page writes either when a file is chosen by hand. Nothing is persisted, and the page's empty state says that a reload loses the handoff and asks for the files again. Leaving either page aborts a read in progress, so no result lands in the store minutes after the reader moved on.
+
+**Why not the activity store.** The viewer's store means "the activity being viewed", and `Close activity` in the header acts on it. An overlay in progress is a different thing — it has a video the viewer has no use for, and closing the viewer's activity should not discard it. Two stores keep the two handoffs from treading on each other; the test that hands a video to the overlay page asserts the viewer stays empty.
+
+**What travels.** The `Activity` already carries the camera's other streams (`sensorStreams`, TD-034) and its warnings, so "auxiliary telemetry and safe warnings" cost no second channel. The clock — duration, frame interval and the first frame's wall-clock time where the container states one — is what `AV-1003` will need to put video time against point time.
+
+**Two rules at intake.** The store records where its activity came from — a file the reader chose, or the video beside it — and that provenance decides what a video's telemetry may replace: a reader's choice, never; the previous video's track, always, since it belonged to that video and goes with it when the video is swapped. Presence alone could not tell the two apart, and would have left a second video sitting beside the first one's track as if they matched. This holds whether the video arrives by hand or by handoff. A video whose track yields no activity is not an error here, as it is on the extraction page: one with no telemetry track at all, and one whose track has no GPS stream or no sample with a satellite fix — the committed HERO8 clip, recorded indoors — are both kept as a video that still needs an activity, the second with its clock, and the reason is shown beside the file. Only a file that could never be drawn over is refused: not a container, no index (`no_video_index`), or a read that failed. A stop is a stop, not a failure to explain.
+
+**Not here.** No map, no charts, no export panel: the viewer's regions are asserted absent before and after files arrive. Templates, the timeline, the preview and export are `AV-1003` to `AV-1007`.
 
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 

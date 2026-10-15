@@ -6,6 +6,8 @@ export interface FileDropZoneProps {
   /** Lowercase extensions accepted by the current build. */
   acceptedExtensions?: string[];
   disabled?: boolean;
+  /** For a page with more than one drop zone, so tests can tell them apart. */
+  testId?: string;
 }
 
 /**
@@ -17,6 +19,7 @@ export function FileDropZone({
   onFile,
   acceptedExtensions = SUPPORTED_FORMATS,
   disabled = false,
+  testId = 'file-input',
 }: FileDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
@@ -89,7 +92,7 @@ export function FileDropZone({
             // Reset so re-selecting the same file fires change again.
             event.target.value = '';
           }}
-          data-testid="file-input"
+          data-testid={testId}
         />
       </div>
 

@@ -676,6 +676,48 @@ test('offers video telemetry in the Tools menu (AV-907)', async ({ page }) => {
   await expect(page.getByRole('region', { name: 'Activity summary' })).toHaveCount(0);
 });
 
+test('offers overlays in the Tools menu, and takes files by hand after a reload (AV-1002)', async ({
+  page,
+}) => {
+  const requests = recordRequests(page);
+  await page.goto('./');
+
+  await page.getByRole('button', { name: 'Tools' }).click();
+  await page.getByRole('menuitem', { name: 'Overlays' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Overlays' })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe('#/overlays');
+
+  // Nothing of the viewer, before or after there is something to draw over.
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Activity charts' })).toHaveCount(0);
+
+  // A reload loses the memory-only handoff; the page says so and asks again.
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Nothing to overlay yet' })).toContainText(
+    /choose the files again/i,
+  );
+  await page.getByTestId('overlay-activity-input').setInputFiles('src/test/fixtures/simple-route.gpx');
+  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('simple-route.gpx');
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+
+  // The real HERO8 clip, read here as well: it carries telemetry but no fix,
+  // so it cannot supply the activity — but it is still a video, and the
+  // GPX chosen a moment ago is what gets drawn over it. The page says why.
+  await page.getByTestId('overlay-video-input').setInputFiles('src/test/fixtures/hero8.mp4');
+  const video = page.getByRole('region', { name: 'Video' });
+  await expect(video).toContainText('hero8.mp4', { timeout: 60_000 });
+  await expect(video).toContainText('0:13');
+  await expect(video).toContainText(/usable satellite fix/i);
+  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('simple-route.gpx');
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+
+  // Nothing left the device, whatever the outcome.
+  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
+    [],
+  );
+});
+
 test('navigates to the viewer from the Tools menu (AV-012)', async ({ page }) => {
   await page.goto('./');
 

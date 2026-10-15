@@ -27,7 +27,7 @@ describe('extracting GPMF from a real GoPro video (AV-903)', () => {
     expect(payload.rawData.length).toBeLessThan(readBinaryFixture('hero8.mp4').byteLength / 10);
 
     expect(payload.timing.videoDurationSeconds).toBeCloseTo(12.6, 0);
-    expect(payload.timing.frameDurationMs).toBeGreaterThan(0);
+    expect(payload.timing.frameIntervalSeconds).toBeGreaterThan(0);
     expect(payload.timing.samples.length).toBeGreaterThan(1);
     // The container's own creation time, not shifted by this machine's zone.
     expect(payload.timing.start?.toISOString()).toBe('2019-11-18T15:41:25.000Z');
@@ -136,7 +136,7 @@ describe('a generated container around a real payload (AV-906)', () => {
     expect(payload.rawData).toEqual(concat([hero7Payload(), sample]));
     expect(payload.timing.samples).toHaveLength(18);
     expect(payload.timing.videoDurationSeconds).toBeCloseTo(18.018, 3);
-    expect(payload.timing.frameDurationMs).toBeCloseTo(18.018 / 511, 6);
+    expect(payload.timing.frameIntervalSeconds).toBeCloseTo(18.018 / 511, 6);
   });
 });
 
@@ -260,7 +260,7 @@ describe('extraction limits and failures (AV-903)', () => {
     expect((error as ActivityError).code).toMatch(/gopro_extract_failed|no_telemetry_track/);
   });
 
-  it('says a container with no index has no telemetry', async () => {
+  it('says a container with no index cannot be read at all', async () => {
     // `ftyp` and an `mdat`, and then nothing: a recording the camera never
     // finished writing. There is no `moov`, so there is nothing to look in.
     const header = new Uint8Array([
@@ -269,7 +269,7 @@ describe('extraction limits and failures (AV-903)', () => {
     ]);
 
     await expect(extractGpmf(new File([header], 'cut.mp4'))).rejects.toMatchObject({
-      code: 'no_telemetry_track',
+      code: 'no_video_index',
       message: expect.stringMatching(/no index/i),
     });
   });

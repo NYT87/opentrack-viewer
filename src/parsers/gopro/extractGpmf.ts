@@ -8,12 +8,12 @@ import type { Mp4Buffer, Mp4File, Mp4Info, Mp4SampleInfo, Mp4TrackInfo } from 'm
 export interface GpmfTiming {
   videoDurationSeconds: number;
   /**
-   * The video's frame interval, in the unit `gopro-telemetry` expects for it:
-   * seconds, despite the name this field was given when the extractor still
-   * passed a library's figure through. Kept as it was so nothing downstream
-   * changes meaning.
+   * The video's frame interval, in seconds — the unit `gopro-telemetry` expects
+   * for it. Once named `frameDurationMs` after a library field it passed
+   * through, which lied about its unit beside `samples`, whose `cts` really is
+   * in milliseconds; renamed so the struct no longer needs prose to be read.
    */
-  frameDurationMs: number;
+  frameIntervalSeconds: number;
   /** Wall-clock start, where the container states one. */
   start?: Date;
   /** One entry per metadata sample: `cts` is milliseconds from the first frame. */
@@ -103,9 +103,12 @@ export async function extractGpmf(
   const boxes = await scanTopLevelBoxes(file, signal);
   const moov = boxes.find((entry) => entry.type === 'moov');
   if (!moov) {
+    // Its own code, not `no_telemetry_track`: a container with no index cannot
+    // be played either, and a caller that keeps a telemetry-less video as a
+    // video (AV-1002) must be able to tell the two apart without reading prose.
     throw new ActivityError(
-      'no_telemetry_track',
-      'This video has no index of its tracks, so there is no telemetry track to read from it.',
+      'no_video_index',
+      'This video has no index of its tracks, so nothing can be read from it. The recording may never have been finished.',
     );
   }
   if (moov.size > MAX_MOOV_BYTES) {
@@ -232,11 +235,13 @@ async function describeTracks(
   }
 
   if (failure !== undefined || !ready) {
+    // Not `no_video_index`: a `moov` was found before this was called, so an
+    // index that never becomes ready is one that could not be read, not one
+    // that is missing.
     throw new ActivityError(
-      failure !== undefined ? 'gopro_extract_failed' : 'no_telemetry_track',
-      failure !== undefined
-        ? 'The index of this video could not be read.'
-        : 'This video has no index of its tracks, so there is no telemetry track to read from it.',
+      'gopro_extract_failed',
+      'The index of this video could not be read.',
+      failure !== undefined ? { cause: failure } : undefined,
     );
   }
   return { ...ready, file: mp4 };
@@ -320,12 +325,12 @@ function toTiming(
       sample.timescale > 0 ? Math.max(end, (sample.dts + sample.duration) / sample.timescale) : end,
     0,
   );
-  const frameDurationMs =
+  const frameIntervalSeconds =
     videoSamples.length > 0 ? videoDurationSeconds / videoSamples.length : 0;
 
   return {
     videoDurationSeconds,
-    frameDurationMs,
+    frameIntervalSeconds,
     // The track's creation time, as the container states it. The previous
     // extractor shifted it by the *viewer's* time zone, which made the same
     // file read differently in different places.
