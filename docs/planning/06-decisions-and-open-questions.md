@@ -379,6 +379,26 @@ Decision (`AV-760`): KML is read in the browser with `DOMParser` and string look
 
 The matrix is not a second rule. Each exporter's `requires` predicate is the one consulted, so a KML activity is judged exactly as a GPX, FIT or TCX one would be — and the converter never invents time, sensor, lap or sport data to satisfy a target (`AV-762`). The export panel shows **Convert to …** rather than **Rewrite as …** for a KML source, since there is nothing to rewrite it as.
 
+### TD-038: The Telemetry Track Is Read From the Index, Not Streamed Past
+
+Decision (`AV-906`): the browser no longer streams a GoPro video through `gpmf-extract`. `extractGpmf` walks the file's top-level box headers — sixteen bytes each, stepping over the `mdat` by its declared size — hands **`mp4box`** the `moov` alone (plus the `ftyp` and each `mdat` header, which it needs to seek), asks it for the `gpmd` sample table, and reads exactly those byte ranges with `File.slice`. `gpmf-extract` is removed as a dependency; `mp4box` is depended on directly and still loaded on demand. `gopro-telemetry` is unchanged.
+
+**What the large-video simulation found.** TD-025 recorded that streaming kept peak memory proportional to the payload. That is true only of a file whose `moov` comes first, and a camera writes it **last**. `mp4box` cannot know which bytes are telemetry until the index arrives, so it holds every chunk until then: fed a simulated recording, it held 129 two-megabyte buffers for a 256 MB file and two gigabytes for a two-gigabyte one, measured with `process.memoryUsage().arrayBuffers` after a forced GC. The earlier figure — 86 KB out of 4.2 MB — was the payload's size, not the reader's peak; the clip was too small for the difference to show.
+
+**What the new reader costs.** `src/test/helpers/virtualVideo.ts` stands in an eight-gigabyte recording — past the 4 GB that forces the 64-bit `mdat` size — with a real HERO7 payload spread through it at a quarter-megabyte spacing, generating bytes only for the ranges read. Extraction reads under 200 KB of it: the headers, the `moov`, and seventeen sample reads totalling exactly the payload. Nothing lands in the picture. Memory grows by the payload, and the read takes milliseconds.
+
+**Behaviour that changed with it**
+
+- A file that is not a container fails on its first box header with `gopro_extract_failed` ("not an MP4 or MOV container"), where before it read to the end and relied on a grace timer to give up. A container with no `moov` — a recording the camera never finished — is `no_telemetry_track`, naming the missing index.
+- The sample table is checked against the file before any read: an index pointing past the end is refused rather than read short.
+- Cancellation is checked before every read, so a stop lands within one sample rather than one two-megabyte chunk.
+- The track's creation time is passed as the container states it. `gpmf-extract` shifted it by the *viewer's* time-zone offset, so the same file read differently in different places.
+- Bounds: a `moov` over 256 MB, a non-`mdat` box over 16 MB before the index, more than 4,096 top-level boxes, or a sample table totalling more than 512 MB is refused with a typed error, since each is a file lying about itself and honouring it would recreate the memory problem.
+
+**Defects that no longer apply.** Of the four `gpmf-extract` defects TD-025 lists, the never-stopped reader, the hang on an unparseable file and the untyped failures were all in the streaming path and are gone with it; the broken inline worker was never used. The library's own Web Worker is no longer a consideration, because nothing streams: moving extraction into an app-owned worker remains possible and remains unneeded.
+
+**Fixture.** `hero7-synthetic.mp4` is the HERO7 payload inside a generated container, built by `src/test/helpers/goproMp4.mjs` from `make-video-fixtures.mjs`: a `gpmd` track whose samples are the payload's `DEVC` chunks, a video track of 510 zero-byte frames for the duration and frame rate, and a `moov` at the end. It is the first video fixture with a satellite fix, which is what lets a browser test open a video and see a route — GoPro ships no outdoor sample small enough to commit. Like the FIT fixtures, the container is written by hand rather than by the library that reads it, so the two cannot share a mistake.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -409,6 +429,8 @@ ISC and MIT are both permissive and near-identical in effect, so nothing turns o
 - It reports **progress** by byte offset, and accepts a **cancellation token** checked on every chunk.
 - `mp4box.onReady` finds the track whose codec is `gpmd`; when there is none it terminates early rather than reading on.
 - Only the metadata samples are retained. **Peak memory is proportional to the GPMF payload — a few MB for a long recording — not to the video.**
+
+  **Superseded by TD-038.** The claim above held only for a file whose `moov` precedes its `mdat`. A camera writes the `moov` last, and the large-video simulation `AV-906` asked for showed `mp4box` holding the whole file until it arrived. `gpmf-extract` has been removed; the metadata track is now read from the index with `File.slice`, and the bullets above describe the path that was replaced.
 
 **Four defects in `gpmf-extract`.** The first was found by reading its source, the next two by running it in tests, and the last only by running it in a real browser. Each is summarized below; [`docs/upstream/gpmf-extract-issues.md`](../upstream/gpmf-extract-issues.md) writes them up as a self-contained report, with reproductions and suggested fixes, for anyone who wants to take them upstream:
 

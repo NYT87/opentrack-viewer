@@ -28,8 +28,8 @@
   "dependencies": {
     "fit-file-parser": "5.2.1",
     "gopro-telemetry": "1.2.11",
-    "gpmf-extract": "0.3.3",
     "maplibre-gl": "6.14.0",
+    "mp4box": "0.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-router-dom": "7.18.4",

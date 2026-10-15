@@ -1806,3 +1806,37 @@ test('converts a timed KML track to TCX and to FIT (AV-762)', async ({ page }) =
   await page.getByRole('button', { name: 'Convert to FIT' }).click();
   expect((await fit).suggestedFilename()).toBe('Morning-track.fit');
 });
+
+test('reads a GoPro video with a fix and maps it through the viewer (AV-906)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  const requests = recordRequests(page);
+
+  await page.goto('./#/video-telemetry');
+  // A real HERO7 payload, recorded outdoors with a fix, inside a generated
+  // container: the one video fixture that produces a route.
+  await page.getByTestId('file-input').setInputFiles('src/test/fixtures/hero7-synthetic.mp4');
+
+  const result = page.getByRole('region', { name: 'Extraction result' });
+  await expect(result).toBeVisible({ timeout: 60_000 });
+  await expect(result).toContainText('Telemetry found');
+  await expect(result).toContainText(/hero7/i);
+
+  await result.getByRole('button', { name: 'Open in viewer' }).click();
+  expect(new URL(page.url()).hash).toBe('#/viewer');
+
+  // The same viewer every other format gets: summary, map, charts, export.
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toContainText('GOPRO');
+  await expect(summary).toContainText('Avg speed');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Speed chart' })).toBeVisible();
+  await expect(page.getByRole('option', { name: /^GPX/ })).toBeEnabled();
+
+  // Nothing about the video, its payload or its route left the tab.
+  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
+    [],
+  );
+  expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+});

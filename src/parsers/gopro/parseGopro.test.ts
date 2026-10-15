@@ -289,3 +289,24 @@ describe('speed for a video, recorded or derived (AV-908)', () => {
     expect(resolvePerformanceMetric(activity, 'pace')).toBe('pace');
   }, 60_000);
 });
+
+describe('a video with a fix, end to end (AV-906)', () => {
+  it('reads the generated HERO7 clip into a mappable activity', async () => {
+    // The container is synthetic; the payload — and its satellite fix — is
+    // not. This is the path the browser test walks, without the browser.
+    const file = new File([readBinaryFixture('hero7-synthetic.mp4')], 'GH010007.MP4', {
+      type: 'video/mp4',
+    });
+    const activity = await parseGopro(await extractGpmf(file), {
+      fileName: file.name,
+      fileSizeBytes: file.size,
+    });
+
+    expect(activity.source.format).toBe('gopro');
+    expect(activity.points.length).toBeGreaterThan(100);
+    expect(activity.streams.hasLocation).toBe(true);
+    expect(activity.streams.hasTime).toBe(true);
+    expect(activity.derived?.distanceMeters).toBeGreaterThan(0);
+    expect(activity.metadata.device?.name).toMatch(/hero7/i);
+  });
+});

@@ -104,8 +104,8 @@ export function VideoTelemetryPage() {
           <section className="prose" aria-label="Reading the video">
             <h3 className="prose__title">Reading {state.fileName}</h3>
             <p>
-              Only the telemetry track is kept; the video itself streams past without being held
-              in memory, however large it is.
+              Only the telemetry track is read: the file's index says where it lies, and the
+              picture is skipped over rather than loaded, however large the video is.
             </p>
             <progress
               className="video__progress"
