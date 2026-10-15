@@ -32,6 +32,15 @@ device identifier is committed here (plan §13, Fixture Policy).
 | `gopro-with-telemetry.mp4` | An MP4 container whose tail carries GoPro's `gpmd` and `GoPro` markers, where a camera actually writes them. Generated: detection reads boxes, not pictures, so it holds no video. |
 | `plain-video.mp4` | The same container with no telemetry track — the "recognized, but not for us" case. |
 | `malformed.tcx` | Unclosed elements; must fail as `invalid_tcx_xml`. |
+| `route-linestring.kml` | An untimed `LineString` with altitudes, a `Style`, and a CDATA description holding `<b>`, `<img>` and `<script>` — which must come out as plain text with the script's body gone. |
+| `track-timed.kml` | A `gx:Track` with five `<when>`/`<gx:coord>` pairs and `gx:SimpleArrayData` heart rate, cadence and power, as Google Earth and Garmin write them. The timed fixture, so FIT and TCX conversion can be tested. |
+| `paused-track.kml` | A `gx:MultiTrack` holding two tracks 3.5 km apart: two segments, and the gap is not distance. |
+| `multi-segment.kml` | A `Folder` with a dated `LineString` placemark, a `MultiGeometry` of two `LineString`s and a `Point`, and a point-only placemark: three segments, two declined points, one ignored placemark date, and a document name that wins over the first leg's. |
+| `unsupported-features.kml` | Hostile: a `NetworkLink`, a `GroundOverlay`, a `gx:Tour`, a `Polygon`, a `Model`, an icon style and a description with `<script src>` and `<iframe>` — four `<href>`s pointing at `example.invalid` — around one three-point route. Tests assert nothing is requested and no URL reaches the page. |
+| `invalid-coordinates.kml` | A `LineString` with non-numeric, out-of-range, Null Island, one-value and `NaN`-altitude tuples, and a `gx:Track` with four `<when>` to three `<gx:coord>` (one empty) and a one-value heart-rate array. |
+| `no-route.kml` | Two `Point` placemarks, a `Polygon` and a `LineString` with no readable tuple; must fail as `no_route_points`, naming what it held. |
+| `dtd-entity.kml` | A `<!DOCTYPE` with nested `<!ENTITY>` declarations; must be refused as `invalid_kml_xml` before the parser expands anything. |
+| `malformed.kml` | Unclosed `LineString`; must fail as `invalid_kml_xml`. |
 
 ## The `.fit` fixtures are generated
 

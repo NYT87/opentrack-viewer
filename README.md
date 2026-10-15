@@ -1,6 +1,6 @@
 # OpenTrack Viewer
 
-**This app opens activity files locally in your browser. GPX, FIT and TCX parsing and all
+**This app opens activity files locally in your browser. GPX, FIT, TCX and KML parsing and all
 calculations happen on your device. The app does not upload your activity file
 to a backend.**
 
@@ -135,6 +135,9 @@ Enforced, not just documented:
 
 - Parsing uses `File`, `Blob`, `ArrayBuffer` and `DOMParser` only. No `fetch` is
   reachable from the intake or parsing path.
+- A KML file can name URLs in several places — `NetworkLink`, icons, overlay
+  images, models. They are counted into a warning and never requested; a unit
+  test and a browser test both assert that opening such a file makes no request.
 - The map is not constructed until an activity with a route is open, so simply
   loading the app makes no external request at all — a tile provider is not told
   that anyone is using it until there is something to show.
@@ -207,18 +210,21 @@ must be opt-in and scrubbed of activity data.
 | Elevation noise threshold | 3 m (`ELEVATION_NOISE_THRESHOLD_METERS`) | Consumer altimeter noise is ±2–5 m; raw delta summing inflates gain on flat routes. Covered by the flat-route test. |
 | Malformed points | Skipped with a warning; only an unreadable document fails | One bad `trkpt` should not cost the user the whole route. |
 | GPX segments | Preserved, never merged | §17 asked whether to merge or preserve. Merging is not a simplification, it is a fabrication: a `<trkseg>` boundary is where the recording stopped, so joining segments both adds distance the athlete did not cover and draws a straight line down a road they never took. `ActivityPoint.segmentIndex` carries the boundary; distance breaks at it and the route renders one LineString per segment. |
+| KML is read, not written | `LineString` and `gx:Track` into `Activity`; export through the registry | `AV-760`–`AV-762`, TD-033/TD-037. KML is a scene description, not a recording: only two of its geometries are a route, and they map into the same model every other format is read into, so a KML route is converted by the GPX, FIT and TCX writers that already exist rather than by three new KML-to-X paths. An untimed route is offered GPX and shown *why* FIT and TCX are withheld — the converter never invents a clock. There is no KML writer, so the panel says **Convert to**, never **Rewrite as**, and the homepage says so too. |
+| KML points, polygons and the rest | Counted and named, never drawn or silently dropped | Standalone `Point` placemarks are declined because the domain has no waypoint — GPX `<wpt>` is not read either — and one invented for KML alone would be the format-specific branch TD-002 forbids. Polygons, overlays, models, tours and network links go into one warning; styles and `<href>`s into `info` notes. A file with none of the two supported geometries is turned away with a message naming what it *did* hold. |
+| KML descriptions and DTDs | Text only, and no DTD at all | A description may be an HTML balloon: `<script>` and `<style>` go with their bodies, every other tag is stripped, and the result is cut to a label — read from `textContent`, so nothing in it is ever a DOM node. A `<!DOCTYPE` or `<!ENTITY` is refused on the raw text before `DOMParser` sees it, because the parser honours entity declarations and the expansion has already happened by the time there is a `doctype` to inspect. `.kmz` is out of scope until archive limits are designed. |
 | Web Workers | Deferred until FIT (AV-702) | Measured, not guessed: main-thread GPX parsing blocks the UI for ~0.07 s at 5,000 points, ~0.5 s at 50,000 and ~0.8 s at 100,000 — below the plan's "if UI stalls" bar (§14) for realistic files. Moving the *XML* formats to a worker is not a relocation: `DOMParser` does not exist in a worker (verified), so GPX and TCX would both need a DOM-free XML parser — the first non-essential runtime dependency. FIT is binary and needs no DOM, so it can go straight into a worker for free. FIT import has since landed (`AV-702`) still on the main thread: the parse is fast enough on realistic files that the same "if UI stalls" bar has not been met, and the worker move stays available whenever it is. |
 
 ## Status against the plan
 
 The plan lives in [`docs/planning/`](docs/planning/README.md).
 
-Implemented: most of **M0–M6**, **M3.5**, **Stage 3** and **Stage 4** — project
+Implemented: most of **M0–M6**, **M3.5**, **Stage 3**, **Stage 4** and **Stage 5** — project
 foundation, the GPX route vertical slice, summary stats, the chart panel with
-the x-axis switch and run-specific charts, map/chart synchronization, FIT and
-TCX import, and browser-side GPX, FIT and TCX export (`AV-001`…`003`, `AV-101`…`103`,
+the x-axis switch and run-specific charts, map/chart synchronization, FIT,
+TCX and KML import, and browser-side GPX, FIT and TCX export (`AV-001`…`003`, `AV-101`…`103`,
 `AV-201`…`203`, `AV-301`…`304`, `AV-401`…`404`, `AV-501`…`507`, `AV-513`, `AV-515`,
-`AV-601`…`605`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-013`, `AV-406`, `AV-407`, `AV-550`–`AV-555`, `AV-701`–`AV-704`, `AV-750`–`AV-753`, plus `AV-801`–`AV-803`).
+`AV-601`…`605`, `AV-004`…`007`, `AV-008`, `AV-009`, `AV-010`, `AV-012`, `AV-405`, `AV-508`–`AV-512`, `AV-514`, `AV-011`, `AV-013`, `AV-406`, `AV-407`, `AV-550`–`AV-555`, `AV-701`–`AV-704`, `AV-750`–`AV-753`, `AV-760`–`AV-763`, plus `AV-801`–`AV-803`).
 
 The plan grew in `f42a152` with two new epics:
 
@@ -326,5 +332,9 @@ external requests, asserted in `e2e/viewer.spec.ts`.
   exist in a worker, so moving either XML format there (GPX or TCX) also means
   replacing it with a DOM-free XML parser. FIT is binary and could move on its
   own whenever the cost justifies it.
+- KML is read, not written: a KML activity converts to GPX, FIT or TCX, and
+  nothing converts to KML. `.kmz` archives are not accepted at all. A route
+  that crosses the antimeridian is kept as recorded, which the basemap may
+  draw the long way round.
 - Map hover uses a linear nearest-coordinate scan. Fine for typical tracks;
   a very dense track would benefit from spatial indexing.

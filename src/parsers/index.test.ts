@@ -118,3 +118,59 @@ describe('video is not accepted by the generic intake (AV-907)', () => {
     });
   });
 });
+
+describe('KML intake (AV-761)', () => {
+  it('routes a .kml file through the same pipeline as GPX', async () => {
+    const { activity, detection } = await parseActivityFile(
+      fixtureFile('route-linestring.kml', 'application/vnd.google-earth.kml+xml'),
+    );
+
+    expect(detection).toMatchObject({ format: 'kml', via: 'xml-root' });
+    expect(activity.source.format).toBe('kml');
+    expect(activity.points).toHaveLength(5);
+    expect(activity.derived?.distanceMeters).toBeGreaterThan(0);
+    // Validation's own note about the missing clock, exactly once.
+    expect(activity.warnings.filter((w) => w.code === 'no_time_stream')).toHaveLength(1);
+  });
+
+  it('does not trust the MIME type: a KML body is read by its root, whatever it is called', async () => {
+    const { detection } = await parseActivityFile(
+      fixtureFile('track-timed.kml', 'application/octet-stream'),
+    );
+
+    expect(detection).toMatchObject({ format: 'kml', via: 'xml-root' });
+  });
+
+  it('reports malformed KML and a DTD as KML failures, with KML-specific advice', async () => {
+    await expect(parseActivityFile(fixtureFile('malformed.kml'))).rejects.toMatchObject({
+      code: 'invalid_kml_xml',
+    });
+    await expect(parseActivityFile(fixtureFile('dtd-entity.kml'))).rejects.toMatchObject({
+      code: 'invalid_kml_xml',
+      hint: expect.stringMatching(/KML/),
+    });
+  });
+
+  it('turns away a KML file that holds places but no route', async () => {
+    await expect(parseActivityFile(fixtureFile('no-route.kml'))).rejects.toMatchObject({
+      code: 'no_route_points',
+    });
+  });
+
+  it('makes no network request for a KML file full of links (privacy regression)', async () => {
+    const calls: unknown[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((...args: unknown[]) => {
+      calls.push(args);
+      return Promise.reject(new Error('network access is not allowed during parsing'));
+    }) as typeof fetch;
+
+    try {
+      await parseActivityFile(fixtureFile('unsupported-features.kml'));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toHaveLength(0);
+  });
+});

@@ -266,7 +266,7 @@ Reason: GPX, FIT, TCX, and future sources should produce the same overlay output
 
 ### TD-033: KML Is an Input Adapter, Not a Pairwise Converter
 
-Decision: KML import should map activity-relevant KML geometry into the normalized `Activity` model, then use the existing exporter registry for downloads. The initial scope supports route `LineString` and timed `gx:Track` data, preserves multiple supported geometries as segments, and requires an explicit waypoint decision for standalone `Point` placemarks. It does not fetch or render external KML resources.
+Decision: KML import should map activity-relevant KML geometry into the normalized `Activity` model, then use the existing exporter registry for downloads. The initial scope supports route `LineString` and timed `gx:Track` data, preserves multiple supported geometries as segments, and requires an explicit waypoint decision for standalone `Point` placemarks. It does not fetch or render external KML resources. The field mapping, the point-placemark policy and the conversion matrix are TD-037.
 
 Reason: KML is a broad geographic-visualization language, while GPX, FIT, and TCX have different activity-data constraints. A normalized adapter avoids a separate KML-to-GPX, KML-to-FIT, and KML-to-TCX implementation, keeps conversion behavior consistent, and lets exporter validation explain why an untimed or otherwise incomplete KML route cannot be represented by a target without fabricated data.
 
@@ -321,6 +321,63 @@ Decision (`AV-518`): chart capability, default visibility, and selected visibili
 Reason: pace and speed are two views of compatible time/distance data, not measurements owned by running and cycling. A cyclist may train by pace and a runner may want speed; neither request should require changing the file. Running cadence and pedal cadence remain separate because their units and normalized fields differ, but either may be shown under any presentation type when its actual stream exists.
 
 The selector may explain an incapable option, but the chart area stays quiet: no title, no placeholder and no reserved space. Visibility customization is per loaded activity and resets on replacement. Changing `View as` reapplies recommendations only before the user customizes the chart set, so a deliberate selection is not silently overwritten.
+
+### TD-037: KML Scope, Field Mapping and Conversion Matrix
+
+Decision (`AV-760`): KML is read in the browser with `DOMParser` and string lookups by local name, exactly as GPX and TCX are — no new dependency, no KML writer. It implements TD-033: the parser maps the two KML geometries that *are* a route into `Activity`, and every export goes through the registry.
+
+**Namespaces.** Elements are matched by local name, so KML 2.2 (`http://www.opengis.net/kml/2.2`), 2.3, the legacy `earth.google.com/kml/2.x` namespaces and an undeclared namespace all read the same way; the root must still be `<kml>`. The Google extension (`http://www.google.com/kml/ext/2.2`) is what carries a timed track, so `gx:Track`, `gx:MultiTrack`, `gx:coord`, `gx:SimpleArrayData` and `gx:value` are read whether the prefix is `gx:` or anything else. A root in an unrecognized namespace is read as 2.2 with an `info` warning. Detection needs a `<kml` root in the first 512 bytes or a `.kml` extension; the MIME type is never consulted (`AV-761`).
+
+**Import — KML to `Activity`**
+
+| KML | `Activity` |
+| --- | --- |
+| `Document/name` | `metadata.name` when several placemarks contribute geometry — the file's title, not the first leg's |
+| `Placemark/name` | `metadata.name` when it is the only route placemark, as a GPX `<trk>` names its activity |
+| `Placemark/description` | `metadata.description`, **as plain text**: `<script>` and `<style>` blocks removed with their bodies, every other tag stripped, whitespace collapsed, cut to 500 characters. Read from `textContent`, so a CDATA balloon is never a DOM node; `<script>` and `<style>` written as XML elements are removed from a copy before the text is collected |
+| `LineString/coordinates` | One segment of points. Tuples are `lon,lat[,alt]` — longitude **first** — separated by whitespace |
+| `gx:Track` | One segment: `<when>` *i* pairs with `<gx:coord>` *i* (`lon lat [alt]`, space-separated). An empty `<gx:coord>` keeps its time with no position; a file in which no sample has a position is refused with `no_route_points` |
+| `gx:MultiTrack` | One segment per child `gx:Track`; `gx:interpolate` is ignored because a gap is never drawn across |
+| `MultiGeometry` | Each `LineString` or `gx:Track` member is a segment, in document order |
+| `Folder`, `Document` | Transparent containers, walked in order to a depth of 32. A container nested deeper is not entered; it and the placemarks inside it are counted into one `warning` (`kml_nesting_too_deep`) that says the route may be incomplete, and the `no_route_points` message names them when nothing shallower was a route |
+| Third tuple value | `point.elevationMeters`. `altitudeMode` is **not** consulted: it tells a globe how to drape the line, not what was measured, and a device export states its altitudes whichever mode it then chose |
+| `gx:SimpleArrayData[@name]` under `ExtendedData/SchemaData` | Matched by position to the track's samples. `heartrate`/`heart_rate`/`hr` → `heartRateBpm`; `cadence` → `runningCadenceSpm` (KML states no sport, so the untyped-GPX rule applies: foot cadence); `power`/`watts` → `powerWatts`; `speed` → `speedMetersPerSecond` when plausible; `temperature`/`temp` → `temperatureCelsius`. Other names are left where they are |
+| Sport | `unknown`, always. KML describes a place, not a workout; the viewer asks whether to show speed or pace (`AV-908`) |
+
+**Standalone `Point` placemarks are declined, not modelled.** A placemark whose only geometry is a `Point` — and a `Point` inside a `MultiGeometry` — is counted and reported in one `warning` (`kml_points_not_read`); nothing is drawn. The domain has no waypoint: GPX `<wpt>` is not read either, and a waypoint model invented for KML alone would be the format-specific branch TD-002 exists to prevent. When a format-independent waypoint model is designed, KML points map onto it; until then the warning says what the file held.
+
+**Deterministic behaviour for the awkward cases**
+
+- *Several placemarks or tracks:* each becomes a segment in document order, as GPX `<trkseg>`s do. Distance is not accumulated across a boundary and no line is drawn over it; `multiple_segments` is reported.
+- *Mismatched `<when>` and `<gx:coord>` counts:* the pairs that line up are kept, the surplus is counted among the unreadable coordinates, and `kml_track_count_mismatch` says so. Nothing is interpolated.
+- *A `gx:SimpleArrayData` with the wrong sample count:* matched by position, surplus dropped, `kml_sensor_count_mismatch` reported.
+- *Missing altitude or time:* absent from the point, like every other format. A route with no `<when>` at all gets `no_time_data`, and the warning says this limits conversion.
+- *A `TimeStamp` or `TimeSpan` on the placemark:* ignored for the points. One date cannot time a track, and applying it to every vertex would invent a clock; `kml_placemark_time_ignored` is reported as `info`.
+- *Invalid coordinates:* `toValidCoordinate` decides, as everywhere else — non-numeric, non-finite, out of range and Null Island are skipped and counted in one `kml_invalid_coordinates` warning. A non-finite third value drops the altitude and keeps the position. A geometry with no valid vertex is not a segment.
+- *Antimeridian crossings:* kept as recorded. Distance is great-circle and correct; the map draws the segment as the file states it, which on a Mercator basemap may run the long way round. No splitting, because splitting is a fabricated boundary.
+- *A file with no route:* `no_route_points`, with a message naming what the file *did* hold (points, polygons, overlays, unreadable coordinates).
+
+**Refused or reported, never read**
+
+| Feature | Behaviour |
+| --- | --- |
+| `<!DOCTYPE`, `<!ENTITY` | **Refused** before parsing with `invalid_kml_xml`. KML never needs a DTD, and an internal subset is where entity expansion lives — `DOMParser` honours it, so the check is on the text, not on `document.doctype` |
+| `Polygon`, `LinearRing` outside one, `Model`, `GroundOverlay`, `ScreenOverlay`, `PhotoOverlay`, `gx:Tour`, `NetworkLink` | Counted and named in one `warning` (`kml_unsupported_features`) |
+| `Style`, `StyleMap`, `Schema`, `styleUrl` | Counted; one `info` warning that styling is presentation, not data |
+| Every non-empty `<href>` anywhere — network links, icons, overlay images, model links | Counted into one `info` warning that says none were requested. The parser touches no network API; a unit test and a browser test assert no request leaves the tab, and the URLs themselves are never repeated into a warning |
+| `.kmz` and any archive | **Out of scope.** Not detected, not accepted. Archive ingestion needs its own size, entry-count, compression-ratio and external-asset limits before a compressed file is opened in a tab |
+| `ExtendedData/Data`, `Region`, `LookAt`, `Camera`, `visibility`, `open` | Ignored silently: nothing an activity could carry is in them |
+
+**Conversion matrix — normalized KML data against each registered exporter**
+
+| Target | Requires | Untimed `LineString` | Timed `gx:Track` | Expected loss on write |
+| --- | --- | --- | --- | --- |
+| GPX | A point with coordinates | ✅ Offered | ✅ Offered | Styles, description HTML, points, polygons, overlays; `sport` stays untyped |
+| FIT | A point with a timestamp | ❌ Disabled: *FIT needs timestamps* | ✅ Offered | As above, plus the description; sport exports as generic |
+| TCX | A point with a timestamp | ❌ Disabled: *TCX needs timestamps* | ✅ Offered | As above; one lap covering the track is stated because the schema demands it; temperature dropped |
+| KML | — | — | — | **Not offered.** There is no KML exporter; the format appears as an output only once one is written and registered |
+
+The matrix is not a second rule. Each exporter's `requires` predicate is the one consulted, so a KML activity is judged exactly as a GPX, FIT or TCX one would be — and the converter never invents time, sensor, lap or sport data to satisfy a target (`AV-762`). The export panel shows **Convert to …** rather than **Rewrite as …** for a KML source, since there is nothing to rewrite it as.
 
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
@@ -413,6 +470,8 @@ question deleted, so the reasoning stays findable.
 | Preserve or merge GPX route segments? | Preserve. Merging is a fabrication: it adds distance the athlete did not cover and draws a line down a road they never took. |
 | Skip malformed points or fail the file? | Skip with a warning, and fail only when nothing usable remains. |
 | App-shell offline only, or route-only mode too? | Both shipped (`AV-802`, `AV-803`). |
+| Do standalone KML `Point` placemarks become waypoints? | No, not yet. They are counted and reported in one warning; a waypoint model invented for KML alone would be a format-specific branch. See TD-037. |
+| Which KML features are lost on conversion, and how is the reader told? | Polygons, overlays, models, tours and network links in one `warning`; styles and external links in `info` notes; points in a warning of their own. Each exporter's own requirement decides what can be written (TD-037). |
 
 ### Answered, needing no work
 

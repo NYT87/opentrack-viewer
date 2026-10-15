@@ -41,7 +41,7 @@ const EXTENSION_FORMATS: Record<string, ActivitySourceFormat> = {
  * drop zone has nowhere to put. Adding it here would build the thing that task
  * exists to avoid.
  */
-export const SUPPORTED_FORMATS: ActivitySourceFormat[] = ['gpx', 'fit', 'tcx'];
+export const SUPPORTED_FORMATS: ActivitySourceFormat[] = ['gpx', 'fit', 'tcx', 'kml'];
 
 export function extensionOf(fileName: string): string {
   const dot = fileName.lastIndexOf('.');
@@ -101,7 +101,7 @@ function unsupportedMessage(format: ActivitySourceFormat): string {
       'support for them is not available yet.';
   }
   return (
-    `${format.toUpperCase()} files are not supported yet. This build reads GPX, FIT and TCX.`
+    `${format.toUpperCase()} files are not supported yet. This build reads GPX, FIT, TCX and KML.`
   );
 }
 

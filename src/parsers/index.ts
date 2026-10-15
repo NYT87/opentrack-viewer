@@ -4,6 +4,7 @@ import { assertUsableActivity } from '../domain/validation';
 import { detectSupportedFormat, type FormatDetection } from './detectFormat';
 import { parseGpx } from './gpx/parseGpx';
 import { parseTcx } from './tcx/parseTcx';
+import { parseKml } from './kml/parseKml';
 
 export { detectFormat, detectSupportedFormat, SUPPORTED_FORMATS } from './detectFormat';
 export type { FormatDetection } from './detectFormat';
@@ -26,6 +27,14 @@ const REGISTRY: Partial<Record<FormatDetection['format'], ParserFn>> = {
     options.onPhase?.('processing');
     return parseTcx(text, { fileName: file.name, fileSizeBytes: file.size });
   },
+  // AV-761. XML again, and read into the same `Activity` as everything else:
+  // a KML route is converted by the exporter registry, never by a KML-specific
+  // path (TD-033). No URL the file names is ever requested.
+  kml: async (file, options) => {
+    const text = await readText(file);
+    options.onPhase?.('processing');
+    return parseKml(text, { fileName: file.name, fileSizeBytes: file.size });
+  },
   // No `gopro` entry: video is read on its own route (`AV-907`), not through
   // the generic intake, because it needs progress and cancellation. See
   // `SUPPORTED_FORMATS`.
@@ -46,6 +55,7 @@ const PARSE_FAILURE: Partial<Record<FormatDetection['format'], ActivityErrorCode
   gpx: 'invalid_gpx_xml',
   fit: 'fit_parse_failed',
   tcx: 'invalid_tcx_xml',
+  kml: 'invalid_kml_xml',
 };
 
 /** Files above this size get a "slow parse" heads-up warning (plan §15). */

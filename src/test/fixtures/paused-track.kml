@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document>
+    <Placemark>
+      <name>Track with a pause</name>
+      <gx:MultiTrack>
+        <gx:interpolate>0</gx:interpolate>
+        <gx:Track>
+          <when>2024-03-02T08:00:00Z</when>
+          <when>2024-03-02T08:00:30Z</when>
+          <when>2024-03-02T08:01:00Z</when>
+          <gx:coord>0.0000 51.5000</gx:coord>
+          <gx:coord>0.0000 51.5010</gx:coord>
+          <gx:coord>0.0000 51.5020</gx:coord>
+        </gx:Track>
+        <gx:Track>
+          <when>2024-03-02T08:20:00Z</when>
+          <when>2024-03-02T08:20:30Z</when>
+          <gx:coord>0.0500 51.5020</gx:coord>
+          <gx:coord>0.0500 51.5030</gx:coord>
+        </gx:Track>
+      </gx:MultiTrack>
+    </Placemark>
+  </Document>
+</kml>

@@ -1,7 +1,7 @@
 /**
  * Format-independent activity domain model (AV-101, TD-002).
  *
- * Every parser — GPX, FIT and TCX — must produce this shape. UI, stats, map
+ * Every parser — GPX, FIT, TCX and KML — must produce this shape. UI, stats, map
  * and chart layers depend on this module only — never on parser output types.
  */
 

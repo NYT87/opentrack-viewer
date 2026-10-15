@@ -222,3 +222,42 @@ describe('a target that cannot be written is disabled, not broken (AV-555)', () 
     }
   });
 });
+
+describe('ExportPanel with a KML source (AV-762)', async () => {
+  const { parseKml } = await import('../parsers/kml/parseKml');
+  const route = parseKml(readFixture('route-linestring.kml'), { fileName: 'route-linestring.kml' });
+  const track = parseKml(readFixture('track-timed.kml'), { fileName: 'track-timed.kml' });
+
+  it('defaults to GPX and names the action a conversion, since KML is not written', () => {
+    render(<ExportPanel activity={route} />);
+
+    expect(screen.getByLabelText('Format')).toHaveValue('gpx');
+    expect(screen.queryByRole('option', { name: /KML/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /same format/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Convert to GPX' })).toBeEnabled();
+    expect(screen.getByText(/rather than translated from KML directly/)).toBeInTheDocument();
+  });
+
+  it('disables the targets an untimed route cannot satisfy', () => {
+    render(<ExportPanel activity={route} />);
+
+    // Disabled in the list, so a reader cannot pick a format that would then
+    // refuse; the reason is the exporter's own, tested with the registry.
+    expect(screen.getByRole('option', { name: 'FIT — unavailable' })).toBeDisabled();
+    expect(screen.getByRole('option', { name: 'TCX — unavailable' })).toBeDisabled();
+    expect(screen.getByRole('option', { name: 'GPX' })).toBeEnabled();
+  });
+
+  it('offers every target for a timed track and downloads the conversion', async () => {
+    const user = userEvent.setup();
+    render(<ExportPanel activity={track} />);
+
+    expect(screen.getByRole('option', { name: 'TCX' })).toBeEnabled();
+    await user.selectOptions(screen.getByLabelText('Format'), 'tcx');
+    await user.click(screen.getByRole('button', { name: 'Convert to TCX' }));
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.fileName).toBe('Morning-track.tcx');
+    expect(await saved[0]?.blob.text()).toContain('<TrainingCenterDatabase');
+  });
+});

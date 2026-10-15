@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Places, not a route</name>
+    <Placemark><name>Start</name><Point><coordinates>0.0000,51.5000</coordinates></Point></Placemark>
+    <Placemark><name>Finish</name><Point><coordinates>0.0010,51.5010</coordinates></Point></Placemark>
+    <Placemark>
+      <name>Field</name>
+      <Polygon><outerBoundaryIs><LinearRing>
+        <coordinates>0.0000,51.5000 0.0010,51.5000 0.0010,51.5010 0.0000,51.5000</coordinates>
+      </LinearRing></outerBoundaryIs></Polygon>
+    </Placemark>
+    <Placemark>
+      <name>Nothing readable</name>
+      <LineString><coordinates>abc,def 0,0</coordinates></LineString>
+    </Placemark>
+  </Document>
+</kml>

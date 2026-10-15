@@ -31,9 +31,9 @@ export interface RouteMetadata {
 }
 
 export const DEFAULT_METADATA: RouteMetadata = {
-  title: `${SITE_NAME} — open GPX, FIT and TCX activity files in your browser`,
+  title: `${SITE_NAME} — open GPX, FIT, TCX and KML activity files in your browser`,
   description:
-    'View GPX, FIT and TCX activity files locally in your browser. Routes, elevation, pace, ' +
+    'View GPX, FIT, TCX and KML activity files locally in your browser. Routes, elevation, pace, ' +
     'speed, heart rate and laps, with no upload, no account and no backend.',
 };
 
@@ -43,7 +43,7 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
     title: `Open an activity file — ${SITE_NAME}`,
     // Describes the tool, never the file someone happens to have open.
     description:
-      'Open a GPX, FIT or TCX file to see its route, distance, duration, elevation and sensor ' +
+      'Open a GPX, FIT, TCX or KML file to see its route, distance, duration, elevation and sensor ' +
       'charts. Parsing happens in this browser tab; your file is never uploaded.',
   },
   [ROUTES.videoTelemetry]: {

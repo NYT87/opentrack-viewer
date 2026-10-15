@@ -11,6 +11,11 @@ const FORMATS: FormatSupport[] = [
   { name: 'GPX', status: 'Supported', detail: 'Tracks and planned routes, with elevation and sensor extensions.' },
   { name: 'FIT', status: 'Supported', detail: 'Garmin and Wahoo recordings, including non-GPS indoor activities.' },
   { name: 'TCX', status: 'Supported', detail: 'Training Center files, with their laps and calories.' },
+  {
+    name: 'KML',
+    status: 'Supported',
+    detail: 'Google Earth routes and timed tracks, read for viewing and conversion to GPX, FIT or TCX. Not written.',
+  },
 ];
 
 /**
@@ -25,7 +30,7 @@ export function HomePage() {
         <header className="page__header">
           <h2 className="page__title">Open your activity files, privately</h2>
           <p className="page__intro">
-            OpenTrack Viewer opens GPX, FIT and TCX activity files in your browser and shows the route, the
+            OpenTrack Viewer opens GPX, FIT, TCX and KML activity files in your browser and shows the route, the
             numbers and the charts behind a workout — without the file ever leaving your device.
           </p>
           <p>

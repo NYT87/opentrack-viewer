@@ -1566,7 +1566,7 @@ test('falls back to the homepage for an unknown hash route (AV-006)', async ({ p
 
   // The title falls back to the site default rather than naming a route that
   // does not exist (AV-013).
-  await expect(page).toHaveTitle(/open GPX, FIT and TCX activity files/);
+  await expect(page).toHaveTitle(/open GPX, FIT, TCX and KML activity files/);
   expect(errors).toEqual([]);
 
   // ...and navigating on from it works.
@@ -1626,7 +1626,7 @@ test('updates the title on navigation, and never names the open file (AV-013)', 
 
   // Navigating changes it, with no reload: the brand is the link home.
   await page.getByRole('link', { name: 'OpenTrack Viewer', exact: true }).click();
-  await expect(page).toHaveTitle(/open GPX, FIT and TCX activity files/);
+  await expect(page).toHaveTitle(/open GPX, FIT, TCX and KML activity files/);
 
   await page.getByRole('link', { name: 'Open an activity' }).first().click();
   await loadFixture(page, 'route-with-elevation.gpx');
@@ -1718,4 +1718,91 @@ test('fixture files are never read by the server', async () => {
   // Sanity check that fixtures are local test data, not network resources.
   const gpx = readFileSync(join(FIXTURE_DIR, 'simple-route.gpx'), 'utf-8');
   expect(gpx).toContain('<gpx');
+});
+
+test('opens a KML file and lists what it held that the route does not (AV-761, AV-762)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  const requests = recordRequests(page);
+
+  // A file that points at the network in four places, holds a polygon, an
+  // overlay, a model, a tour and a network link — and one three-point route.
+  await loadFixture(page, 'unsupported-features.kml');
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toContainText('KML');
+  await expect(summary).toContainText('The actual route');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+
+  // The conversion review: every loss said, before any export.
+  const warnings = page.locator('details.warnings');
+  await expect(warnings).toContainText(/parser warning/);
+  await warnings.locator('summary').click();
+  await expect(warnings).toContainText(/Not read: 1 polygon, 1 image overlay, 1 3D model, 1 tour and 1 network link/);
+  await expect(warnings).toContainText(/4 external resources/);
+
+  // No URL from the file reaches the page, as text or as a request.
+  await expect(page.locator('body')).not.toContainText('example.invalid');
+  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
+    [],
+  );
+  expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+});
+
+test('converts an untimed KML route to GPX, and withholds the formats that need a clock (AV-762)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-linestring.kml');
+
+  // KML is not written, so there is no rewrite: the default is a conversion.
+  await expect(page.getByLabel('Format')).toHaveValue('gpx');
+  await expect(page.getByRole('option', { name: /KML/ })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: /^FIT/ })).toBeDisabled();
+  await expect(page.getByRole('option', { name: /^TCX/ })).toBeDisabled();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to GPX' }).click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe('Riverside-loop.gpx');
+
+  const stream = await saved.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const xml = Buffer.concat(chunks);
+  expect(xml.toString('utf-8')).toContain('<gpx');
+
+  // Hand it straight back to the app: the real proof it is readable GPX.
+  await page.getByRole('button', { name: 'Close activity' }).click();
+  await page.getByTestId('file-input').setInputFiles({
+    name: saved.suggestedFilename(),
+    mimeType: 'application/gpx+xml',
+    buffer: xml,
+  });
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toContainText('GPX');
+  await expect(summary).toContainText('Riverside loop');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+});
+
+test('converts a timed KML track to TCX and to FIT (AV-762)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'track-timed.kml');
+
+  // A gx:Track has a clock, so every registered target is on offer.
+  await expect(page.getByRole('option', { name: /^FIT/ })).toBeEnabled();
+  await expect(page.getByRole('option', { name: /^TCX/ })).toBeEnabled();
+  await expect(page.getByRole('region', { name: 'Heart rate chart' })).toBeVisible();
+
+  await page.getByLabel('Format').selectOption('tcx');
+  const tcx = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to TCX' }).click();
+  expect((await tcx).suggestedFilename()).toBe('Morning-track.tcx');
+
+  await page.getByLabel('Format').selectOption('fit');
+  const fit = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to FIT' }).click();
+  expect((await fit).suggestedFilename()).toBe('Morning-track.fit');
 });

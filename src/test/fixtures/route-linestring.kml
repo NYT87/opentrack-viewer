@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Synthetic KML document</name>
+    <Style id="route">
+      <LineStyle><color>ff0000ff</color><width>4</width></LineStyle>
+    </Style>
+    <Placemark>
+      <name>Riverside loop</name>
+      <description><![CDATA[A <b>planned</b> route.<br/><img src="http://example.invalid/banner.png"/><script>alert('kml')</script> Drawn by hand.]]></description>
+      <styleUrl>#route</styleUrl>
+      <LineString>
+        <tessellate>1</tessellate>
+        <altitudeMode>absolute</altitudeMode>
+        <coordinates>
+          0.0000,51.5000,100.0
+          0.0000,51.5010,120.0
+          0.0010,51.5020,110.0
+          0.0020,51.5020,105.0
+          0.0020,51.5010,95.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>

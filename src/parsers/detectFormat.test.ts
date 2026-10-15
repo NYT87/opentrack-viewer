@@ -80,7 +80,7 @@ describe('detectSupportedFormat', () => {
     // User-facing text that must not outlive the format list it describes.
     let hint = '';
     try {
-      await detectSupportedFormat(new File(['<kml />'], 'route.kml'));
+      await detectSupportedFormat(new File(['{}'], 'route.geojson'));
     } catch (error) {
       hint = (error as ActivityError).hint;
     }
@@ -91,11 +91,20 @@ describe('detectSupportedFormat', () => {
     }
   });
 
-  it('rejects recognized-but-unimplemented formats', async () => {
-    // KML is recognized, but is only ever evaluated on user need.
-    await expect(detectSupportedFormat(new File(['<kml />'], 'route.kml'))).rejects.toMatchObject({
-      code: 'unsupported_format',
+  it('accepts KML, which this build now parses (AV-761)', async () => {
+    const kml = '<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2" />';
+
+    await expect(detectSupportedFormat(new File([kml], 'route.kml'))).resolves.toMatchObject({
+      format: 'kml',
+      via: 'xml-root',
     });
+  });
+
+  it('rejects recognized-but-unimplemented formats', async () => {
+    // GeoJSON is recognized, but is only ever evaluated on user need.
+    await expect(
+      detectSupportedFormat(new File(['{"type":"FeatureCollection"}'], 'route.geojson')),
+    ).rejects.toMatchObject({ code: 'unsupported_format' });
   });
 });
 
