@@ -18,6 +18,12 @@ export default tseslint.config(
     },
   },
   {
+    // The one plain-JS file that runs in a browser: the AV-1001 probe page
+    // (TD-039). It is served to Playwright, never bundled.
+    files: ['scripts/overlay-export-probe/probe.js'],
+    languageOptions: { globals: { ...globals.browser, MP4Box: 'readonly' } },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,

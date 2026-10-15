@@ -399,6 +399,94 @@ Decision (`AV-906`): the browser no longer streams a GoPro video through `gpmf-e
 
 **Fixture.** `hero7-synthetic.mp4` is the HERO7 payload inside a generated container, built by `src/test/helpers/goproMp4.mjs` from `make-video-fixtures.mjs`: a `gpmd` track whose samples are the payload's `DEVC` chunks, a video track of 510 zero-byte frames for the duration and frame rate, and a `moov` at the end. It is the first video fixture with a satellite fix, which is what lets a browser test open a video and see a route — GoPro ships no outdoor sample small enough to commit. Like the FIT fixtures, the container is written by hand rather than by the library that reads it, so the two cannot share a mistake.
 
+### TD-039: Overlay Export Uses the Browser's Own Media APIs — Transparent WebM and PNG First, Burned-In H.264 Second
+
+Decision (`AV-1001`): overlay export is built on the browser's own media APIs and nothing heavier. The first export (`AV-1006`) is a **transparent VP9 WebM recorded with `MediaRecorder`** from a canvas, offered only where a probe proves the alpha survives, beside a **PNG image sequence** that every browser can produce and every editor can read. Burned-in video (`AV-1007`) follows as a second phase, through **WebCodecs** — `VideoDecoder` on the source, canvas compositing, a hardware `VideoEncoder` to H.264, the source audio copied through untouched — muxed into MP4 by **Mediabunny**. **ffmpeg.wasm is rejected. Chroma-key video is not offered.** `TD-026`'s ordering stands, now with measurements behind it rather than a hunch.
+
+**How it was measured.** A probe page (`scripts/overlay-export-probe/`) draws a representative overlay — HUD text with shadows, a gauge arc, a 2,000-point route inset, a progress bar — over a moving textured background, and asks each engine what it supports and how fast. It was run headless through Playwright on an Apple Silicon Mac in **Chromium 156**, **Brave 155** (a Chromium with the proprietary codecs a shipped Chrome has) and **WebKit 26.4** (the engine under Safari 26). Firefox was started and stopped before it finished, so **nothing below is claimed for Firefox**; neither is anything claimed for a phone, since none was measured. The decode tests use `hero8.mp4`, the one real camera file in the tree: H.264 at 848×480, 30 fps, with an AAC track.
+
+**What every engine agrees on**
+
+| Question | Chromium, Brave, WebKit |
+| --- | --- |
+| WebCodecs — `VideoEncoder`, `VideoDecoder`, `AudioEncoder`, `AudioDecoder` | All present |
+| `OffscreenCanvas` with a 2D context, `requestVideoFrameCallback`, `MediaRecorder`, `canvas.captureStream` | All present |
+| **Can `VideoEncoder` keep alpha?** `alpha: 'keep'` with VP8 or VP9 | **No, in all three.** `isConfigSupported` echoes the option back and reports the config unsupported. There is no transparent video through WebCodecs. |
+| H.264 encode at 1080p and 4K, hardware | Yes, in all three |
+| HEVC encode, hardware | Yes, in all three — and Chromium's *software* HEVC encoder, which also reports supported, ran at **1.7 fps**, so "supported" is not "usable" and the app must prefer hardware explicitly |
+| H.264 decode at 480p, 1080p and 4K | Yes, in all three |
+| HEVC 4K decode | Yes, in all three. Chromium: hardware only (`prefer-software` is refused). WebKit: both. |
+| `crossOriginIsolated`, `SharedArrayBuffer` | **False and absent in all three.** The app is a static site, GitHub Pages sets no COOP/COEP headers, and so no multi-threaded WebAssembly can ever run here. |
+| `navigator.storage.getDirectory()` — the origin-private file system | Present in all three. This is where an export larger than memory goes. |
+| `showSaveFilePicker` — streaming straight to a file the user chose | Chromium only. **Brave disables it**, WebKit has never had it. It is an optimisation where present, never the plan. |
+
+**Where they differ, and why it decides the format**
+
+| Measurement | Chromium 156 | Brave 155 | WebKit 26.4 |
+| --- | --- | --- | --- |
+| **Does `MediaRecorder` keep alpha in VP9 WebM?** A transparent canvas recorded, played back over magenta, the transparent corner read | **Yes** — `(255, 0, 255)` | **Yes** — `(254, 0, 254)` | **No** — `(0, 0, 0)`: the file is opaque black where it should be clear |
+| `MediaRecorder` containers | WebM (VP8, VP9, AV1, H.264), MP4 (H.264, VP9), Matroska | Same | WebM (VP8, VP9), MP4 (H.264) |
+| Duration header in the recorded WebM | **Missing** — `video.duration` is `Infinity` | Missing | Missing — `NaN` |
+| WebP from a canvas, with alpha | Yes | Yes | **No** — silently returns PNG |
+| AV1 encode | Software, 46 fps at 1080p | Software, 50 fps | Not supported |
+| `video.captureStream()` for audio | 1 audio + 1 video track | Same | **Not present** |
+| WebGPU | Yes | Yes | No |
+
+So there is exactly one way to produce a transparent video in a browser today — `MediaRecorder` with VP9 — and it works in the Chromium family and not in WebKit. That, not preference, is why the transparent WebM is offered behind a runtime probe and the PNG sequence is offered everywhere.
+
+**Encode throughput**, frames per second, 150 frames at 1080p and 45 at 4K, draw cost included (it is 0.1–0.5 ms a frame at 1080p and under 4 ms at 4K, so the canvas is never the bottleneck):
+
+| Encoder | Chromium hw | Chromium sw | Brave hw | Brave sw | WebKit hw | WebKit sw |
+| --- | --- | --- | --- | --- | --- | --- |
+| H.264 1080p | **181** | 41 | **188** | 43 | **128** | 155 |
+| HEVC 1080p | 172 | 1.7 | 174 | 1.8 | 149 | 154 |
+| VP9 1080p | — | 66 | — | 62 | 68 | 71 |
+| VP8 1080p | — | 58 | — | 91 | 74 | 85 |
+| AV1 1080p | — | 46 | — | 50 | — | — |
+| H.264 4K | **49** | 10 | **50** | 9 | **38** | 35 |
+| HEVC 4K | 47 | 0.5 | 47 | 0.5 | 37 | 42 |
+| VP9 4K | — | 19 | — | 22 | 17 | 22 |
+
+A dash is "refused by `isConfigSupported`". WebKit reports every encoder as both hardware and software and runs them at the same speed, so the preference means nothing there; in Chromium it is the difference between 181 fps and 41. **Hardware H.264 is the burned-in codec**: the fastest everywhere, the only one every editor and phone reads, and 4K at 38–50 fps is still faster than real time. Memory stayed flat throughout — the JS heap moved by under 2 MB over every run — because encoded chunks were counted and dropped: an encoder streams, and so must whatever receives it.
+
+**The source clip, decoded and burned.** `hero8.mp4` through `VideoDecoder`, demuxed by the `mp4box` already in the tree: 379 frames in 379 outputs at **732 fps** (Chromium), **1,167** (Brave), **1,215** (WebKit). The full burned-in chain — decode, draw the frame, draw the overlay over it, encode — at the clip's own size:
+
+| Chain | Chromium | Brave | WebKit |
+| --- | --- | --- | --- |
+| Decode → composite → H.264 hardware | 319 fps, **10.6× real time** | 321 fps, 10.7× | 210 fps, 7× |
+| Decode → composite → VP9 software | 119 fps, 4× | 101 fps, 3.4× | 106 fps, 3.5× |
+
+Burned-in export is therefore feasible without a server, and `AV-1007` can be scheduled. The projection to larger sources comes from the encoder ceilings above rather than a measured chain, and is stated as such: at 1080p the H.264 encoder bounds the chain at roughly 4–6× real time, so a ten-minute clip renders in two to three minutes; at 4K the bound is **1.2–1.7× real time**, so the same ten minutes takes six to eight. Those are the figures the progress estimate should be built from, and the ones to re-measure on the first real 4K file.
+
+**The real-time path, for comparison.** Playing the clip in a `<video>` element and copying each `requestVideoFrameCallback` frame to a canvas presented 379 of 379 frames in Chromium (377 in Brave, 2 dropped) at exactly real time, with `captureStream()` offering the audio track beside the video. It is the universal fallback — no demuxer, no codec negotiation — at the price of taking as long as the clip and dropping frames whenever the tab is starved. In headless WebKit `play()` is refused by the autoplay policy, so that path is unmeasured there. It is kept as the fallback for a source `VideoDecoder` refuses, not as the plan.
+
+**Image sequence.** PNG at 1080p: **17 ms and 125 KB a frame** in Chromium, 32 ms and 112 KB in WebKit — 2× real time and 1× respectively, and **3.7 MB per second of video** at 30 fps, so a ten-minute clip is 2.2 GB and must be streamed into the archive as it is drawn, never accumulated. WebP, where it exists, was *slower and larger* for this content — 71–78 ms and 288–384 KB a frame — because a mostly-transparent frame of flat colour and text is what PNG was made for. PNG only. The archive is store-only ZIP, written by hand: PNG is already compressed, and a zip writer that compresses nothing is a hundred lines with no dependency. It is capped at the 4 GB the plain ZIP format allows — about eighteen minutes at 1080p30 — and the page offers a lower frame rate rather than ZIP64: a HUD whose values change at telemetry rate does not need thirty frames a second, and an editor holds a frame for as long as it is told to.
+
+**Transparent WebM is real time.** `MediaRecorder` timestamps by the wall clock, so a ten-minute overlay takes ten minutes to record, and `captureStream(0)` with manual `requestFrame()` does not escape that — frames pushed faster are stamped closer together and the timeline shrinks. That is the price of alpha, and it is stated in the UI as an estimate before the user starts. The recorded file also lacks its duration header in every engine, which editors notice; the EBML `Duration` element is patched into the first cluster's header after recording, and a test asserts that the result has a finite `duration` when loaded.
+
+**Rejected: ffmpeg.wasm.** Not measured, and deliberately so, because it fails before performance is reached: `@ffmpeg/core` 0.12.10 is **GPL-2.0-or-later** — it bundles x264 — which this app's permissive terms cannot carry; it is **65 MB unpacked, a 32 MB download** for a page whose entire GoPro path is 62 KB; its multi-threaded build needs `crossOriginIsolated`, which the table above shows is false and, on a static host, unfixable; and single-threaded WebAssembly cannot beat the hardware encoders the browser already exposes — Chromium's own *software* HEVC encoder ran at 1.7 fps, and a wasm build would be slower still. Its one capability nothing else has — libvpx encoding VP9 *with* alpha — would give WebKit a transparent WebM that WebKit cannot then play. There is no case for it.
+
+**Rejected: chroma-key video.** It exists to serve editors that cannot read alpha, and a PNG sequence serves them without the fringing that keying anti-aliased text and translucent panels leaves behind. Adding it would be a third export path to test for a problem the second already solves.
+
+**Muxer: Mediabunny, for phase two only.** Phase one needs no new dependency: `MediaRecorder` writes its own container and the ZIP is written by hand. Phase two needs an MP4 writer for WebCodecs chunks. The two small MIT muxers — `webm-muxer` 5.1.4 and `mp4-muxer` 5.2.2, 12 and 14 KB gzipped — are both **deprecated by their author** in favour of Mediabunny 1.61, which is **MPL-2.0** (file-level copyleft: it obliges sharing changes to *its* files, which this app does not make, and is compatible with a permissive app) and tree-shakes to **43 KB gzipped** for MP4 output with a streaming target, measured with Vite from the modules it actually imports; the full library with its demuxers is 155 KB and is not needed, because `mp4box` already demuxes the source for telemetry and will demux it for frames. Loaded on demand, like FIT and the GoPro path.
+
+**Memory and output.** Nothing above holds a video in memory: frames are drawn, encoded and released, and the encoder's output is written as it arrives. Where it is written is the one browser-specific choice: Chromium can stream into a file the user picked (`showSaveFilePicker`); everywhere else the chunks go to a file in the origin-private file system and the download is served from that `File` at the end. At 8 Mbps a ten-minute 1080p render is 600 MB, which is why it must never be a `Blob` of parts in a tab.
+
+**Audio.** Burned-in export copies the source's AAC packets into the output unchanged — no decode, no re-encode, no drift — which `mp4box` supplies and Mediabunny accepts. Overlay-only exports carry no audio: the editor has the original.
+
+**What the probe did not cover, recorded so `AV-1007` does not assume it**
+
+- **10-bit HEVC.** HERO11 and later record 10-bit HEVC in nearly every mode, and only 1080p at 60 fps or below can be forced to H.264. The probe tested HEVC Main (8-bit) only. Whether `VideoDecoder` accepts `hvc1.2.4.L153.B0` must be checked on the first HERO11 file before the page claims to burn one in; a source the decoder refuses falls back to the `<video>` path above.
+- **Phones.** iOS runs the WebKit measured here with far less memory and the same `MediaRecorder` alpha gap, so transparent WebM is unavailable there by construction and burned-in export is declared **desktop-only** until measured.
+- **Firefox.** Unmeasured. It is not in the Playwright project either, so nothing in CI depends on it; the capability probes at export time are what keep an unmeasured browser from being promised something it cannot do.
+- **The headless shell.** Playwright's full Chromium (`channel: 'chromium'`) was used and found to carry H.264 and HEVC, which is what lets `AV-1008`'s browser tests exercise a real burned-in render in CI. The headless *shell* build was not measured and may lack them.
+
+**Phased recommendation**, as the task asked for one:
+
+1. **`AV-1006`, overlay-only.** PNG sequence in a store-only ZIP, everywhere; transparent VP9 WebM via `MediaRecorder`, offered only after a sub-second probe at export time records a transparent frame and reads a pixel back — never by sniffing the browser's name. Both run on an `OffscreenCanvas` in a worker, with progress and a stop button. No new dependency.
+2. **`AV-1007`, burned-in.** WebCodecs decode through `mp4box`'s sample table (the reader `TD-038` built, extended from one track to two), composite on canvas, hardware H.264 through `VideoEncoder` with `prefer-hardware` and a refusal if only software answers, audio copied through, Mediabunny writing MP4 to the origin-private file system. Desktop only; 4K accepted with the slower estimate shown first.
+3. **Template JSON** is not an export mode but a serialisation `AV-1003` needs for its own tests, so it ships with the model and costs nothing further.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -494,6 +582,9 @@ question deleted, so the reasoning stays findable.
 | App-shell offline only, or route-only mode too? | Both shipped (`AV-802`, `AV-803`). |
 | Do standalone KML `Point` placemarks become waypoints? | No, not yet. They are counted and reported in one warning; a waypoint model invented for KML alone would be a format-specific branch. See TD-037. |
 | Which KML features are lost on conversion, and how is the reader told? | Polygons, overlays, models, tours and network links in one `warning`; styles and external links in `info` notes; points in a warning of their own. Each exporter's own requirement decides what can be written (TD-037). |
+| Which overlay-only export format ships first? | A PNG sequence everywhere, and a transparent VP9 WebM where a probe shows `MediaRecorder` keeps alpha — the Chromium family does, WebKit does not, and WebCodecs never does. No chroma-key video (TD-039). |
+| Is burned-in browser-side video export viable? | Yes, measured: WebCodecs decodes the HERO8 clip at over 700 fps and the decode-composite-encode chain runs at 7–11× real time with hardware H.264, in Chromium, Brave and WebKit alike. Second phase, desktop only, audio copied through, 10-bit HEVC still to be checked (TD-039). |
+| Should overlay configuration be exported as project JSON? | Yes — it is the serialisation `AV-1003` needs for its own tests, so it ships with the template model rather than as an export mode (TD-039). |
 
 ### Answered, needing no work
 
@@ -514,10 +605,7 @@ question deleted, so the reasoning stays findable.
 - What GoPro models and telemetry streams are in the first supported scope: GPS only, GPS plus speed/altitude, or GPS plus IMU/camera streams?
 - How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
 - What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
-- Which overlay-only export format should ship first: transparent WebM, chroma-key video, PNG/WebP image sequence, or a combination?
-- Is burned-in browser-side video export viable for realistic GoPro clips with acceptable quality, memory usage, duration limits, browser support, and audio handling?
 - What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
-- Should overlay configuration be exported as project JSON so users can reuse templates between videos?
 - For Route Builder, should the first implementation support manual straight-line point editing only, or should road/path snapping be added later through an optional routing provider?
 - Which user-facing label should ship for the viewer action: `Create Custom Track`, `Plan Route from Activity`, or another phrase?
 - Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?
