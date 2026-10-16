@@ -851,3 +851,7 @@ body {
 .overlay-controls__field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
 .overlay-controls__field input[type='range'] { flex: 1 1 120px; min-width: 0; }
 .overlay-controls__hint { color: var(--text-muted); font-size: 12px; }
+
+/* Overlay export (AV-1006) */
+.overlay-export__settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; }
+.overlay-export__progress { width: min(100%, 320px); vertical-align: middle; }

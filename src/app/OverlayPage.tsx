@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FileDropZone } from '../components/FileDropZone';
 import { WarningList } from '../components/ErrorPanel';
+import { OverlayExportPanel } from '../components/OverlayExportPanel';
 import { OverlayPreview } from '../components/OverlayPreview';
 import { VideoReadProgress } from '../components/VideoReadProgress';
 import type { Activity } from '../domain/activity';
@@ -43,6 +44,8 @@ export function OverlayPage() {
   const setOffsetSeconds = useOverlayStore((state) => state.setOffsetSeconds);
   const controls = useOverlayStore((state) => state.controls);
   const setControls = useOverlayStore((state) => state.setControls);
+  const media = useOverlayStore((state) => state.media);
+  const setMedia = useOverlayStore((state) => state.setMedia);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
 
   const [busy, setBusy] = useState<Busy>({ status: 'idle' });
@@ -133,6 +136,18 @@ export function OverlayPage() {
             units={unitSystem}
             controls={controls}
             onControlsChange={setControls}
+            onMediaInfo={setMedia}
+          />
+        )}
+
+        {idle && source.video && source.activity && (
+          <OverlayExportPanel
+            video={source.video}
+            activity={source.activity}
+            controls={controls}
+            offsetSeconds={offsetSeconds}
+            units={unitSystem}
+            media={media}
           />
         )}
 
@@ -157,7 +172,7 @@ export function OverlayPage() {
             <h3 className="prose__title">Held here, for the next steps</h3>
             <p>
               {source.video && source.activity
-                ? 'Export follows. Both files stay in memory on this page until then, or until you start over.'
+                ? 'Both files stay in memory on this page until then, or until you start over.'
                 : source.video
                   ? 'This video supplies no activity of its own. Add an activity file — from a watch, say — to draw over it.'
                   : 'Without a video, this activity can become a standalone overlay: the route on a transparent background. Add a video to draw its telemetry over the picture.'}

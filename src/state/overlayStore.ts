@@ -29,6 +29,17 @@ export interface OverlayVideo {
 }
 
 /**
+ * What the video element reports once it has read the file: the picture's
+ * size and the true length. The export sizes its frames from the first and,
+ * where the container stated no clock, takes its length from the second.
+ */
+export interface OverlayMedia {
+  width: number;
+  height: number;
+  durationSeconds: number;
+}
+
+/**
  * Where the activity came from. `hand` is a file the reader chose; `video` is
  * the telemetry of the video beside it. The difference decides what a new
  * video may replace (TD-040): a reader's choice, never; the previous video's
@@ -67,6 +78,9 @@ interface OverlayState {
    * rest: nothing but the theme is ever written to storage.
    */
   controls: OverlayControls;
+  /** AV-1006. Reported by the preview; forgotten with the video. */
+  media: OverlayMedia | undefined;
+  setMedia: (media: OverlayMedia | undefined) => void;
   setControls: (patch: Partial<OverlayControls>) => void;
   /**
    * Sets the video. Replacing or removing a video takes with it an activity
@@ -89,6 +103,16 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
   source: {},
   offsetSeconds: 0,
   controls: DEFAULT_OVERLAY_CONTROLS,
+  media: undefined,
+
+  setMedia: (media) =>
+    set((state) => {
+      const same =
+        state.media?.width === media?.width &&
+        state.media?.height === media?.height &&
+        state.media?.durationSeconds === media?.durationSeconds;
+      return same ? state : { media };
+    }),
 
   setControls: (patch) => set((state) => ({ controls: { ...state.controls, ...patch } })),
 
@@ -99,6 +123,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
       const keepsActivity = state.source.activityOrigin === 'hand';
       return {
         offsetSeconds: 0,
+        media: undefined,
         source: {
           video,
           activity: keepsActivity ? state.source.activity : undefined,
@@ -122,7 +147,8 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
     return true;
   },
 
-  clear: () => set({ source: {}, offsetSeconds: 0, controls: DEFAULT_OVERLAY_CONTROLS }),
+  clear: () =>
+    set({ source: {}, offsetSeconds: 0, media: undefined, controls: DEFAULT_OVERLAY_CONTROLS }),
 }));
 
 /** Whether there is anything on the page to make an overlay from. */

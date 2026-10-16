@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { widestGpx } from './helpers/overlayFixtures';
 
 /**
  * AV-1005. The one check that needs a real layout engine: nothing the overlay
@@ -14,25 +15,6 @@ import { expect, test, type Page } from '@playwright/test';
  * portrait video.
  */
 const FIXTURE_DIR = join(process.cwd(), 'src/test/fixtures');
-const HERO8_START = '2019-11-18T15:41:25Z';
-
-function widestGpx(): string {
-  const start = Date.parse(HERO8_START);
-  const points = Array.from({ length: 21 }, (_, i) => {
-    const time = new Date(start + i * 1000).toISOString().replace('.000Z', 'Z');
-    return `<trkpt lat="${(51.5 + i * 0.0003).toFixed(5)}" lon="${(0.001 * i).toFixed(5)}">
-        <ele>${1000 + i}</ele><time>${time}</time>
-        <extensions><speed>27.8</speed><gpxtpx:TrackPointExtension>
-          <gpxtpx:hr>${188 + (i % 3)}</gpxtpx:hr><gpxtpx:cad>${88 + (i % 3)}</gpxtpx:cad>
-          <power>${999 + (i % 2)}</power></gpxtpx:TrackPointExtension></extensions></trkpt>`;
-  });
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="e2e" xmlns="http://www.topografix.com/GPX/1/1"
-     xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
-  <trk><name>Widest values</name><type>cycling</type><trkseg>${points.join('')}</trkseg></trk>
-</gpx>`;
-}
-
 /** Makes the video element report this size, whatever it is playing. */
 async function reportVideoSize(page: Page, width: number, height: number) {
   await page.addInitScript(

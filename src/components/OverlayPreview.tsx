@@ -3,7 +3,7 @@ import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
 import { buildOverlay, type OverlayControls as Controls } from '../overlay/presets';
 import { buildOverlayTimeline } from '../overlay/timeline';
-import type { OverlayVideo } from '../state/overlayStore';
+import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { OverlayControls } from './OverlayControls';
 import { OverlayLayer } from './OverlayLayer';
 
@@ -15,6 +15,8 @@ interface OverlayPreviewProps {
   units: UnitSystem;
   controls: Controls;
   onControlsChange: (patch: Partial<Controls>) => void;
+  /** Told the picture's size and length once the browser has read them. */
+  onMediaInfo?: (media: OverlayMedia) => void;
 }
 
 const UNAVAILABLE_MESSAGES = {
@@ -62,6 +64,7 @@ export function OverlayPreview({
   units,
   controls,
   onControlsChange,
+  onMediaInfo,
 }: OverlayPreviewProps) {
   const element = useRef<HTMLVideoElement>(null);
   useLocalSource(element, video.file);
@@ -97,8 +100,15 @@ export function OverlayPreview({
     if (Number.isFinite(media.duration)) setElementDuration(media.duration);
     if (media.videoWidth > 0 && media.videoHeight > 0) {
       setFrameAspect(media.videoWidth / media.videoHeight);
+      if (Number.isFinite(media.duration)) {
+        onMediaInfo?.({
+          width: media.videoWidth,
+          height: media.videoHeight,
+          durationSeconds: media.duration,
+        });
+      }
     }
-  }, []);
+  }, [onMediaInfo]);
 
   // Events that can move the clock, plus a per-frame loop while it runs.
   useEffect(() => {
