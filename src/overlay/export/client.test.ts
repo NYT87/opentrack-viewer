@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CANCEL_GRACE_MS,
+  INSPECT_TIMEOUT_MS,
   PROBE_TIMEOUT_MS,
+  inspectBurnSource,
   probeExportStorage,
   resetStorageProbe,
+  startBurnedInExport,
   startOverlayExport,
   type WorkerLike,
 } from './client';
-import type { ExportRequest, FromWorker, ToWorker } from './protocol';
+import type { BurnRequest, ExportRequest, FromWorker, ToWorker } from './protocol';
 import { getExportSupport } from './support';
 import { DEFAULT_OVERLAY_CONTROLS, buildOverlay } from '../presets';
 import { buildOverlayTimeline } from '../timeline';
@@ -227,6 +230,118 @@ describe('probing the worker\'s storage (AV-1006)', () => {
       await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + 1);
       expect(await settled).toMatchObject({ code: 'render_failed' });
       expect(worker.terminated).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+const burnRequest: Omit<BurnRequest, 'archiveName'> = {
+  file: new File(['video'], 'GH010042.mp4'),
+  width: 1280,
+  height: 720,
+  bitrate: 5_000_000,
+  videoDurationSeconds: 10,
+  offsetSeconds: 0,
+  units: 'metric',
+  template: request.template,
+  activity,
+};
+
+describe('the burned-in render job (AV-1007)', () => {
+  it('sends the video file and settings to the worker, with an archive name of its own choosing', async () => {
+    const { worker, posted } = fakeWorker();
+    startBurnedInExport(burnRequest, () => undefined, { createWorker: () => worker });
+    await tick();
+    const message = posted[0] as Extract<ToWorker, { type: 'burn' }>;
+    expect(message.type).toBe('burn');
+    // The reader's own file object goes through, not a copy of its bytes.
+    expect(message.request.file).toBe(burnRequest.file);
+    expect(message.request).toMatchObject({ width: 1280, height: 720, bitrate: 5_000_000 });
+    expect(message.request.archiveName).toMatch(/^overlay-export-.+\.zip$/);
+  });
+
+  it('relays progress as a fraction and the seconds rendered, and resolves with the file and its notes', async () => {
+    const { worker } = fakeWorker();
+    const onProgress = vi.fn();
+    const job = startBurnedInExport(burnRequest, onProgress, { createWorker: () => worker });
+    await tick();
+    worker.emit({ type: 'burnProgress', fraction: 0.4, processedSeconds: 4 });
+    expect(onProgress).toHaveBeenCalledWith(0.4, 4);
+    // Frame-count progress is for the other kind of export, and is not mistaken for this one.
+    worker.emit({ type: 'progress', done: 5, total: 10 });
+    expect(onProgress).toHaveBeenCalledTimes(1);
+
+    const file = new Blob(['mp4']);
+    worker.emit({ type: 'done', file, bytes: 3, frameCount: 300, storage: 'opfs', notes: ['No sound.'] });
+    await expect(job.done).resolves.toMatchObject({ file, bytes: 3, frameCount: 300, notes: ['No sound.'] });
+  });
+
+  it('stops like any other job, and discards a render that finishes after the stop', async () => {
+    const { worker, posted } = fakeWorker();
+    const job = startBurnedInExport(burnRequest, () => undefined, { createWorker: () => worker });
+    await tick();
+    job.cancel();
+    expect(posted.at(-1)).toEqual({ type: 'cancel' });
+    worker.emit({ type: 'done', file: new Blob(['mp4']), bytes: 3, frameCount: 1, storage: 'opfs' });
+    await expect(job.done).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('rejects, rather than throws, when the worker cannot be constructed', async () => {
+    const job = startBurnedInExport(burnRequest, () => undefined, {
+      createWorker: () => {
+        throw new Error('blocked');
+      },
+    });
+    await expect(job.done).rejects.toMatchObject({ code: 'render_failed' });
+  });
+});
+
+describe('looking at a video before rendering it (AV-1007)', () => {
+  const target = { width: 1280, height: 720, bitrate: 5_000_000, frameRate: 30 };
+  const info = {
+    video: { codec: 'avc', width: 848, height: 480, canDecode: true },
+    audio: { codec: 'aac', canDecode: true },
+    canEncode: true,
+  };
+
+  it('sends the file and the target size, and returns what the worker found', async () => {
+    const { worker, posted } = fakeWorker();
+    const file = new File(['v'], 'a.mp4');
+    const answer = inspectBurnSource(file, target, { createWorker: () => worker });
+    expect(posted[0]).toEqual({ type: 'inspect', file, ...target });
+    worker.emit({ type: 'inspected', info });
+    await expect(answer).resolves.toEqual(info);
+    expect(worker.terminated).toBe(true);
+  });
+
+  it('rejects with the worker\'s reason, on a crash, on a worker that cannot start, and on silence', async () => {
+    const refused = fakeWorker();
+    const first = inspectBurnSource(new File(['v'], 'a.mp4'), target, { createWorker: () => refused.worker });
+    refused.worker.emit({ type: 'error', code: 'render_failed', message: 'not an MP4' });
+    await expect(first).rejects.toMatchObject({ message: 'not an MP4' });
+
+    const crashed = fakeWorker();
+    const second = inspectBurnSource(new File(['v'], 'a.mp4'), target, { createWorker: () => crashed.worker });
+    crashed.worker.onerror?.({ message: 'script failed' } as ErrorEvent);
+    await expect(second).rejects.toMatchObject({ message: 'script failed' });
+
+    await expect(
+      inspectBurnSource(new File(['v'], 'a.mp4'), target, {
+        createWorker: () => {
+          throw new Error('blocked');
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'render_failed' });
+
+    vi.useFakeTimers();
+    try {
+      const silent = fakeWorker();
+      const third = inspectBurnSource(new File(['v'], 'a.mp4'), target, { createWorker: () => silent.worker });
+      const settled = third.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(INSPECT_TIMEOUT_MS + 1);
+      expect(await settled).toMatchObject({ code: 'render_failed', message: 'Reading the video took too long.' });
+      expect(silent.worker.terminated).toBe(true);
     } finally {
       vi.useRealTimers();
     }

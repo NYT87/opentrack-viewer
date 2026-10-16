@@ -22,6 +22,17 @@ const PROGRESS_INTERVAL_MS = 50;
 
 let current: AbortController | undefined;
 
+const post = (message: FromWorker) => scope.postMessage(message);
+
+/** Tells the page a job could not even begin, so it is not left waiting. */
+function reportFailure(error: unknown, fallback = 'The export engine could not be started.'): void {
+  post({
+    type: 'error',
+    code: 'render_failed',
+    message: error instanceof Error && error.message ? `${fallback} (${error.message})` : fallback,
+  });
+}
+
 async function run(request: ExportRequest, controller: AbortController): Promise<void> {
   const archive = await createArchiveSink(request.archiveName);
   try {
@@ -98,8 +109,28 @@ scope.onmessage = (event) => {
     return;
   }
   if (message.type === 'probe') {
-    void probeArchiveStorage(message.archiveName).then((storage) =>
-      scope.postMessage({ type: 'probed', storage }),
+    void probeArchiveStorage(message.archiveName).then(
+      (storage) => scope.postMessage({ type: 'probed', storage }),
+      reportFailure,
+    );
+    return;
+  }
+  // Loaded on demand. A chunk that will not load (offline after an update, a
+  // blocked script) must be *said*: the page is waiting on an answer, and
+  // without one an inspection waits out its timeout and a render waits forever.
+  if (message.type === 'inspect') {
+    void import('./burnWorker').then(
+      ({ handleInspect }) => handleInspect(message, post),
+      (error: unknown) => reportFailure(error, 'The video renderer could not be loaded.'),
+    );
+    return;
+  }
+  if (message.type === 'burn') {
+    const controller = new AbortController();
+    current = controller;
+    void import('./burnWorker').then(
+      ({ handleBurn }) => handleBurn(message.request, controller, post),
+      (error: unknown) => reportFailure(error, 'The video renderer could not be loaded.'),
     );
     return;
   }

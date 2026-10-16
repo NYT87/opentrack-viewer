@@ -30,6 +30,12 @@ export function storageLimitBytes(storage: ArchiveStorage): number {
 
 export interface ArchiveSink {
   sink: ZipSink;
+  /**
+   * Writes at an absolute position, for formats that go back to patch a header
+   * (an MP4's `mdat` size). Only a file can do this; memory cannot, which is why
+   * a burned-in render needs file storage and an image sequence does not.
+   */
+  writeAt?: (chunk: Uint8Array, position: number) => void;
   storage: ArchiveStorage;
   /** Closes the archive and hands back the finished file. */
   finish(): Promise<Blob>;
@@ -82,19 +88,24 @@ async function createOpfsSink(archiveName: string): Promise<ArchiveSink> {
     }
   };
 
+  const writeAt = (chunk: Uint8Array, at: number): number => {
+    const written = access.write(chunk, { at });
+    // A short write is a full disk or an exhausted quota: say so, do not truncate.
+    if (written !== chunk.length) {
+      throw new OverlayExportError(
+        'storage_failed',
+        'This browser could not store the export — there may not be enough free space.',
+      );
+    }
+    return written;
+  };
+
   return {
     storage: 'opfs',
+    writeAt: (chunk, at) => void writeAt(chunk, at),
     sink: {
       write(chunk) {
-        const written = access.write(chunk, { at: position });
-        // A short write is a full disk or an exhausted quota: say so, do not truncate.
-        if (written !== chunk.length) {
-          throw new OverlayExportError(
-            'storage_failed',
-            'This browser could not store the export — there may not be enough free space.',
-          );
-        }
-        position += written;
+        position += writeAt(chunk, position);
       },
     },
     async finish() {

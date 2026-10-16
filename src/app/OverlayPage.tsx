@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FileDropZone } from '../components/FileDropZone';
 import { WarningList } from '../components/ErrorPanel';
+import { BurnedInExportPanel } from '../components/BurnedInExportPanel';
 import { OverlayExportPanel } from '../components/OverlayExportPanel';
 import { OverlayPreview } from '../components/OverlayPreview';
 import { VideoReadProgress } from '../components/VideoReadProgress';
@@ -142,6 +143,17 @@ export function OverlayPage() {
 
         {idle && source.video && source.activity && (
           <OverlayExportPanel
+            video={source.video}
+            activity={source.activity}
+            controls={controls}
+            offsetSeconds={offsetSeconds}
+            units={unitSystem}
+            media={media}
+          />
+        )}
+
+        {idle && source.video && source.activity && (
+          <BurnedInExportPanel
             video={source.video}
             activity={source.activity}
             controls={controls}

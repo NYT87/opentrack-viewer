@@ -25,6 +25,11 @@ describe('the archive sink (AV-1006)', () => {
     expect(entries.map((entry) => entry.name)).toEqual(['a.txt']);
   });
 
+  it('cannot write at a position in memory, which is what keeps a video out of it', async () => {
+    const archive = await createArchiveSink('x.zip');
+    expect(archive.writeAt).toBeUndefined();
+  });
+
   it('copies what it is given, since the writer reuses its buffers', async () => {
     const archive = await createArchiveSink('x.zip');
     const buffer = new Uint8Array([1, 2, 3]);
@@ -105,6 +110,20 @@ describe('the archive sink on the origin-private file system (AV-1006)', () => {
     expect(await archive.finish()).toBe(fake.file);
     expect(fake.events).toEqual(['flush', 'close']);
     expect(fake.root.removeEntry).not.toHaveBeenCalled();
+  });
+
+  it('also writes at an absolute position, for a format that goes back to patch its header', async () => {
+    const fake = fakeOpfs();
+    const archive = await createArchiveSink('overlay-export-a.zip');
+    archive.writeAt!(new Uint8Array([7, 7]), 100);
+    archive.writeAt!(new Uint8Array([1]), 0);
+    expect(fake.writes).toEqual([
+      { bytes: [7, 7], at: 100 },
+      { bytes: [1], at: 0 },
+    ]);
+    // Sequential writes carry on from where they were, unaffected.
+    archive.sink.write(new Uint8Array([5]));
+    expect(fake.writes.at(-1)).toEqual({ bytes: [5], at: 0 });
   });
 
   it('treats a short write as a full disk, rather than truncating quietly', async () => {

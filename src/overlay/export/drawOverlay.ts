@@ -38,8 +38,12 @@ export interface OverlayRendererInput {
 }
 
 export interface OverlayRenderer {
-  /** Clears the context and draws the overlay as it is at this video time. */
-  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number): void;
+  /**
+   * Draws the overlay as it is at this video time. By default the context is
+   * cleared first, so what is not overlay is transparent; a burned-in render
+   * passes `clear: false` to draw over a video frame already on the canvas.
+   */
+  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number, options?: { clear?: boolean }): void;
 }
 
 type Ready = Extract<ResolvedOverlayComponent, { status: 'ready' }>;
@@ -150,9 +154,9 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
   }
 
   return {
-    drawFrame(ctx, videoTimeSeconds) {
+    drawFrame(ctx, videoTimeSeconds, options) {
       // Transparent by construction: nothing but the components is ever painted.
-      ctx.clearRect(0, 0, width, height);
+      if (options?.clear !== false) ctx.clearRect(0, 0, width, height);
       const sample = timeline.sampleAt(videoTimeSeconds);
       if (!sample) return;
 

@@ -3,6 +3,8 @@ import { OverlayExportError } from './errors';
 import {
   ARCHIVE_NAME_PREFIX,
   type ArchiveStorage,
+  type BurnRequest,
+  type BurnSourceInfo,
   type ExportRequest,
   type FromWorker,
   type ToWorker,
@@ -17,6 +19,8 @@ export interface ExportOutput {
   file: Blob;
   bytes: number;
   frameCount: number;
+  /** Things the reader should know, such as sound that could not be carried over. */
+  notes?: string[];
   /** Frees the stored archive once the reader has it, or has moved on. */
   dispose: () => Promise<void>;
 }
@@ -119,10 +123,97 @@ function startupError(error: unknown): OverlayExportError {
   );
 }
 
+/** A PNG-sequence export: frames done out of frames in all. */
 export function startOverlayExport(
   request: Omit<ExportRequest, 'archiveName'>,
   onProgress: (done: number, total: number) => void,
   deps: ExportClientDeps = {},
+): ExportJob {
+  return startWorkerJob(
+    (archiveName) => ({ type: 'start', request: { ...request, archiveName } }),
+    (message) => {
+      if (message.type === 'progress') onProgress(message.done, message.total);
+    },
+    deps,
+  );
+}
+
+/** AV-1007. A burned-in render: how much of it is done, 0 to 1, and how many seconds of video. */
+export function startBurnedInExport(
+  request: Omit<BurnRequest, 'archiveName'>,
+  onProgress: (fraction: number, processedSeconds: number) => void,
+  deps: ExportClientDeps = {},
+): ExportJob {
+  return startWorkerJob(
+    (archiveName) => ({ type: 'burn', request: { ...request, archiveName } }),
+    (message) => {
+      if (message.type === 'burnProgress') onProgress(message.fraction, message.processedSeconds);
+    },
+    deps,
+  );
+}
+
+/** How long reading a video's index may take before the worker is judged stuck. */
+export const INSPECT_TIMEOUT_MS = 60_000;
+
+/**
+ * AV-1007. Looks at a video in a worker — its tracks, whether this browser can
+ * decode it, whether it reports it can encode H.264 at the target size —
+ * before anything is rendered. Reads only the container's index, not the
+ * picture, however large the file.
+ */
+export function inspectBurnSource(
+  file: File,
+  target: { width: number; height: number; bitrate: number; frameRate?: number },
+  deps: ExportClientDeps = {},
+): Promise<BurnSourceInfo> {
+  return new Promise((resolve, reject) => {
+    let worker: WorkerLike;
+    try {
+      worker = (deps.createWorker ?? defaultWorker)();
+    } catch (error) {
+      reject(startupError(error));
+      return;
+    }
+    const finish = () => {
+      clearTimeout(timer);
+      worker.terminate();
+    };
+    const timer = setTimeout(() => {
+      finish();
+      reject(new OverlayExportError('render_failed', 'Reading the video took too long.'));
+    }, INSPECT_TIMEOUT_MS);
+    worker.onmessage = (event) => {
+      const message = event.data;
+      if (message.type === 'inspected') {
+        finish();
+        resolve(message.info);
+      } else if (message.type === 'error') {
+        finish();
+        reject(new OverlayExportError(message.code, message.message));
+      }
+    };
+    worker.onerror = (event) => {
+      finish();
+      reject(new OverlayExportError('render_failed', event.message || 'The video could not be read.'));
+    };
+    try {
+      worker.postMessage({ type: 'inspect', file, ...target });
+    } catch (error) {
+      finish();
+      reject(startupError(error));
+    }
+  });
+}
+
+/**
+ * Runs one job in a worker: the start message, the stop, the clean-up of the
+ * stored file however it ends. The page never sees the worker.
+ */
+function startWorkerJob(
+  startMessage: (archiveName: string) => ToWorker,
+  onWorkerMessage: (message: FromWorker) => void,
+  deps: ExportClientDeps,
 ): ExportJob {
   const archiveName = newArchiveName();
   // A worker that cannot even be constructed (a blocked script, a policy) is a
@@ -151,8 +242,8 @@ export function startOverlayExport(
 
     worker.onmessage = (event) => {
       const message = event.data;
-      if (message.type === 'progress') {
-        onProgress(message.done, message.total);
+      if (message.type === 'progress' || message.type === 'burnProgress') {
+        onWorkerMessage(message);
       } else if (message.type === 'done') {
         finish();
         if (cancelRequested) {
@@ -166,6 +257,7 @@ export function startOverlayExport(
           file: message.file,
           bytes: message.bytes,
           frameCount: message.frameCount,
+          notes: message.notes ?? [],
           dispose: () => (message.storage === 'opfs' ? removeArchive(archiveName) : Promise.resolve()),
         });
       } else if (message.type === 'error') {
@@ -195,7 +287,7 @@ export function startOverlayExport(
     }
     started = true;
     try {
-      worker.postMessage({ type: 'start', request: { ...request, archiveName } });
+      worker.postMessage(startMessage(archiveName));
     } catch (error) {
       // A request that cannot be sent (it could not be cloned) would otherwise
       // leave the job waiting for a worker that never heard of it.
