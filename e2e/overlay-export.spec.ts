@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page, type Request } from '@playwright/test';
-import { widestGpx } from './helpers/overlayFixtures';
+import { CLIP_PATH, RIDE_PATH, fetchBlobBytes, widestGpx } from './helpers/overlayFixtures';
 import { decodePng } from './helpers/png';
 import { readZip } from '../src/test/helpers/zipReader';
 
@@ -157,4 +157,47 @@ test('reports an export engine that cannot start, instead of waiting on it', asy
   await expect(panel.getByRole('button', { name: 'Export PNG sequence' })).toHaveCount(0);
   await expect(panel.getByText(/Checking how this browser/)).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Overlay controls' })).toBeVisible();
+});
+
+test('exports a short overlay-only asset from the committed clip and ride, fast and exactly sized', async ({ page }) => {
+  await page.goto('./#/overlays');
+  await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
+  await expect(page.getByRole('region', { name: 'Video' })).toContainText('overlay-test-clip.mp4', {
+    timeout: 30_000,
+  });
+  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  const panel = page.getByRole('region', { name: 'Export overlay' });
+  await panel.getByLabel('Frame rate').selectOption('10');
+  await expect(panel.getByTestId('export-plan')).toContainText('60 frames, 256 × 144');
+
+  await panel.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = panel.getByRole('link', { name: /overlay-test-clip-overlay-256x144-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 30_000 });
+
+  const entries = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!)));
+  expect(entries).toHaveLength(61); // metadata + 6 s at 10 fps
+  expect(JSON.parse(new TextDecoder().decode(entries[0]!.data))).toMatchObject({
+    format: 'png-sequence',
+    transparent: true,
+    width: 256,
+    height: 144,
+    frameRate: 10,
+    frameCount: 60,
+    durationSeconds: 6,
+    videoDurationSeconds: 6,
+  });
+
+  // Every frame is a 256×144 PNG; the first is transparent at the corners and drawn on somewhere.
+  for (const frame of entries.slice(1)) {
+    const view = new DataView(frame.data.buffer, frame.data.byteOffset);
+    expect([view.getUint32(16), view.getUint32(20)]).toEqual([256, 144]);
+  }
+  const first = decodePng(Buffer.from(entries[1]!.data));
+  const alpha = (x: number, y: number) => first.pixels[(y * first.width + x) * 4 + 3]!;
+  expect([alpha(0, 0), alpha(255, 0), alpha(128, 72)]).toEqual([0, 0, 0]);
+  let drawn = 0;
+  for (let i = 3; i < first.pixels.length; i += 4) if (first.pixels[i]! > 0) drawn += 1;
+  expect(drawn).toBeGreaterThan(100);
+  // The overlay moves with the ride: the last frame is not the first.
+  expect(Buffer.from(entries.at(-1)!.data).equals(Buffer.from(entries[1]!.data))).toBe(false);
 });

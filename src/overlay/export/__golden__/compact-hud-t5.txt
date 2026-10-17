@@ -1,0 +1,43 @@
+clearRect(0, 0, 1280, 720)
+save()
+beginPath()
+roundRect(25.6, 609.6, 256, 96, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 609.6, 256, 96, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("SPEED", 42.5, 631.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("18.0 km/h", 42.5, 649.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(25.6, 513.6, 256, 96, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 513.6, 256, 96, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("DISTANCE", 42.5, 535.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("22 m", 42.5, 553.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(25.6, 417.6, 256, 96, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 417.6, 256, 96, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("TIME", 42.5, 439.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:05", 42.5, 457.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(25.6, 321.6, 256, 96, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 321.6, 256, 96, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("HEART RATE", 42.5, 336.93) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("105 bpm", 42.5, 355.52) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillRect(42.5, 395.23, 222.21, 7.04) fill="rgb(255 255 255 / 0.25)" alpha=1
+fillRect(42.5, 395.23, 81.48, 7.04) fill="#ff6a00" alpha=1
+restore()

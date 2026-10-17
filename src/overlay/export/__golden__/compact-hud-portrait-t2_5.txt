@@ -1,0 +1,167 @@
+clearRect(0, 0, 720, 1280)
+save()
+beginPath()
+roundRect(14.4, 1178.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 1178.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("SPEED", 23.9, 1191.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("16.2 km/h", 23.9, 1201.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 1124.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 1124.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("PACE", 23.9, 1137.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("3:42 /km", 23.9, 1147.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 1070.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 1070.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("DISTANCE", 23.9, 1083.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("10 m", 23.9, 1093.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 1016.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 1016.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("TIME", 23.9, 1029.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:03", 23.9, 1039.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 962.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 962.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("ELEVATION", 23.9, 975.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("103 m", 23.9, 985.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 908.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 908.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("HEART RATE", 23.9, 917.59) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("103 bpm", 23.9, 928.04) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillRect(23.9, 950.37, 124.99, 3.96) fill="rgb(255 255 255 / 0.25)" alpha=1
+fillRect(23.9, 950.37, 43.75, 3.96) fill="#ff6a00" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 854.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 854.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("CYCLING CADENCE", 23.9, 867.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("83 rpm", 23.9, 877.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 800.96, 144, 54, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 800.96, 144, 54, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("POWER", 23.9, 813.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("155 W", 23.9, 823.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(576, 1103.36, 129.6, 129.6, 6.34)
+clip()
+beginPath()
+roundRect(576, 1103.36, 129.6, 129.6, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+beginPath()
+moveTo(640.8, 1222.59)
+lineTo(640.8, 1221.86)
+lineTo(640.8, 1221.09)
+lineTo(640.8, 1220.28)
+lineTo(640.8, 1219.44)
+lineTo(640.8, 1218.56)
+lineTo(640.8, 1217.64)
+lineTo(640.8, 1216.69)
+lineTo(640.8, 1215.7)
+lineTo(640.8, 1214.67)
+lineTo(640.8, 1213.61)
+lineTo(640.8, 1212.51)
+lineTo(640.8, 1211.38)
+lineTo(640.8, 1210.2)
+lineTo(640.8, 1208.99)
+lineTo(640.8, 1207.75)
+lineTo(640.8, 1206.46)
+lineTo(640.8, 1205.14)
+lineTo(640.8, 1203.79)
+lineTo(640.8, 1202.39)
+lineTo(640.8, 1200.97)
+lineTo(640.8, 1199.5)
+lineTo(640.8, 1198)
+lineTo(640.8, 1196.46)
+lineTo(640.8, 1194.88)
+lineTo(640.8, 1193.27)
+lineTo(640.8, 1191.62)
+lineTo(640.8, 1189.93)
+lineTo(640.8, 1188.21)
+lineTo(640.8, 1186.45)
+lineTo(640.8, 1184.65)
+lineTo(640.8, 1182.82)
+lineTo(640.8, 1180.95)
+lineTo(640.8, 1179.05)
+lineTo(640.8, 1177.1)
+lineTo(640.8, 1175.13)
+lineTo(640.8, 1173.11)
+lineTo(640.8, 1171.06)
+lineTo(640.8, 1168.97)
+lineTo(640.8, 1166.84)
+lineTo(640.8, 1164.68)
+lineTo(640.8, 1162.48)
+lineTo(640.8, 1160.24)
+lineTo(640.8, 1157.97)
+lineTo(640.8, 1155.66)
+lineTo(640.8, 1153.32)
+lineTo(640.8, 1150.93)
+lineTo(640.8, 1148.51)
+lineTo(640.8, 1146.06)
+lineTo(640.8, 1143.56)
+lineTo(640.8, 1141.04)
+lineTo(640.8, 1138.47)
+lineTo(640.8, 1135.87)
+lineTo(640.8, 1133.23)
+lineTo(640.8, 1130.55)
+lineTo(640.8, 1127.84)
+lineTo(640.8, 1125.09)
+lineTo(640.8, 1122.31)
+lineTo(640.8, 1119.48)
+lineTo(640.8, 1116.62)
+lineTo(640.8, 1113.73)
+stroke() stroke="#ffffff" width=3.89 alpha=0.8
+beginPath()
+arc(640.8, 1220.69, 6.48, 0, 6.28) fill="#ff6a00" alpha=1
+fill() fill="#ff6a00" alpha=1
+restore()
+save()
+beginPath()
+roundRect(14.4, 1245.76, 691.2, 8.64, 6.34)
+clip()
+beginPath()
+roundRect(14.4, 1245.76, 691.2, 8.64, 6.34)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillRect(14.4, 1245.76, 691.2, 8.64) fill="rgb(255 255 255 / 0.25)" alpha=1
+fillRect(14.4, 1245.76, 12.1, 8.64) fill="#ff6a00" alpha=1
+restore()
