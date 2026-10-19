@@ -57,6 +57,8 @@ const overlayFiles = [
   join(SRC, 'components/OverlayLayer.tsx'),
   join(SRC, 'components/OverlayPreview.tsx'),
   join(SRC, 'components/BurnedInExportPanel.tsx'),
+  join(SRC, 'components/RouteOverlayPanel.tsx'),
+  join(SRC, 'components/RouteOverlayLink.tsx'),
 ];
 
 describe('the overlay code can send nothing anywhere and keeps nothing (AV-1008)', () => {
@@ -70,6 +72,9 @@ describe('the overlay code can send nothing anywhere and keeps nothing (AV-1008)
         'overlay/export/archiveSink.ts',
         'components/OverlayPreview.tsx',
         'components/BurnedInExportPanel.tsx',
+        'components/RouteOverlayPanel.tsx',
+        'overlay/export/drawRouteImage.ts',
+        'overlay/routeImage.ts',
         'app/OverlayPage.tsx',
       ]),
     );

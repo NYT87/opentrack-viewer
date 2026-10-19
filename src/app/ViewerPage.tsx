@@ -6,6 +6,7 @@ import { resolvePerformanceMetric } from '../domain/performance';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { ExportPanel } from '../components/ExportPanel';
+import { RouteOverlayLink } from '../components/RouteOverlayLink';
 import { FileDropZone } from '../components/FileDropZone';
 import { LapsPanel, hasUsefulLaps } from '../components/LapsPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
@@ -229,6 +230,7 @@ export function ViewerPage() {
 
           <section className="box" id="activity-export" aria-label="Export activity">
             <ExportPanel activity={readyActivity} selectedRange={selectedRange} />
+            <RouteOverlayLink activity={readyActivity} selectedRange={selectedRange} />
           </section>
         </div>
       </div>

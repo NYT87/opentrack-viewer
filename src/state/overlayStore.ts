@@ -60,6 +60,12 @@ export interface OverlaySource {
   video?: OverlayVideo;
   activity?: Activity;
   activityOrigin?: OverlayActivityOrigin;
+  /**
+   * AV-1009. The activity is the viewer's focused section, handed over on
+   * purpose, not the whole recording. Said beside the activity so a route image
+   * of a part is never taken for the ride.
+   */
+  focusedSection?: boolean;
 }
 
 interface OverlayState {
@@ -87,9 +93,20 @@ interface OverlayState {
    * that was that video's own telemetry; one chosen by hand stays.
    */
   setVideo: (video: OverlayVideo | undefined) => void;
-  /** Sets the activity, recording where it came from. */
-  setActivity: (activity: Activity, origin: OverlayActivityOrigin) => void;
+  /** Sets the activity, recording where it came from and whether it is a focused section. */
+  setActivity: (
+    activity: Activity,
+    origin: OverlayActivityOrigin,
+    options?: { focusedSection?: boolean },
+  ) => void;
   clearActivity: () => void;
+  /**
+   * AV-1009. The viewer's "Create route overlay": the activity on its own, for a
+   * route image. A video already held here is let go, with its offset and its
+   * measurements: the page would otherwise open the video workflow and not the
+   * route image the reader asked for.
+   */
+  setStandaloneActivity: (activity: Activity, options?: { focusedSection?: boolean }) => void;
   /**
    * Offers a video's own telemetry as the activity. Taken when the slot is
    * empty or holds a previous video's telemetry; declined when the reader
@@ -128,18 +145,35 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
           video,
           activity: keepsActivity ? state.source.activity : undefined,
           activityOrigin: keepsActivity ? 'hand' : undefined,
+          ...(keepsActivity && state.source.focusedSection ? { focusedSection: true } : {}),
         },
       };
     }),
 
-  setActivity: (activity, origin) =>
+  setActivity: (activity, origin, options) =>
     set((state) => ({
       offsetSeconds: 0,
-      source: { ...state.source, activity, activityOrigin: origin },
+      source: {
+        video: state.source.video,
+        activity,
+        activityOrigin: origin,
+        ...(options?.focusedSection ? { focusedSection: true } : {}),
+      },
     })),
 
   clearActivity: () =>
     set((state) => ({ offsetSeconds: 0, source: { video: state.source.video } })),
+
+  setStandaloneActivity: (activity, options) =>
+    set({
+      offsetSeconds: 0,
+      media: undefined,
+      source: {
+        activity,
+        activityOrigin: 'hand',
+        ...(options?.focusedSection ? { focusedSection: true } : {}),
+      },
+    }),
 
   offerVideoActivity: (activity) => {
     if (get().source.activityOrigin === 'hand') return false;

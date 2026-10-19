@@ -4,6 +4,7 @@ import { WarningList } from '../components/ErrorPanel';
 import { BurnedInExportPanel } from '../components/BurnedInExportPanel';
 import { OverlayExportPanel } from '../components/OverlayExportPanel';
 import { OverlayPreview } from '../components/OverlayPreview';
+import { RouteOverlayPanel } from '../components/RouteOverlayPanel';
 import { VideoReadProgress } from '../components/VideoReadProgress';
 import type { Activity } from '../domain/activity';
 import { ActivityError, toActivityError } from '../domain/errors';
@@ -141,6 +142,10 @@ export function OverlayPage() {
           />
         )}
 
+        {idle && !source.video && source.activity && (
+          <RouteOverlayPanel activity={source.activity} focusedSection={source.focusedSection} />
+        )}
+
         {idle && source.video && source.activity && (
           <OverlayExportPanel
             video={source.video}
@@ -172,6 +177,7 @@ export function OverlayPage() {
             />
             <ActivitySlot
               activity={source.activity}
+              focusedSection={source.focusedSection}
               units={unitSystem}
               onFile={(file) => void handleActivity(file)}
               onClear={clearActivity}
@@ -187,7 +193,7 @@ export function OverlayPage() {
                 ? 'Both files stay in memory on this page until then, or until you start over.'
                 : source.video
                   ? 'This video supplies no activity of its own. Add an activity file — from a watch, say — to draw over it.'
-                  : 'Without a video, this activity can become a standalone overlay: the route on a transparent background. Add a video to draw its telemetry over the picture.'}
+                  : 'Without a video, this activity becomes a standalone overlay: the route on a transparent background, above. Add a video to draw its telemetry over the picture.'}
             </p>
             <p className="video__actions">
               <button type="button" className="button" onClick={clear}>
@@ -251,11 +257,13 @@ function VideoSlot({
 
 function ActivitySlot({
   activity,
+  focusedSection,
   units,
   onFile,
   onClear,
 }: {
   activity: Activity | undefined;
+  focusedSection?: boolean;
   units: UnitSystem;
   onFile: (file: File) => void;
   onClear: () => void;
@@ -274,6 +282,12 @@ function ActivitySlot({
                 {activity.source.fileName ?? activity.source.format.toUpperCase()}
               </dd>
             </div>
+            {focusedSection && (
+              <div className="summary__stat">
+                <dt className="summary__label">Scope</dt>
+                <dd className="summary__value">Focused section only</dd>
+              </div>
+            )}
             <div className="summary__stat">
               <dt className="summary__label">Points</dt>
               <dd className="summary__value">{activity.points.length}</dd>

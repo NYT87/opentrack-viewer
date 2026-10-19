@@ -16,8 +16,12 @@ vi.mock('maplibre-gl', async () => {
 const { App } = await import('./App');
 const { useOverlayStore } = await import('../state/overlayStore');
 const { useActivityStore } = await import('../state/activityStore');
+const { useInteractionStore } = await import('../state/interactionStore');
 const { readBinaryFixture, readFixture } = await import('../test/helpers/fixtures');
+const { makeActivity } = await import('../test/helpers/activity');
 
+const useActivityFixture = () =>
+  makeActivity(Array.from({ length: 6 }, (_, i) => ({ lat: 10 + i * 0.001, lon: 20 + i * 0.002 })));
 const heroVideo = () =>
   new File([readBinaryFixture('hero8.mp4')], 'GH010042.mp4', { type: 'video/mp4' });
 const gpxFile = () =>
@@ -450,5 +454,128 @@ describe('the preview on the page (AV-1004)', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('the route image without a video (AV-1009)', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() =>
+      new Proxy({}, { get: () => () => undefined, set: () => true })) as never);
+  });
+
+  it('offers a route image for an activity chosen by hand, with no video', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    expect(screen.queryByRole('region', { name: 'Route image' })).not.toBeInTheDocument();
+
+    await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
+
+    const panel = await screen.findByRole('region', { name: 'Route image' });
+    expect(within(panel).getByTestId('route-image-preview')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Download PNG' })).toBeEnabled();
+    expect(panel).toHaveTextContent(/whole activity/);
+    expect(screen.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Export overlay' })).not.toBeInTheDocument();
+  });
+
+  it('is not offered for a video alone, and gives way to the video overlays when one is added', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    act(() => useOverlayStore.getState().setActivity(useActivityFixture(), 'hand'));
+    expect(await screen.findByRole('region', { name: 'Route image' })).toBeInTheDocument();
+
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:clip', revokeObjectURL: () => {} }));
+    try {
+      act(() =>
+        useOverlayStore.getState().setVideo({
+          file: heroVideo(),
+          timing: { durationSeconds: 17, frameIntervalSeconds: 1 / 30 },
+        }),
+      );
+      expect(await screen.findByRole('region', { name: 'Preview' })).toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Route image' })).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('explains an activity with no route instead of drawing nothing', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    const { makeActivity } = await import('../test/helpers/activity');
+    act(() => useOverlayStore.getState().setActivity(makeActivity([{ elevationMeters: 1 }, { elevationMeters: 2 }]), 'hand'));
+    const panel = await screen.findByRole('region', { name: 'Route image' });
+    expect(within(panel).getByRole('alert')).toHaveTextContent(/no locations/);
+    expect(within(panel).getByRole('button', { name: 'Download PNG' })).toBeDisabled();
+  });
+});
+
+describe('handed over from the viewer (AV-1009)', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() =>
+      new Proxy({}, { get: () => () => undefined, set: () => true })) as never);
+  });
+
+  const openInViewer = async () => {
+    window.location.hash = '#/viewer';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('file-input'), gpxFile());
+    return screen.findByRole('button', { name: 'Create route overlay' });
+  };
+
+  it('takes the whole activity to the overlay page and previews its route', async () => {
+    await userEvent.click(await openInViewer());
+
+    const panel = await screen.findByRole('region', { name: 'Route image' });
+    expect(window.location.hash).toBe('#/overlays');
+    expect(within(panel).getByTestId('route-image-preview')).toBeInTheDocument();
+    expect(panel).toHaveTextContent(/whole activity/);
+    const activity = screen.getByRole('region', { name: 'Activity' });
+    expect(within(activity).getByText('morning-run.gpx')).toBeInTheDocument();
+    expect(within(activity).queryByText('Focused section only')).not.toBeInTheDocument();
+  });
+
+  it('opens the route image even when a video was held here before', async () => {
+    act(() =>
+      useOverlayStore.getState().setVideo({
+        file: heroVideo(),
+        timing: { durationSeconds: 17, frameIntervalSeconds: 1 / 30 },
+      }),
+    );
+    await userEvent.click(await openInViewer());
+
+    const panel = await screen.findByRole('region', { name: 'Route image' });
+    expect(within(panel).getByTestId('route-image-preview')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Download PNG' })).toBeEnabled();
+    expect(screen.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument();
+    expect(useOverlayStore.getState().source.video).toBeUndefined();
+  });
+
+  it('takes only the focused section when it was chosen on purpose', async () => {
+    const button = await openInViewer();
+    const total = useActivityStore.getState().activity!.points.length;
+    act(() => useInteractionStore.getState().setSelectedRange({ startIndex: 1, endIndex: 2 }));
+    expect(total).toBeGreaterThan(2);
+
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Use only the selected section/ }));
+    await userEvent.click(button);
+
+    const panel = await screen.findByRole('region', { name: 'Route image' });
+    expect(panel).toHaveTextContent(/focused section/);
+    const activity = screen.getByRole('region', { name: 'Activity' });
+    expect(within(activity).getByText('Focused section only')).toBeInTheDocument();
+    expect(useOverlayStore.getState().source.activity!.points.map((point) => point.index)).toEqual([1, 2]);
+    // The viewer's own activity is untouched.
+    expect(useActivityStore.getState().activity!.points).toHaveLength(total);
+  });
+
+  it('forgets that it was a section when another activity is chosen', async () => {
+    await userEvent.click(await openInViewer());
+    act(() => useOverlayStore.getState().setActivity(useActivityFixture(), 'hand', { focusedSection: true }));
+    expect(await screen.findByText('Focused section only')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Choose another activity' }));
+    await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
+    await screen.findByRole('region', { name: 'Route image' });
+    expect(screen.queryByText('Focused section only')).not.toBeInTheDocument();
   });
 });
