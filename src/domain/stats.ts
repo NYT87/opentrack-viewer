@@ -188,7 +188,8 @@ export interface ElevationResult {
 /**
  * AV-403. Accumulates a candidate climb/descent and only commits it once it
  * exceeds ELEVATION_NOISE_THRESHOLD_METERS, so barometric jitter on flat
- * ground does not register as gain.
+ * ground does not register as gain. Accumulation restarts at a recorded segment
+ * boundary (AV-1101), as distance does.
  */
 export function computeElevation(
   points: ActivityPoint[],
@@ -199,6 +200,7 @@ export function computeElevation(
   let min: number | undefined;
   let max: number | undefined;
   let anchor: number | undefined;
+  let anchorSegment: number | undefined;
   let seen = 0;
 
   for (const point of points) {
@@ -208,6 +210,14 @@ export function computeElevation(
     seen += 1;
     if (min === undefined || value < min) min = value;
     if (max === undefined || value > max) max = value;
+
+    // Like distance, a climb is not counted across a recording gap: the ground
+    // between the end of one segment and the start of the next was not travelled
+    // by this recording, so the difference in height is not height climbed.
+    // The new segment starts a fresh anchor; the overall min and max stand.
+    const segment = point.segmentIndex ?? 0;
+    if (anchor !== undefined && segment !== anchorSegment) anchor = undefined;
+    anchorSegment = segment;
 
     if (anchor === undefined) {
       anchor = value;

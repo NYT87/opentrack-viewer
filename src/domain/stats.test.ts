@@ -168,6 +168,45 @@ describe('computeTimeBounds (AV-402)', () => {
 });
 
 describe('computeElevation (AV-403)', () => {
+  describe('across a recording gap (AV-1101)', () => {
+    const run = (elevations: number[], segment: number) =>
+      elevations.map((elevationMeters) => ({ elevationMeters, segmentIndex: segment }));
+
+    it('does not count the jump up between two segments as climb', () => {
+      const result = computeElevation(points([...run([100, 100, 100], 0), ...run([1000, 1000, 1000], 1)]));
+      expect(result.gainMeters).toBe(0);
+      expect(result.lossMeters).toBe(0);
+      expect(result.minMeters).toBe(100);
+      expect(result.maxMeters).toBe(1000);
+    });
+
+    it('does not count the jump down between two segments as descent', () => {
+      const result = computeElevation(points([...run([1000, 1000], 0), ...run([100, 100], 1)]));
+      expect(result.gainMeters).toBe(0);
+      expect(result.lossMeters).toBe(0);
+      expect(result.minMeters).toBe(100);
+      expect(result.maxMeters).toBe(1000);
+    });
+
+    it('still counts the climbing done inside each segment, from where that segment began', () => {
+      const result = computeElevation(points([...run([100, 110, 120], 0), ...run([1000, 1010, 995], 1)]));
+      expect(result.gainMeters).toBe(30);
+      expect(result.lossMeters).toBe(15);
+    });
+
+    it('starts a new anchor even when a gap falls in the middle of a not-yet-committed climb', () => {
+      // 2 m up (under the threshold) before the gap must not combine with 2 m after it.
+      const result = computeElevation(points([...run([100, 102], 0), ...run([500, 502], 1)]), 3);
+      expect(result.gainMeters).toBe(0);
+    });
+
+    it('counts a continuous segment exactly as before', () => {
+      const flat = computeElevation(points(run([100, 110, 130, 120], 0)));
+      const unsegmented = computeElevation(points([100, 110, 130, 120].map((elevationMeters) => ({ elevationMeters }))));
+      expect(flat).toEqual(unsegmented);
+    });
+  });
+
   it('sums a sustained climb', () => {
     const result = computeElevation(
       points([{ elevationMeters: 100 }, { elevationMeters: 150 }, { elevationMeters: 200 }]),
