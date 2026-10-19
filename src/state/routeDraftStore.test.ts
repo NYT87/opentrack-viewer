@@ -56,3 +56,35 @@ describe('the route draft store (AV-1102)', () => {
     expect(useRouteDraftStore.getState().draft).toBeUndefined();
   });
 });
+
+describe('editing through the store (AV-1104)', () => {
+  it('adds, moves and removes points of the held draft, returning each outcome', () => {
+    useRouteDraftStore.getState().startBlank();
+    const added = useRouteDraftStore.getState().addPoint({ lat: 10, lon: 20 });
+    expect(added.ok).toBe(true);
+    const id = useRouteDraftStore.getState().draft!.points[0]!.id;
+
+    expect(useRouteDraftStore.getState().movePoint(id, { lat: 11, lon: 21 }).ok).toBe(true);
+    expect(useRouteDraftStore.getState().draft!.points[0]).toMatchObject({ lat: 11, lon: 21 });
+
+    expect(useRouteDraftStore.getState().removePoint(id).ok).toBe(true);
+    expect(useRouteDraftStore.getState().draft!.points).toEqual([]);
+  });
+
+  it('leaves the held draft untouched when an edit is refused', () => {
+    useRouteDraftStore.getState().startBlank();
+    useRouteDraftStore.getState().addPoint({ lat: 10, lon: 20 });
+    const held = useRouteDraftStore.getState().draft;
+
+    const refused = useRouteDraftStore.getState().addPoint({ lat: 95, lon: 20 });
+    expect(refused).toMatchObject({ ok: false, error: { code: 'invalid_point' } });
+    expect(useRouteDraftStore.getState().removePoint('nope').ok).toBe(false);
+    expect(useRouteDraftStore.getState().draft).toBe(held);
+  });
+
+  it('reports that there is nothing to edit without a draft', () => {
+    const result = useRouteDraftStore.getState().addPoint({ lat: 10, lon: 20 });
+    expect(result).toMatchObject({ ok: false, error: { code: 'empty_draft' } });
+    expect(useRouteDraftStore.getState().draft).toBeUndefined();
+  });
+});

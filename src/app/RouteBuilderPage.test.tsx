@@ -2,7 +2,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+// The page draws the draft on a map once there is one, and jsdom has no WebGL.
+vi.mock('maplibre-gl', async () => {
+  const { FakeMap, setWorkerUrl } = await import('../test/helpers/maplibreMock');
+  return {
+    default: { Map: FakeMap, NavigationControl: class {}, setWorkerUrl },
+    Map: FakeMap,
+    NavigationControl: class {},
+    setWorkerUrl,
+  };
+});
+vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
+
 const { App } = await import('./App');
+const { FakeMap, latestMap, resetMapLibreMock } = await import('../test/helpers/maplibreMock');
 const { ROUTES, TOOLS_ITEMS } = await import('./routes');
 const { metadataForRoute } = await import('./seo');
 const { useRouteDraftStore } = await import('../state/routeDraftStore');
@@ -17,7 +30,28 @@ beforeEach(() => {
   useActivityStore.getState().clear();
   useInteractionStore.setState({ unitSystem: 'metric' });
   window.location.hash = '';
+  resetMapLibreMock();
 });
+
+/** The map, once the page has lazily loaded it and its style has "loaded". */
+async function readyMap() {
+  await waitFor(() => expect(FakeMap.instances.length).toBeGreaterThan(0));
+  const map = latestMap();
+  act(() => map.completeStyleLoad());
+  return map;
+}
+
+const routeFeatures = (map: ReturnType<typeof latestMap>) =>
+  (map.sources.get('activity-route')?.data as { features: unknown[] }).features;
+const pointFeatures = (map: ReturnType<typeof latestMap>) =>
+  (map.sources.get('draft-points')?.data as { features: { properties: { id: string; selected: boolean } }[] }).features;
+
+const press = (map: ReturnType<typeof latestMap>, lat: number, lon: number) =>
+  act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: lon, lat } }));
+
+const editor = () => screen.getByRole('region', { name: 'Edit points' });
+const addForm = () => within(editor()).getByRole('form', { name: 'Add a point by coordinates' });
+const draft = () => useRouteDraftStore.getState().draft!;
 
 const goToRouteBuilder = async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Tools' }));
@@ -333,5 +367,244 @@ describe('the page uses the app’s shell (AV-1102)', () => {
     await screen.findByRole('region', { name: 'Planned track' });
     expect(Object.keys(localStorage).filter((key) => key !== 'opentrack-viewer:theme')).toEqual([]);
     expect(Object.keys(sessionStorage)).toEqual([]);
+  });
+});
+
+describe('editing points on the map (AV-1104)', () => {
+  it('draws a blank draft on a map before it has any points, with nothing fitted yet', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+
+    const map = await readyMap();
+    expect(screen.getByRole('region', { name: 'Draft map' })).toBeInTheDocument();
+    expect(routeFeatures(map)).toEqual([]);
+    expect(map.fitBoundsCalls).toEqual([]);
+  });
+
+  it('adds a point where the map was pressed, selects it, and redraws the route at once', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+
+    expect(draft().points).toHaveLength(2);
+    expect(draft().points[1]).toMatchObject({ lat: 43.01, lon: -8, origin: { kind: 'manual' } });
+    // The preview: one line through both points, and both drawn as handles,
+    // the newest selected.
+    expect(routeFeatures(map)).toHaveLength(1);
+    expect(pointFeatures(map).map((f) => f.properties)).toEqual([
+      { id: 'p0', selected: false },
+      { id: 'p1', selected: true },
+    ]);
+    const track = screen.getByRole('region', { name: 'Planned track' });
+    expect(within(track).getByText('Points').nextSibling).toHaveTextContent('2');
+    expect(within(track).getByText('Distance').nextSibling).toHaveTextContent(/1\.1\d? km/);
+    expect(editor()).toHaveTextContent('Selected: point 2 of 2');
+  });
+
+  it('adds a point from typed coordinates, with an elevation when given', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    await readyMap();
+
+    await userEvent.type(within(addForm()).getByLabelText('Latitude'), '51.5');
+    await userEvent.type(within(addForm()).getByLabelText('Longitude'), '-0.1');
+    await userEvent.type(within(addForm()).getByLabelText(/Elevation/), '12');
+    await userEvent.click(within(addForm()).getByRole('button', { name: 'Add point' }));
+
+    expect(draft().points[0]).toMatchObject({ lat: 51.5, lon: -0.1, elevationMeters: 12, edit: { kind: 'added' } });
+  });
+
+  it('refuses an impossible place with a word, not a block, and changes nothing', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    const before = draft();
+
+    await userEvent.type(within(addForm()).getByLabelText('Latitude'), '95');
+    await userEvent.type(within(addForm()).getByLabelText('Longitude'), '0');
+    await userEvent.click(within(addForm()).getByRole('button', { name: 'Add point' }));
+
+    expect(within(editor()).getByRole('status')).toHaveTextContent(/Latitude must be a number between -90 and 90/);
+    expect(draft()).toBe(before);
+    // Nothing is modal: the next edit goes straight through.
+    press(map, 43.01, -8);
+    expect(draft().points).toHaveLength(2);
+    expect(within(editor()).getByRole('status')).not.toHaveTextContent(/Latitude must/);
+  });
+
+  it('selects points from the keyboard, removes the selected one, and keeps the rest', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    press(map, 43.02, -8);
+    expect(editor()).toHaveTextContent('Selected: point 3 of 3');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    expect(editor()).toHaveTextContent('Selected: point 2 of 3');
+    expect(pointFeatures(map).find((f) => f.properties.selected)?.properties.id).toBe('p1');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove point' }));
+
+    expect(draft().points.map((p) => p.id)).toEqual(['p0', 'p2']);
+    expect(editor()).toHaveTextContent('No point selected (2 in the track)');
+    expect(routeFeatures(map)).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Remove point' })).not.toBeInTheDocument();
+  });
+
+  it('selects a point by pressing it on the map', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+
+    map.queryRenderedFeatures.mockReturnValue([{ properties: { id: 'p0' } }]);
+    press(map, 43, -8);
+
+    expect(editor()).toHaveTextContent('Selected: point 1 of 2');
+    expect(draft().points).toHaveLength(2);
+  });
+
+  it('moves the selected point by typing where it should go, remembering where it was', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    const moveForm = () => within(editor()).getByRole('form', { name: 'Move the selected point' });
+
+    // The fields start from where the point is.
+    expect(within(moveForm()).getByLabelText('Latitude')).toHaveValue('43');
+    await userEvent.clear(within(moveForm()).getByLabelText('Latitude'));
+    await userEvent.type(within(moveForm()).getByLabelText('Latitude'), '43.5');
+    await userEvent.click(within(moveForm()).getByRole('button', { name: 'Move point' }));
+
+    expect(draft().points[0]).toMatchObject({ lat: 43.5, lon: -8, edit: { kind: 'added' } });
+    expect(pointFeatures(map)[0]?.properties.id).toBe('p0');
+  });
+
+  it('moves the selected point to where the map is pressed, in move mode', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+
+    await userEvent.click(screen.getByRole('radio', { name: /moves the selected point/ }));
+    expect(within(editor()).getByRole('status')).toHaveTextContent('Press the map to move point 2 there.');
+    press(map, 44, -9);
+
+    expect(draft().points).toHaveLength(2);
+    expect(draft().points[1]).toMatchObject({ lat: 44, lon: -9 });
+
+    // Deselecting takes the map back to adding: there is nothing to move. And
+    // it stays there: the next press adds and selects a point, and the press
+    // after that adds another rather than moving it (review R1-C2).
+    await userEvent.click(screen.getByRole('button', { name: 'Deselect' }));
+    expect(screen.getByRole('radio', { name: /moves the selected point/ })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /adds a point/ })).toBeChecked();
+    press(map, 45, -9);
+    expect(draft().points).toHaveLength(3);
+    expect(screen.getByRole('radio', { name: /adds a point/ })).toBeChecked();
+    press(map, 46, -9);
+    expect(draft().points).toHaveLength(4);
+    expect(draft().points[3]).toMatchObject({ lat: 46, lon: -9 });
+  });
+
+  it('goes back to adding when the selected point is removed, and after starting over', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    await userEvent.click(screen.getByRole('radio', { name: /moves the selected point/ }));
+
+    // Removing the selected point: the next two presses both add.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove point' }));
+    expect(screen.getByRole('radio', { name: /adds a point/ })).toBeChecked();
+    press(map, 44, -8);
+    press(map, 45, -8);
+    expect(draft().points.map((p) => [p.lat, p.lon])).toEqual([[43, -8], [44, -8], [45, -8]]);
+
+    // Move mode again, then a new draft: it does not carry over.
+    await userEvent.click(screen.getByRole('radio', { name: /moves the selected point/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const fresh = await readyMap();
+    expect(screen.getByRole('radio', { name: /adds a point/ })).toBeChecked();
+    press(fresh, 1, 1);
+    press(fresh, 2, 2);
+    expect(draft().points).toHaveLength(2);
+  });
+
+  it('does not pull the camera back while editing, but fits a new draft', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    const map = await readyMap();
+    expect(map.fitBoundsCalls).toHaveLength(1);
+
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    expect(map.fitBoundsCalls).toHaveLength(1);
+
+    // Starting over unmounts the map with the draft; a new draft gets a new
+    // map, fitted once to its first point (a centre, since one point has no
+    // area) and then left alone as points are added.
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const fresh = await readyMap();
+    expect(fresh).not.toBe(map);
+    press(fresh, 1, 1);
+    expect(fresh.easeToCalls).toHaveLength(1);
+    press(fresh, 2, 2);
+    press(fresh, 3, 3);
+    expect(fresh.easeToCalls).toHaveLength(1);
+    expect(fresh.fitBoundsCalls).toHaveLength(0);
+  });
+
+  it('leaves the activity a draft was copied from exactly as it was', async () => {
+    const source = makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }, { lat: 10.002, lon: 20 }]);
+    const before = JSON.stringify(source);
+    const handed = draftFromActivity(source, { name: 'Copy' });
+    if (!handed.ok) throw new Error('draft expected');
+    act(() => useRouteDraftStore.getState().setDraft(handed.value));
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    const map = await readyMap();
+
+    press(map, 11, 21);
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    const moveForm = within(editor()).getByRole('form', { name: 'Move the selected point' });
+    await userEvent.clear(within(moveForm).getByLabelText('Longitude'));
+    await userEvent.type(within(moveForm).getByLabelText('Longitude'), '25');
+    await userEvent.click(within(moveForm).getByRole('button', { name: 'Move point' }));
+
+    expect(JSON.stringify(source)).toBe(before);
+    expect(draft().points.some((p) => p.lon === 25)).toBe(true);
+  });
+
+  it('says plainly that points are not dragged', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    await readyMap();
+    expect(within(editor()).getByRole('status')).toHaveTextContent(/Points are not dragged/);
   });
 });

@@ -1,9 +1,15 @@
 import { create } from 'zustand';
 import type { Activity, ActivityPointRange } from '../domain/activity';
 import {
+  addPoint,
   appendImportedRoute,
   createBlankDraft,
   draftFromActivity,
+  movePoint,
+  removePoint,
+  type AddPointOptions,
+  type DraftPlace,
+  RouteDraftError,
   type DraftResult,
   type RouteDraft,
 } from '../domain/routeDraft';
@@ -31,8 +37,22 @@ interface RouteDraftState {
     activity: Activity,
     options?: { range?: ActivityPointRange },
   ) => DraftResult<RouteDraft>;
+  /**
+   * AV-1104. Edits by hand, each through the model's own operation: the
+   * outcome is returned so the page can say why an edit was refused, and a
+   * refusal leaves the held draft untouched. Without a draft there is nothing
+   * to edit, which is reported the same way.
+   */
+  addPoint: (place: DraftPlace, options?: AddPointOptions) => DraftResult<RouteDraft>;
+  removePoint: (id: string) => DraftResult<RouteDraft>;
+  movePoint: (id: string, place: DraftPlace) => DraftResult<RouteDraft>;
   clear: () => void;
 }
+
+const noDraft = (): DraftResult<RouteDraft> => ({
+  ok: false,
+  error: new RouteDraftError('empty_draft', 'There is no planned track to edit.'),
+});
 
 export const useRouteDraftStore = create<RouteDraftState>((set, get) => ({
   draft: undefined,
@@ -46,6 +66,30 @@ export const useRouteDraftStore = create<RouteDraftState>((set, get) => ({
     const result = held
       ? appendImportedRoute(held, activity, options)
       : draftFromActivity(activity, options);
+    if (result.ok) set({ draft: result.value });
+    return result;
+  },
+
+  addPoint: (place, options) => {
+    const held = get().draft;
+    if (!held) return noDraft();
+    const result = addPoint(held, place, options);
+    if (result.ok) set({ draft: result.value });
+    return result;
+  },
+
+  removePoint: (id) => {
+    const held = get().draft;
+    if (!held) return noDraft();
+    const result = removePoint(held, id);
+    if (result.ok) set({ draft: result.value });
+    return result;
+  },
+
+  movePoint: (id, place) => {
+    const held = get().draft;
+    if (!held) return noDraft();
+    const result = movePoint(held, id, place);
     if (result.ok) set({ draft: result.value });
     return result;
   },

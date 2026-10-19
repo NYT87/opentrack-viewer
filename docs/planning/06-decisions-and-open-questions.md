@@ -625,6 +625,18 @@ Decision (`AV-1103`): the loaded viewer offers **Create custom track** beside th
 
 **The selected section**, as for the route overlay (TD-047): the whole route goes unless the reader ticks *Copy only the selected section* — worded apart from the overlay action's box, since the two sit in the same panel — offered only when the selection yields a draft. A section that was asked for and is no longer there — the selection moved to an unlocated stretch, or was cleared — disables the button with the reason until the box is unticked, which is the explicit way back to the whole activity.
 
+### TD-051: Route Points Are Edited by Hand, in Straight Lines, by Pressing or Typing — Never by Dragging
+
+Decision (`AV-1104`): Route Builder draws the draft on the viewer's own map component and edits it through three pure operations on the model — `addPoint`, `removePoint`, `movePoint` (TD-048's rules: a new draft each time, nothing shared with an activity, a refusal changes nothing) — and nothing else. **Editing is manual and straight-line**: a point goes where the reader put it and the line runs straight to the next; no road snapping and no routing provider, now or by this design. That answers the §17 question: snapping would need a network routing service, which the privacy model (§5) has no room for, and a planned track for a device is a sequence of places, not a navigation.
+
+**Two ways to say where, and both have a keyboard form.** A press on the map adds a point at the end of the track (or, in *move* mode, moves the selected point there), and the same place can be typed as coordinates. Points are selected by pressing them on the map or by stepping through them with *Previous point* and *Next point*. **Points are not dragged**, and the page says so: there is no drag handle and nothing suggests one. A drag has no keyboard equivalent and no way to refuse a bad place mid-gesture, whereas a deliberate press-to-move or a typed coordinate has both. Drag-to-move is left out of this milestone by design, not deferred; adding it later would be a convenience over the same operation.
+
+**Where the point lands in the track's stretches.** An added point continues the stretch it joins — at the end, the last stretch; after a chosen point, that point's — so it is drawn joined to its neighbours, which is why it was added. A removed point leaves its neighbours in their stretches. A moved point keeps its origin, elevation and time, and records where the source had it **once**: the first move remembers the original place, and later moves keep that record rather than the last stop, so what was changed from the recording can always be told; a point the reader added has no original and stays *added*.
+
+**A bad place is refused with a word, never a block.** Latitude outside ±90, longitude outside ±180, or anything that is not a finite number is refused by `validatePlace` with a message naming the part (`invalid_point`); an id that is not in the track is `unknown_point`. The page shows the reason in a `role="status"` line and nothing else changes — the next press goes straight through. Every edit is reported to the page as a `DraftResult`, so the reason the page gives is the model's own.
+
+**The map does not fight the editor.** The map component gained optional editing props — a layer of draft points (the selected one larger and amber), a press-on-point and a press-on-map callback (a press on a point is not also a press on the map), and a `fitKey`: with one, the camera is fitted only when the key changes (a new draft), not on every change to the route, so adding a point does not pull the camera back to the whole track. Without the key the viewer's behaviour is unchanged and tested so. The preview is the draft through `draftToActivity` and the same GeoJSON builder the viewer uses, recomputed on each committed edit — never on pointer movement — which is the §14 rule for large drafts.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -724,6 +736,7 @@ question deleted, so the reasoning stays findable.
 | Is burned-in browser-side video export viable? | Yes, measured: WebCodecs decodes the HERO8 clip at over 700 fps and the decode-composite-encode chain runs at 7–11× real time with hardware H.264, in Chromium, Brave and WebKit alike. Second phase, desktop only, audio copied through, 10-bit HEVC still to be checked (TD-039). |
 | Should overlay configuration be exported as project JSON? | Yes — it is the serialisation `AV-1003` needs for its own tests, so it ships with the template model rather than as an export mode (TD-039). |
 | Which label for the viewer action that opens Route Builder? | **Create custom track**, the task's own phrase in the app's sentence case. Not *Plan route from activity*: a planner promises routing, which this does not do (TD-050). |
+| Manual straight-line editing only, or road snapping through a routing provider? | Manual and straight-line, by design rather than deferral: snapping needs a network routing service the privacy model has no room for, and a planned track for a device is a sequence of places. Points are pressed or typed, never dragged (TD-051). |
 
 ### Answered, needing no work
 
@@ -745,7 +758,6 @@ question deleted, so the reasoning stays findable.
 - How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
 - What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
 - What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
-- For Route Builder, should the first implementation support manual straight-line point editing only, or should road/path snapping be added later through an optional routing provider?
 - Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?
 - Should Route Builder support undo/redo in the first milestone, or only confirmation for destructive section discard?
 - Should far-apart appended tracks be joined by a visible straight segment, kept as separate segments, or require the user to confirm the join?

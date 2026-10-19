@@ -13,6 +13,7 @@ import {
 import { haversineMeters, withDerivedStats } from './stats';
 import type { Activity } from './activity';
 import { makeActivity } from '../test/helpers/activity';
+import { addPoint, movePoint, removePoint, validatePlace } from './routeDraft';
 
 const T0 = new Date('2024-06-01T08:00:00Z');
 const at = (s: number) => new Date(T0.getTime() + s * 1000);
@@ -469,5 +470,98 @@ describe('immutability (AV-1101)', () => {
   it('feeds the same derived-stats path as a parsed activity', () => {
     const activity = unwrap(draftToActivity(unwrap(draftFromActivity(recording(), { id: 'd' }))));
     expect(withDerivedStats({ ...activity, warnings: [] }).derived!.pointCount).toBe(8);
+  });
+});
+
+describe('editing by hand (AV-1104)', () => {
+  const base = () => unwrap(draftFromActivity(recording(), { id: 'd' }));
+
+  it('refuses a place that is not on the planet, and says which part', () => {
+    expect(validatePlace({ lat: 91, lon: 0 })).toMatchObject({ ok: false, error: { code: 'invalid_point', message: /Latitude/ } });
+    expect(validatePlace({ lat: 0, lon: -181 })).toMatchObject({ ok: false, error: { code: 'invalid_point', message: /Longitude/ } });
+    expect(validatePlace({ lat: Number.NaN, lon: 0 }).ok).toBe(false);
+    expect(validatePlace({ lat: 0, lon: 0, elevationMeters: Number.POSITIVE_INFINITY }).ok).toBe(false);
+    expect(validatePlace({ lat: -90, lon: 180, elevationMeters: -5 })).toMatchObject({ ok: true, value: { lat: -90, lon: 180, elevationMeters: -5 } });
+  });
+
+  it('adds a point at the end, in the last stretch, marked as the reader’s own', () => {
+    const draft = deepFreeze(base());
+    const next = unwrap(addPoint(draft, { lat: 10.5, lon: 20.5, elevationMeters: 30 }));
+    const added = next.points[next.points.length - 1]!;
+    expect(added).toMatchObject({ lat: 10.5, lon: 20.5, elevationMeters: 30, origin: { kind: 'manual' }, edit: { kind: 'added' } });
+    expect(added.segmentIndex).toBe(draft.points[draft.points.length - 1]!.segmentIndex);
+    expect(added.id).toBe(`p${draft.counters.point}`);
+    expect(next.counters.point).toBe(draft.counters.point + 1);
+    expect(next.points.length).toBe(draft.points.length + 1);
+    // Untouched points are the same objects; the draft given is as it was.
+    expect(next.points[0]).toBe(draft.points[0]);
+    expect(draft.points.length).toBe(base().points.length);
+  });
+
+  it('starts an empty draft’s first stretch with its first point', () => {
+    const next = unwrap(addPoint(createBlankDraft({ id: 'b' }), { lat: 1, lon: 2 }));
+    expect(next.points).toHaveLength(1);
+    expect(next.points[0]).toMatchObject({ id: 'p0', segmentIndex: 0 });
+  });
+
+  it('adds a point after a chosen one, joining that point’s stretch', () => {
+    const draft = base();
+    const anchor = draft.points[1]!;
+    const next = unwrap(addPoint(draft, { lat: 10.1, lon: 20.1 }, { afterId: anchor.id }));
+    expect(next.points[2]).toMatchObject({ lat: 10.1, segmentIndex: anchor.segmentIndex });
+    expect(next.points[1]).toBe(anchor);
+    expect(addPoint(draft, { lat: 1, lon: 1 }, { afterId: 'nope' })).toMatchObject({ ok: false, error: { code: 'unknown_point' } });
+  });
+
+  it('refuses an invalid place and changes nothing', () => {
+    const draft = deepFreeze(base());
+    const refused = addPoint(draft, { lat: 100, lon: 0 });
+    expect(refused).toMatchObject({ ok: false, error: { code: 'invalid_point' } });
+    expect(draft.points.length).toBe(base().points.length);
+  });
+
+  it('removes a point, leaving its neighbours in their stretches', () => {
+    const draft = deepFreeze(base());
+    const gone = draft.points[2]!;
+    const next = unwrap(removePoint(draft, gone.id));
+    expect(next.points.map((p) => p.id)).not.toContain(gone.id);
+    expect(next.points.length).toBe(draft.points.length - 1);
+    expect(next.points[1]).toBe(draft.points[1]);
+    expect(next.points[2]).toBe(draft.points[3]);
+    expect(removePoint(draft, 'nope')).toMatchObject({ ok: false, error: { code: 'unknown_point' } });
+  });
+
+  it('moves a point and remembers where the source had it, once', () => {
+    const draft = deepFreeze(base());
+    const target = draft.points[1]!;
+    const once = unwrap(movePoint(draft, target.id, { lat: 11, lon: 21 }));
+    expect(once.points[1]).toMatchObject({ id: target.id, lat: 11, lon: 21, edit: { kind: 'moved', fromLat: target.lat, fromLon: target.lon } });
+    // Origin, elevation and time are kept: it is the same point, elsewhere.
+    expect(once.points[1]!.origin).toEqual(target.origin);
+    expect(once.points[1]!.elevationMeters).toBe(target.elevationMeters);
+
+    const twice = unwrap(movePoint(once, target.id, { lat: 12, lon: 22 }));
+    expect(twice.points[1]!.edit).toEqual({ kind: 'moved', fromLat: target.lat, fromLon: target.lon });
+    expect(draft.points[1]!.lat).toBe(target.lat);
+  });
+
+  it('keeps an added point marked as added when it is moved', () => {
+    const withAdded = unwrap(addPoint(base(), { lat: 1, lon: 1 }));
+    const added = withAdded.points[withAdded.points.length - 1]!;
+    const moved = unwrap(movePoint(withAdded, added.id, { lat: 2, lon: 2 }));
+    expect(moved.points[moved.points.length - 1]!.edit).toEqual({ kind: 'added' });
+  });
+
+  it('refuses to move to an invalid place or an unknown point', () => {
+    const draft = base();
+    expect(movePoint(draft, draft.points[0]!.id, { lat: 0, lon: 200 })).toMatchObject({ ok: false, error: { code: 'invalid_point' } });
+    expect(movePoint(draft, 'nope', { lat: 0, lon: 0 })).toMatchObject({ ok: false, error: { code: 'unknown_point' } });
+  });
+
+  it('feeds edits straight into the generated activity', () => {
+    const edited = unwrap(addPoint(unwrap(removePoint(base(), 'p0')), { lat: 10.5, lon: 20.5 }));
+    const activity = unwrap(draftToActivity(edited));
+    expect(activity.points.length).toBe(edited.points.length);
+    expect(activity.points[activity.points.length - 1]).toMatchObject({ lat: 10.5, lon: 20.5 });
   });
 });

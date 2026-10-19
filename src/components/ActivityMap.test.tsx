@@ -478,3 +478,112 @@ describe('a highlighted lap does not move the map (§17)', () => {
     expect(map.sources.get('activity-lap')?.data).toMatchObject({ features: [] });
   });
 });
+
+describe('editable points (AV-1104)', () => {
+  const points = {
+    type: 'FeatureCollection' as const,
+    features: [
+      { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [-0.3, 51.5] }, properties: { id: 'p0', selected: false } },
+      { type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [-0.1, 51.7] }, properties: { id: 'p1', selected: true } },
+    ],
+  };
+
+  beforeEach(() => resetMapLibreMock());
+
+  it('draws the points in a layer of their own and pushes changes to it', () => {
+    const { rerender } = renderMap({ editPoints: points });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+
+    expect(map.layers.map((layer) => layer.id)).toContain('draft-point');
+    expect(map.sources.get('draft-points')?.data).toBe(points);
+
+    const fewer = { ...points, features: points.features.slice(0, 1) };
+    rerender(<ActivityMap route={route} marker={emptyMarker} basemapEnabled editPoints={fewer} />);
+    expect(map.sources.get('draft-points')?.data).toBe(fewer);
+  });
+
+  it('hands a press on the map to the page as a place, and a press on a point as its id', () => {
+    const onMapClick = vi.fn();
+    const onPointClick = vi.fn();
+    renderMap({ editPoints: points, onMapClick, onPointClick });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+
+    act(() => map.emit('click', { point: { x: 1, y: 1 }, lngLat: { lng: -0.2, lat: 51.6 } }));
+    expect(onMapClick).toHaveBeenCalledWith({ lat: 51.6, lon: -0.2 });
+    expect(onPointClick).not.toHaveBeenCalled();
+
+    // Over a point, the press is the point's, not the map's.
+    map.queryRenderedFeatures.mockReturnValue([{ properties: { id: 'p1' } }]);
+    onMapClick.mockClear();
+    act(() => map.emit('click', { point: { x: 2, y: 2 }, lngLat: { lng: -0.1, lat: 51.7 } }));
+    expect(onPointClick).toHaveBeenCalledWith('p1');
+    expect(onMapClick).not.toHaveBeenCalled();
+  });
+
+  it('with a fit key, fits the camera once per key and not on every edit', () => {
+    const { rerender } = renderMap({ fitKey: 'draft-a' });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    expect(map.fitBoundsCalls).toHaveLength(1);
+
+    // The same draft, edited: the camera stays where the reader has it.
+    const edited = activityToRouteGeoJSON(
+      makeActivity([{ lat: 51.5, lon: -0.3 }, { lat: 51.7, lon: -0.1 }, { lat: 52.1, lon: 0.4 }]),
+    );
+    rerender(<ActivityMap route={edited} marker={emptyMarker} basemapEnabled fitKey="draft-a" />);
+    expect(map.fitBoundsCalls).toHaveLength(1);
+    expect(map.sources.get('activity-route')?.data).toBe(edited.featureCollection);
+
+    // A different draft is fitted afresh.
+    rerender(<ActivityMap route={edited} marker={emptyMarker} basemapEnabled fitKey="draft-b" />);
+    expect(map.fitBoundsCalls).toHaveLength(2);
+  });
+
+  it('without a fit key, keeps fitting every new route, as the viewer expects', () => {
+    const { rerender } = renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    const other = activityToRouteGeoJSON(makeActivity([{ lat: 40, lon: 1 }, { lat: 41, lon: 2 }]));
+    rerender(<ActivityMap route={other} marker={emptyMarker} basemapEnabled />);
+    expect(map.fitBoundsCalls).toHaveLength(2);
+  });
+});
+
+describe('editing across the antimeridian and through a resize (AV-1104, review)', () => {
+  beforeEach(() => resetMapLibreMock());
+
+  it('wraps a press in a repeated world back to a real longitude', () => {
+    const onMapClick = vi.fn();
+    renderMap({ onMapClick });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: 181, lat: 10 } }));
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: -181, lat: 10 } }));
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: 540.5, lat: 10 } }));
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: -180, lat: 10 } }));
+
+    expect(onMapClick.mock.calls.map(([place]) => (place as { lon: number }).lon)).toEqual([
+      -179, 179, -179.5, -180,
+    ]);
+  });
+
+  it('with a fit key, a resize after panning and editing leaves the camera alone', () => {
+    const { rerender } = renderMap({ fitKey: 'draft-a' });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    expect(map.fitBoundsCalls).toHaveLength(1);
+
+    // The reader pans, then edits the draft.
+    act(() => map.emit('dragstart', { originalEvent: new MouseEvent('mousedown') }));
+    const edited = activityToRouteGeoJSON(
+      makeActivity([{ lat: 51.5, lon: -0.3 }, { lat: 51.7, lon: -0.1 }, { lat: 52.1, lon: 0.4 }]),
+    );
+    rerender(<ActivityMap route={edited} marker={emptyMarker} basemapEnabled fitKey="draft-a" />);
+
+    act(() => map.emit('resize'));
+    expect(map.fitBoundsCalls).toHaveLength(1);
+  });
+});

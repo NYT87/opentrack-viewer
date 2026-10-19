@@ -118,7 +118,12 @@ export interface RouteDraft {
   counters: { point: number; source: number };
 }
 
-export type RouteDraftErrorCode = 'empty_draft' | 'no_route_points' | 'invalid_range';
+export type RouteDraftErrorCode =
+  | 'empty_draft'
+  | 'no_route_points'
+  | 'invalid_range'
+  | 'invalid_point'
+  | 'unknown_point';
 
 export class RouteDraftError extends Error {
   readonly code: RouteDraftErrorCode;
@@ -386,4 +391,115 @@ export function draftToActivity(
     warnings,
   };
   return ok(withDerivedStats(activity));
+}
+
+/*
+ * AV-1104. Editing by hand. Each operation returns a new draft and leaves the
+ * one it was given as it was; a refusal (`invalid_point`, `unknown_point`)
+ * carries a reason and changes nothing. Points that did not change are shared
+ * with the previous draft.
+ */
+
+export interface DraftPlace {
+  lat: number;
+  lon: number;
+  elevationMeters?: number;
+}
+
+/**
+ * A place a reader typed or clicked is checked before it becomes a point: a
+ * latitude past the poles, a longitude past the antimeridian, or anything that
+ * is not a finite number is refused rather than drawn somewhere it cannot be.
+ */
+export function validatePlace(place: DraftPlace): DraftResult<DraftPlace> {
+  const { lat, lon, elevationMeters } = place;
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    return fail('invalid_point', 'Latitude must be a number between -90 and 90.');
+  }
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+    return fail('invalid_point', 'Longitude must be a number between -180 and 180.');
+  }
+  if (elevationMeters !== undefined && !Number.isFinite(elevationMeters)) {
+    return fail('invalid_point', 'Elevation must be a number of metres, or left blank.');
+  }
+  return ok({ lat, lon, ...(elevationMeters !== undefined ? { elevationMeters } : {}) });
+}
+
+export interface AddPointOptions {
+  /**
+   * Put the new point after this one rather than at the end. It joins that
+   * point's stretch, so the line runs through it.
+   */
+  afterId?: string;
+}
+
+const indexOfPoint = (draft: RouteDraft, id: string): number =>
+  draft.points.findIndex((point) => point.id === id);
+
+/**
+ * Adds a place as a point the reader put there: at the end of the track, or
+ * after a chosen point. It continues the stretch it lands in — a new point
+ * is drawn joined to its neighbours, which is the whole point of adding it —
+ * and an empty draft starts its first stretch with it.
+ */
+export function addPoint(
+  draft: RouteDraft,
+  place: DraftPlace,
+  options: AddPointOptions = {},
+): DraftResult<RouteDraft> {
+  const valid = validatePlace(place);
+  if (!valid.ok) return valid as unknown as DraftResult<RouteDraft>;
+
+  let at = draft.points.length;
+  if (options.afterId !== undefined) {
+    const after = indexOfPoint(draft, options.afterId);
+    if (after === -1) return fail('unknown_point', 'That point is not in this track.');
+    at = after + 1;
+  }
+  const neighbour = draft.points[at - 1] ?? draft.points[at];
+  const point: DraftPoint = {
+    id: `p${draft.counters.point}`,
+    ...valid.value,
+    segmentIndex: neighbour?.segmentIndex ?? 0,
+    origin: { kind: 'manual' },
+    edit: { kind: 'added' },
+  };
+  return ok({
+    ...draft,
+    points: [...draft.points.slice(0, at), point, ...draft.points.slice(at)],
+    counters: { ...draft.counters, point: draft.counters.point + 1 },
+  });
+}
+
+/** Takes one point out. Its neighbours keep their stretches; the line now runs between them. */
+export function removePoint(draft: RouteDraft, id: string): DraftResult<RouteDraft> {
+  const at = indexOfPoint(draft, id);
+  if (at === -1) return fail('unknown_point', 'That point is not in this track.');
+  return ok({ ...draft, points: draft.points.filter((_, index) => index !== at) });
+}
+
+/**
+ * Moves a point to a new place. The place it came from is remembered once —
+ * the first move records where the source had it, and later moves keep that
+ * record rather than the last stop — so what was changed from the original
+ * can always be told. A point the reader added has no original to remember.
+ */
+export function movePoint(
+  draft: RouteDraft,
+  id: string,
+  place: DraftPlace,
+): DraftResult<RouteDraft> {
+  const valid = validatePlace(place);
+  if (!valid.ok) return valid as unknown as DraftResult<RouteDraft>;
+  const at = indexOfPoint(draft, id);
+  if (at === -1) return fail('unknown_point', 'That point is not in this track.');
+
+  const current = draft.points[at]!;
+  const edit: DraftPointEdit =
+    current.edit?.kind === 'added' || current.edit?.kind === 'moved'
+      ? current.edit
+      : { kind: 'moved', fromLat: current.lat, fromLon: current.lon };
+  const moved: DraftPoint = { ...current, lat: valid.value.lat, lon: valid.value.lon, edit };
+  if (valid.value.elevationMeters !== undefined) moved.elevationMeters = valid.value.elevationMeters;
+  return ok({ ...draft, points: draft.points.map((point, index) => (index === at ? moved : point)) });
 }

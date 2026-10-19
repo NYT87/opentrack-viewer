@@ -150,3 +150,40 @@ test('fits a phone screen without a sideways scroll', async ({ page }) => {
   });
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('draws the draft on a map and edits it point by point (AV-1104)', async ({ page }) => {
+  await page.goto('./#/route-builder');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Basemap tiles').uncheck();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await page.getByRole('button', { name: 'Start a blank track' }).click();
+
+  // The map is there before the first point, ready to be pressed.
+  const mapRegion = page.getByRole('region', { name: 'Draft map' });
+  await expect(mapRegion.locator('.maplibregl-canvas')).toBeVisible();
+
+  // Two points typed in: a line a little over a kilometre long.
+  const add = page.getByRole('form', { name: 'Add a point by coordinates' });
+  await add.getByLabel('Latitude').fill('43.00');
+  await add.getByLabel('Longitude').fill('-8.00');
+  await add.getByRole('button', { name: 'Add point' }).click();
+  await add.getByLabel('Latitude').fill('43.01');
+  await add.getByLabel('Longitude').fill('-8.00');
+  await add.getByRole('button', { name: 'Add point' }).click();
+
+  const track = page.getByRole('region', { name: 'Planned track' });
+  await expect(track).toContainText('2');
+  await expect(track).toContainText(/1\.1\d? km|1\.1 km/);
+
+  // An impossible place is refused with a word, not a crash, and nothing changes.
+  await add.getByLabel('Latitude').fill('95');
+  await add.getByRole('button', { name: 'Add point' }).click();
+  await expect(page.getByRole('region', { name: 'Edit points' }).getByRole('status')).toContainText(
+    /Latitude must be/,
+  );
+  await expect(track).toContainText(/Points\s*2/);
+
+  // The last point added is selected; removing it leaves one.
+  await page.getByRole('button', { name: 'Remove point' }).click();
+  await expect(track).toContainText(/Points\s*1/);
+});

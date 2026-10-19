@@ -40,6 +40,20 @@ const MARKER_SOURCE = 'activity-marker';
 const MARKER_LAYER = 'activity-marker-point';
 const LAP_SOURCE = 'activity-lap';
 const LAP_LAYER = 'activity-lap-line';
+const EDIT_POINT_SOURCE = 'draft-points';
+const EDIT_POINT_LAYER = 'draft-point';
+
+/** An empty collection, for a map with no editable points. */
+const EMPTY_POINTS: FeatureCollection<Point, EditPointProperties> = {
+  type: 'FeatureCollection',
+  features: [],
+};
+
+/** AV-1104. What a draft point carries onto the map: its id, and whether it is the one picked out. */
+export interface EditPointProperties {
+  id: string;
+  selected: boolean;
+}
 
 /**
  * Default basemap: OpenStreetMap raster tiles, declared inline so there is no
@@ -153,6 +167,25 @@ export interface ActivityMapProps {
    */
   onRouteHover?: (pointIndex: number | undefined) => void;
   onRouteClick?: (pointIndex: number | undefined) => void;
+  /**
+   * AV-1104. Points a reader can pick out and edit, drawn as circles over the
+   * route; the selected one in its own colour. The route draft's.
+   */
+  editPoints?: FeatureCollection<Point, EditPointProperties>;
+  /** A press on one of `editPoints`, with its id. */
+  onPointClick?: (id: string) => void;
+  /**
+   * A press on the map itself — not on a draft point, which `onPointClick`
+   * takes — with the place pressed. How the page adds a point by clicking.
+   */
+  onMapClick?: (place: { lat: number; lon: number }) => void;
+  /**
+   * When given, the camera is fitted to the route only when this value
+   * changes, not on every change to the route: a track being edited point by
+   * point must not pull the camera back to the whole each time. Left out, the
+   * viewer's behaviour — a fit on every new route — is unchanged.
+   */
+  fitKey?: string;
 }
 
 /**
@@ -169,6 +202,10 @@ export function ActivityMap({
   basemapStyle = DEFAULT_BASEMAP_STYLE,
   onRouteHover,
   onRouteClick,
+  editPoints,
+  onPointClick,
+  onMapClick,
+  fitKey,
 }: ActivityMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -181,6 +218,9 @@ export function ActivityMap({
   const focusRouteRef = useRef(focusRoute);
   const lapRouteRef = useRef(lapRoute);
   const markerRef = useRef(marker);
+  const editPointsRef = useRef(editPoints);
+  /** The `fitKey` the camera was last fitted for, so a route edit does not re-fit. */
+  const fittedKeyRef = useRef<string | undefined>(undefined);
   /** Bounds of the route currently displayed, for re-fitting after a resize. */
   const boundsRef = useRef<[number, number, number, number] | undefined>(undefined);
   /** Set once the user moves the camera, so a resize stops overriding them. */
@@ -193,13 +233,21 @@ export function ActivityMap({
     focusRouteRef.current = focusRoute;
     lapRouteRef.current = lapRoute;
     markerRef.current = marker;
-  }, [route, focusRoute, lapRoute, marker]);
+    editPointsRef.current = editPoints;
+  }, [route, focusRoute, lapRoute, marker, editPoints]);
 
   // A newly loaded activity gets a fresh automatic fit even if the user had
-  // moved the camera while viewing the previous one.
+  // moved the camera while viewing the previous one. With a fit key, only a
+  // new key is a new thing to look at: an edit to the same draft keeps the
+  // camera where the reader put it, through a resize as well.
+  const movedForKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
+    if (fitKey !== undefined) {
+      if (movedForKeyRef.current === fitKey) return;
+      movedForKeyRef.current = fitKey;
+    }
     userMovedRef.current = false;
-  }, [route]);
+  }, [route, fitKey]);
 
   const basemapLayerIds = useMemo(() => basemapLayerIdsOf(basemapStyle), [basemapStyle]);
 
@@ -316,6 +364,25 @@ export function ActivityMap({
           paint: { 'line-color': '#c77dff', 'line-width': 5 },
         });
       }
+      if (!map.getSource(EDIT_POINT_SOURCE)) {
+        map.addSource(EDIT_POINT_SOURCE, {
+          type: 'geojson',
+          data: editPointsRef.current ?? EMPTY_POINTS,
+        });
+        map.addLayer({
+          id: EDIT_POINT_LAYER,
+          type: 'circle',
+          source: EDIT_POINT_SOURCE,
+          paint: {
+            // The selected point is larger and amber; the rest white, so a
+            // track of many points reads as a line with handles on it.
+            'circle-radius': ['case', ['get', 'selected'], 8, 5],
+            'circle-color': ['case', ['get', 'selected'], '#ffd166', '#ffffff'],
+            'circle-stroke-color': '#0b0f14',
+            'circle-stroke-width': 2,
+          },
+        });
+      }
       if (!map.getSource(MARKER_SOURCE)) {
         map.addSource(MARKER_SOURCE, { type: 'geojson', data: markerRef.current });
         map.addLayer({
@@ -357,8 +424,14 @@ export function ActivityMap({
 
     boundsRef.current = route.bounds;
     if (!route.bounds) return;
+    // With a fit key, only a new key — a different draft — moves the camera;
+    // an edit to the same draft leaves it where the reader put it.
+    if (fitKey !== undefined) {
+      if (fittedKeyRef.current === fitKey) return;
+      fittedKeyRef.current = fitKey;
+    }
     fitToBounds(map, route.bounds, 500);
-  }, [route, isStyleReady]);
+  }, [route, isStyleReady, fitKey]);
 
   /**
    * AV-604. Dim the full route while a section is focused, draw the section
@@ -420,6 +493,44 @@ export function ActivityMap({
     }
   }, [marker, isStyleReady]);
 
+  // AV-1104. Push the editable points, and hand presses on them and on the
+  // map to the page. A press on a point is not also a press on the map: the
+  // map-level handler steps aside when a draft point is under the pointer.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isStyleReady) return;
+    const source = map.getSource(EDIT_POINT_SOURCE);
+    if (source && 'setData' in source) {
+      (source as GeoJSONSource).setData(editPoints ?? EMPTY_POINTS);
+    }
+  }, [editPoints, isStyleReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isStyleReady || (!onPointClick && !onMapClick)) return;
+
+    const handlePointClick = (event: MapMouseEvent) => {
+      const feature = map.queryRenderedFeatures(event.point, { layers: [EDIT_POINT_LAYER] })[0];
+      const id = feature?.properties?.id;
+      if (typeof id === 'string') onPointClick?.(id);
+    };
+    const handleMapClick = (event: MapMouseEvent) => {
+      const onPoint = map.queryRenderedFeatures(event.point, { layers: [EDIT_POINT_LAYER] });
+      if (onPoint.length > 0) return;
+      // The map draws the world repeated, so a press past the antimeridian
+      // reports a longitude past ±180. It is the same place; it is wrapped
+      // here, so the model's strict check sees the real coordinate.
+      onMapClick?.({ lat: event.lngLat.lat, lon: wrapLongitude(event.lngLat.lng) });
+    };
+
+    map.on('click', EDIT_POINT_LAYER, handlePointClick);
+    map.on('click', handleMapClick);
+    return () => {
+      map.off('click', EDIT_POINT_LAYER, handlePointClick);
+      map.off('click', handleMapClick);
+    };
+  }, [isStyleReady, onPointClick, onMapClick]);
+
   // Route hover/click → active point index (AV-603).
   useEffect(() => {
     const map = mapRef.current;
@@ -475,6 +586,15 @@ export function ActivityMap({
       )}
     </div>
   );
+}
+
+/**
+ * Brings a longitude from a repeated world back into [-180, 180]. One already
+ * there is returned as it is, so the arithmetic cannot nudge a real coordinate.
+ */
+function wrapLongitude(lng: number): number {
+  if (lng >= -180 && lng <= 180) return lng;
+  return ((((lng + 180) % 360) + 360) % 360) - 180;
 }
 
 /**

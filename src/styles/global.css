@@ -875,3 +875,14 @@ body {
 /* AV-1102. Imported file names are the reader's own and may hold no space to
    break at; they wrap rather than widen a phone screen. */
 .route-draft__sources { overflow-wrap: anywhere; }
+
+/* AV-1104. Route Builder's editing controls: a small form beside the map.
+   Fields sit side by side where there is room and stack on a phone. */
+.editor { display: flex; flex-direction: column; gap: 12px; }
+.editor__fields { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; }
+.editor__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.editor__field input { width: 10ch; max-width: 100%; }
+.editor__modes { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.editor__mode { display: inline-flex; align-items: center; gap: 6px; }
+.editor__status { margin: 0; font-size: 13px; color: var(--text-muted); }
+.editor__selected { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
