@@ -92,6 +92,39 @@ test('has the app’s header and Settings, which opens over the page without lea
   await expect(page.getByRole('region', { name: 'Planned track' })).toBeVisible();
 });
 
+test('copies the viewed route into Route Builder, and the viewer keeps its activity (AV-1103)', async ({
+  page,
+}) => {
+  const requests: Request[] = [];
+  page.on('request', (request) => requests.push(request));
+  await page.goto('./#/viewer');
+  // Route-only basemap, so the viewer's map fetches no tiles and the request
+  // list below measures the handoff alone.
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Basemap tiles').uncheck();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByTestId('file-input').setInputFiles(RIDE_PATH);
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Create custom track' }).click();
+
+  expect(new URL(page.url()).hash).toBe('#/route-builder');
+  const track = page.getByRole('region', { name: 'Planned track' });
+  await expect(track).toContainText('Copied from a track');
+  await expect(track).toContainText(/of \d+ points used/);
+
+  // Back in the viewer, the activity is still open, untouched by the copy.
+  await page.getByRole('button', { name: 'Tools' }).click();
+  await page.getByRole('menuitem', { name: 'File viewer' }).click();
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create custom track' })).toBeEnabled();
+
+  // The handoff is memory only: nothing left the origin, and nothing was stored.
+  expect(requests.map((r) => r.url()).filter((url) => !url.startsWith(new URL(page.url()).origin))).toEqual([]);
+  expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k !== 'opentrack-viewer:theme'))).toEqual([]);
+});
+
 test('fits a phone screen without a sideways scroll', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('./#/route-builder');

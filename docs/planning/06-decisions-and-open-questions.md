@@ -615,6 +615,16 @@ Decision (`AV-1102`): planned tracks are made on **`/route-builder`** (**Tools �
 
 **What the page does and does not do yet.** It takes drafts in and says what it holds — name, how it started, points, stretches, distance (derived from the geometry through `draftToActivity`, in the reader's units), each source with how many of its points were used, and the model's warnings. It has no map and no editing; those are AV-1104, and the page says a blank track has no points yet rather than implying tools it lacks. It uses the app's shell: global header, Settings modal (which opens over the page without leaving it), theme, responsive layout (a 360 px viewport has no sideways scroll, tested), and route metadata in `seo.ts` that is constant and never names a track or file. The page's regions are named so that none contains another's name (*Nothing planned yet*, *Planned track*): Playwright's role-name match is by substring, which is how a region called "No planned track yet" once matched a query for "Planned track".
 
+### TD-050: The Viewer's "Create custom track" Copies the Route Into Route Builder, and the Model Decides Whether It Can
+
+Decision (`AV-1103`): the loaded viewer offers **Create custom track** beside the export panel and the route overlay action. It hands Route Builder a **copy** of the open activity's route — `draftFromActivity`, which reads the activity and leaves it alone (TD-048) — through `routeDraftStore.setDraft`, replacing whatever draft was held, and navigates there. In memory only, like every handoff (§5); the activity the viewer shows is unchanged and still open on the way back, and a test asserts both the serialized activity and the store's reference are what they were.
+
+**The label.** *Create custom track*, the phrase the task and the roadmap use, in sentence case like every other button here. Not *Plan route from activity*: a planner promises routing, which this does not do (the same reasoning that named the page Route Builder, TD-049). This answers the §17 question.
+
+**Whether the button can be pressed is the model's answer, not a second guess.** The draft is built up front from the activity (and, when there is a chart selection, from the selected range) rather than on the click. If `draftFromActivity` refuses — no point with a usable location — the button is disabled and the refusal's own message is shown under it, so the reason the viewer gives is the reason the model has, and the two cannot drift. A copy of an activity's points is cheap enough to make on render, and shares nothing with the activity.
+
+**The selected section**, as for the route overlay (TD-047): the whole route goes unless the reader ticks *Copy only the selected section* — worded apart from the overlay action's box, since the two sit in the same panel — offered only when the selection yields a draft. A section that was asked for and is no longer there — the selection moved to an unlocated stretch, or was cleared — disables the button with the reason until the box is unticked, which is the explicit way back to the whole activity.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -713,6 +723,7 @@ question deleted, so the reasoning stays findable.
 | Which overlay-only export format ships first? | A PNG sequence everywhere, and a transparent VP9 WebM where a probe shows `MediaRecorder` keeps alpha — the Chromium family does, WebKit does not, and WebCodecs never does. No chroma-key video (TD-039). |
 | Is burned-in browser-side video export viable? | Yes, measured: WebCodecs decodes the HERO8 clip at over 700 fps and the decode-composite-encode chain runs at 7–11× real time with hardware H.264, in Chromium, Brave and WebKit alike. Second phase, desktop only, audio copied through, 10-bit HEVC still to be checked (TD-039). |
 | Should overlay configuration be exported as project JSON? | Yes — it is the serialisation `AV-1003` needs for its own tests, so it ships with the template model rather than as an export mode (TD-039). |
+| Which label for the viewer action that opens Route Builder? | **Create custom track**, the task's own phrase in the app's sentence case. Not *Plan route from activity*: a planner promises routing, which this does not do (TD-050). |
 
 ### Answered, needing no work
 
@@ -735,7 +746,6 @@ question deleted, so the reasoning stays findable.
 - What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
 - What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
 - For Route Builder, should the first implementation support manual straight-line point editing only, or should road/path snapping be added later through an optional routing provider?
-- Which user-facing label should ship for the viewer action: `Create Custom Track`, `Plan Route from Activity`, or another phrase?
 - Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?
 - Should Route Builder support undo/redo in the first milestone, or only confirmation for destructive section discard?
 - Should far-apart appended tracks be joined by a visible straight segment, kept as separate segments, or require the user to confirm the join?
