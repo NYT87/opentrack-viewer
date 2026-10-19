@@ -20,6 +20,11 @@ export const ROUTES = {
    * map, charts or export controls of the viewer's.
    */
   overlays: '/overlays',
+  /**
+   * AV-1102. Planned tracks are edited on a page of their own, never inside the
+   * viewer: the viewer shows what was recorded, and a draft is what is intended.
+   */
+  routeBuilder: '/route-builder',
 } as const;
 
 /**
@@ -30,4 +35,5 @@ export const TOOLS_ITEMS = [
   { to: ROUTES.viewer, label: 'File viewer' },
   { to: ROUTES.videoTelemetry, label: 'Video telemetry' },
   { to: ROUTES.overlays, label: 'Overlays' },
+  { to: ROUTES.routeBuilder, label: 'Route Builder' },
 ] as const;

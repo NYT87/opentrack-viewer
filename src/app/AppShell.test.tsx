@@ -199,6 +199,7 @@ describe('Tools menu (AV-012)', () => {
     expect(toolsButton()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('menu', { name: 'Tools' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'File viewer' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Route Builder' })).toBeInTheDocument();
 
     await userEvent.click(toolsButton());
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();

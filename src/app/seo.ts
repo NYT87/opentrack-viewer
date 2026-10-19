@@ -60,6 +60,13 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
       'Draw the telemetry inside a GoPro video, or an activity file, over the picture for your ' +
       'own video editor. Everything is drawn in this browser tab; nothing is uploaded.',
   },
+  [ROUTES.routeBuilder]: {
+    title: `Plan a route — ${SITE_NAME}`,
+    // Describes the tool, never a track someone has imported or drawn.
+    description:
+      'Start a planned track, or begin from a GPX, FIT, TCX or KML route, and export it as a new ' +
+      'file. Everything is built in this browser tab; nothing is uploaded.',
+  },
   [ROUTES.terms]: {
     title: `Terms and Conditions — ${SITE_NAME}`,
     description:
