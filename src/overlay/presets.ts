@@ -154,6 +154,16 @@ const MARGIN = 0.02;
  */
 export const BASE_FONT_CQW = 2.2;
 export const TILE_HEIGHT_EMS = 3.2;
+/**
+ * And this many ems of width: the widest figure ("100.1 km/h") plus the tile's
+ * padding, in the widest sans a reader's system is likely to fall back to.
+ * The app names no font of its own, so the budget has to hold in DejaVu Sans
+ * Bold — Ubuntu's default, with 0.70 em digits — where that figure measures
+ * about 6.6 em; Helvetica, Liberation and Noto need under 5.5. A tile too
+ * narrow does not clip: the value wraps onto a second line and overflows the
+ * tile's height instead, which is how this was found, on a CI runner.
+ */
+export const TILE_WIDTH_EMS = 8.2;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 interface PlaceOptions {
@@ -190,7 +200,8 @@ function placeEntries(
 ): Map<string, Placed> {
   const rects = new Map<string, Placed>();
   const tileH = clamp(0.075 * scale * frameAspect, 0.02, 0.2);
-  const tileW = clamp(0.16 * scale, 0.05, 0.3);
+  // Width in frame widths, from the em budget: type is sized in frame widths too.
+  const tileW = clamp(((BASE_FONT_CQW * TILE_WIDTH_EMS) / 100) * scale, 0.05, 0.3);
   const progressH = clamp(0.012 * frameAspect, 0.006, 0.02);
   const toY = (distanceFromEdge: number, height: number) =>
     position === 'bottom' ? 1 - distanceFromEdge - height : distanceFromEdge;

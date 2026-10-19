@@ -829,8 +829,11 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .overlay-item--progress, .overlay-item--routeInset { padding: 0; }
-.overlay-item__label { font-size: 0.55em; text-transform: uppercase; opacity: 0.75; }
-.overlay-item__value { font-weight: 700; line-height: 1.1; }
+/* A figure never wraps: a font too wide for its tile clips at the side, where it
+   is seen for what it is, rather than folding onto a second line that spills
+   out of the tile's height. */
+.overlay-item__label { font-size: 0.55em; text-transform: uppercase; opacity: 0.75; white-space: nowrap; }
+.overlay-item__value { font-weight: 700; line-height: 1.1; white-space: nowrap; }
 .overlay-item__track { height: 0.25em; margin-top: 0.2em; background: rgb(255 255 255 / 0.25); }
 .overlay-item__bar { height: 100%; min-height: 100%; background: var(--overlay-accent, currentColor); }
 .overlay-item--progress { background: rgb(255 255 255 / 0.25) !important; }

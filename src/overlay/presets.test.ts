@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BASE_FONT_CQW,
   TILE_HEIGHT_EMS,
+  TILE_WIDTH_EMS,
   DEFAULT_OVERLAY_CONTROLS,
   OVERLAY_PRESETS,
   buildOverlay,
@@ -221,9 +222,9 @@ describe('overlay presets (AV-1005)', () => {
           for (const aspect of [0.5625, 1, 16 / 9]) {
             const { template } = buildOverlay(controls({ presetId, scale, enabled: everything }), timeline, aspect);
             const tiles = template.components.filter((c) => c.type === 'text' || c.type === 'gauge');
-            // 10 figures, none narrower than the width a value like "100.0 km/h" takes.
+            // 10 figures, none narrower than the em budget the widest value needs in a wide font.
             expect(tiles).toHaveLength(10);
-            for (const tile of tiles) expect(tile.rect.width).toBeGreaterThanOrEqual(0.16 * scale - 1e-9);
+            for (const tile of tiles) expect(tile.rect.width).toBeGreaterThanOrEqual(((BASE_FONT_CQW * TILE_WIDTH_EMS) / 100) * scale - 1e-9);
           }
         }
       }
