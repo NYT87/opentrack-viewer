@@ -1139,6 +1139,20 @@ Acceptance criteria:
 - Generated overlays and source activity data remain in the browser; no file contents, coordinates, preview pixels, or exported images are uploaded.
 - Unit tests cover route projection/bounds, transparent pixels, styling options, deterministic dimensions, and error handling; browser tests cover GPX selection or viewer handoff, preview, and download.
 
+#### AV-1010: Customize Static Overlay Image Layout, Text, and Activity Stats
+
+Dependencies: AV-1003, AV-1005, AV-1009
+
+Acceptance criteria:
+- The static (no-video) overlay export lets the user choose where each element sits on the image: the route, each stat, and each text block. Position is set by direct placement on the preview and by keyboard-accessible controls (nudge, snap to edge or corner, numeric offset); elements stay inside the frame and the layout does not depend on dragging alone.
+- The user can add free text blocks with editable content, size, colour, alignment and weight, and remove them again.
+- Stat elements available: pace or speed (the user picks which, in the reader's units), distance, duration, and date. Duration offers elapsed time and moving time where the activity has both.
+- Date and time elements let the user choose a format (for example `2026-09-24`, `24 Sep 2026`, `24/09/2026`, long weekday form, with or without time), rendered in the activity's own time zone or the reader's, stated on the control.
+- An element whose value the activity lacks is offered disabled with the reason, never drawn as a blank or `NaN`.
+- Layout, text and format choices are part of the same serializable overlay configuration used by the video overlays where the model allows, so a layout round-trips through project JSON.
+- Export stays transparent PNG with configurable dimensions; text is drawn with the canvas, not baked from a remote font, and no activity data, text or image leaves the browser.
+- Unit tests cover placement clamping, each stat's value and unit formatting, each date format, missing-value handling, text escaping, and configuration round-trip; browser tests cover placing, nudging, adding text, changing a date format and downloading, with a pixel check that elements land where placed.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model
@@ -1244,3 +1258,19 @@ Acceptance criteria:
 - Responsive tests cover desktop layout and mobile layout without the large-screen sidebar.
 - Performance checks cover editing and previewing drafts with large point counts, including append operations.
 - Privacy regression tests confirm route-builder import, edit, append, and export flows do not upload route points, file contents, draft metadata, or exported files.
+
+#### AV-1109: Merge Several Track Files Into One Timed Activity With Pauses
+
+Dependencies: AV-102, AV-103, AV-1101, AV-1106, AV-1107
+
+Acceptance criteria:
+- From Route Builder the user can combine two or more recorded track files (GPX first; FIT and TCX as the parsers allow) into **one** activity that can be exported as a single track, as a separate action from the untimed planned-track export (TD-054).
+- The files are ordered by their own recorded start time, oldest first, whatever order they were chosen or dropped in and whatever their file names; the order is shown, and a file with no timestamps is refused from the merge with the reason rather than placed by guess.
+- The merged activity is built as if it were one recording: one track, one segment run per source, original timestamps, elevation and any sensor fields the exporter supports kept, points strictly in time order.
+- The gap between the end of one file and the start of the next is treated as a **pause**: it counts in elapsed time but not in moving or timer time, adds no distance across the jump, and produces no interpolated points. A gap with a large spatial jump is warned about, not joined.
+- Overlapping files (the second starts before the first ends) are refused or trimmed by an explicit, stated rule, never silently interleaved.
+- Totals (distance, elapsed time, moving time, elevation gain and loss, average speed or pace) are computed over the merged activity and equal the sum of the parts, with the pauses excluded from moving time.
+- The merged activity can be viewed on the page, exported through the exporter registry (GPX first; FIT and TCX where they can represent the pause correctly) with a name that identifies it as merged, and re-imported by the viewer to the same points, times and totals.
+- Fixture: the two Garmin Connect cycling files recorded on 2026-09-24 near Imabari, `activity_24573607104.gpx` (5,817 points, 23:55:51Z to 02:11:48Z) and `activity_24573607127.gpx` (10,465 points, 03:26:17Z to 07:36:36Z), which are a morning ride and a continuation 74 minutes later from about the same place. Merging them yields one ride of 16,282 points with a 74-minute pause; the test must give the same result whichever file is chosen first. Committed fixtures are trimmed or synthesized copies if the originals' size or location data should not be committed.
+- Nothing is uploaded or stored; the merge happens in the browser.
+- Tests cover ordering independent of selection order, the pause accounting, overlap handling, a file without timestamps, totals equal to the sum of the parts, GPX export and re-import, and the no-upload privacy behaviour.
