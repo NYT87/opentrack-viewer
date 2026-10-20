@@ -1153,6 +1153,23 @@ Acceptance criteria:
 - Export stays transparent PNG with configurable dimensions; text is drawn with the canvas, not baked from a remote font, and no activity data, text or image leaves the browser.
 - Unit tests cover placement clamping, each stat's value and unit formatting, each date format, missing-value handling, text escaping, and configuration round-trip; browser tests cover placing, nudging, adding text, changing a date format and downloading, with a pixel check that elements land where placed.
 
+#### AV-1011: Build a Custom Video Overlay on a Free Canvas, With or Without a Source Video
+
+Dependencies: AV-1003, AV-1004, AV-1005, AV-1006, AV-1007, AV-1010
+
+Acceptance criteria:
+- The overlay page offers a **custom canvas** mode for building a telemetry video overlay from an activity alone or from an activity and a source video; a video is optional, and without one the canvas is the whole output.
+- The user chooses the output resolution: presets (for example 1920x1080, 1080x1920, 1080x1080, 3840x2160) and a custom width and height within stated limits. The preview keeps the chosen aspect ratio, and the layout is stored in fractions of the frame so it survives a change of resolution.
+- Components are placed and moved freely on the canvas by direct manipulation, with keyboard-accessible equivalents (select, nudge, numeric position, size, layer order, duplicate, delete). Components stay inside the frame, and selection, move and resize are undoable.
+- Available data components, each bound to the activity timeline (TD-041) so it changes as the video plays: speed gauge, distance display, time display (elapsed and moving), pace display, and the ones AV-1010 already defines. Each has a label, unit and number format, and is disabled with a reason when the activity lacks the data.
+- Available **shapes**, as in a card behind the figures: rounded rectangle, rectangle, ellipse and line. Each has fill colour, fill transparency, border width, border colour, border transparency and, where it applies, corner radius. A shape can sit behind or in front of other components and can hold or group components so they move together.
+- Text blocks and the static elements of AV-1010 are available on the same canvas, and share one placement model, so a layout made for the static image opens here and the reverse.
+- The whole layout, including shapes, resolution and component bindings, is the serializable overlay configuration (project JSON), can be saved and reopened, and a layout from a built-in preset can be taken as the starting point.
+- The preview renders the chosen layout over the video with the same renderer the export uses, so what is seen is what is written.
+- Export goes through the existing overlay exporters at the chosen resolution: transparent PNG sequence and transparent VP9 WebM where supported (AV-1006), and burned-in video where supported (AV-1007). Without a video, the transparent exports render the timeline across the activity's duration at a chosen frame rate.
+- Everything stays in the browser: no activity data, video, layout or output leaves it.
+- Unit tests cover placement and resize clamping, resolution change keeping the layout proportional, shape styling and transparency, binding each data component to the timeline, a missing-data component, layout round-trip, and the shared model with AV-1010; golden renders cover each shape and each data component; browser tests cover choosing a resolution, placing and moving components, styling a shape, previewing with and without a video, and exporting, including a pixel check that components land where placed.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model
