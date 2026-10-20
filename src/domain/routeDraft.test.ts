@@ -13,7 +13,7 @@ import {
 import { haversineMeters, withDerivedStats } from './stats';
 import type { Activity } from './activity';
 import { makeActivity } from '../test/helpers/activity';
-import { addPoint, beginsStretch, discardSection, joinBefore, movePoint, removePoint, sectionBounds, splitBefore, validatePlace, type DraftPoint } from './routeDraft';
+import { addPoint, appendJump, FAR_APPEND_METERS, beginsStretch, discardSection, joinBefore, movePoint, removePoint, sectionBounds, splitBefore, validatePlace, type DraftPoint } from './routeDraft';
 
 const T0 = new Date('2024-06-01T08:00:00Z');
 const at = (s: number) => new Date(T0.getTime() + s * 1000);
@@ -742,5 +742,35 @@ describe('joining keeps the boundary after the joined run (AV-1105, review)', ()
     const draft: RouteDraft = { ...createBlankDraft({ id: 'cut' }), points, counters: { point: 7, source: 0 } };
     const cut = unwrap(discardSection(draft, { fromId: 'p2', toId: 'p3' }));
     expect(cut.points.map((p) => [p.id, p.segmentIndex])).toEqual([['p0', 0], ['p1', 0], ['p4', 0], ['p5', 2], ['p6', 2]]);
+  });
+});
+
+describe('the jump an append makes (AV-1106)', () => {
+  const at = (lat: number) => makeActivity([{ lat, lon: 20 }, { lat: lat + 0.001, lon: 20 }]);
+
+  it('measures from the end of the draft to the start of what was appended', () => {
+    const first = unwrap(draftFromActivity(at(10)));
+    const near = unwrap(appendImportedRoute(first, at(10.002)));
+    const jump = appendJump(first, near)!;
+    expect(jump.firstId).toBe(near.points[2]!.id);
+    expect(jump.meters).toBeCloseTo(haversineMeters(10.001, 20, 10.002, 20), 3);
+    expect(jump.far).toBe(false);
+
+    const far = unwrap(appendImportedRoute(first, at(11)));
+    expect(appendJump(first, far)).toMatchObject({ far: true });
+    expect(appendJump(first, far)!.meters).toBeGreaterThan(FAR_APPEND_METERS);
+  });
+
+  it('keeps the appended points in their original order, after the draft’s, in a stretch of their own', () => {
+    const first = unwrap(draftFromActivity(at(10)));
+    const next = unwrap(appendImportedRoute(first, makeActivity([{ lat: 11, lon: 1 }, { lat: 11, lon: 2 }, { lat: 11, lon: 3 }])));
+    expect(next.points.slice(2).map((p) => p.lon)).toEqual([1, 2, 3]);
+    expect(next.points.slice(2).map((p) => p.origin)).toMatchObject([{ pointIndex: 0 }, { pointIndex: 1 }, { pointIndex: 2 }]);
+    expect(beginsStretch(next, next.points[2]!.id)).toBe(true);
+  });
+
+  it('has no jump to measure from an empty draft', () => {
+    const blank = createBlankDraft({ id: 'b' });
+    expect(appendJump(blank, unwrap(appendImportedRoute(blank, at(10))))).toBeUndefined();
   });
 });

@@ -7,6 +7,7 @@ import type { EditPointProperties } from '../components/ActivityMap';
 import { toActivityError } from '../domain/errors';
 import { EMPTY_ROUTE_GEOMETRY, activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
 import {
+  appendJump,
   beginsStretch,
   draftToActivity,
   sectionBounds,
@@ -30,7 +31,21 @@ const ActivityMap = lazy(() =>
 type Intake =
   | { status: 'idle' }
   | { status: 'reading'; fileName: string }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string; code: string };
+
+/**
+ * AV-1106. What the last append was: which file, how many points, and the
+ * first of them. Only that is remembered; where the jump is, how long it is
+ * and whether it is still a break are read from the draft as it is now, so a
+ * join, a move or an undo can never leave the notice describing a track that
+ * no longer exists.
+ */
+interface Appended {
+  draftId: string;
+  fileName: string;
+  firstId: string;
+  added: number;
+}
 
 /** What a press on the map does: adds a point at the end, or moves the selected one. */
 type ClickMode = 'add' | 'move';
@@ -81,6 +96,7 @@ export function RouteBuilderPage() {
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
 
   const [intake, setIntake] = useState<Intake>({ status: 'idle' });
+  const [appended, setAppended] = useState<Appended | undefined>(undefined);
   /*
    * What the reader picked out, what a press on the map does, and the marks
    * of a section. All belong to one draft: a selection outlives nothing — a
@@ -255,20 +271,44 @@ export function RouteBuilderPage() {
       // The viewer's own intake: GPX, FIT, TCX and KML, read in this tab.
       const { activity } = await parseActivityFile(file);
       if (readToken.current !== token) return;
+      const before = useRouteDraftStore.getState().draft;
       const result = importTrack(activity);
-      setIntake(
-        result.ok ? { status: 'idle' } : { status: 'error', message: result.error.message },
+      if (!result.ok) {
+        setIntake({ status: 'error', message: result.error.message, code: result.error.code });
+        return;
+      }
+      setIntake({ status: 'idle' });
+      const jump = before ? appendJump(before, result.value) : undefined;
+      setAppended(
+        jump && before
+          ? {
+              draftId: result.value.id,
+              fileName: file.name,
+              firstId: jump.firstId,
+              added: result.value.points.length - before.points.length,
+            }
+          : undefined,
       );
     } catch (error) {
       if (readToken.current !== token) return;
-      setIntake({
-        status: 'error',
-        message: toActivityError(error, 'unsupported_format').message,
-      });
+      const failure = toActivityError(error, 'unsupported_format');
+      setIntake({ status: 'error', message: failure.message, code: failure.code });
     }
   };
 
   const busy = intake.status === 'reading';
+
+  // The append notice, read from the current draft: the first appended point
+  // and the point now before it, how far apart they are, and whether a line
+  // joins them. Gone when the point is gone or nothing precedes it.
+  const appendedNow = useMemo(() => {
+    if (!draft || !appended || appended.draftId !== draft.id) return undefined;
+    const at = draft.points.findIndex((point) => point.id === appended.firstId);
+    if (at <= 0) return undefined;
+    const jump = appendJump({ ...draft, points: draft.points.slice(0, at) }, draft);
+    if (!jump) return undefined;
+    return { ...appended, ...jump, joined: !beginsStretch(draft, appended.firstId) };
+  }, [draft, appended]);
 
   return (
     <main className="page">
@@ -308,7 +348,12 @@ export function RouteBuilderPage() {
         {intake.status === 'error' && (
           <section className="prose" aria-label="Track not imported">
             <h3 className="prose__title">That track could not be imported</h3>
-            <p role="alert">{intake.message}</p>
+            <p role="alert" data-error-code={intake.code}>
+              {intake.code === 'no_route_points'
+                ? `It has no route to add: ${intake.message}`
+                : intake.message}
+            </p>
+            {draft && <p>The planned track is as it was.</p>}
             <p>
               <button type="button" className="button" onClick={() => setIntake({ status: 'idle' })}>
                 Try another file
@@ -366,6 +411,25 @@ export function RouteBuilderPage() {
                 ? 'It is added after the points already here, as a separate stretch: the end of one and the start of the next are not joined until you join them.'
                 : 'The route becomes the first points of a new planned track. Only its places are kept, not heart rate, power or the device that recorded it.'}
             </p>
+            {appendedNow && (
+              <div className="editor__selected" role="status" aria-label="Last track added">
+                <span className="route-draft__appended">
+                  {`Added ${appendedNow.added} point${appendedNow.added === 1 ? '' : 's'} from ${appendedNow.fileName}. `}
+                  {appendedNow.joined
+                    ? `It is joined to the point before it: the ${formatDistance(appendedNow.meters, unitSystem)} between them is drawn and counted.`
+                    : appendedNow.far
+                      ? `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it — far apart, so it is a stretch of its own and nothing is drawn or counted across the jump. If it is one road, join them.`
+                      : `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it, as a stretch of its own; nothing is drawn or counted across the jump until you join them.`}
+                </span>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setSelectedId(appendedNow.firstId)}
+                >
+                  Select the join
+                </button>
+              </div>
+            )}
             <FileDropZone
               acceptedExtensions={SUPPORTED_FORMATS}
               onFile={(file) => void handleFile(file)}

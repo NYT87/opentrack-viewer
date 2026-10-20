@@ -22,7 +22,7 @@ const { useRouteDraftStore } = await import('../state/routeDraftStore');
 const { useActivityStore } = await import('../state/activityStore');
 const { useInteractionStore } = await import('../state/interactionStore');
 const { draftFromActivity } = await import('../domain/routeDraft');
-const { fixtureFile } = await import('../test/helpers/fixtures');
+const { fixtureFile, binaryFixtureFile } = await import('../test/helpers/fixtures');
 const { makeActivity } = await import('../test/helpers/activity');
 
 beforeEach(() => {
@@ -868,5 +868,139 @@ describe('undo and the live selection; one-point sections (AV-1105, review)', ()
     expect(pointFeatures(map).map((f) => f.properties.inSection)).toEqual([false, true, false]);
     expect(pointFeatures(map).map((f) => f.properties.selected)).toEqual([false, false, false]);
     expect(map.layers.find((layer) => layer.id === 'draft-point')).toBeDefined();
+  });
+});
+
+describe('appending another track (AV-1106)', () => {
+  const lastAdded = () => screen.getByRole('status', { name: 'Last track added' });
+  const upload = async (file: File) => userEvent.upload(screen.getByTestId('route-builder-input'), file);
+
+  async function startWithGpx() {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await screen.findByRole('region', { name: 'Planned track' });
+    return draft().points.length;
+  }
+
+  it('appends a second GPX after the first, in order, and says how far it jumped', async () => {
+    const before = await startWithGpx();
+    const ids = draft().points.map((p) => p.id);
+    await upload(fixtureFile('route-with-elevation.gpx'));
+
+    await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
+    expect(draft().points.slice(0, before).map((p) => p.id)).toEqual(ids);
+    expect(draft().kind).toBe('copied');
+    expect(lastAdded()).toHaveTextContent(/Added \d+ points from route-with-elevation\.gpx\. It starts .* as a stretch of its own/);
+  });
+
+  it('appends a TCX and a FIT through the same intake, warning when the start is far away', async () => {
+    const before = await startWithGpx();
+    await upload(fixtureFile('ride-minimal.tcx', 'application/vnd.garmin.tcx+xml'));
+    await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
+    // 51.5° to 51.4° north: about eleven kilometres.
+    expect(lastAdded()).toHaveTextContent(/far apart, so it is a stretch of its own and nothing is drawn or counted across the jump/);
+    expect(draft().sources.map((s) => s.fileName)).toEqual(['simple-route.gpx', 'ride-minimal.tcx']);
+
+    const withTcx = draft().points.length;
+    await upload(binaryFixtureFile('ride-with-sensors.fit'));
+    await waitFor(() => expect(draft().points.length).toBeGreaterThan(withTcx));
+    expect(draft().sources.map((s) => s.fileName)).toEqual(['simple-route.gpx', 'ride-minimal.tcx', 'ride-with-sensors.fit']);
+    expect(lastAdded()).toHaveTextContent('ride-with-sensors.fit');
+  });
+
+  it('selects the join on request, where the reader can join the two', async () => {
+    const before = await startWithGpx();
+    await upload(fixtureFile('ride-minimal.tcx', 'application/vnd.garmin.tcx+xml'));
+    await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
+
+    await userEvent.click(within(lastAdded()).getByRole('button', { name: 'Select the join' }));
+
+    expect(editor()).toHaveTextContent(`Selected: point ${before + 1} of`);
+    await userEvent.click(screen.getByRole('button', { name: 'Join to the point before' }));
+    expect(new Set(draft().points.map((p) => p.segmentIndex)).size).toBe(1);
+  });
+
+  it('keeps the notice true after a join, a move of either end, and an undo (review R1-C1)', async () => {
+    const before = await startWithGpx();
+    await upload(fixtureFile('ride-minimal.tcx', 'application/vnd.garmin.tcx+xml'));
+    await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
+    const farText = lastAdded().textContent;
+    expect(farText).toMatch(/far apart/);
+
+    // Joined: the notice says the jump is now drawn and counted.
+    await userEvent.click(within(lastAdded()).getByRole('button', { name: 'Select the join' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Join to the point before' }));
+    expect(lastAdded()).toHaveTextContent(/joined to the point before it: the .* between them is drawn and counted/);
+    expect(lastAdded()).not.toHaveTextContent(/nothing is drawn/);
+
+    // Undo the join: back to a break, with the same distance as before.
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
+    expect(lastAdded().textContent).toBe(farText);
+
+    // Move the first appended point next to the end of the first track: the
+    // distance follows, and it is no longer far.
+    const end = draft().points[before - 1]!;
+    const moveForm = within(editor()).getByRole('form', { name: 'Move the selected point' });
+    await userEvent.clear(within(moveForm).getByLabelText('Latitude'));
+    await userEvent.type(within(moveForm).getByLabelText('Latitude'), String(end.lat + 0.001));
+    await userEvent.clear(within(moveForm).getByLabelText('Longitude'));
+    await userEvent.type(within(moveForm).getByLabelText('Longitude'), String(end.lon));
+    await userEvent.click(within(moveForm).getByRole('button', { name: 'Move point' }));
+    expect(lastAdded()).not.toHaveTextContent(/far apart/);
+    expect(lastAdded()).toHaveTextContent(/It starts 1\d\d m from the point before it/);
+
+    // Move the last point of the first track far away: the notice measures from it.
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    const endForm = within(editor()).getByRole('form', { name: 'Move the selected point' });
+    await userEvent.clear(within(endForm).getByLabelText('Latitude'));
+    await userEvent.type(within(endForm).getByLabelText('Latitude'), '45');
+    await userEvent.click(within(endForm).getByRole('button', { name: 'Move point' }));
+    expect(lastAdded()).toHaveTextContent(/far apart/);
+  }, 20_000);
+
+  it('refuses a track with no route, says so as such, and keeps the draft', async () => {
+    await startWithGpx();
+    const held = draft();
+    await upload(binaryFixtureFile('treadmill-run.fit'));
+
+    const failure = await screen.findByRole('region', { name: 'Track not imported' });
+    const alert = within(failure).getByRole('alert');
+    expect(alert).toHaveAttribute('data-error-code', 'no_route_points');
+    expect(alert).toHaveTextContent(/^It has no route to add/);
+    expect(failure).toHaveTextContent('The planned track is as it was.');
+    expect(draft()).toBe(held);
+  });
+
+  it('refuses a file that is not a track it can read, with its own reason, and keeps the draft', async () => {
+    await startWithGpx();
+    const held = draft();
+    await upload(new File(['not a track at all'], 'notes.gpx', { type: 'application/gpx+xml' }));
+
+    const alert = within(await screen.findByRole('region', { name: 'Track not imported' })).getByRole('alert');
+    expect(alert.getAttribute('data-error-code')).not.toBe('no_route_points');
+    expect(draft()).toBe(held);
+  });
+
+  it('turns away an unsupported file type before reading it', async () => {
+    await startWithGpx();
+    const held = draft();
+    // The picker's accept list would hide it; a drop does not, so the page's own check is what is tested.
+    await userEvent.setup({ applyAccept: false }).upload(screen.getByTestId('route-builder-input'), new File(['a,b'], 'route.csv', { type: 'text/csv' }));
+    expect(await screen.findByText(/"route\.csv" is not supported/)).toBeInTheDocument();
+    expect(draft()).toBe(held);
+  });
+
+  it('never replaces the draft by appending, and can be undone', async () => {
+    const before = await startWithGpx();
+    const id = draft().id;
+    await upload(fixtureFile('route-with-elevation.gpx'));
+    await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
+    expect(draft().id).toBe(id);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
+    expect(draft().points).toHaveLength(before);
+    // The notice goes with the points it described.
+    expect(screen.queryByRole('status', { name: 'Last track added' })).not.toBeInTheDocument();
   });
 });

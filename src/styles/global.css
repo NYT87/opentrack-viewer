@@ -889,3 +889,7 @@ body {
 .editor__mode { display: inline-flex; align-items: center; gap: 6px; }
 .editor__status { margin: 0; font-size: 13px; color: var(--text-muted); }
 .editor__selected { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* AV-1106. The append notice names the file too: it wraps anywhere, and as a
+   flex child it may shrink below its text's width, or a long name with no
+   space in it would widen a phone screen. */
+.route-draft__appended { min-width: 0; flex: 1 1 16rem; overflow-wrap: anywhere; }

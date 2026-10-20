@@ -6,7 +6,7 @@ import {
   type ActivityPointRange,
   type ActivityWarning,
 } from './activity';
-import { withDerivedStats } from './stats';
+import { haversineMeters, withDerivedStats } from './stats';
 
 /**
  * AV-1101. The route draft: a planned track, kept apart from the immutable
@@ -648,4 +648,35 @@ export function beginsStretch(draft: RouteDraft, id: string): boolean {
   const at = indexOfPoint(draft, id);
   if (at <= 0) return at === 0;
   return (draft.points[at]!.segmentIndex ?? 0) !== (draft.points[at - 1]!.segmentIndex ?? 0);
+}
+
+/*
+ * AV-1106. Appending is `appendImportedRoute`, through the app's own intake.
+ * What this adds is the measure of the jump: how far the start of what was
+ * appended lies from the end of what was there. The two are never joined by
+ * the append (TD-048, TD-052); a large jump is said out loud so the reader
+ * can decide whether it is one road with a hole in it or two separate rides.
+ */
+
+/** Beyond this, the start of an appended track is called far from the end of the draft. */
+export const FAR_APPEND_METERS = 1000;
+
+export interface AppendJump {
+  /** The first appended point, which begins its own stretch. */
+  firstId: string;
+  /** Straight-line distance from the last point before it. */
+  meters: number;
+  far: boolean;
+}
+
+/**
+ * The jump an append made, comparing the draft before it with the draft after.
+ * Undefined when there was nothing before to jump from, or nothing appended.
+ */
+export function appendJump(before: RouteDraft, after: RouteDraft): AppendJump | undefined {
+  const last = before.points[before.points.length - 1];
+  const first = after.points[before.points.length];
+  if (!last || !first) return undefined;
+  const meters = haversineMeters(last.lat, last.lon, first.lat, first.lon);
+  return { firstId: first.id, meters, far: meters > FAR_APPEND_METERS };
 }

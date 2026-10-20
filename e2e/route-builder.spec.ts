@@ -139,6 +139,14 @@ test('fits a phone screen without a sideways scroll', async ({ page }) => {
   await expect(track).toBeVisible();
   await expect(track).toContainText('Morning_Ride_2026');
 
+  // Appended under the same kind of name, the notice names it too, and must wrap as well.
+  await page.getByTestId('route-builder-input').setInputFiles({
+    name: 'Evening_Ride_2026_10_19_Export_From_Watch_Full_Resolution_Track_Final_v2.gpx',
+    mimeType: 'application/gpx+xml',
+    buffer: readFileSync(RIDE_PATH),
+  });
+  await expect(page.getByRole('status', { name: 'Last track added' })).toContainText('Evening_Ride_2026');
+
   // The page scrolls inside `.shell__scroll`, not the document, so measuring
   // the document alone would miss an overflow that lives in there.
   const overflow = await page.evaluate(() => {
@@ -223,4 +231,49 @@ test('cuts a section out of the track, shows it first, and takes it back (AV-110
 
   await page.getByRole('button', { name: 'Undo last edit' }).click();
   await expect(track).toContainText(/Points\s*4/);
+});
+
+test('appends a TCX after a GPX, warns of the far jump, and sends nothing anywhere (AV-1106)', async ({ page }) => {
+  const requests: Request[] = [];
+  page.on('request', (request) => requests.push(request));
+  await page.goto('./#/route-builder');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Basemap tiles').uncheck();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+
+  await page.getByTestId('route-builder-input').setInputFiles('src/test/fixtures/simple-route.gpx');
+  const track = page.getByRole('region', { name: 'Planned track' });
+  await expect(track).toContainText(/Stretches\s*1/);
+
+  await page.getByTestId('route-builder-input').setInputFiles('src/test/fixtures/ride-minimal.tcx');
+  await expect(track).toContainText(/Stretches\s*2/);
+  const added = page.getByRole('status', { name: 'Last track added' });
+  await expect(added).toContainText('ride-minimal.tcx');
+  await expect(added).toContainText(/far apart/);
+
+  // Joined on request: one stretch.
+  await added.getByRole('button', { name: 'Select the join' }).click();
+  await page.getByRole('button', { name: 'Join to the point before' }).click();
+  await expect(track).toContainText(/Stretches\s*1/);
+
+  // A file with no route is refused and the track kept.
+  await page.getByTestId('route-builder-input').setInputFiles('src/test/fixtures/treadmill-run.fit');
+  await expect(page.getByRole('region', { name: 'Track not imported' }).getByRole('alert')).toContainText(
+    /no route to add/,
+  );
+
+  // Every request is a same-origin GET with no body: nothing of the files is sent,
+  // not even to the app's own host (review R1-C2).
+  const origin = new URL(page.url()).origin;
+  for (const request of requests) {
+    expect(new URL(request.url()).origin, request.url()).toBe(origin);
+    expect(request.method(), request.url()).toBe('GET');
+    expect(request.postData(), request.url()).toBeNull();
+  }
+  // Nothing of either file reaches a URL, the title, or storage.
+  expect(requests.some((r) => /simple-route|ride-minimal|treadmill/.test(r.url()))).toBe(false);
+  expect(await page.title()).not.toMatch(/simple-route|ride-minimal/);
+  expect(
+    await page.evaluate(() => Object.keys(localStorage).filter((k) => k !== 'opentrack-viewer:theme')),
+  ).toEqual([]);
 });
