@@ -657,6 +657,20 @@ Decision (`AV-1106`): another track is appended from the Route Builder page thro
 
 **Privacy.** The file is read in the tab and dropped once parsed; its name is used only in the page's own text and the draft's source list. A browser test records every request through a GPX-then-TCX append, a join and a refused FIT, and asserts none leaves the origin, none carries a file name, the title names no file, and nothing is written to storage.
 
+### TD-054: A Planned Track Is Exported as a GPX of Places, Without Times, Named as a Plan
+
+Decision (`AV-1107`): Route Builder writes the draft through the same exporter registry as a recorded activity — `draftToActivity` into `exportActivity` — so there is one GPX writer, not two. Export controls appear only once the draft is a route, meaning some stretch has two points; before that the section says what is missing and offers nothing to press.
+
+**GPX only, and FIT and TCX shown disabled with why.** The registry's FIT and TCX writers produce *activity* files: sessions, laps and records keyed by time. A plan written that way would need invented times and would appear on a watch as a workout already done, which is not representing the planned track correctly, so they are listed as unavailable with that reason rather than hidden. A FIT *course* writer would be the way to offer FIT, and is a separate piece of work.
+
+**No timestamps.** A planned track says where to go, not when. The times a copied recording carried are left out, a draft drawn by hand never had any, and a file mixing the two would be stranger than either. This answers the §17 question about timestamps in planned-track exports. Elevation, name and one `<trkseg>` per stretch are written; nothing of heart rate, cadence, power, temperature, speed, laps or the device is, because the draft never held them (TD-048).
+
+**Warnings say what was left out.** After a download the page says only the route was written and why (when the draft came from a recording), that the file has no timestamps and why, and — when there are several stretches — that they are separate segments that some devices show only the first of or join, with the advice to join them first if it is one road. Points the draft dropped for having no location are reported too.
+
+**Naming.** `<draft name>-planned-track.gpx`, through the same allowlist the viewer's exports use (`safeFileStem`, now shared), so a download is never taken for a recording and a name with path separators cannot escape the downloads folder. A blank name becomes `route-planned-track.gpx`.
+
+**Privacy and round trip.** The file is a `Blob` handed to the browser's download through an object URL, the same helper the viewer's export uses. A browser test downloads the planned GPX, reads it back through the viewer's own intake as a route with the same number of points and no times, and asserts every request on the way was a same-origin GET with no body; a unit test parses it back with `parseActivityFile` and compares every coordinate and elevation in order.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -758,6 +772,7 @@ question deleted, so the reasoning stays findable.
 | Which label for the viewer action that opens Route Builder? | **Create custom track**, the task's own phrase in the app's sentence case. Not *Plan route from activity*: a planner promises routing, which this does not do (TD-050). |
 | Manual straight-line editing only, or road snapping through a routing provider? | Manual and straight-line, by design rather than deferral: snapping needs a network routing service the privacy model has no room for, and a planned track for a device is a sequence of places. Points are pressed or typed, never dragged (TD-051). |
 | Undo/redo in the first milestone, or only confirmation for a section discard? | Undo, for every edit, fifty deep; no confirmation dialogs and no redo. A dialog interrupts every discard to catch the rare slip and is answered by reflex; an undo costs nothing until it is needed, and a redo stack buys little for what it costs to explain (TD-052). |
+| Timestamps in planned-track exports: keep, synthesize, or omit? | Omit. A plan says where to go, not when; kept times would make a device read it as a ride already done, and synthesized ones would be invented. FIT and TCX, which need times, are listed as unavailable with that reason (TD-054). |
 | Far-apart appended tracks: a visible straight join, separate segments, or a confirmed join? | Separate stretches, joined on request: an appended track starts its own, the map draws no line nobody drew, and the selected point offers *Join to the point before* or *Start a new stretch here* (TD-052). |
 
 ### Answered, needing no work
@@ -780,4 +795,3 @@ question deleted, so the reasoning stays findable.
 - How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
 - What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
 - What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
-- Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?

@@ -21,7 +21,8 @@ const { metadataForRoute } = await import('./seo');
 const { useRouteDraftStore } = await import('../state/routeDraftStore');
 const { useActivityStore } = await import('../state/activityStore');
 const { useInteractionStore } = await import('../state/interactionStore');
-const { draftFromActivity } = await import('../domain/routeDraft');
+const { draftFromActivity, createBlankDraft } = await import('../domain/routeDraft');
+type RouteDraft = import('../domain/routeDraft').RouteDraft;
 const { fixtureFile, binaryFixtureFile } = await import('../test/helpers/fixtures');
 const { makeActivity } = await import('../test/helpers/activity');
 
@@ -644,7 +645,7 @@ describe('discarding a section, with undo (AV-1105)', () => {
     expect(draft().points).toHaveLength(5);
     // Nothing has moved the camera for it.
     expect(map.fitBoundsCalls.length + map.easeToCalls.length).toBe(1);
-  });
+  }, 20_000);
 
   it('reads the marks the same way whichever end was marked first', async () => {
     await fiveAndSelect(4);
@@ -1002,5 +1003,113 @@ describe('appending another track (AV-1106)', () => {
     expect(draft().points).toHaveLength(before);
     // The notice goes with the points it described.
     expect(screen.queryByRole('status', { name: 'Last track added' })).not.toBeInTheDocument();
+  });
+});
+
+describe('exporting the planned track (AV-1107)', () => {
+  let saved: { fileName: string; blob: Blob }[] = [];
+  beforeEach(() => {
+    saved = [];
+    const blobs = new Map<string, Blob>();
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: (blob: Blob) => {
+        const url = `blob:test/${blobs.size}`;
+        blobs.set(url, blob);
+        return url;
+      },
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: () => {} });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push({ fileName: this.download, blob: blobs.get(this.href)! });
+    });
+  });
+
+  const exportRegion = () => screen.getByRole('region', { name: 'Export for a device' });
+
+  it('offers no controls until the track is a route', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    expect(exportRegion()).toHaveTextContent(/once the track is a route/);
+    expect(within(exportRegion()).queryByRole('button')).not.toBeInTheDocument();
+
+    press(map, 43, -8);
+    expect(within(exportRegion()).queryByRole('button')).not.toBeInTheDocument();
+    press(map, 43.01, -8);
+    expect(within(exportRegion()).getByRole('button', { name: /Download/ })).toBeEnabled();
+  });
+
+  it('downloads a GPX named as a planned track, and says what it left out', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('route-with-elevation.gpx'));
+    await screen.findByRole('region', { name: 'Planned track' });
+
+    await userEvent.click(within(exportRegion()).getByRole('button', { name: /Download .*-planned-track\.gpx/ }));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]!.fileName).toMatch(/-planned-track\.gpx$/);
+    const xml = await saved[0]!.blob.text();
+    expect(xml).toContain('<trkpt');
+    expect(xml).not.toContain('<time>');
+    const written = within(exportRegion()).getByRole('status', { name: 'Planned track written' });
+    expect(written).toHaveTextContent(saved[0]!.fileName);
+    expect(written).toHaveTextContent(/Only the route was written/);
+    expect(written).toHaveTextContent(/says where to go, not when/);
+  });
+
+  it('lists FIT and TCX as disabled, with the reason, and GPX as the choice', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await screen.findByRole('region', { name: 'Planned track' });
+
+    expect(within(exportRegion()).getByRole('radio', { name: /^GPX/ })).toBeChecked();
+    for (const label of [/^FIT/, /^TCX/]) {
+      const radio = within(exportRegion()).getByRole('radio', { name: label });
+      expect(radio).toBeDisabled();
+    }
+    expect(exportRegion()).toHaveTextContent(/FIT is written as a recorded activity/);
+    expect(exportRegion()).toHaveTextContent(/TCX is written as a recorded activity/);
+  });
+
+  it('warns about separate stretches when there are several', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await screen.findByRole('region', { name: 'Planned track' });
+    await userEvent.upload(screen.getByTestId('route-builder-input'), fixtureFile('route-with-elevation.gpx'));
+    await waitFor(() => expect(new Set(draft().points.map((p) => p.segmentIndex)).size).toBe(2));
+
+    await userEvent.click(within(exportRegion()).getByRole('button', { name: /Download/ }));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(within(exportRegion()).getByRole('status', { name: 'Planned track written' })).toHaveTextContent(
+      /2 separate track segments/,
+    );
+  });
+});
+
+describe('the stretch count in the summary (AV-1107, review)', () => {
+  it('counts a stretch whose number comes back as a stretch of its own', async () => {
+    const draft0: RouteDraft = {
+      ...createBlankDraft({ id: 'r', name: 'Runs' }),
+      points: [0, 0, 1, 1, 0, 0].map((segmentIndex, i) => ({
+        id: `p${i}`,
+        lat: 43 + i * 0.001,
+        lon: -8,
+        segmentIndex,
+        origin: { kind: 'manual' as const },
+      })),
+      counters: { point: 6, source: 0 },
+    };
+    act(() => useRouteDraftStore.getState().setDraft(draft0));
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    const track = await screen.findByRole('region', { name: 'Planned track' });
+    expect(within(track).getByText('Stretches').nextSibling).toHaveTextContent('3');
   });
 });

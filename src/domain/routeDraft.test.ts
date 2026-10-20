@@ -13,7 +13,7 @@ import {
 import { haversineMeters, withDerivedStats } from './stats';
 import type { Activity } from './activity';
 import { makeActivity } from '../test/helpers/activity';
-import { addPoint, appendJump, FAR_APPEND_METERS, beginsStretch, discardSection, joinBefore, movePoint, removePoint, sectionBounds, splitBefore, validatePlace, type DraftPoint } from './routeDraft';
+import { addPoint, appendJump, FAR_APPEND_METERS, beginsStretch, stretchLengths, discardSection, joinBefore, movePoint, removePoint, sectionBounds, splitBefore, validatePlace, type DraftPoint } from './routeDraft';
 
 const T0 = new Date('2024-06-01T08:00:00Z');
 const at = (s: number) => new Date(T0.getTime() + s * 1000);
@@ -555,7 +555,7 @@ describe('editing by hand (AV-1104)', () => {
   it('refuses to move to an invalid place or an unknown point', () => {
     const draft = base();
     expect(movePoint(draft, draft.points[0]!.id, { lat: 0, lon: 200 })).toMatchObject({ ok: false, error: { code: 'invalid_point' } });
-    expect(movePoint(draft, 'nope', { lat: 0, lon: 0 })).toMatchObject({ ok: false, error: { code: 'unknown_point' } });
+    expect(movePoint(draft, 'nope', { lat: 1, lon: 1 })).toMatchObject({ ok: false, error: { code: 'unknown_point' } });
   });
 
   it('feeds edits straight into the generated activity', () => {
@@ -772,5 +772,28 @@ describe('the jump an append makes (AV-1106)', () => {
   it('has no jump to measure from an empty draft', () => {
     const blank = createBlankDraft({ id: 'b' });
     expect(appendJump(blank, unwrap(appendImportedRoute(blank, at(10))))).toBeUndefined();
+  });
+});
+
+describe('stretchLengths (AV-1107, review)', () => {
+  const pts = (segments: (number | undefined)[]) =>
+    segments.map((segmentIndex, i) => ({ id: `p${i}`, lat: 1, lon: 1, segmentIndex, origin: { kind: 'manual' as const } }));
+
+  it('reads runs of adjacent points, so a number that comes back starts a new stretch', () => {
+    expect(stretchLengths(pts([]))).toEqual([]);
+    expect(stretchLengths(pts([0, 0, 0]))).toEqual([3]);
+    expect(stretchLengths(pts([0, 1, 0]))).toEqual([1, 1, 1]);
+    expect(stretchLengths(pts([0, 0, 1, 1, 0, 0]))).toEqual([2, 2, 2]);
+    expect(stretchLengths(pts([undefined, 0, 2]))).toEqual([2, 1]);
+  });
+});
+
+describe('0°, 0° is refused like the rest of the app refuses it (AV-1107, review)', () => {
+  it('will not place a point the map and every writer would drop', () => {
+    expect(validatePlace({ lat: 0, lon: 0 })).toMatchObject({ ok: false, error: { code: 'invalid_point', message: /0, longitude 0/ } });
+    expect(addPoint(createBlankDraft({ id: 'z' }), { lat: 0, lon: 0 })).toMatchObject({ ok: false });
+    // Either one alone is a real place.
+    expect(validatePlace({ lat: 0, lon: 1 }).ok).toBe(true);
+    expect(validatePlace({ lat: 1, lon: 0 }).ok).toBe(true);
   });
 });

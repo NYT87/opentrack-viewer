@@ -1,6 +1,7 @@
 import {
   computeStreams,
   hasValidLocation,
+  toValidCoordinate,
   type Activity,
   type ActivityPoint,
   type ActivityPointRange,
@@ -419,6 +420,13 @@ export function validatePlace(place: DraftPlace): DraftResult<DraftPlace> {
   if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
     return fail('invalid_point', 'Longitude must be a number between -180 and 180.');
   }
+  // The rule every reader, the map and every writer apply (`toValidCoordinate`):
+  // 0°, 0° is where a device puts a point it has no fix for, so the app drops
+  // it everywhere. A point placed there would be kept here and drawn and
+  // written nowhere; it is refused instead, with the reason.
+  if (!toValidCoordinate(lat, lon)) {
+    return fail('invalid_point', 'Latitude 0, longitude 0 is not used: it is where devices put a point with no fix, so the map and every file format leave it out.');
+  }
   if (elevationMeters !== undefined && !Number.isFinite(elevationMeters)) {
     return fail('invalid_point', 'Elevation must be a number of metres, or left blank.');
   }
@@ -679,4 +687,23 @@ export function appendJump(before: RouteDraft, after: RouteDraft): AppendJump | 
   if (!last || !first) return undefined;
   const meters = haversineMeters(last.lat, last.lon, first.lat, first.lon);
   return { firstId: first.id, meters, far: meters > FAR_APPEND_METERS };
+}
+
+/**
+ * The lengths of the draft's stretches, in order: a stretch is a run of
+ * *adjacent* points sharing a `segmentIndex`. Read by transitions, never by
+ * collecting the numbers, because a number can come back after a different
+ * one — runs `0, 1, 0` are three stretches, as the GPX writer and the map draw
+ * them, not two.
+ */
+export function stretchLengths(points: readonly DraftPoint[]): number[] {
+  const lengths: number[] = [];
+  let previous: number | undefined;
+  for (const point of points) {
+    const segment = point.segmentIndex ?? 0;
+    if (previous === undefined || segment !== previous) lengths.push(1);
+    else lengths[lengths.length - 1]! += 1;
+    previous = segment;
+  }
+  return lengths;
 }

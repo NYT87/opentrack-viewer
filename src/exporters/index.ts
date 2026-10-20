@@ -214,16 +214,22 @@ function resolveSource(
  */
 function deriveBaseName(activity: Activity, isRange: boolean): string {
   const fromSource = activity.source.fileName?.replace(/\.[^.]+$/, '');
-  const raw = activity.metadata.name?.trim() || fromSource || 'activity';
-  // An allowlist, not a denylist: the name came out of a file, so it can hold
-  // path separators, control characters or anything else a file system objects
-  // to. The full name still lives inside the exported document.
-  const safe =
+  const safe = safeFileStem(activity.metadata.name?.trim() || fromSource || 'activity', 'activity');
+  return isRange ? `${safe}-section` : safe;
+}
+
+/**
+ * A name a file system will accept. An allowlist, not a denylist: the name
+ * came out of a file or a reader's typing, so it can hold path separators,
+ * control characters or anything else a file system objects to. The full name
+ * still lives inside the exported document.
+ */
+export function safeFileStem(raw: string, fallback: string): string {
+  return (
     raw
       .replace(/[^A-Za-z0-9._-]+/g, '-')
       .replace(/-+/g, '-')
       .replace(/^[-.]+|[-.]+$/g, '')
-      .slice(0, 80) || 'activity';
-
-  return isRange ? `${safe}-section` : safe;
+      .slice(0, 80) || fallback
+  );
 }

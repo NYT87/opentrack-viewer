@@ -193,7 +193,11 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
  * revoked immediately afterwards: it holds the whole file in memory, and the
  * download has already taken its own reference by then.
  */
-function download(blob: Blob, fileName: string): void {
+/**
+ * Hands a blob to the browser's own download: an object URL on a temporary
+ * anchor, revoked at once. Nothing is sent anywhere. Shared by every export.
+ */
+export function download(blob: Blob, fileName: string): void {
   if (typeof URL.createObjectURL !== 'function') return;
 
   const url = URL.createObjectURL(blob);

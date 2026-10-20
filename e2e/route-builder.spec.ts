@@ -277,3 +277,47 @@ test('appends a TCX after a GPX, warns of the far jump, and sends nothing anywhe
     await page.evaluate(() => Object.keys(localStorage).filter((k) => k !== 'opentrack-viewer:theme')),
   ).toEqual([]);
 });
+
+test('exports the planned track as a GPX that the viewer reads back as the same route (AV-1107)', async ({ page }, testInfo) => {
+  const requests: Request[] = [];
+  page.on('request', (request) => requests.push(request));
+  await page.goto('./#/route-builder');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Basemap tiles').uncheck();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await page.getByTestId('route-builder-input').setInputFiles(RIDE_PATH);
+  await expect(page.getByRole('region', { name: 'Planned track' })).toBeVisible();
+  const planned = await page.getByRole('region', { name: 'Planned track' }).textContent();
+  const pointCount = Number(/Points\s*(\d+)/.exec(planned ?? '')![1]);
+
+  const exportRegion = page.getByRole('region', { name: 'Export for a device' });
+  await expect(exportRegion.getByRole('radio', { name: /^FIT/ })).toBeDisabled();
+  await expect(exportRegion.getByRole('radio', { name: /^TCX/ })).toBeDisabled();
+  const downloading = page.waitForEvent('download');
+  await exportRegion.getByRole('button', { name: /Download .*-planned-track\.gpx/ }).click();
+  const saved = await downloading;
+  expect(saved.suggestedFilename()).toMatch(/-planned-track\.gpx$/);
+  await expect(exportRegion.getByRole('status', { name: 'Planned track written' })).toContainText(
+    /says where to go, not when/,
+  );
+
+  const path = testInfo.outputPath(saved.suggestedFilename());
+  await saved.saveAs(path);
+  const xml = readFileSync(path, 'utf-8');
+  expect(xml).not.toContain('<time>');
+  expect(xml.match(/<trkpt /g)).toHaveLength(pointCount);
+
+  // Read back by the viewer: a route with the same number of points.
+  await page.getByRole('button', { name: 'Tools' }).click();
+  await page.getByRole('menuitem', { name: 'File viewer' }).click();
+  await page.getByTestId('file-input').setInputFiles(path);
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+
+  const origin = new URL(page.url()).origin;
+  for (const request of requests) {
+    expect(new URL(request.url()).origin, request.url()).toBe(origin);
+    expect(request.method(), request.url()).toBe('GET');
+    expect(request.postData(), request.url()).toBeNull();
+  }
+});

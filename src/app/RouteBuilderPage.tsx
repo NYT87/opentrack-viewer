@@ -3,6 +3,7 @@ import type { FeatureCollection, Point } from 'geojson';
 import { FileDropZone } from '../components/FileDropZone';
 import { WarningList } from '../components/ErrorPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
+import { PlannedTrackExport } from '../components/PlannedTrackExport';
 import type { EditPointProperties } from '../components/ActivityMap';
 import { toActivityError } from '../domain/errors';
 import { EMPTY_ROUTE_GEOMETRY, activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
@@ -11,6 +12,7 @@ import {
   beginsStretch,
   draftToActivity,
   sectionBounds,
+  stretchLengths,
   type DraftPlace,
   type DraftResult,
   type DraftSection,
@@ -400,6 +402,8 @@ export function RouteBuilderPage() {
               onDiscard={discard}
               onUndo={undoLast}
             />
+
+            <PlannedTrackExport draft={draft} />
           </>
         )}
 
@@ -770,7 +774,7 @@ function DraftSummary({
     const result = draftToActivity(draft);
     return result.ok ? result.value : undefined;
   }, [draft]);
-  const segments = new Set(draft.points.map((point) => point.segmentIndex ?? 0)).size;
+  const segments = stretchLengths(draft.points).length;
 
   return (
     <section className="prose" aria-label="Planned track">
