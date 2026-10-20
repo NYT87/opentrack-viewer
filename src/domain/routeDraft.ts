@@ -503,3 +503,149 @@ export function movePoint(
   if (valid.value.elevationMeters !== undefined) moved.elevationMeters = valid.value.elevationMeters;
   return ok({ ...draft, points: draft.points.map((point, index) => (index === at ? moved : point)) });
 }
+
+/*
+ * AV-1105. Sections and stretches. A section is a contiguous span of the
+ * track between two points, in either order; a stretch is a run of points
+ * sharing a `segmentIndex`, drawn as one line. Discarding a section leaves a
+ * cut, and the cut is either closed — the points either side joined, as a
+ * reader removing a detour means — or kept as a gap. Joining and splitting
+ * are also offered on their own, as the repairs for appended tracks (TD-048):
+ * an import starts a stretch of its own, and only the reader says whether the
+ * end of one track and the start of the next are really one road.
+ */
+
+export interface DraftSection {
+  fromId: string;
+  toId: string;
+}
+
+/** A section as index bounds, in draft order, whichever way round it was given. */
+export function sectionBounds(
+  draft: RouteDraft,
+  section: DraftSection,
+): DraftResult<{ start: number; end: number }> {
+  const a = indexOfPoint(draft, section.fromId);
+  const b = indexOfPoint(draft, section.toId);
+  if (a === -1 || b === -1) return fail('unknown_point', 'That point is not in this track.');
+  return ok({ start: Math.min(a, b), end: Math.max(a, b) });
+}
+
+/** The highest stretch number in use, so a new one can be made after it. */
+const lastSegment = (points: readonly DraftPoint[]) =>
+  points.reduce((max, point) => Math.max(max, point.segmentIndex ?? 0), -1);
+
+/**
+ * Gives the stretch beginning at `at` the stretch of the point before it: the
+ * run from `at` onward that shared the old number takes the new one, and
+ * later stretches are untouched. Nothing to do at the start of the track or
+ * inside a stretch.
+ */
+function joinAt(points: readonly DraftPoint[], at: number): DraftPoint[] {
+  const before = points[at - 1];
+  const first = points[at];
+  if (!before || !first) return [...points];
+  const from = before.segmentIndex ?? 0;
+  if (from === (first.segmentIndex ?? 0)) return [...points];
+  const end = runEnd(points, at);
+  const joined = renumberRun(points, at, from);
+  // The run after the joined one may already carry `from` — stretches are
+  // numbered in order of appearance, and a cut can bring two with the same
+  // number together — and would silently join too. It keeps its boundary by
+  // taking a number of its own.
+  const following = joined[end + 1];
+  return following && (following.segmentIndex ?? 0) === from
+    ? renumberRun(joined, end + 1, lastSegment(points) + 1)
+    : joined;
+}
+
+/**
+ * The last index of the run that begins at `start`: the contiguous points
+ * sharing its stretch number. Found once, so renumbering a run is one pass —
+ * a later run that happens to reuse the number is past the end and untouched.
+ */
+function runEnd(points: readonly DraftPoint[], start: number): number {
+  const segment = points[start]?.segmentIndex ?? 0;
+  let end = start;
+  while (end + 1 < points.length && (points[end + 1]?.segmentIndex ?? 0) === segment) end += 1;
+  return end;
+}
+
+/** The run beginning at `start`, renumbered; every other point is shared as it was. */
+function renumberRun(points: readonly DraftPoint[], start: number, segmentIndex: number): DraftPoint[] {
+  const end = runEnd(points, start);
+  const next = [...points];
+  for (let index = start; index <= end; index += 1) {
+    next[index] = { ...points[index]!, segmentIndex };
+  }
+  return next;
+}
+
+/** Starts a new stretch at `at`, if the point there shares one with the point before it. */
+function splitAt(points: readonly DraftPoint[], at: number): DraftPoint[] {
+  const before = points[at - 1];
+  const first = points[at];
+  if (!before || !first) return [...points];
+  if ((before.segmentIndex ?? 0) !== (first.segmentIndex ?? 0)) return [...points];
+  return renumberRun(points, at, lastSegment(points) + 1);
+}
+
+export interface DiscardOptions {
+  /** Leave the cut open: the points after it start a stretch of their own. */
+  keepGap?: boolean;
+}
+
+/**
+ * Takes a section out of the track. The points either side of the cut are
+ * joined into one stretch — a removed detour leaves the road running on —
+ * unless the reader asks to keep the gap, in which case what follows the cut
+ * begins a stretch of its own. A section at the start or the end has nothing
+ * to join; discarding the whole track leaves an empty draft, which is a
+ * track with no points rather than an error.
+ */
+export function discardSection(
+  draft: RouteDraft,
+  section: DraftSection,
+  options: DiscardOptions = {},
+): DraftResult<RouteDraft> {
+  const bounds = sectionBounds(draft, section);
+  if (!bounds.ok) return bounds as unknown as DraftResult<RouteDraft>;
+  const { start, end } = bounds.value;
+  const kept = [...draft.points.slice(0, start), ...draft.points.slice(end + 1)];
+  // The cut sits at `start`: the point now there followed the section.
+  const points = start > 0 && start < kept.length
+    ? options.keepGap
+      ? splitAt(kept, start)
+      : joinAt(kept, start)
+    : kept;
+  return ok({ ...draft, points });
+}
+
+/** Joins the stretch that begins at this point to the one before it. */
+export function joinBefore(draft: RouteDraft, id: string): DraftResult<RouteDraft> {
+  const at = indexOfPoint(draft, id);
+  if (at === -1) return fail('unknown_point', 'That point is not in this track.');
+  if (at === 0) return fail('invalid_range', 'The first point has nothing before it to join.');
+  if ((draft.points[at]!.segmentIndex ?? 0) === (draft.points[at - 1]!.segmentIndex ?? 0)) {
+    return fail('invalid_range', 'That point is already joined to the one before it.');
+  }
+  return ok({ ...draft, points: joinAt(draft.points, at) });
+}
+
+/** Splits the track before this point, so it begins a stretch of its own. */
+export function splitBefore(draft: RouteDraft, id: string): DraftResult<RouteDraft> {
+  const at = indexOfPoint(draft, id);
+  if (at === -1) return fail('unknown_point', 'That point is not in this track.');
+  if (at === 0) return fail('invalid_range', 'The first point already begins the track.');
+  if ((draft.points[at]!.segmentIndex ?? 0) !== (draft.points[at - 1]!.segmentIndex ?? 0)) {
+    return fail('invalid_range', 'That point already begins a stretch.');
+  }
+  return ok({ ...draft, points: splitAt(draft.points, at) });
+}
+
+/** Whether this point begins a stretch: the first, or one not joined to the point before it. */
+export function beginsStretch(draft: RouteDraft, id: string): boolean {
+  const at = indexOfPoint(draft, id);
+  if (at <= 0) return at === 0;
+  return (draft.points[at]!.segmentIndex ?? 0) !== (draft.points[at - 1]!.segmentIndex ?? 0);
+}

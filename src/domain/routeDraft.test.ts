@@ -13,7 +13,7 @@ import {
 import { haversineMeters, withDerivedStats } from './stats';
 import type { Activity } from './activity';
 import { makeActivity } from '../test/helpers/activity';
-import { addPoint, movePoint, removePoint, validatePlace } from './routeDraft';
+import { addPoint, beginsStretch, discardSection, joinBefore, movePoint, removePoint, sectionBounds, splitBefore, validatePlace, type DraftPoint } from './routeDraft';
 
 const T0 = new Date('2024-06-01T08:00:00Z');
 const at = (s: number) => new Date(T0.getTime() + s * 1000);
@@ -563,5 +563,184 @@ describe('editing by hand (AV-1104)', () => {
     const activity = unwrap(draftToActivity(edited));
     expect(activity.points.length).toBe(edited.points.length);
     expect(activity.points[activity.points.length - 1]).toMatchObject({ lat: 10.5, lon: 20.5 });
+  });
+});
+
+describe('discarding a section (AV-1105)', () => {
+  // Ten points in one stretch, p0..p9 along a line.
+  const line = () => {
+    let draft = createBlankDraft({ id: 'line' });
+    for (let i = 0; i < 10; i += 1) draft = unwrap(addPoint(draft, { lat: 10 + i * 0.001, lon: 20 }));
+    return draft;
+  };
+  const ids = (draft: RouteDraft) => draft.points.map((p) => p.id);
+  const segments = (draft: RouteDraft) => draft.points.map((p) => p.segmentIndex ?? 0);
+
+  it('reads a section the same way whichever end was given first', () => {
+    const draft = line();
+    expect(unwrap(sectionBounds(draft, { fromId: 'p2', toId: 'p5' }))).toEqual({ start: 2, end: 5 });
+    expect(unwrap(sectionBounds(draft, { fromId: 'p5', toId: 'p2' }))).toEqual({ start: 2, end: 5 });
+    expect(unwrap(sectionBounds(draft, { fromId: 'p4', toId: 'p4' }))).toEqual({ start: 4, end: 4 });
+    expect(sectionBounds(draft, { fromId: 'p4', toId: 'nope' })).toMatchObject({ ok: false, error: { code: 'unknown_point' } });
+  });
+
+  it('takes a middle section out and joins the road either side, forward or reverse', () => {
+    const draft = deepFreeze(line());
+    const forward = unwrap(discardSection(draft, { fromId: 'p3', toId: 'p6' }));
+    const reverse = unwrap(discardSection(draft, { fromId: 'p6', toId: 'p3' }));
+    expect(ids(forward)).toEqual(['p0', 'p1', 'p2', 'p7', 'p8', 'p9']);
+    expect(ids(reverse)).toEqual(ids(forward));
+    expect(new Set(segments(forward)).size).toBe(1);
+    expect(forward.points[3]).toBe(draft.points[7]);
+    expect(draft.points).toHaveLength(10);
+  });
+
+  it('keeps a gap when asked: what follows the cut starts a stretch of its own', () => {
+    const gapped = unwrap(discardSection(line(), { fromId: 'p3', toId: 'p6' }, { keepGap: true }));
+    expect(ids(gapped)).toEqual(['p0', 'p1', 'p2', 'p7', 'p8', 'p9']);
+    expect(segments(gapped)).toEqual([0, 0, 0, 1, 1, 1]);
+    // And the generated track counts no distance across the gap.
+    const activity = unwrap(draftToActivity(gapped));
+    const joined = unwrap(draftToActivity(unwrap(discardSection(line(), { fromId: 'p3', toId: 'p6' }))));
+    expect(activity.derived!.distanceMeters!).toBeLessThan(joined.derived!.distanceMeters!);
+  });
+
+  it('discards from the start, from the end, the whole track, and a one-point track without crashing', () => {
+    const draft = line();
+    expect(ids(unwrap(discardSection(draft, { fromId: 'p0', toId: 'p2' })))).toEqual(['p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9']);
+    expect(ids(unwrap(discardSection(draft, { fromId: 'p7', toId: 'p9' })))).toEqual(['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6']);
+    const emptied = unwrap(discardSection(draft, { fromId: 'p0', toId: 'p9' }));
+    expect(emptied.points).toEqual([]);
+    expect(draftToActivity(emptied)).toMatchObject({ ok: false, error: { code: 'empty_draft' } });
+    const one = unwrap(addPoint(createBlankDraft({ id: 'one' }), { lat: 1, lon: 1 }));
+    expect(unwrap(discardSection(one, { fromId: 'p0', toId: 'p0' })).points).toEqual([]);
+    // Edges with a gap asked for: nothing to split at an edge.
+    expect(segments(unwrap(discardSection(draft, { fromId: 'p0', toId: 'p2' }, { keepGap: true })))).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it('joins across a cut that straddled two stretches, and leaves later stretches alone', () => {
+    // Three appended routes: p0-2 | p3-5 | p6-8, then p9 appended as a fourth.
+    const draft = unwrap(
+      draftFromImports([
+        makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }, { lat: 10.002, lon: 20 }]),
+        makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }, { lat: 11.002, lon: 20 }]),
+        makeActivity([{ lat: 12, lon: 20 }, { lat: 12.001, lon: 20 }, { lat: 12.002, lon: 20 }]),
+        makeActivity([{ lat: 13, lon: 20 }]),
+      ]),
+    );
+    expect(segments(draft)).toEqual([0, 0, 0, 1, 1, 1, 2, 2, 2, 3]);
+    // Cut from inside the first route to inside the third: the remainder of
+    // the third joins the first; the fourth stays its own.
+    const cut = unwrap(discardSection(draft, { fromId: 'p1', toId: 'p7' }));
+    expect(ids(cut)).toEqual(['p0', 'p8', 'p9']);
+    expect(segments(cut)).toEqual([0, 0, 3]);
+  });
+
+  it('joins and splits stretches by hand, and says when there is nothing to do', () => {
+    const draft = unwrap(
+      draftFromImports([
+        makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }]),
+        makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }]),
+      ]),
+    );
+    expect(segments(draft)).toEqual([0, 0, 1, 1]);
+    expect(beginsStretch(draft, 'p0')).toBe(true);
+    expect(beginsStretch(draft, 'p1')).toBe(false);
+    expect(beginsStretch(draft, 'p2')).toBe(true);
+
+    const joined = unwrap(joinBefore(draft, 'p2'));
+    expect(segments(joined)).toEqual([0, 0, 0, 0]);
+    expect(joinBefore(joined, 'p2')).toMatchObject({ ok: false, error: { code: 'invalid_range', message: /already joined/ } });
+    expect(joinBefore(draft, 'p0')).toMatchObject({ ok: false, error: { code: 'invalid_range' } });
+
+    const split = unwrap(splitBefore(joined, 'p1'));
+    expect(segments(split)).toEqual([0, 1, 1, 1]);
+    expect(splitBefore(split, 'p1')).toMatchObject({ ok: false, error: { code: 'invalid_range', message: /already begins/ } });
+    expect(splitBefore(draft, 'nope')).toMatchObject({ ok: false, error: { code: 'unknown_point' } });
+    // Nothing given was changed.
+    expect(segments(draft)).toEqual([0, 0, 1, 1]);
+    expect(segments(joined)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('splits only the run at the point, not a later run that reused the number', () => {
+    // p0 p1 | p2 p3 | p4 p5, then join p4 to the previous: [0,0,1,1,1,1].
+    let draft = unwrap(
+      draftFromImports([
+        makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }]),
+        makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }]),
+        makeActivity([{ lat: 12, lon: 20 }, { lat: 12.001, lon: 20 }]),
+      ]),
+    );
+    draft = unwrap(joinBefore(draft, 'p4'));
+    expect(segments(draft)).toEqual([0, 0, 1, 1, 1, 1]);
+    // Splitting at p3 gives p3..p5 the next free number, leaving p2 in stretch 1.
+    expect(segments(unwrap(splitBefore(draft, 'p3')))).toEqual([0, 0, 1, 2, 2, 2]);
+  });
+});
+
+describe('stretch repairs on a long track (AV-1105, review)', () => {
+  it('splits and joins near the start of a 60,000-point stretch in one pass', () => {
+    const points: DraftPoint[] = Array.from({ length: 60_000 }, (_, i) => ({
+      id: `p${i}`,
+      lat: 10 + i * 0.00001,
+      lon: 20,
+      segmentIndex: 0,
+      origin: { kind: 'manual' },
+    }));
+    const draft: RouteDraft = { ...createBlankDraft({ id: 'long' }), points, counters: { point: points.length, source: 0 } };
+
+    const started = performance.now();
+    const split = unwrap(splitBefore(draft, 'p1'));
+    const joined = unwrap(joinBefore(split, 'p1'));
+    const gapped = unwrap(discardSection(draft, { fromId: 'p2', toId: 'p3' }, { keepGap: true }));
+    const elapsed = performance.now() - started;
+
+    expect(split.points[0]!.segmentIndex).toBe(0);
+    expect(split.points[1]!.segmentIndex).toBe(1);
+    expect(split.points[59_999]!.segmentIndex).toBe(1);
+    expect(joined.points.every((point) => point.segmentIndex === 0)).toBe(true);
+    expect(gapped.points[2]!.segmentIndex).toBe(1);
+    expect(gapped.points[59_997]!.segmentIndex).toBe(1);
+    // Three edits over 180,000 points: linear, so well under a second even on a loaded machine (quadratic was ~9 s per edit).
+    expect(elapsed).toBeLessThan(1000);
+  });
+});
+
+describe('joining keeps the boundary after the joined run (AV-1105, review)', () => {
+  it('does not also join a following stretch that happens to carry the target number', () => {
+    // p0 p1 | p2 p3 | p4 p5 with runs numbered 0, 1, 0 — the shape a cut can leave.
+    const points: DraftPoint[] = [0, 0, 1, 1, 0, 0].map((segmentIndex, i) => ({
+      id: `p${i}`,
+      lat: 10 + i,
+      lon: 20,
+      segmentIndex,
+      origin: { kind: 'manual' },
+    }));
+    const draft: RouteDraft = { ...createBlankDraft({ id: 'runs' }), points, counters: { point: 6, source: 0 } };
+
+    const joined = unwrap(joinBefore(draft, 'p2'));
+
+    expect(joined.points.map((p) => p.segmentIndex)).toEqual([0, 0, 0, 0, 2, 2]);
+    // p3 → p4 stays a break: no distance is counted across it.
+    const before = unwrap(draftToActivity(draft)).derived!.distanceMeters!;
+    const after = unwrap(draftToActivity(joined)).derived!.distanceMeters!;
+    const p1p2 = haversineMeters(points[1]!.lat, points[1]!.lon, points[2]!.lat, points[2]!.lon);
+    expect(after - before).toBeCloseTo(p1p2, 0);
+    expect(draft.points.map((p) => p.segmentIndex)).toEqual([0, 0, 1, 1, 0, 0]);
+  });
+
+  it('keeps the same boundary when a discard joins across a cut', () => {
+    // p0 p1 | p2 p3 p4 | p5 p6 numbered 0, 1, 0; discarding p2–p3 joins p4 to p1
+    // and must leave p5 p6 as their own stretch.
+    const points: DraftPoint[] = [0, 0, 1, 1, 1, 0, 0].map((segmentIndex, i) => ({
+      id: `p${i}`,
+      lat: 10 + i,
+      lon: 20,
+      segmentIndex,
+      origin: { kind: 'manual' },
+    }));
+    const draft: RouteDraft = { ...createBlankDraft({ id: 'cut' }), points, counters: { point: 7, source: 0 } };
+    const cut = unwrap(discardSection(draft, { fromId: 'p2', toId: 'p3' }));
+    expect(cut.points.map((p) => [p.id, p.segmentIndex])).toEqual([['p0', 0], ['p1', 0], ['p4', 0], ['p5', 2], ['p6', 2]]);
   });
 });

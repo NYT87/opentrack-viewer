@@ -187,3 +187,40 @@ test('draws the draft on a map and edits it point by point (AV-1104)', async ({ 
   await page.getByRole('button', { name: 'Remove point' }).click();
   await expect(track).toContainText(/Points\s*1/);
 });
+
+test('cuts a section out of the track, shows it first, and takes it back (AV-1105)', async ({ page }) => {
+  await page.goto('./#/route-builder');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Basemap tiles').uncheck();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await page.getByRole('button', { name: 'Start a blank track' }).click();
+
+  const add = page.getByRole('form', { name: 'Add a point by coordinates' });
+  for (const lat of ['43.00', '43.01', '43.02', '43.03']) {
+    await add.getByLabel('Latitude').fill(lat);
+    await add.getByLabel('Longitude').fill('-8.00');
+    await add.getByRole('button', { name: 'Add point' }).click();
+  }
+  const track = page.getByRole('region', { name: 'Planned track' });
+  await expect(track).toContainText(/Points\s*4/);
+
+  // Points 2 and 3 become the section; it is named before it is cut.
+  await page.getByRole('button', { name: 'Deselect' }).click();
+  await page.getByRole('button', { name: 'Next point' }).click();
+  await page.getByRole('button', { name: 'Next point' }).click();
+  await page.getByRole('button', { name: 'Section starts here' }).click();
+  await page.getByRole('button', { name: 'Next point' }).click();
+  await page.getByRole('button', { name: 'Section ends here' }).click();
+  const section = page.getByRole('group', { name: 'Section' });
+  await expect(section).toContainText('Section: points 2 to 3 (2 points), shown on the map');
+
+  await page.getByRole('button', { name: 'Discard section' }).click();
+  await expect(track).toContainText(/Points\s*2/);
+  await expect(track).toContainText(/Stretches\s*1/);
+  await expect(page.getByRole('region', { name: 'Edit points' }).getByRole('status')).toContainText(
+    /Discarded 2 points/,
+  );
+
+  await page.getByRole('button', { name: 'Undo last edit' }).click();
+  await expect(track).toContainText(/Points\s*4/);
+});

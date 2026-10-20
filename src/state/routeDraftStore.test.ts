@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useRouteDraftStore } from './routeDraftStore';
+import { UNDO_DEPTH, useRouteDraftStore } from './routeDraftStore';
 import { createBlankDraft } from '../domain/routeDraft';
 import { makeActivity } from '../test/helpers/activity';
 
@@ -86,5 +86,99 @@ describe('editing through the store (AV-1104)', () => {
     const result = useRouteDraftStore.getState().addPoint({ lat: 10, lon: 20 });
     expect(result).toMatchObject({ ok: false, error: { code: 'empty_draft' } });
     expect(useRouteDraftStore.getState().draft).toBeUndefined();
+  });
+});
+
+describe('sections, stretches and undo through the store (AV-1105)', () => {
+  const fill = () => {
+    useRouteDraftStore.getState().startBlank();
+    for (let i = 0; i < 5; i += 1) useRouteDraftStore.getState().addPoint({ lat: 10 + i * 0.001, lon: 20 });
+  };
+  const ids = () => useRouteDraftStore.getState().draft!.points.map((p) => p.id);
+
+  it('discards a section, and takes it back', () => {
+    fill();
+    expect(useRouteDraftStore.getState().discardSection({ fromId: 'p1', toId: 'p3' }).ok).toBe(true);
+    expect(ids()).toEqual(['p0', 'p4']);
+
+    expect(useRouteDraftStore.getState().undo()).toBe(true);
+    expect(ids()).toEqual(['p0', 'p1', 'p2', 'p3', 'p4']);
+  });
+
+  it('undoes every kind of edit, newest first, and says when there is nothing left', () => {
+    fill();
+    const after5 = useRouteDraftStore.getState().draft;
+    useRouteDraftStore.getState().movePoint('p0', { lat: 50, lon: 50 });
+    useRouteDraftStore.getState().removePoint('p4');
+    useRouteDraftStore.getState().splitBefore('p2');
+    expect(useRouteDraftStore.getState().history).toHaveLength(8);
+
+    useRouteDraftStore.getState().undo();
+    expect(useRouteDraftStore.getState().draft!.points.map((p) => p.segmentIndex)).toEqual([0, 0, 0, 0]);
+    useRouteDraftStore.getState().undo();
+    expect(ids()).toHaveLength(5);
+    useRouteDraftStore.getState().undo();
+    expect(useRouteDraftStore.getState().draft).toBe(after5);
+    for (let i = 0; i < 5; i += 1) expect(useRouteDraftStore.getState().undo()).toBe(true);
+    expect(useRouteDraftStore.getState().undo()).toBe(false);
+    expect(useRouteDraftStore.getState().draft!.points).toEqual([]);
+  });
+
+  it('remembers nothing of a draft that was replaced, and nothing for a refused edit', () => {
+    fill();
+    useRouteDraftStore.getState().startBlank();
+    expect(useRouteDraftStore.getState().undo()).toBe(false);
+    useRouteDraftStore.getState().addPoint({ lat: 1, lon: 1 });
+    useRouteDraftStore.getState().addPoint({ lat: 95, lon: 1 });
+    expect(useRouteDraftStore.getState().history).toHaveLength(1);
+    useRouteDraftStore.getState().setDraft(createBlankDraft());
+    expect(useRouteDraftStore.getState().history).toEqual([]);
+  });
+
+  it('keeps no more than the undo depth', () => {
+    useRouteDraftStore.getState().startBlank();
+    for (let i = 0; i < UNDO_DEPTH + 10; i += 1) useRouteDraftStore.getState().addPoint({ lat: 1, lon: 1 });
+    expect(useRouteDraftStore.getState().history).toHaveLength(UNDO_DEPTH);
+  });
+
+  it('joins and splits stretches of the held draft', () => {
+    useRouteDraftStore.getState().importTrack(makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }]));
+    useRouteDraftStore.getState().importTrack(makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }]));
+    const seg = () => useRouteDraftStore.getState().draft!.points.map((p) => p.segmentIndex);
+    expect(seg()).toEqual([0, 0, 1, 1]);
+    expect(useRouteDraftStore.getState().joinBefore('p2').ok).toBe(true);
+    expect(seg()).toEqual([0, 0, 0, 0]);
+    expect(useRouteDraftStore.getState().splitBefore('p2').ok).toBe(true);
+    expect(seg()).toEqual([0, 0, 1, 1]);
+    // The first import is a new draft, so only the second import and the two repairs can be undone.
+    expect(useRouteDraftStore.getState().history).toHaveLength(3);
+  });
+});
+
+describe('ids after an undo (AV-1105, review)', () => {
+  it('never gives a new point the id of one an undo took away', () => {
+    useRouteDraftStore.getState().startBlank();
+    useRouteDraftStore.getState().addPoint({ lat: 1, lon: 1 });
+    useRouteDraftStore.getState().addPoint({ lat: 2, lon: 2 });
+    expect(useRouteDraftStore.getState().draft!.points.map((p) => p.id)).toEqual(['p0', 'p1']);
+
+    useRouteDraftStore.getState().undo();
+    useRouteDraftStore.getState().addPoint({ lat: 3, lon: 3 });
+
+    expect(useRouteDraftStore.getState().draft!.points.map((p) => p.id)).toEqual(['p0', 'p2']);
+    // And the same for sources: an undone import's number is not reused.
+    useRouteDraftStore.getState().importTrack(makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }]));
+    useRouteDraftStore.getState().undo();
+    useRouteDraftStore.getState().importTrack(makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }]));
+    expect(useRouteDraftStore.getState().draft!.sources.map((s) => s.id)).toEqual(['s1']);
+  });
+
+  it('restores the very same draft object when no counter has to be carried forward', () => {
+    useRouteDraftStore.getState().startBlank();
+    useRouteDraftStore.getState().addPoint({ lat: 1, lon: 1 });
+    const before = useRouteDraftStore.getState().draft;
+    useRouteDraftStore.getState().movePoint('p0', { lat: 5, lon: 5 });
+    useRouteDraftStore.getState().undo();
+    expect(useRouteDraftStore.getState().draft).toBe(before);
   });
 });

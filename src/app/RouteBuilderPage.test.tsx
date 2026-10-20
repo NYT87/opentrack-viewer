@@ -44,7 +44,7 @@ async function readyMap() {
 const routeFeatures = (map: ReturnType<typeof latestMap>) =>
   (map.sources.get('activity-route')?.data as { features: unknown[] }).features;
 const pointFeatures = (map: ReturnType<typeof latestMap>) =>
-  (map.sources.get('draft-points')?.data as { features: { properties: { id: string; selected: boolean } }[] }).features;
+  (map.sources.get('draft-points')?.data as { features: { properties: { id: string; selected: boolean; inSection?: boolean } }[] }).features;
 
 const press = (map: ReturnType<typeof latestMap>, lat: number, lon: number) =>
   act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: lon, lat } }));
@@ -397,8 +397,8 @@ describe('editing points on the map (AV-1104)', () => {
     // the newest selected.
     expect(routeFeatures(map)).toHaveLength(1);
     expect(pointFeatures(map).map((f) => f.properties)).toEqual([
-      { id: 'p0', selected: false },
-      { id: 'p1', selected: true },
+      { id: 'p0', selected: false, inSection: false },
+      { id: 'p1', selected: true, inSection: false },
     ]);
     const track = screen.getByRole('region', { name: 'Planned track' });
     expect(within(track).getByText('Points').nextSibling).toHaveTextContent('2');
@@ -606,5 +606,267 @@ describe('editing points on the map (AV-1104)', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
     await readyMap();
     expect(within(editor()).getByRole('status')).toHaveTextContent(/Points are not dragged/);
+  });
+});
+
+describe('discarding a section, with undo (AV-1105)', () => {
+  const lapFeatures = (map: ReturnType<typeof latestMap>) =>
+    (map.sources.get('activity-lap')?.data as { features: unknown[] }).features;
+  const sectionGroup = () => within(editor()).getByRole('group', { name: 'Section' });
+  const stretches = () =>
+    within(screen.getByRole('region', { name: 'Planned track' })).queryByText('Stretches')?.nextSibling?.textContent;
+
+  /** Five points zig-zagging north, so cutting the middle shortens the track; then selects point `n` (1-based). */
+  async function fiveAndSelect(n: number) {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    for (let i = 0; i < 5; i += 1) press(map, 43 + i * 0.01, -8 + (i % 2) * 0.02);
+    await userEvent.click(screen.getByRole('button', { name: 'Deselect' }));
+    for (let i = 0; i < n; i += 1) await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    expect(editor()).toHaveTextContent(`Selected: point ${n} of 5`);
+    return map;
+  }
+
+  it('marks a section from the selected point and shows it on the map before anything is cut', async () => {
+    const map = await fiveAndSelect(2);
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    expect(sectionGroup()).toHaveTextContent('Section starts at point 2; mark where it ends');
+    expect(lapFeatures(map)).toEqual([]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+
+    expect(sectionGroup()).toHaveTextContent('Section: points 2 to 4 (3 points), shown on the map');
+    expect(lapFeatures(map)).toHaveLength(1);
+    expect(draft().points).toHaveLength(5);
+    // Nothing has moved the camera for it.
+    expect(map.fitBoundsCalls.length + map.easeToCalls.length).toBe(1);
+  });
+
+  it('reads the marks the same way whichever end was marked first', async () => {
+    await fiveAndSelect(4);
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    expect(sectionGroup()).toHaveTextContent('Section: points 2 to 4 (3 points)');
+  });
+
+  it('discards the middle, joins the road either side, and updates the preview and distance', async () => {
+    const map = await fiveAndSelect(2);
+    const before = within(screen.getByRole('region', { name: 'Planned track' })).getByText('Distance').nextSibling!.textContent;
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+
+    expect(draft().points.map((p) => p.id)).toEqual(['p0', 'p3', 'p4']);
+    expect(stretches()).toBe('1');
+    expect(routeFeatures(map)).toHaveLength(1);
+    expect(lapFeatures(map)).toEqual([]);
+    expect(within(editor()).getByRole('status')).toHaveTextContent(/Discarded 2 points.*runs straight.*Undo takes it back/);
+    const after = within(screen.getByRole('region', { name: 'Planned track' })).getByText('Distance').nextSibling!.textContent;
+    expect(after).not.toBe(before);
+    // The marks went with the points; no section is pending.
+    expect(screen.queryByRole('button', { name: 'Discard section' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a gap when asked, so the two sides are separate stretches', async () => {
+    // A one-point section, the middle point: two points remain either side,
+    // enough for a line on each.
+    const map = await fiveAndSelect(3);
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    expect(sectionGroup()).toHaveTextContent('Section: points 3 to 3 (1 point)');
+    await userEvent.click(screen.getByRole('checkbox', { name: /keep a gap/ }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+
+    expect(draft().points.map((p) => p.segmentIndex)).toEqual([0, 0, 1, 1]);
+    expect(stretches()).toBe('2');
+    expect(routeFeatures(map)).toHaveLength(2);
+    expect(within(editor()).getByRole('status')).toHaveTextContent(/A gap was kept/);
+  });
+
+  it('takes a discard back with Undo, and Undo is only offered when there is something to take back', async () => {
+    await fiveAndSelect(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    for (let i = 0; i < 4; i += 1) await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+    // The whole track: an empty draft, not a crash.
+    expect(draft().points).toEqual([]);
+    expect(editor()).toHaveTextContent('No points yet');
+    expect(within(editor()).getByRole('status')).toHaveTextContent(/Discarded 5 points.*Nothing was on the other side/);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
+    expect(draft().points).toHaveLength(5);
+    expect(within(editor()).getByRole('status')).toHaveTextContent('The last edit was taken back.');
+
+    // Undo all the way back to the blank track, then there is nothing left.
+    for (let i = 0; i < 5; i += 1) await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
+    expect(draft().points).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Undo last edit' })).toBeDisabled();
+    // Sixteen presses and clicks: longer than the default budget on a loaded machine.
+  }, 20_000);
+
+  it('discards from the start and from the end without anything to join', async () => {
+    await fiveAndSelect(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+    expect(draft().points.map((p) => p.id)).toEqual(['p2', 'p3', 'p4']);
+
+    // Now the last two of what is left: select the second, mark, then the last.
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+    expect(draft().points.map((p) => p.id)).toEqual(['p2']);
+    expect(stretches()).toBe('1');
+  });
+
+  it('joins and splits stretches from the selected point', async () => {
+    await fiveAndSelect(3);
+    expect(editor()).toHaveTextContent('This point continues the stretch from the point before.');
+    await userEvent.click(screen.getByRole('button', { name: 'Start a new stretch here' }));
+    expect(stretches()).toBe('2');
+    expect(editor()).toHaveTextContent('This point begins a stretch');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Join to the point before' }));
+    expect(stretches()).toBe('1');
+    expect(draft().points.map((p) => p.segmentIndex)).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it('forgets the marks with the draft they belonged to', async () => {
+    await fiveAndSelect(2);
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    await readyMap();
+    expect(sectionGroup()).toHaveTextContent('Section: none marked');
+  });
+});
+
+describe('marks never outlive their draft (AV-1105, review)', () => {
+  it('does not resurrect a section when a new draft reuses the old point ids', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    expect(screen.getByRole('button', { name: 'Discard section' })).toBeInTheDocument();
+
+    // A new draft whose points are again p0 and p1.
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const fresh = await readyMap();
+    press(fresh, 1, 1);
+    press(fresh, 2, 2);
+
+    const group = within(editor()).getByRole('group', { name: 'Section' });
+    expect(group).toHaveTextContent('Section: none marked');
+    expect(screen.queryByRole('button', { name: 'Discard section' })).not.toBeInTheDocument();
+    expect((fresh.sources.get('activity-lap')?.data as { features: unknown[] }).features).toEqual([]);
+  });
+});
+
+describe('marks and undo (AV-1105, review)', () => {
+  it('does not resurrect a section when a point is added after undoing an addition', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    expect(screen.getByRole('button', { name: 'Discard section' })).toBeInTheDocument();
+
+    // Take the second point back, then add another somewhere else.
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
+    const group = within(editor()).getByRole('group', { name: 'Section' });
+    expect(group).toHaveTextContent('Section starts at point 1; mark where it ends');
+    press(map, 50, -1);
+
+    expect(draft().points.map((p) => p.id)).toEqual(['p0', 'p2']);
+    expect(group).toHaveTextContent('Section starts at point 1; mark where it ends');
+    expect(screen.queryByRole('button', { name: 'Discard section' })).not.toBeInTheDocument();
+    expect((map.sources.get('activity-lap')?.data as { features: unknown[] }).features).toEqual([]);
+  });
+});
+
+describe('undo and the live selection; one-point sections (AV-1105, review)', () => {
+  it('does not bring back move mode for a point that was removed and then restored by undo', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    await userEvent.click(screen.getByRole('radio', { name: /moves the selected point/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove point' }));
+    expect(screen.getByRole('radio', { name: /adds a point/ })).toBeChecked();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
+
+    // The point is back; the selection and its move mode are not.
+    expect(draft().points).toHaveLength(2);
+    expect(editor()).toHaveTextContent('No point selected (2 in the track)');
+    expect(screen.getByRole('radio', { name: /adds a point/ })).toBeChecked();
+    press(map, 50, -1);
+    expect(draft().points).toHaveLength(3);
+    expect(draft().points[1]).toMatchObject({ lat: 43.01, lon: -8 });
+  });
+
+  it('keeps a live selection and its mode across an undo of some other edit', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('radio', { name: /moves the selected point/ }));
+    press(map, 44, -9); // moves p0
+
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
+
+    expect(editor()).toHaveTextContent('Selected: point 1 of 2');
+    expect(screen.getByRole('radio', { name: /moves the selected point/ })).toBeChecked();
+  });
+
+  it('shows a one-point section on the map through its handle', async () => {
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    const map = await readyMap();
+    press(map, 43, -8);
+    press(map, 43.01, -8);
+    press(map, 43.02, -8);
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Deselect' }));
+
+    expect(within(editor()).getByRole('group', { name: 'Section' })).toHaveTextContent('Section: points 2 to 2 (1 point), shown on the map');
+    // No line can be drawn through one point, so the handle carries the mark.
+    expect(pointFeatures(map).map((f) => f.properties.inSection)).toEqual([false, true, false]);
+    expect(pointFeatures(map).map((f) => f.properties.selected)).toEqual([false, false, false]);
+    expect(map.layers.find((layer) => layer.id === 'draft-point')).toBeDefined();
   });
 });

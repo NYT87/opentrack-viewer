@@ -49,10 +49,16 @@ const EMPTY_POINTS: FeatureCollection<Point, EditPointProperties> = {
   features: [],
 };
 
-/** AV-1104. What a draft point carries onto the map: its id, and whether it is the one picked out. */
+/**
+ * AV-1104 / AV-1105. What a draft point carries onto the map: its id, whether
+ * it is the one picked out, and whether it lies in the marked section. The
+ * section is also a line (`lapRoute`), but a line needs two points, so the
+ * points carry the mark too — a one-point section is still shown.
+ */
 export interface EditPointProperties {
   id: string;
   selected: boolean;
+  inSection?: boolean;
 }
 
 /**
@@ -374,10 +380,18 @@ export function ActivityMap({
           type: 'circle',
           source: EDIT_POINT_SOURCE,
           paint: {
-            // The selected point is larger and amber; the rest white, so a
+            // The selected point is larger and amber; points in the marked
+            // section take the section line's colour; the rest white, so a
             // track of many points reads as a line with handles on it.
             'circle-radius': ['case', ['get', 'selected'], 8, 5],
-            'circle-color': ['case', ['get', 'selected'], '#ffd166', '#ffffff'],
+            'circle-color': [
+              'case',
+              ['get', 'selected'],
+              '#ffd166',
+              ['==', ['get', 'inSection'], true],
+              '#c77dff',
+              '#ffffff',
+            ],
             'circle-stroke-color': '#0b0f14',
             'circle-stroke-width': 2,
           },
