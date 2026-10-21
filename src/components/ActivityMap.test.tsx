@@ -239,6 +239,30 @@ describe('ActivityMap (AV-302/AV-303)', () => {
     expect(onRouteHover).toHaveBeenCalledWith(3);
   });
 
+  it('finds the nearest point in the run as given, not in the tile copy MapLibre reports (AV-1108, review)', () => {
+    // Regression: the feature under the pointer carries the tile's geometry,
+    // clipped at the tile's edge and simplified for the zoom. Here it has lost
+    // the middle coordinate; an index into it would name the wrong point.
+    const onRouteHover = vi.fn();
+    const onRouteClick = vi.fn();
+    renderMap({ onRouteHover, onRouteClick });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+
+    map.queryRenderedFeatures.mockReturnValue([
+      {
+        properties: { featureIndex: 0 },
+        geometry: { type: 'LineString', coordinates: [[-0.3, 51.5], [0.2, 51.9]] },
+      },
+    ]);
+    const nearMiddle = { point: { x: 10, y: 10 }, lngLat: { lng: -0.11, lat: 51.69 } };
+    act(() => map.emit('mousemove', nearMiddle, 'activity-route-line'));
+    act(() => map.emit('click', nearMiddle, 'activity-route-line'));
+
+    expect(onRouteHover).toHaveBeenCalledWith(1);
+    expect(onRouteClick).toHaveBeenCalledWith(1);
+  });
+
   it('clears the hover when the pointer leaves the route', () => {
     const onRouteHover = vi.fn();
     renderMap({ onRouteHover });
@@ -520,6 +544,34 @@ describe('editable points (AV-1104)', () => {
     act(() => map.emit('click', { point: { x: 2, y: 2 }, lngLat: { lng: -0.1, lat: 51.7 } }));
     expect(onPointClick).toHaveBeenCalledWith('p1');
     expect(onMapClick).not.toHaveBeenCalled();
+  });
+
+  it('gives a press on a draft point to the point, not to the route under it (AV-1108, review)', () => {
+    // A handle sits on the line, so a press on it is reported for both layers.
+    // The handle names its point exactly; the route would only guess the
+    // nearest, which can be a neighbour at the handle's edge.
+    const onPointClick = vi.fn();
+    const onRouteClick = vi.fn();
+    renderMap({ editPoints: points, onPointClick, onRouteClick });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+
+    map.queryRenderedFeatures.mockImplementation(((_point: unknown, options?: { layers?: string[] }) =>
+      options?.layers?.includes('draft-point')
+        ? [{ properties: { id: 'p1' } }]
+        : [{ properties: { featureIndex: 0 }, geometry: { type: 'LineString', coordinates: [] } }]) as never);
+    act(() => map.emit('click', { point: { x: 2, y: 2 }, lngLat: { lng: -0.1, lat: 51.7 } }));
+
+    expect(onPointClick).toHaveBeenCalledWith('p1');
+    expect(onRouteClick).not.toHaveBeenCalled();
+
+    // Off the handle, the route's press is the route's.
+    map.queryRenderedFeatures.mockImplementation(((_point: unknown, options?: { layers?: string[] }) =>
+      options?.layers?.includes('draft-point')
+        ? []
+        : [{ properties: { featureIndex: 0 }, geometry: { type: 'LineString', coordinates: [] } }]) as never);
+    act(() => map.emit('click', { point: { x: 3, y: 3 }, lngLat: { lng: -0.11, lat: 51.69 } }));
+    expect(onRouteClick).toHaveBeenCalledWith(1);
   });
 
   it('with a fit key, fits the camera once per key and not on every edit', () => {

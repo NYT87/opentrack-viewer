@@ -531,6 +531,9 @@ export function ActivityMap({
     const handleMapClick = (event: MapMouseEvent) => {
       const onPoint = map.queryRenderedFeatures(event.point, { layers: [EDIT_POINT_LAYER] });
       if (onPoint.length > 0) return;
+      // When a press on the route has a meaning of its own (`onRouteClick`,
+      // which picks the nearest point), it is not also a press on the map.
+      if (onRouteClick && map.queryRenderedFeatures(event.point, { layers: [ROUTE_LAYER] }).length > 0) return;
       // The map draws the world repeated, so a press past the antimeridian
       // reports a longitude past ±180. It is the same place; it is wrapped
       // here, so the model's strict check sees the real coordinate.
@@ -543,7 +546,7 @@ export function ActivityMap({
       map.off('click', EDIT_POINT_LAYER, handlePointClick);
       map.off('click', handleMapClick);
     };
-  }, [isStyleReady, onPointClick, onMapClick]);
+  }, [isStyleReady, onPointClick, onMapClick, onRouteClick]);
 
   // Route hover/click → active point index (AV-603).
   useEffect(() => {
@@ -551,26 +554,34 @@ export function ActivityMap({
     if (!map || !isStyleReady || route.isEmpty) return;
 
     const nearestIndex = (event: MapMouseEvent): number | undefined => {
-      const features = map.queryRenderedFeatures(event.point, { layers: [ROUTE_LAYER] });
-      const feature = features[0];
-      const geometry = feature?.geometry;
-      if (!geometry || geometry.type !== 'LineString') return undefined;
+      const feature = map.queryRenderedFeatures(event.point, { layers: [ROUTE_LAYER] })[0];
+      if (!feature) return undefined;
 
-      const coordinateIndex = nearestCoordinateIndex(geometry.coordinates, [
-        event.lngLat.lng,
+      // Coordinates are per-segment, so the hit feature identifies which run to
+      // look the activity point index up in. Only that: the feature's own
+      // geometry is the tile's copy of the run, clipped at the tile's edge and
+      // simplified for the zoom, so its coordinate indices are not the run's.
+      // The nearest coordinate is looked for in the run as given to the map,
+      // whose indices are the activity's (AV-1108, review).
+      const featureIndex = Number(feature.properties?.featureIndex ?? 0);
+      const run = routeRef.current.featureCollection.features[featureIndex];
+      if (!run) return undefined;
+      const coordinateIndex = nearestCoordinateIndex(run.geometry.coordinates, [
+        wrapLongitude(event.lngLat.lng),
         event.lngLat.lat,
       ]);
       if (coordinateIndex === undefined) return undefined;
-
-      // Coordinates are per-segment, so the hit feature identifies which run to
-      // look the activity point index up in.
-      const featureIndex = Number(feature?.properties?.featureIndex ?? 0);
       return routeRef.current.sourceIndices[featureIndex]?.[coordinateIndex];
     };
 
     const handleMove = (event: MapMouseEvent) => onRouteHover?.(nearestIndex(event));
     const handleLeave = () => onRouteHover?.(undefined);
-    const handleClick = (event: MapMouseEvent) => onRouteClick?.(nearestIndex(event));
+    const handleClick = (event: MapMouseEvent) => {
+      // A press on a draft point is the point's (`onPointClick`), not the
+      // route's: the handle names the point exactly, the route only nearly.
+      if (onPointClick && map.queryRenderedFeatures(event.point, { layers: [EDIT_POINT_LAYER] }).length > 0) return;
+      onRouteClick?.(nearestIndex(event));
+    };
 
     map.on('mousemove', ROUTE_LAYER, handleMove);
     map.on('mouseleave', ROUTE_LAYER, handleLeave);
@@ -581,7 +592,7 @@ export function ActivityMap({
       map.off('mouseleave', ROUTE_LAYER, handleLeave);
       map.off('click', ROUTE_LAYER, handleClick);
     };
-  }, [isStyleReady, route.isEmpty, onRouteHover, onRouteClick]);
+  }, [isStyleReady, route.isEmpty, onRouteHover, onRouteClick, onPointClick]);
 
   return (
     <div className="map" data-testid="activity-map">

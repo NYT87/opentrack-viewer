@@ -15,6 +15,7 @@ vi.mock('maplibre-gl', async () => {
 vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 
 const { App } = await import('./App');
+const { ALL_HANDLES_LIMIT } = await import('./RouteBuilderPage');
 const { FakeMap, latestMap, resetMapLibreMock } = await import('../test/helpers/maplibreMock');
 const { ROUTES, TOOLS_ITEMS } = await import('./routes');
 const { metadataForRoute } = await import('./seo');
@@ -1111,5 +1112,157 @@ describe('the stretch count in the summary (AV-1107, review)', () => {
     render(<App />);
     const track = await screen.findByRole('region', { name: 'Planned track' });
     expect(within(track).getByText('Stretches').nextSibling).toHaveTextContent('3');
+  });
+});
+
+describe('handles on a long track (AV-1108)', () => {
+  const long = (n: number, split?: number): RouteDraft => ({
+    ...createBlankDraft({ id: `long-${n}`, name: 'Long' }),
+    points: Array.from({ length: n }, (_, i) => ({
+      id: `p${i}`,
+      lat: 43 + i * 0.0001,
+      lon: -8,
+      segmentIndex: split !== undefined && i >= split ? 1 : 0,
+      origin: { kind: 'manual' as const },
+    })),
+    counters: { point: n, source: 0 },
+  });
+
+  it('draws every handle up to the limit', async () => {
+    act(() => useRouteDraftStore.getState().setDraft(long(ALL_HANDLES_LIMIT)));
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    const map = await readyMap();
+    expect(pointFeatures(map)).toHaveLength(ALL_HANDLES_LIMIT);
+  });
+
+  it('keeps only the selected point, stretch ends and section ends beyond it', async () => {
+    act(() => useRouteDraftStore.getState().setDraft(long(10_000, 5_000)));
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    const map = await readyMap();
+    // Two stretches: their four ends.
+    expect(pointFeatures(map).map((f) => f.properties.id)).toEqual(['p0', 'p4999', 'p5000', 'p9999']);
+
+    // Select the last point, step back, and mark a section: those points get handles.
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    const ids = pointFeatures(map).map((f) => f.properties.id);
+    expect(ids).toEqual(['p0', 'p4999', 'p5000', 'p9997', 'p9998', 'p9999']);
+    expect(pointFeatures(map).find((f) => f.properties.id === 'p9997')!.properties.selected).toBe(true);
+    expect(pointFeatures(map).filter((f) => f.properties.inSection).map((f) => f.properties.id)).toEqual(['p9997', 'p9998']);
+  }, 20_000);
+
+  it('selects an interior point without a handle by pressing the route, and edits a section from there (review R1-C1)', async () => {
+    act(() => useRouteDraftStore.getState().setDraft(long(10_000)));
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    const map = await readyMap();
+    const held = draft();
+    expect(pointFeatures(map).some((f) => f.properties.id === 'p5000')).toBe(false);
+
+    // A press on the route line near point 5000: MapLibre reports the line
+    // feature under the pointer, and the page picks the nearest point on it.
+    const line = held.points.map((p) => [p.lon, p.lat]);
+    map.queryRenderedFeatures.mockImplementation(((_point: unknown, options?: { layers?: string[] }) =>
+      options?.layers?.includes('activity-route-line')
+        ? [{ geometry: { type: 'LineString', coordinates: line }, properties: { featureIndex: 0 } }]
+        : []) as never);
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: -8, lat: 43 + 5000 * 0.0001 } }));
+
+    expect(editor()).toHaveTextContent('Selected: point 5001 of 10000');
+    expect(draft()).toBe(held);
+    expect(pointFeatures(map).find((f) => f.properties.id === 'p5000')!.properties.selected).toBe(true);
+
+    // And a section from there, two points long, discarded.
+    await userEvent.click(screen.getByRole('button', { name: 'Section starts here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Section ends here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+    expect(draft().points).toHaveLength(9_998);
+    expect(draft().points.some((p) => p.id === 'p5000' || p.id === 'p5001')).toBe(false);
+  }, 20_000);
+
+  it('keeps a press on the line adding a point on a short track, where every point has a handle', async () => {
+    act(() => useRouteDraftStore.getState().setDraft(long(10)));
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    const map = await readyMap();
+    const line = draft().points.map((p) => [p.lon, p.lat]);
+    map.queryRenderedFeatures.mockImplementation(((_point: unknown, options?: { layers?: string[] }) =>
+      options?.layers?.includes('activity-route-line')
+        ? [{ geometry: { type: 'LineString', coordinates: line }, properties: { featureIndex: 0 } }]
+        : []) as never);
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: -8, lat: 43.0005 } }));
+    expect(draft().points).toHaveLength(11);
+  });
+
+  it('in move mode, a press on the line still moves the selected point of a long track (review R1-C1)', async () => {
+    act(() => useRouteDraftStore.getState().setDraft(long(10_000)));
+    window.location.hash = '#/route-builder';
+    render(<App />);
+    const map = await readyMap();
+    const line = draft().points.map((p) => [p.lon, p.lat]);
+    map.queryRenderedFeatures.mockImplementation(((_point: unknown, options?: { layers?: string[] }) =>
+      options?.layers?.includes('activity-route-line')
+        ? [{ geometry: { type: 'LineString', coordinates: line }, properties: { featureIndex: 0 } }]
+        : []) as never);
+
+    // The last point selected and moved onto the line, where point 5000 is.
+    await userEvent.click(screen.getByRole('button', { name: 'Previous point' }));
+    expect(editor()).toHaveTextContent('Selected: point 10000 of 10000');
+    await userEvent.click(screen.getByRole('radio', { name: /moves the selected point/ }));
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: -8, lat: 43.5 } }));
+
+    expect(editor()).toHaveTextContent('Selected: point 10000 of 10000');
+    expect(draft().points).toHaveLength(10_000);
+    expect(draft().points[9_999]).toMatchObject({ id: 'p9999', lat: 43.5, lon: -8 });
+  }, 20_000);
+});
+
+describe('one preview per edit (AV-1108)', () => {
+  it('turns the draft into an activity once for each edit, shared by the map and the summary', async () => {
+    vi.resetModules();
+    let conversions = 0;
+    vi.doMock('../domain/routeDraft', async () => {
+      const actual = await vi.importActual<typeof import('../domain/routeDraft')>('../domain/routeDraft');
+      return {
+        ...actual,
+        draftToActivity: (...args: Parameters<typeof actual.draftToActivity>) => {
+          conversions += 1;
+          return actual.draftToActivity(...args);
+        },
+      };
+    });
+    try {
+      const { App: Fresh } = await import('./App');
+      const { useRouteDraftStore: freshStore } = await import('../state/routeDraftStore');
+      window.location.hash = '#/route-builder';
+      render(<Fresh />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+      // Points typed rather than pressed on the map: the map is a lazy chunk,
+      // and after the module reset its mocked MapLibre may be either module
+      // instance. The count is of the page's work, the same either way.
+      const type = async (lat: string) => {
+        await userEvent.clear(within(addForm()).getByLabelText('Latitude'));
+        await userEvent.type(within(addForm()).getByLabelText('Latitude'), lat);
+        await userEvent.clear(within(addForm()).getByLabelText('Longitude'));
+        await userEvent.type(within(addForm()).getByLabelText('Longitude'), '-8');
+        await userEvent.click(within(addForm()).getByRole('button', { name: 'Add point' }));
+      };
+      await type('43');
+      await type('43.01');
+
+      const before = conversions;
+      await type('43.02');
+      expect(freshStore.getState().draft!.points).toHaveLength(3);
+      expect(conversions - before).toBe(1);
+    } finally {
+      vi.doUnmock('../domain/routeDraft');
+      vi.resetModules();
+    }
   });
 });

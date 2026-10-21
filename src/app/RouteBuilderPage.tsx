@@ -5,6 +5,7 @@ import { WarningList } from '../components/ErrorPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
 import { PlannedTrackExport } from '../components/PlannedTrackExport';
 import type { EditPointProperties } from '../components/ActivityMap';
+import type { Activity } from '../domain/activity';
 import { toActivityError } from '../domain/errors';
 import { EMPTY_ROUTE_GEOMETRY, activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
 import {
@@ -223,6 +224,24 @@ export function RouteBuilderPage() {
     [mode, selectedId, movePointInDraft, addPointToDraft, setSelectedId],
   );
   const handlePointClick = useCallback((id: string) => setSelectedId(id), [setSelectedId]);
+  /*
+   * AV-1108. Above the handle limit most points have no handle to press, so a
+   * press on the route line picks the nearest point instead — and is not also
+   * an add. The route's point indices are the draft's: the preview activity
+   * numbers its points in draft order. Below the limit every point has a
+   * handle, and a press on the line keeps adding a point, as it always did.
+   * In move mode a press on the line still moves the selected point: that is
+   * what the reader asked a press to do, and a point put back on the track is
+   * the commonest move there is.
+   */
+  const thinned = (draft?.points.length ?? 0) > ALL_HANDLES_LIMIT && mode !== 'move';
+  const handleRouteClick = useCallback(
+    (pointIndex: number | undefined) => {
+      const id = pointIndex === undefined ? undefined : draft?.points[pointIndex]?.id;
+      if (id) setSelectedId(id);
+    },
+    [draft, setSelectedId],
+  );
 
   const discard = (keepGap: boolean) => {
     if (!marks || !section) return;
@@ -366,7 +385,12 @@ export function RouteBuilderPage() {
 
         {draft && !busy && (
           <>
-            <DraftSummary draft={draft} units={unitSystem} onClear={clear} />
+            <DraftSummary
+              draft={draft}
+              track={track?.ok ? track.value : undefined}
+              units={unitSystem}
+              onClear={clear}
+            />
 
             <section className="box" aria-label="Draft map">
               <Suspense fallback={<MapPlaceholder reason="loading" />}>
@@ -378,6 +402,7 @@ export function RouteBuilderPage() {
                   editPoints={editPoints}
                   onPointClick={handlePointClick}
                   onMapClick={handleMapClick}
+                  onRouteClick={thinned ? handleRouteClick : undefined}
                   fitKey={draft.id}
                 />
               </Suspense>
@@ -446,24 +471,44 @@ export function RouteBuilderPage() {
   );
 }
 
+/**
+ * AV-1108. Above this many points a handle on every one is noise — they merge
+ * into a solid line at any zoom that shows the track — and every edit would
+ * send them all to the map again. A long track keeps handles for the points
+ * that matter: the selected one, the ends of every stretch, and a section's
+ * ends; the rest are picked with a press on the line, which selects the
+ * nearest point, or reached with Previous and Next, as from the keyboard.
+ */
+export const ALL_HANDLES_LIMIT = 2000;
+
 /** The draft's points as map features, the selected one flagged for the layer's paint. */
 function draftPointsToGeoJSON(
   draft: RouteDraft | undefined,
   selectedId: string | undefined,
   section: { start: number; end: number } | undefined,
 ): FeatureCollection<Point, EditPointProperties> {
-  return {
-    type: 'FeatureCollection',
-    features: (draft?.points ?? []).map((point, index) => ({
+  const points = draft?.points ?? [];
+  const everyPoint = points.length <= ALL_HANDLES_LIMIT;
+  const features: FeatureCollection<Point, EditPointProperties>['features'] = [];
+  points.forEach((point, index) => {
+    const selected = point.id === selectedId;
+    const inSection = section !== undefined && index >= section.start && index <= section.end;
+    const keep =
+      everyPoint ||
+      selected ||
+      (section !== undefined && (index === section.start || index === section.end)) ||
+      index === 0 ||
+      index === points.length - 1 ||
+      (point.segmentIndex ?? 0) !== (points[index - 1]?.segmentIndex ?? 0) ||
+      (point.segmentIndex ?? 0) !== (points[index + 1]?.segmentIndex ?? 0);
+    if (!keep) return;
+    features.push({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [point.lon, point.lat] },
-      properties: {
-        id: point.id,
-        selected: point.id === selectedId,
-        inSection: section !== undefined && index >= section.start && index <= section.end,
-      },
-    })),
-  };
+      properties: { id: point.id, selected, inSection },
+    });
+  });
+  return { type: 'FeatureCollection', features };
 }
 
 /** A typed coordinate, or `NaN` for anything that is not a number — which the model refuses. */
@@ -763,17 +808,16 @@ function MoveForm({
 
 function DraftSummary({
   draft,
+  track,
   units,
   onClear,
 }: {
   draft: RouteDraft;
+  /** The draft as an activity, computed once by the page for the map and this summary alike. */
+  track: Activity | undefined;
   units: UnitSystem;
   onClear: () => void;
 }) {
-  const track = useMemo(() => {
-    const result = draftToActivity(draft);
-    return result.ok ? result.value : undefined;
-  }, [draft]);
   const segments = stretchLengths(draft.points).length;
 
   return (

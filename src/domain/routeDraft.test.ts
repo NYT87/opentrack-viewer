@@ -797,3 +797,29 @@ describe('0°, 0° is refused like the rest of the app refuses it (AV-1107, revi
     expect(validatePlace({ lat: 1, lon: 0 }).ok).toBe(true);
   });
 });
+
+describe('large drafts (AV-1108)', () => {
+  it('edits, discards, appends and previews a 30,000-point draft without a quadratic step', () => {
+    const recording = makeActivity(
+      Array.from({ length: 15_000 }, (_, i) => ({ lat: 43 + i * 0.00001, lon: -8 + (i % 7) * 0.00001, elevationMeters: 100 })),
+    );
+    const started = performance.now();
+    let draft = unwrap(draftFromActivity(recording));
+    draft = unwrap(appendImportedRoute(draft, recording));
+    expect(draft.points).toHaveLength(30_000);
+    draft = unwrap(addPoint(draft, { lat: 44, lon: -8 }));
+    draft = unwrap(movePoint(draft, 'p100', { lat: 43.5, lon: -8 }));
+    draft = unwrap(removePoint(draft, 'p200'));
+    draft = unwrap(discardSection(draft, { fromId: 'p1000', toId: 'p2000' }));
+    draft = unwrap(joinBefore(draft, 'p15000'));
+    draft = unwrap(splitBefore(draft, 'p20000'));
+    const activity = unwrap(draftToActivity(draft));
+    const elapsed = performance.now() - started;
+
+    expect(activity.points).toHaveLength(30_000 + 1 - 1 - 1001);
+    expect(stretchLengths(draft.points)).toHaveLength(2);
+    // Linear work over 30,000 points, eight operations and one preview: three seconds
+    // is a generous ceiling on a loaded machine; anything quadratic takes minutes.
+    expect(elapsed).toBeLessThan(3_000);
+  });
+});
