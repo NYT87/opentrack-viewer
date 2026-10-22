@@ -41,9 +41,13 @@ async function openTools(page: Page) {
   return page.getByRole('menu', { name: 'Tools' });
 }
 
-/** Settings is a modal (AV-007): it neither navigates nor unmounts the viewer. */
+/**
+ * Settings is a modal (AV-007): it neither navigates nor unmounts the viewer.
+ * The header's control, specifically: the homepage's privacy copy has a
+ * "Settings" button of its own that opens the same dialog.
+ */
 async function openSettings(page: Page) {
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   return page.getByRole('dialog');
 }
 
@@ -621,7 +625,7 @@ test('opens Settings from the homepage header (AV-007)', async ({ page }) => {
   await page.goto('./');
 
   // TD-008: an app-wide choice should not require opening a file to find.
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('radio', { name: 'Dark' })).toBeVisible();
@@ -761,7 +765,7 @@ test('keeps the Tools menu clear of the title and settings icon (AV-012)', async
 
   const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
   const tools = (await page.getByRole('button', { name: /Tools/ }).boundingBox())!;
-  const settings = (await page.getByRole('button', { name: 'Settings' }).boundingBox())!;
+  const settings = (await page.getByRole('banner').getByRole('button', { name: 'Settings' }).boundingBox())!;
 
   // Beside the title, not on top of it, and clear of the settings icon.
   expect(tools.x).toBeGreaterThanOrEqual(title.x + title.width - 1);
@@ -1547,7 +1551,7 @@ test('keeps the footer reachable on a narrow screen', async ({ page }) => {
 
 test('credits nyt87 in the footer on every page', async ({ page }) => {
   const credit = page.getByRole('link', { name: 'nyt87' });
-  const repo = page.getByRole('link', { name: 'GitHub' });
+  const repo = page.getByRole('contentinfo').getByRole('link', { name: 'GitHub' });
 
   await expect(credit).toHaveAttribute('href', 'https://nyt87.github.io/');
   await expect(repo).toHaveAttribute('href', 'https://github.com/NYT87/opentrack-viewer');
@@ -1590,7 +1594,7 @@ test('deep-links into the viewer under the sub-path', async ({ page }) => {
   await page.goto('./#/viewer');
 
   await expect(page.getByTestId('file-input')).toBeAttached();
-  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Settings' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'nyt87' })).toBeVisible();
 });
 
@@ -1608,7 +1612,7 @@ test('falls back to the homepage for an unknown hash route (AV-006)', async ({ p
   await expect(page.getByRole('link', { name: 'Read the Terms and Conditions' })).toBeVisible();
 
   // The chrome is intact, so the reader can go somewhere real from here.
-  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Settings' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'nyt87' })).toBeVisible();
 
   // The title falls back to the site default rather than naming a route that

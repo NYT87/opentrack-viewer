@@ -35,7 +35,7 @@ async function settleMap(): Promise<void> {
 
 /** Settings is a modal, so it neither navigates nor unmounts the viewer. */
 async function openSettings(): Promise<void> {
-  await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+  await userEvent.click(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' }));
   await screen.findByRole('dialog');
 }
 

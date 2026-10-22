@@ -10,6 +10,14 @@ import { useAppTheme } from './useAppTheme';
 import { useRouteMetadata } from './useRouteMetadata';
 
 /**
+ * What the shell offers the page it routes to. Home names Settings in its
+ * privacy copy, and the name should open the dialog it names.
+ */
+export interface ShellContext {
+  openSettings: () => void;
+}
+
+/**
  * AV-003 / AV-006. Layout chrome shared by every page: header with navigation,
  * the routed page, and the site footer.
  */
@@ -27,6 +35,7 @@ export function AppShell() {
   // Modal state lives here rather than in the router, so opening settings
   // leaves the route and the mounted viewer untouched (AV-007).
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const shellContext: ShellContext = { openSettings: () => setIsSettingsOpen(true) };
 
   return (
     <div className="shell">
@@ -76,7 +85,7 @@ export function AppShell() {
       */}
       <div className="shell__scroll">
         <div className="shell__body">
-          <Outlet />
+          <Outlet context={shellContext} />
         </div>
 
         <SiteFooter />

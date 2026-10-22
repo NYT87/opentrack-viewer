@@ -44,7 +44,7 @@ const toolsItem = (name: string) =>
   within(screen.getByRole('menu', { name: 'Tools' })).getByRole('menuitem', { name });
 
 const openSettings = async () => {
-  await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+  await userEvent.click(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' }));
   return screen.findByRole('dialog');
 };
 
@@ -71,8 +71,9 @@ describe('routing (AV-006)', () => {
     expect(screen.getByText('FIT')).toBeInTheDocument();
     expect(screen.getByText('TCX')).toBeInTheDocument();
     expect(screen.getByText('KML')).toBeInTheDocument();
-    // Every format the plan named is now readable, so none is listed as planned.
-    expect(screen.getAllByText('Supported')).toHaveLength(4);
+    // Every format is read; the caption says which are also written.
+    expect(screen.getAllByText('Read · Write')).toHaveLength(3);
+    expect(screen.getAllByText('Read only')).toHaveLength(1);
     // KML is read, not written, and the homepage must not claim otherwise (AV-762).
     expect(screen.getByText(/conversion to GPX, FIT or TCX\. Not written\./)).toBeInTheDocument();
     expect(screen.queryByText('Planned')).not.toBeInTheDocument();
@@ -155,7 +156,7 @@ describe('header (AV-010)', () => {
     render(<App />);
     await goToViewer();
 
-    const settings = screen.getByRole('button', { name: 'Settings' });
+    const settings = within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' });
     expect(settings).toHaveAttribute('title', 'Settings');
     // Icon only: no visible label text to read out twice.
     expect(settings.textContent).toBe('');
@@ -166,7 +167,7 @@ describe('header (AV-010)', () => {
     render(<App />);
     await goToViewer();
 
-    screen.getByRole('button', { name: 'Settings' }).focus();
+    within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' }).focus();
     await userEvent.keyboard('{Enter}');
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
@@ -347,7 +348,7 @@ describe('settings modal (AV-007)', () => {
     // not have to open a file to find the switch.
     render(<App />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await userEvent.click(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' }));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('radio', { name: 'Dark' })).toBeInTheDocument();
@@ -359,7 +360,7 @@ describe('settings modal (AV-007)', () => {
     // activity, so the control would act on nothing.
     render(<App />);
 
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close activity' })).not.toBeInTheDocument();
   });
 
@@ -367,7 +368,7 @@ describe('settings modal (AV-007)', () => {
     render(<App />);
     await goToViewer();
 
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' })).toBeInTheDocument();
   });
 
   it('opens as a dialog without changing the route', async () => {
@@ -395,7 +396,7 @@ describe('settings modal (AV-007)', () => {
   it('moves focus into the dialog and returns it to the opener on close', async () => {
     render(<App />);
     await goToViewer();
-    const opener = screen.getByRole('button', { name: 'Settings' });
+    const opener = within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' });
 
     const dialog = await openSettings();
     expect(dialog).toContainElement(document.activeElement as HTMLElement);
