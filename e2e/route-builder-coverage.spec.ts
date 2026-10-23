@@ -46,7 +46,7 @@ async function expectNothingSent(page: Page, requests: Request[], fileStems: str
 
 /** The basemap off, so the map fetches no tiles and the audit sees only the app. */
 async function routeOnly(page: Page) {
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -312,7 +312,7 @@ test('every control is named, and shows where focus is (AV-1108)', async ({ page
 test('Settings is a dialog that opens over the page and gives focus back (AV-1108)', async ({ page }) => {
   await page.goto('./#/route-builder');
   await page.getByRole('button', { name: 'Start a blank track' }).click();
-  const settings = page.getByRole('button', { name: 'Settings' });
+  const settings = page.getByRole('banner').getByRole('button', { name: 'Settings' });
   await tabTo(page, 'Settings');
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog');

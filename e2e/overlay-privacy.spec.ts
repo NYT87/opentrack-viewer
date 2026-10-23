@@ -136,7 +136,7 @@ test('no request carries the video, the telemetry, a frame, a file name or the e
     mimeType: 'video/mp4',
     buffer: readFileSync(CLIP_PATH),
   });
-  await expect(page.getByRole('region', { name: 'Video' })).toContainText(`${CANARY}-clip.mp4`, {
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText(`${CANARY}-clip.mp4`, {
     timeout: 30_000,
   });
   await page.getByTestId('overlay-activity-input').setInputFiles({

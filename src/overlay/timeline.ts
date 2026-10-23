@@ -119,7 +119,38 @@ export interface OverlayTimeline {
    */
   sensorLabels: ReadonlyMap<string, OverlaySensorInfo>;
   sampleAt: (videoTimeSeconds: number) => OverlaySample | undefined;
+  /**
+   * TD-059. How the video was laid against the activity, so the page can say
+   * so: by the camera's own clock, or at the activity's first point because
+   * the video states no clock. Absent when the timeline cannot sample.
+   */
+  alignment?: OverlayAlignment;
 }
+
+export interface OverlayAlignment {
+  anchoredBy: 'videoClock' | 'activityStart';
+  /** Seconds into the activity at video time 0, before the offset. */
+  anchorSeconds: number;
+  /** Seconds from the activity's first timed point to its last. */
+  activitySpanSeconds: number;
+  /** Where video 0 and video's end land in activity seconds, with the offset. */
+  videoStartInActivity: number;
+  videoEndInActivity: number;
+  /** Whether any of the video's span falls within the activity's. */
+  overlaps: boolean;
+  /** When the activity starts, and the video when its container says: for a mismatch told in dates. */
+  activityStart: Date;
+  videoStart?: Date;
+  /**
+   * TD-059. The activity's speed (or, without one, its elevation) across its
+   * whole span, evenly sampled: what a reader lines a sprint or a climb up by.
+   * Absent when the activity has neither.
+   */
+  trace?: { label: 'Speed' | 'Elevation'; values: (number | undefined)[] };
+}
+
+/** How many samples the alignment trace takes across the activity. */
+const TRACE_SAMPLES = 160;
 
 interface TimedPoint {
   seconds: number;
@@ -364,5 +395,38 @@ export function buildOverlayTimeline(
 
   const hasRoute = points.some(({ point }) => toValidCoordinate(point.lat, point.lon) !== undefined);
 
-  return { durationSeconds, offsetSeconds, available, hasRoute, sensorLabels, sampleAt };
+  const traceId = available.has('metric:speed')
+    ? 'metric:speed'
+    : available.has('metric:elevation')
+      ? 'metric:elevation'
+      : undefined;
+  const traceRead = sources.find((entry) => entry.id === traceId)?.read;
+  const trace =
+    traceRead && spanSeconds > 0
+      ? {
+          label: traceId === 'metric:speed' ? ('Speed' as const) : ('Elevation' as const),
+          values: Array.from({ length: TRACE_SAMPLES }, (_, i) => {
+            const index = lowerIndex((spanSeconds * i) / (TRACE_SAMPLES - 1));
+            return index < 0 ? undefined : traceRead(pointAt(index));
+          }),
+        }
+      : undefined;
+
+  const videoStartInActivity = toActivitySeconds(0);
+  const videoEndInActivity = toActivitySeconds(durationSeconds);
+  const alignment: OverlayAlignment | undefined = hasVideo
+    ? {
+        anchoredBy: typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? 'videoClock' : 'activityStart',
+        anchorSeconds,
+        activitySpanSeconds: spanSeconds,
+        videoStartInActivity,
+        videoEndInActivity,
+        overlaps: videoEndInActivity >= 0 && videoStartInActivity <= spanSeconds,
+        activityStart: new Date(firstMs),
+        ...(trace ? { trace } : {}),
+        ...(typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? { videoStart: new Date(anchorMs) } : {}),
+      }
+    : undefined;
+
+  return { durationSeconds, offsetSeconds, available, hasRoute, sensorLabels, sampleAt, alignment };
 }

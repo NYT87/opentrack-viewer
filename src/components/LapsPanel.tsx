@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ActivityLap } from '../domain/activity';
 import { MISSING, formatDistance, formatDuration, type UnitSystem } from '../domain/units';
 import { useInteractionStore } from '../state/interactionStore';
@@ -48,10 +49,21 @@ function lapDuration(lap: ActivityLap): number | undefined {
  * a lap is a marker within the activity, not a request to look somewhere else,
  * which is what separates it from a chart range selection.
  */
-/** Why a lap can carry figures and still have nothing to show on the map. */
-const NOT_DRAWABLE =
-  'This lap has no continuous stretch of route to highlight: its points sit either side of a ' +
-  'recording gap.';
+/**
+ * Why a lap can carry figures and still have nothing to show on the map, said
+ * under the table rather than in a tooltip that keyboard and touch readers
+ * never see: "Lap 2 can't be highlighted…", "Laps 2 and 4 can't be…".
+ */
+function notDrawableNote(numbers: number[]): string {
+  const list =
+    numbers.length === 1
+      ? `Lap ${numbers[0]}`
+      : `Laps ${numbers.slice(0, -1).join(', ')} and ${numbers.at(-1)}`;
+  return (
+    `${list} can't be highlighted on the map: ${numbers.length === 1 ? 'its' : 'their'} points sit ` +
+    'either side of a recording gap.'
+  );
+}
 
 export function LapsPanel({ laps, units = 'metric', highlightable }: LapsPanelProps) {
   const selectedLapIndex = useInteractionStore((state) => state.selectedLapIndex);
@@ -59,6 +71,10 @@ export function LapsPanel({ laps, units = 'metric', highlightable }: LapsPanelPr
   // Only formats that state calories get the column, rather than a row of
   // dashes for every GPX file.
   const showCalories = laps.some((lap) => Number.isFinite(lap.caloriesKcal));
+  const noteId = useId();
+  const notDrawable = laps
+    .filter((lap) => !(highlightable?.has(lap.index) ?? true))
+    .map((lap) => lap.index + 1);
   return (
     <section className="laps" aria-label="Laps">
       <h3 className="laps__title">Laps</h3>
@@ -91,13 +107,16 @@ export function LapsPanel({ laps, units = 'metric', highlightable }: LapsPanelPr
                       aria-pressed={isSelected}
                       // The cell shows a number; the name says what pressing it
                       // does, so the control is not just "1" to a screen reader.
-                      aria-label={`${isSelected ? 'Stop highlighting' : 'Highlight'} lap ${lap.index + 1}`}
+                      // One name, with the state in aria-pressed: a name that
+                      // also flipped said the state twice, and changed under
+                      // the reader's focus.
+                      aria-label={`Highlight lap ${lap.index + 1}`}
                       onClick={() => setSelectedLapIndex(isSelected ? undefined : lap.index)}
                     >
                       {lap.index + 1}
                     </button>
                   ) : (
-                    <span className="laps__number" title={NOT_DRAWABLE}>
+                    <span className="laps__number" aria-describedby={noteId}>
                       {lap.index + 1}
                     </span>
                   )}
@@ -113,6 +132,12 @@ export function LapsPanel({ laps, units = 'metric', highlightable }: LapsPanelPr
           </tbody>
         </table>
       </div>
+
+      {notDrawable.length > 0 && (
+        <p className="laps__note" id={noteId}>
+          {notDrawableNote(notDrawable)}
+        </p>
+      )}
     </section>
   );
 }

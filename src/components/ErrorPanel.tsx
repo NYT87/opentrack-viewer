@@ -1,13 +1,25 @@
 import type { ActivityError } from '../domain/errors';
 import type { ActivityWarning } from '../domain/activity';
 
-export function ErrorPanel({ error, onDismiss }: { error: ActivityError; onDismiss?: () => void }) {
+export function ErrorPanel({
+  error,
+  onDismiss,
+  fileName,
+}: {
+  error: ActivityError;
+  onDismiss?: () => void;
+  /** Named, so a reader who has tried several files knows which one failed. */
+  fileName?: string;
+}) {
   return (
     <div className="panel panel--error" role="alert">
-      <h3 className="panel__title">Could not open this file</h3>
+      <h3 className="panel__title">{fileName ? `Could not open ${fileName}` : 'Could not open this file'}</h3>
       <p className="panel__message">{error.message}</p>
       <p className="panel__hint">{error.hint}</p>
-      <code className="panel__code">{error.code}</code>
+      {/* For a bug report, said as such: a bare code chip reads as something to act on. */}
+      <p className="panel__code-line">
+        Code for a bug report: <code className="panel__code">{error.code}</code>
+      </p>
       {onDismiss && (
         <button type="button" className="button" onClick={onDismiss}>
           Dismiss

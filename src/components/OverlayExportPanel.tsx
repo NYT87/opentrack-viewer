@@ -15,6 +15,7 @@ import {
   EXPORT_HEIGHT_PRESETS,
   exportDimensions,
   formatBytes,
+  formatFrameRate,
   highestFittingFrameRate,
   planExport,
 } from '../overlay/export/plan';
@@ -37,6 +38,8 @@ interface OverlayExportPanelProps {
   support?: ExportSupport;
   /** Asks the worker where an archive can really be stored; injected by tests. */
   probeStorage?: () => Promise<ArchiveStorage>;
+  /** Told whether a finished file is waiting to be downloaded, so Start over can ask first. */
+  onFinishedChange?: (finished: boolean) => void;
 }
 
 type StorageState =
@@ -53,6 +56,8 @@ type Phase =
       fileName: string;
       bytes: number;
       frameCount: number;
+      /** The rate it was drawn at, for the note on setting the editor to match. */
+      fps: number;
       /** What it was made from, to tell when the page has since moved on. */
       made: { signature: string; activity: Activity; file: File };
     }
@@ -61,7 +66,10 @@ type Phase =
 
 const NATIVE = 'native';
 
-/** The offered rate nearest the video's own, so a 25 fps video starts at 25. */
+/**
+ * The offered rate nearest the video's own, so a 25 fps video starts at 25 and
+ * a GoPro's 29.97 starts at 29.97, not at a 30 that would drift (TD-059).
+ */
 function nearestFrameRate(frameIntervalSeconds: number | undefined): number {
   if (!frameIntervalSeconds || !(frameIntervalSeconds > 0)) return DEFAULT_EXPORT_FRAME_RATE;
   const own = 1 / frameIntervalSeconds;
@@ -90,6 +98,7 @@ export function OverlayExportPanel({
   start = startOverlayExport,
   support = getExportSupport(),
   probeStorage = probeExportStorage,
+  onFinishedChange,
 }: OverlayExportPanelProps) {
   const id = useId();
   const [fps, setFps] = useState(() => nearestFrameRate(video.timing?.frameIntervalSeconds));
@@ -173,7 +182,16 @@ export function OverlayExportPanel({
     [phase],
   );
 
+  const isFinished = phase.status === 'done';
+  useEffect(() => onFinishedChange?.(isFinished), [isFinished, onFinishedChange]);
+
   if (timeline.unavailable) return null;
+
+  /*
+   * TD-059. A video the activity covers none of would export an empty overlay:
+   * blocked like "nothing switched on", with the way out named.
+   */
+  const noOverlap = timeline.alignment?.overlaps === false;
 
   const running = phase.status === 'running';
   const nothingOn = built.template.components.length === 0;
@@ -219,7 +237,8 @@ export function OverlayExportPanel({
         setPhase({
           status: 'done',
           url: URL.createObjectURL(result.file),
-          fileName: `${baseName(video.file.name)}-overlay-${plan.width}x${plan.height}-${plan.fps}fps.zip`,
+          fileName: `${baseName(video.file.name)}-overlay-${plan.width}x${plan.height}-${formatFrameRate(plan.fps)}fps.zip`,
+          fps: plan.fps,
           bytes: result.bytes,
           frameCount: result.frameCount,
           made: { signature, activity, file: video.file },
@@ -241,14 +260,21 @@ export function OverlayExportPanel({
   };
 
   const stop = () => job.current?.cancel();
+  // One primary at a time: the export until a file is ready, then its download,
+  // and the export again once that file no longer matches the preview.
+  const stale =
+    phase.status === 'done' &&
+    (phase.made.signature !== signature || phase.made.activity !== activity || phase.made.file !== video.file);
+  const downloadFirst = phase.status === 'done' && !stale;
 
   return (
     <section className="prose overlay-export" aria-label="Export overlay">
-      <h3 className="prose__title">Export overlay</h3>
+      <h3 className="prose__title" tabIndex={-1}>
+        Export overlay
+      </h3>
       <p>
-        Saves the overlay by itself — one transparent PNG per frame, in a ZIP — to place over your
-        video in an editor. Your video is not changed. Everything is drawn on this device; nothing is
-        uploaded.
+        Saves the overlay by itself, one transparent PNG per frame in a ZIP, to place over your video
+        in an editor. Your video is not changed, and nothing is uploaded.
       </p>
 
       {!support.supported && <p role="alert">{support.reason}</p>}
@@ -265,9 +291,10 @@ export function OverlayExportPanel({
       {support.supported && storageState.status === 'ready' && ready && (
         <>
           <div className="overlay-export__settings">
-            <label className="overlay-controls__field" htmlFor={`${id}-fps`}>
-              Frame rate
+            <div className="overlay-controls__field">
+              <label htmlFor={`${id}-fps`}>Frame rate</label>
               <select
+                className="select"
                 id={`${id}-fps`}
                 value={fps}
                 disabled={running}
@@ -275,14 +302,15 @@ export function OverlayExportPanel({
               >
                 {EXPORT_FRAME_RATES.map((rate) => (
                   <option key={rate} value={rate}>
-                    {rate} fps
+                    {formatFrameRate(rate)} fps
                   </option>
                 ))}
               </select>
-            </label>
-            <label className="overlay-controls__field" htmlFor={`${id}-size`}>
-              Picture size
+            </div>
+            <div className="overlay-controls__field">
+              <label htmlFor={`${id}-size`}>Picture size</label>
               <select
+                className="select"
                 id={`${id}-size`}
                 value={heightChoice}
                 disabled={running}
@@ -300,7 +328,7 @@ export function OverlayExportPanel({
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
           </div>
 
           <p data-testid="export-plan">
@@ -316,7 +344,7 @@ export function OverlayExportPanel({
                 : 'This is more than one ZIP file can hold.'}{' '}
               {fallbackFps !== undefined ? (
                 <button type="button" className="button" onClick={() => setFps(fallbackFps)}>
-                  Use {fallbackFps} fps
+                  Use {formatFrameRate(fallbackFps)} fps
                 </button>
               ) : (
                 'Choose a smaller picture size.'
@@ -326,6 +354,7 @@ export function OverlayExportPanel({
           {nothingOn && (
             <p role="status">No component is switched on, so there is nothing to export.</p>
           )}
+          {noOverlap && <p role="status">The activity covers none of this video, so nothing would be drawn. Change where the video starts, in Sync.</p>}
 
           <p className="video__actions">
             {running ? (
@@ -335,11 +364,11 @@ export function OverlayExportPanel({
             ) : (
               <button
                 type="button"
-                className="button button--primary"
+                className={downloadFirst ? 'button' : 'button button--primary'}
                 onClick={begin}
-                disabled={!plan.fitsArchive || nothingOn}
+                disabled={!plan.fitsArchive || nothingOn || noOverlap}
               >
-                Export PNG sequence
+                {stale ? 'Export again' : 'Export PNG sequence'}
               </button>
             )}
           </p>
@@ -347,20 +376,23 @@ export function OverlayExportPanel({
       )}
 
       {phase.status === 'running' && (
-        <p>
-          <progress
-            aria-label="Export progress"
-            value={phase.done}
-            max={phase.total}
-            className="overlay-export__progress"
-          />{' '}
-          Frame {phase.done} of {phase.total}
-        </p>
+        <>
+          <p>
+            <progress
+              aria-label="Export progress"
+              value={phase.done}
+              max={phase.total}
+              className="overlay-export__progress"
+            />{' '}
+            Frame {phase.done} of {phase.total}
+          </p>
+          {/* Said at each quarter, not each frame: a frame count would drown a screen reader. */}
+          <p className="visually-hidden" role="status">
+            Exporting: {Math.floor((phase.done / Math.max(1, phase.total)) * 4) * 25}% done.
+          </p>
+        </>
       )}
-      {phase.status === 'done' &&
-        (phase.made.signature !== signature ||
-          phase.made.activity !== activity ||
-          phase.made.file !== video.file) && (
+      {stale && (
           <p role="alert">
             This file was made with earlier settings, and no longer matches the preview. Export
             again to match it.
@@ -369,9 +401,15 @@ export function OverlayExportPanel({
       {phase.status === 'done' && (
         <p role="status">
           Done: {phase.frameCount} frames, {formatBytes(phase.bytes)}.{' '}
-          <a className="button button--primary" href={phase.url} download={phase.fileName}>
+          <a className={downloadFirst ? 'button button--primary' : 'button'} href={phase.url} download={phase.fileName}>
             Download {phase.fileName}
           </a>
+        </p>
+      )}
+      {phase.status === 'done' && (
+        <p className="overlay-export__import">
+          In your editor, set the sequence to {formatFrameRate(phase.fps)} fps and place the first
+          frame at the start of the clip; the frames are numbered from there.
         </p>
       )}
       {phase.status === 'stopped' && <p role="status">Export stopped. Nothing was saved.</p>}

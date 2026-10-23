@@ -3,6 +3,7 @@ import type { UnitSystem } from '../../domain/units';
 import { BASE_FONT_CQW } from '../presets';
 import { projectRoute, type ProjectedRoute } from '../routeProjection';
 import {
+  needsHalo,
   resolveOverlayComponent,
   type OverlayComponent,
   type OverlayTemplate,
@@ -99,6 +100,12 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
 
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
+    // The preview's text-shadow, drawn: a dark halo under the type on a clear background.
+    const halo = needsHalo(ready.style);
+    if (halo) {
+      ctx.shadowColor = 'rgb(0 0 0 / 0.8)';
+      ctx.shadowBlur = 0.2 * em;
+    }
 
     ctx.globalAlpha = 0.75;
     ctx.fillStyle = ready.style.textColor;
@@ -110,6 +117,10 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     ctx.font = `bold ${valueSize}px ${FONT_FAMILY}`;
     ctx.fillText(ready.text ?? '', x, y);
     y += valueSize * 1.1 + trackGap;
+    if (halo) {
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+    }
 
     if (ready.fraction !== undefined) {
       const trackWidth = box.w - 2 * padX;

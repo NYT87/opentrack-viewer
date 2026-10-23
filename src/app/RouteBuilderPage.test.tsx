@@ -6,9 +6,9 @@ import userEvent from '@testing-library/user-event';
 vi.mock('maplibre-gl', async () => {
   const { FakeMap, setWorkerUrl } = await import('../test/helpers/maplibreMock');
   return {
-    default: { Map: FakeMap, NavigationControl: class {}, setWorkerUrl },
+    default: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class { setUnit() {} }, setWorkerUrl },
     Map: FakeMap,
-    NavigationControl: class {},
+    NavigationControl: class {}, ScaleControl: class { setUnit() {} },
     setWorkerUrl,
   };
 });

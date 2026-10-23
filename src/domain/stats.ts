@@ -341,16 +341,33 @@ export function computeStats(points: ActivityPoint[]): ComputeStatsResult {
       ? 1000 / averageSpeedMetersPerSecond
       : undefined;
 
+  /*
+   * TD-058. The same averages over moving time, which is what a reader of a
+   * training log expects as "average pace": a run with a four-minute stop at a
+   * crossing should not read as a walk. Both are kept, each labelled.
+   */
+  const movingDurationSeconds = computeMovingDuration(points, distance.cumulativeMeters);
+  const averageMovingSpeedMetersPerSecond =
+    distance.totalMeters !== undefined && movingDurationSeconds !== undefined && movingDurationSeconds > 0
+      ? distance.totalMeters / movingDurationSeconds
+      : undefined;
+  const averageMovingPaceSecondsPerKm =
+    averageMovingSpeedMetersPerSecond !== undefined && averageMovingSpeedMetersPerSecond > 0
+      ? 1000 / averageMovingSpeedMetersPerSecond
+      : undefined;
+
   return {
     stats: {
       pointCount: points.length,
       startTime: time.startTime,
       endTime: time.endTime,
       durationSeconds: time.durationSeconds,
-      movingDurationSeconds: computeMovingDuration(points, distance.cumulativeMeters),
+      movingDurationSeconds,
       distanceMeters: distance.totalMeters,
       averageSpeedMetersPerSecond,
       averagePaceSecondsPerKm,
+      averageMovingSpeedMetersPerSecond,
+      averageMovingPaceSecondsPerKm,
       elevationGainMeters: elevation.gainMeters,
       elevationLossMeters: elevation.lossMeters,
       minElevationMeters: elevation.minMeters,

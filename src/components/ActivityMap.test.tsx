@@ -6,9 +6,9 @@ import { FakeMap, latestMap, resetMapLibreMock, setWorkerUrl } from '../test/hel
 vi.mock('maplibre-gl', async () => {
   const { FakeMap: Fake, setWorkerUrl } = await import('../test/helpers/maplibreMock');
   return {
-    default: { Map: Fake, NavigationControl: class {}, setWorkerUrl },
+    default: { Map: Fake, NavigationControl: class {}, ScaleControl: class { setUnit() {} }, setWorkerUrl },
     Map: Fake,
-    NavigationControl: class {},
+    NavigationControl: class {}, ScaleControl: class { setUnit() {} },
     setWorkerUrl,
   };
 });
@@ -637,5 +637,26 @@ describe('editing across the antimeridian and through a resize (AV-1104, review)
 
     act(() => map.emit('resize'));
     expect(map.fitBoundsCalls).toHaveLength(1);
+  });
+});
+
+describe('the route\'s ends (TD-056)', () => {
+  beforeEach(() => resetMapLibreMock());
+
+  it('marks where the route starts and finishes', () => {
+    renderMap();
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    const ends = map.sources.get('activity-ends')?.data as { features: { properties: { end: string }; geometry: { coordinates: number[] } }[] };
+    expect(ends.features.map((feature) => feature.properties.end)).toEqual(['start', 'finish']);
+    expect(ends.features[0]!.geometry.coordinates).toEqual([-0.3, 51.5]);
+    expect(ends.features[1]!.geometry.coordinates).toEqual([0.2, 51.9]);
+  });
+
+  it('leaves them to Route Builder\'s own handles when there are edit points', () => {
+    renderMap({ editPoints: { type: 'FeatureCollection', features: [] } });
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+    expect((map.sources.get('activity-ends')?.data as { features: unknown[] }).features).toHaveLength(0);
   });
 });

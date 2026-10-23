@@ -229,15 +229,16 @@ test('charts pace and cadence for a running activity (AV-505, AV-506)', async ({
   );
 });
 
-test('explains why run charts are unavailable for other activities (AV-507)', async ({ page }) => {
+test('draws no run chart, and no message about one, for other activities (AV-507, AV-516)', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'route-with-elevation.gpx');
 
-  // The fixture is a hike, so pace and cadence do not apply.
-  await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText(
-    /shown for running activities/i,
-  );
+  // The fixture is a hike, so pace and cadence do not apply: they take no
+  // title, no message and no space (TD-028).
   await expect(page.getByRole('region', { name: 'Elevation chart' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Pace chart' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Cadence chart' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Activity charts' })).not.toContainText(/is shown for|has no .* data/i);
 });
 
 test('keeps the upload layout when a parse fails (AV-004)', async ({ page }) => {
@@ -277,7 +278,7 @@ test('centres the loaded viewer in a max-width column (AV-011)', async ({ page }
   expect(Math.abs(content.x - (1800 - content.x - content.width))).toBeLessThan(4);
 });
 
-test('offers a section sidebar on large screens only (AV-011)', async ({ page }) => {
+test('offers a section sidebar on large screens, and a row of the same links below (AV-011, TD-056)', async ({ page }) => {
   await page.setViewportSize({ width: 1500, height: 900 });
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-cadence.gpx');
@@ -293,8 +294,16 @@ test('offers a section sidebar on large screens only (AV-011)', async ({ page })
   const sections = (await page.locator('.viewer__sections').boundingBox())!;
   expect(navBox.x + navBox.width).toBeLessThanOrEqual(sections.x + 1);
 
+  // Narrower, the same links run as one row above the content, so Export is
+  // a tap away rather than a long scroll.
   await page.setViewportSize({ width: 900, height: 900 });
-  await expect(nav).toBeHidden();
+  await expect(nav).toBeVisible();
+  const row = (await nav.boundingBox())!;
+  const below = (await page.locator('.viewer__sections').boundingBox())!;
+  expect(row.y + row.height).toBeLessThanOrEqual(below.y + 1);
+  expect(row.height).toBeLessThan(60);
+  await nav.getByRole('button', { name: 'Export' }).click();
+  await expect(page.locator('#activity-export')).toBeFocused();
 });
 
 test('section links scroll without navigating or clearing the activity (AV-011)', async ({
@@ -471,7 +480,9 @@ test('redraws the charts for the selected section and back (AV-511, AV-512)', as
   await page.mouse.up();
 
   // The charts now show the section, and say so without implying an edit.
-  await expect(page.getByText(/file is unchanged/i)).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Selected section summary' }).getByText(/file is unchanged/i),
+  ).toBeVisible();
   expect(await plotted()).not.toBe(whole);
 
   await page.getByRole('button', { name: 'Reset View' }).click();
@@ -513,7 +524,8 @@ test('marks chart axes at real intervals and keeps labels clear (AV-514)', async
   expect(Math.abs(boxWidth - attrWidth)).toBeLessThan(2);
 
   // A 334 m activity has no whole-kilometre tick, so the ends carry the scale.
-  await expect(chart.locator('.is-endpoint')).toHaveCount(2);
+  // The shared axis is written once, under the last chart (TD-056).
+  await expect(page.getByRole('slider').last().locator('.is-endpoint')).toHaveCount(2);
 
   await page.getByRole('button', { name: 'Time' }).click();
   await expect(chart.getByText(/x-axis: elapsed time/)).toBeVisible();
@@ -709,7 +721,7 @@ test('offers overlays in the Tools menu, and takes files by hand after a reload 
   // so it cannot supply the activity — but it is still a video, and the
   // GPX chosen a moment ago is what gets drawn over it. The page says why.
   await page.getByTestId('overlay-video-input').setInputFiles('src/test/fixtures/hero8.mp4');
-  const video = page.getByRole('region', { name: 'Video' });
+  const video = page.getByRole('region', { name: 'Video', exact: true });
   await expect(video).toContainText('hero8.mp4', { timeout: 60_000 });
   await expect(video).toContainText('0:13');
   await expect(video).toContainText(/usable satellite fix/i);
@@ -816,7 +828,8 @@ test('focuses the map on the selected section, then leaves it alone (AV-604)', a
     page
       .locator('.maplibregl-canvas')
       .screenshot()
-      .then((shot) => countPixelsNear(decodePng(shot), [0xff, 0xd1, 0x66], 40));
+      // Selection Violet: the chart-selected section (DESIGN.md, TD-056).
+      .then((shot) => countPixelsNear(decodePng(shot), [0xc7, 0x7d, 0xff], 40));
   expect(await focusPixels()).toBe(0);
 
   // Measured after the screenshot: taking one scrolls its target into view,
@@ -871,13 +884,9 @@ test('charts speed for a ride, not pace or run cadence (AV-513, AV-515)', async 
   // ~8 m/s is around 29 km/h.
   await expect(speed).toContainText(/2[5-9]\.\d|3[0-2]\.\d/);
 
-  // Run-specific charts explain that they do not apply to a ride.
-  await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText(
-    /shown for running activities/i,
-  );
-  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText(
-    /shown for running activities/i,
-  );
+  // Run-specific charts do not apply to a ride, so they are not drawn (AV-516).
+  await expect(page.getByRole('region', { name: 'Pace chart' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toHaveCount(0);
 });
 
 test('labels running cadence in strides per minute (AV-515)', async ({ page }) => {
@@ -888,10 +897,8 @@ test('labels running cadence in strides per minute (AV-515)', async ({ page }) =
   await expect(cadence).toContainText('Cadence (spm)');
   await expect(cadence).not.toContainText('rpm');
 
-  // A run gets no speed chart.
-  await expect(page.getByRole('region', { name: 'Speed chart' })).toContainText(
-    /shown for cycling activities/i,
-  );
+  // A run gets no speed chart, and no message about one (AV-516).
+  await expect(page.getByRole('region', { name: 'Speed chart' })).toHaveCount(0);
 });
 
 test('highlights a lap from its row, and lets go again (§17)', async ({ page }) => {
@@ -900,18 +907,14 @@ test('highlights a lap from its row, and lets go again (§17)', async ({ page })
 
   const laps = page.getByRole('region', { name: 'Laps' });
   await laps.getByRole('button', { name: 'Highlight lap 1' }).click();
-  await expect(laps.getByRole('button', { name: 'Stop highlighting lap 1' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  // One name throughout; the state is in aria-pressed alone.
+  const lap1 = laps.getByRole('button', { name: 'Highlight lap 1' });
+  await expect(lap1).toHaveAttribute('aria-pressed', 'true');
 
   // Pressing again puts the route back, and no other lap is left pressed.
-  await laps.getByRole('button', { name: 'Stop highlighting lap 1' }).click();
-  await expect(laps.getByRole('button', { name: 'Highlight lap 1' })).toHaveAttribute(
-    'aria-pressed',
-    'false',
-  );
-  await expect(laps.getByRole('button', { name: /^Stop highlighting/ })).toHaveCount(0);
+  await lap1.click();
+  await expect(lap1).toHaveAttribute('aria-pressed', 'false');
+  await expect(laps.getByRole('button', { pressed: true })).toHaveCount(0);
 });
 
 test('offers no control for a lap with no stretch of route to draw (§17)', async ({ page }) => {
@@ -922,7 +925,7 @@ test('offers no control for a lap with no stretch of route to draw (§17)', asyn
   // press used to do nothing at all, with nothing said about why.
   const laps = page.getByRole('region', { name: 'Laps' });
   await expect(laps.getByRole('button', { name: 'Highlight lap 2' })).toHaveCount(0);
-  await expect(laps.getByTitle(/either side of a recording gap/i)).toHaveText('2');
+  await expect(laps).toContainText("Lap 2 can't be highlighted on the map: its points sit either side of a recording gap.");
 
   // Its figures are unaffected: only the control is absent.
   await expect(laps).toContainText('11');
@@ -937,11 +940,8 @@ test('charts pedal cadence for a ride that records it', async ({ page }) => {
   await expect(pedal).toContainText('rpm');
   await expect(pedal).toContainText(/pedal revolutions per minute/i);
 
-  // The running cadence chart is still listed, saying why it is empty — the
-  // same way a run is told that speed is a cycling chart.
-  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText(
-    /shown for running activities/i,
-  );
+  // The running cadence chart does not apply to a ride: not drawn (AV-516).
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toHaveCount(0);
 });
 
 test('exports the loaded activity as a real download (AV-554)', async ({ page }) => {
@@ -1213,11 +1213,11 @@ test('opens an indoor FIT run with no GPS at all (AV-703)', async ({ page }) => 
   // being no GPS, because the treadmill recorded it.
   await expect(summary).toContainText('Avg pace');
   await expect(summary).toContainText('133 m');
-  // The map box explains itself rather than showing an empty map, and MapLibre
-  // is never downloaded because there is nothing to draw.
-  const map = page.getByRole('region', { name: 'Route map' });
-  await expect(map).toContainText('No route to display');
-  await expect(map.locator('canvas')).toHaveCount(0);
+  // No map box held open to say there is no map: the overview says it once,
+  // and MapLibre is never downloaded because there is nothing to draw.
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+  await expect(page.getByTestId('no-route-note')).toContainText('no GPS coordinates');
+  await expect(page.locator('.maplibregl-canvas')).toHaveCount(0);
 
   // Charts that need no position still work.
   await expect(page.getByRole('region', { name: 'Pace chart' })).toBeVisible();
@@ -1295,7 +1295,8 @@ test('shows a useful error for a malformed GPX file', async ({ page }) => {
   await loadFixture(page, 'malformed.gpx');
 
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('Could not open this file');
+  // Named, so a reader who has tried several files knows which one failed.
+  await expect(alert).toContainText('Could not open malformed.gpx');
   await expect(alert).toContainText('invalid_gpx_xml');
 });
 
@@ -1350,10 +1351,11 @@ test('hovering the chart highlights the corresponding map point', async ({ page 
   expect(await page.getByTestId('chart-cursor').count()).toBeGreaterThan(1);
 });
 
-test('shows a placeholder instead of a map for an activity with no GPS', async ({ page }) => {
+test('says there is no route, instead of showing a map, for an activity with no GPS', async ({ page }) => {
   await loadFixture(page, 'no-location.gpx');
 
-  await expect(page.getByTestId('map-placeholder')).toContainText('No route to display');
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Activity overview' }).getByTestId('no-route-note')).toBeVisible();
   await expect(page.locator('.maplibregl-canvas')).toHaveCount(0);
   // The activity is still usable.
   await expect(page.getByTestId('elevation-chart-svg')).toBeVisible();
@@ -1890,4 +1892,45 @@ test('reads a GoPro video with a fix and maps it through the viewer (AV-906)', a
     [],
   );
   expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+});
+
+test('reads and selects along the charts by keyboard alone, from the title it lands on (TD-056)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  // Opening a file puts focus on what was opened, and says so.
+  await expect(page.locator('#activity-title')).toBeFocused();
+  await expect(page.locator('.viewer [role="status"][aria-live="polite"]')).toContainText(/^Activity opened: distance /);
+
+  // Tab reaches the first chart, which is a slider over the activity.
+  const chart = page.getByRole('slider', { name: 'Elevation chart' });
+  for (let i = 0; i < 40 && !(await chart.evaluate((element) => element === document.activeElement)); i += 1) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(chart).toBeFocused();
+  const ring = await chart.evaluate((element) => getComputedStyle(element).outlineStyle);
+  expect(ring).not.toBe('none');
+
+  // The arrows move the cursor, and the readout names every chart's value at it.
+  const readout = page.getByRole('region', { name: 'Values at the cursor' });
+  await expect(readout).toContainText('Point at a chart');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(readout.getByRole('term').first()).toHaveText('At');
+  await expect(readout).toContainText('Elevation');
+  await expect(chart).toHaveAttribute('aria-valuetext', /^at .+, elevation \d+ m$/);
+  await expect(page.getByTestId('chart-cursor').first()).toBeVisible();
+
+  // Shift extends a section, Enter keeps it, Escape lets it go.
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Enter');
+  // The section is said where the reader is looking: in the sticky readout,
+  // with its figures and the way back out, and nothing inserted above the charts.
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
+  const scope = page.locator('.chart-readout').getByRole('region', { name: 'Selected section summary' });
+  await expect(scope).toContainText('Your file is unchanged');
+  await expect(chart).toHaveAttribute('aria-valuetext', /^at .+, elevation \d+ m$/);
+  await page.getByRole('slider', { name: 'Elevation chart' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Reset View' })).toHaveCount(0);
 });

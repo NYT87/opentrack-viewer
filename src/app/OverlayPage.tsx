@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { OverlayControls } from '../components/OverlayControls';
+import { buildOverlayTimeline } from '../overlay/timeline';
 import { FileDropZone } from '../components/FileDropZone';
-import { WarningList } from '../components/ErrorPanel';
+import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { BurnedInExportPanel } from '../components/BurnedInExportPanel';
 import { OverlayExportPanel } from '../components/OverlayExportPanel';
 import { OverlayPreview } from '../components/OverlayPreview';
@@ -12,24 +14,51 @@ import { formatDistance, formatDuration, formatFileSize, type UnitSystem } from 
 import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { useInteractionStore } from '../state/interactionStore';
-import { hasOverlaySource, useOverlayStore, type OverlayVideo } from '../state/overlayStore';
+import {
+  hasOverlaySource,
+  useOverlayStore,
+  type OverlayMedia,
+  type OverlaySnapshot,
+  type OverlayVideo,
+} from '../state/overlayStore';
+import type { VideoReadProgressState } from '../components/VideoReadProgress';
 import { VIDEO_EXTENSIONS } from './readVideoTelemetry';
 import { useVideoTelemetryRead } from './useVideoTelemetryRead';
 
-type Busy =
+/** What became of the last file chosen for a slot. Each slot has its own. */
+type SlotState =
   | { status: 'idle' }
-  | { status: 'readingActivity'; fileName: string }
-  | { status: 'error'; error: ActivityError };
+  | { status: 'reading'; fileName: string }
+  | { status: 'error'; error: ActivityError; fileName: string };
+
+const IDLE: SlotState = { status: 'idle' };
+
+/**
+ * Focuses a slot once React has drawn it: the error it is showing if any, so
+ * focus lands on what went wrong, else its drop zone, else its heading.
+ */
+function focusSlot(ref: RefObject<HTMLElement | null>) {
+  setTimeout(() => {
+    const slot = ref.current;
+    const target =
+      slot?.querySelector<HTMLElement>('.panel--error button') ??
+      slot?.querySelector<HTMLElement>('.dropzone__target') ??
+      slot?.querySelector<HTMLElement>('h3');
+    target?.focus();
+  }, 0);
+}
 
 /**
  * AV-1002. Where overlays are made: a page of its own, reached from Tools,
  * that holds a local video, a normalized activity, or both.
  *
  * It renders nothing of the viewer — no map, no charts, no export controls —
- * because there is nothing to view here, only something to draw over. The
- * preview (AV-1004) is the one thing it draws: the video, with the overlay over
- * it at the video's current time. Besides that it takes the files in, says what
- * it has, and keeps them in memory.
+ * because there is nothing to view here, only something to draw over.
+ *
+ * TD-059. With a video it is a workspace: the preview kept in view, and the
+ * files, the overlay controls and the exports beside it. Reading or failing to
+ * read a file is said in that file's slot, and nothing else is taken down for
+ * it: a file being replaced stays until its replacement has been read.
  *
  * Two ways in. The extraction page hands over what it read; or the files are
  * chosen here, which is also what a reload needs, since the handoff is memory
@@ -42,6 +71,7 @@ export function OverlayPage() {
   const clearActivity = useOverlayStore((state) => state.clearActivity);
   const offerVideoActivity = useOverlayStore((state) => state.offerVideoActivity);
   const clear = useOverlayStore((state) => state.clear);
+  const restore = useOverlayStore((state) => state.restore);
   const offsetSeconds = useOverlayStore((state) => state.offsetSeconds);
   const setOffsetSeconds = useOverlayStore((state) => state.setOffsetSeconds);
   const controls = useOverlayStore((state) => state.controls);
@@ -50,11 +80,47 @@ export function OverlayPage() {
   const setMedia = useOverlayStore((state) => state.setMedia);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
 
-  const [busy, setBusy] = useState<Busy>({ status: 'idle' });
+  const [videoState, setVideoState] = useState<SlotState>(IDLE);
+  const [activityState, setActivityState] = useState<SlotState>(IDLE);
+  /** What Start over let go of, until the reader undoes it or chooses a file. */
+  const [cleared, setCleared] = useState<OverlaySnapshot | undefined>();
+  /** Where the preview draws its sync panel: the side column, below the files. */
+  const [syncTarget, setSyncTarget] = useState<HTMLDivElement | null>(null);
+  /** Whether either export holds a finished file Start over would throw away. */
+  const [finished, setFinished] = useState({ png: false, video: false });
+  const [confirmingStartOver, setConfirmingStartOver] = useState(false);
   const { reading, read, cancel } = useVideoTelemetryRead();
+  const videoSlot = useRef<HTMLElement>(null);
+  const activitySlot = useRef<HTMLElement>(null);
+  const keepIt = useRef<HTMLButtonElement>(null);
+  const exports = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+
+  // TD-059. Where the stage sticks over the page (below 1100px), the page
+  // scrolls a focused control clear of it: its height is the scroll padding.
+  useEffect(() => {
+    const element = stage.current;
+    const scroller = element?.closest<HTMLElement>('.shell__scroll');
+    if (!element || !scroller || typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(() => {
+      scroller.style.setProperty('--overlay-stage-height', `${element.offsetHeight}px`);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      scroller.style.removeProperty('--overlay-stage-height');
+    };
+  }, [source.video]);
+
+  // The confirm takes the place of the button that opened it: focus goes to
+  // its safe answer rather than falling to the page.
+  useEffect(() => {
+    if (confirmingStartOver) keepIt.current?.focus();
+  }, [confirmingStartOver]);
 
   const handleVideo = async (file: File) => {
-    setBusy({ status: 'idle' });
+    setCleared(undefined);
+    setVideoState(IDLE);
     try {
       const { activity, timing, activityError } = await read(file);
       // Whatever the reader returned is a video to draw over — it decides
@@ -66,265 +132,548 @@ export function OverlayPage() {
     } catch (error) {
       const failure = toActivityError(error, 'gopro_extract_failed');
       if (failure.code === 'extraction_cancelled') return;
-      // What the reader throws is a file nothing could be drawn over.
-      setBusy({ status: 'error', error: failure });
+      // What the reader throws is a file nothing could be drawn over; the
+      // video already held, if any, is still the one in use.
+      setVideoState({ status: 'error', error: failure, fileName: file.name });
+      focusSlot(videoSlot);
     }
   };
 
   const handleActivity = async (file: File) => {
-    setBusy({ status: 'readingActivity', fileName: file.name });
+    setCleared(undefined);
+    setActivityState({ status: 'reading', fileName: file.name });
     try {
       // The same intake the viewer uses: GPX, FIT, TCX and KML, read here.
+      // Set only once read, so the activity being replaced stays until then.
       const { activity } = await parseActivityFile(file);
       setActivity(activity, 'hand');
-      setBusy({ status: 'idle' });
+      setActivityState(IDLE);
     } catch (error) {
-      setBusy({ status: 'error', error: toActivityError(error, 'unsupported_format') });
+      setActivityState({
+        status: 'error',
+        error: toActivityError(error, 'unsupported_format'),
+        fileName: file.name,
+      });
+      focusSlot(activitySlot);
     }
   };
 
-  const idle = busy.status === 'idle' && !reading;
+  const focusStartOver = () =>
+    setTimeout(() => document.querySelector<HTMLElement>('[data-start-over]')?.focus(), 0);
+
+  const startOver = () => {
+    setConfirmingStartOver(false);
+    setFinished({ png: false, video: false });
+    setCleared(clear());
+    setVideoState(IDLE);
+    setActivityState(IDLE);
+    focusSlot(videoSlot);
+  };
+
+  // The controls sit in the side column, so the page builds the timeline they
+  // ask about: the same one the preview builds, from the same inputs.
+  const durationSeconds = source.video?.timing?.durationSeconds ?? media?.durationSeconds ?? 0;
+  const timeline = useMemo(
+    () =>
+      buildOverlayTimeline(source.activity, {
+        video: { durationSeconds, start: source.video?.timing?.start },
+        offsetSeconds,
+      }),
+    [source.activity, durationSeconds, source.video?.timing?.start, offsetSeconds],
+  );
+
+  const files = (
+    <>
+      <VideoSlot
+        slotRef={videoSlot}
+        video={source.video}
+        activity={source.activity}
+        media={media}
+        compact={Boolean(source.video)}
+        state={videoState}
+        reading={reading}
+        onCancelReading={cancel}
+        onFile={(file) => void handleVideo(file)}
+        onDismiss={() => {
+          setVideoState(IDLE);
+          focusSlot(videoSlot);
+        }}
+        onRemove={() => {
+          setVideo(undefined);
+          focusSlot(videoSlot);
+        }}
+      />
+      <ActivitySlot
+        slotRef={activitySlot}
+        activity={source.activity}
+        focusedSection={source.focusedSection}
+        units={unitSystem}
+        compact={Boolean(source.video)}
+        state={activityState}
+        onFile={(file) => void handleActivity(file)}
+        onDismiss={() => {
+          setActivityState(IDLE);
+          focusSlot(activitySlot);
+        }}
+        onRemove={() => {
+          clearActivity();
+          focusSlot(activitySlot);
+        }}
+      />
+      {hasOverlaySource(source) && !confirmingStartOver && (
+        <p className="overlay-files__actions">
+          {/* Lets go of the files only: the overlay settings are the reader's (TD-043). */}
+          <button
+            type="button"
+            className="button"
+            data-start-over
+            onClick={() =>
+              source.video && source.activity && (finished.png || finished.video)
+                ? setConfirmingStartOver(true)
+                : startOver()
+            }
+          >
+            Start over
+          </button>
+        </p>
+      )}
+      {confirmingStartOver && (
+        // Undo puts the files back, but a finished export is made again, not kept.
+        <div className="panel overlay-undo" role="alert">
+          <p className="panel__message">
+            A finished export is still here to download. Starting over lets it go, and Undo will not
+            bring it back.
+          </p>
+          <span className="overlay-files__actions">
+            <button type="button" className="button" onClick={startOver}>
+              Start over anyway
+            </button>
+            <button
+              type="button"
+              className="button"
+              ref={keepIt}
+              onClick={() => {
+                setConfirmingStartOver(false);
+                focusStartOver();
+              }}
+            >
+              Keep it
+            </button>
+          </span>
+        </div>
+      )}
+    </>
+  );
+
+  const undo = cleared && (
+    <div className="panel overlay-undo" role="status">
+      <p className="panel__message">
+        Started over: both files were let go. Your overlay settings are kept.
+      </p>
+      <button
+        type="button"
+        className="button"
+        onClick={() => {
+          restore(cleared);
+          setCleared(undefined);
+          focusSlot(videoSlot);
+        }}
+      >
+        Undo
+      </button>
+    </div>
+  );
 
   return (
-    <main className="page">
+    <main className={source.video ? 'page page--overlays is-workspace' : 'page page--overlays'}>
       <div className="page__inner">
         <header className="page__header">
           <h2 className="page__title">Overlays</h2>
           <p className="page__intro">
-            Draw what a video's telemetry says over the picture — speed, distance, the route, the
-            climbs — for your own video editor. Everything is drawn on this device; the video, its
+            Draw what a video's telemetry says over the picture (speed, distance, the route, the
+            climbs) for your own video editor. Everything is drawn on this device; the video, its
             telemetry and anything made from them are never uploaded.
           </p>
         </header>
 
-        {idle && !hasOverlaySource(source) && (
+        {!hasOverlaySource(source) && (
           <section className="prose" aria-label="Nothing to overlay yet">
             <h3 className="prose__title">Nothing to overlay yet</h3>
             <p>
-              Overlays start from a GoPro video, an activity file, or both. If you came here from
-              Video telemetry, that handoff lives in memory only and does not survive a reload —
-              choose the files again below.
+              Choose a GoPro video, an activity file, or both. A handoff from Video telemetry lives
+              in memory only and does not survive a reload: choose the files again below.
             </p>
           </section>
         )}
 
-        {reading && <VideoReadProgress progress={reading} onCancel={cancel} />}
-
-        {busy.status === 'readingActivity' && (
-          <section className="prose" aria-label="Reading the activity">
-            <h3 className="prose__title">Reading {busy.fileName}</h3>
-            <p>Parsing happens in this tab.</p>
-          </section>
-        )}
-
-        {busy.status === 'error' && (
-          <section className="prose" aria-label="File not read">
-            <h3 className="prose__title">That file could not be read</h3>
-            <p role="alert">{busy.error.message}</p>
-            <p>
-              <button type="button" className="button" onClick={() => setBusy({ status: 'idle' })}>
-                Try another file
-              </button>
-            </p>
-          </section>
-        )}
-
-        {idle && source.video && (
-          <OverlayPreview
-            video={source.video}
-            activity={source.activity}
-            offsetSeconds={offsetSeconds}
-            onOffsetChange={setOffsetSeconds}
-            units={unitSystem}
-            controls={controls}
-            onControlsChange={setControls}
-            onMediaInfo={setMedia}
-          />
-        )}
-
-        {idle && !source.video && source.activity && (
-          <RouteOverlayPanel activity={source.activity} focusedSection={source.focusedSection} />
-        )}
-
-        {idle && source.video && source.activity && (
-          <OverlayExportPanel
-            video={source.video}
-            activity={source.activity}
-            controls={controls}
-            offsetSeconds={offsetSeconds}
-            units={unitSystem}
-            media={media}
-          />
-        )}
-
-        {idle && source.video && source.activity && (
-          <BurnedInExportPanel
-            video={source.video}
-            activity={source.activity}
-            controls={controls}
-            offsetSeconds={offsetSeconds}
-            units={unitSystem}
-            media={media}
-          />
-        )}
-
-        {idle && (
-          <>
-            <VideoSlot
-              video={source.video}
-              onFile={(file) => void handleVideo(file)}
-              onClear={() => setVideo(undefined)}
-            />
-            <ActivitySlot
-              activity={source.activity}
-              focusedSection={source.focusedSection}
-              units={unitSystem}
-              onFile={(file) => void handleActivity(file)}
-              onClear={clearActivity}
-            />
-          </>
-        )}
-
-        {idle && hasOverlaySource(source) && (
-          <section className="prose" aria-label="What comes next">
-            <h3 className="prose__title">Held here, for the next steps</h3>
-            <p>
-              {source.video && source.activity
-                ? 'Both files stay in memory on this page until then, or until you start over.'
-                : source.video
-                  ? 'This video supplies no activity of its own. Add an activity file — from a watch, say — to draw over it.'
-                  : 'Without a video, this activity becomes a standalone overlay: the route on a transparent background, above. Add a video to draw its telemetry over the picture.'}
-            </p>
-            <p className="video__actions">
-              <button type="button" className="button" onClick={clear}>
-                Start over
-              </button>
-            </p>
-          </section>
-        )}
+        {/*
+          TD-059. One layout for every state, so the file slots never move in
+          the page: a file being dropped while a video finishes reading is not
+          lost to a slot drawn anew. With a video it is a workspace, the picture
+          kept in view beside the files, the controls and the exports.
+        */}
+        <div className={source.video ? 'overlay-workspace' : 'overlay-column'}>
+          <div className="overlay-workspace__stage" ref={stage}>
+            {source.video ? (
+              <OverlayPreview
+                video={source.video}
+                activity={source.activity}
+                offsetSeconds={offsetSeconds}
+                onOffsetChange={setOffsetSeconds}
+                units={unitSystem}
+                controls={controls}
+                onControlsChange={setControls}
+                onMediaInfo={setMedia}
+                controlsElsewhere
+                syncTarget={syncTarget}
+              />
+            ) : null}
+          </div>
+          <div className="overlay-workspace__side">
+            {/* The way past the files, sync and overlay settings, for a keyboard. */}
+            {source.video && source.activity && (
+              <p className="overlay-skip">
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    const target = exports.current?.querySelector<HTMLElement>('h3');
+                    target?.focus();
+                    target?.scrollIntoView({ block: 'start' });
+                  }}
+                >
+                  Skip to export
+                </button>
+              </p>
+            )}
+            {/* Beside the drop zone Start over puts focus in, so it is seen. */}
+            {undo}
+            {/*
+              TD-059. With a video, sync is the first thing to do, so it comes
+              first, and the files it is done with shrink to a line each below.
+              The slots keep their place in the tree either way, so a file being
+              dropped is never lost to a slot drawn anew.
+            */}
+            <div className="overlay-sync-slot" ref={setSyncTarget} />
+            {files}
+            {/* Below the files, so the slots never move when a route image appears. */}
+            {!source.video && source.activity && (
+              <RouteOverlayPanel
+                activity={source.activity}
+                focusedSection={source.focusedSection}
+              />
+            )}
+            {source.video && source.activity && !timeline.unavailable && (
+              <OverlayControls
+                controls={controls}
+                timeline={timeline}
+                onChange={setControls}
+                frameAspect={media && media.height > 0 ? media.width / media.height : undefined}
+              />
+            )}
+            {source.video && source.activity && (
+              <div className="overlay-exports" ref={exports}>
+                <OverlayExportPanel
+                  video={source.video}
+                  activity={source.activity}
+                  controls={controls}
+                  offsetSeconds={offsetSeconds}
+                  units={unitSystem}
+                  media={media}
+                  onFinishedChange={(png) =>
+                    setFinished((current) => (current.png === png ? current : { ...current, png }))
+                  }
+                />
+                <BurnedInExportPanel
+                  video={source.video}
+                  activity={source.activity}
+                  controls={controls}
+                  offsetSeconds={offsetSeconds}
+                  units={unitSystem}
+                  media={media}
+                  onFinishedChange={(video) =>
+                    setFinished((current) =>
+                      current.video === video ? current : { ...current, video },
+                    )
+                  }
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </main>
   );
 }
 
-function VideoSlot({
-  video,
+/** A file input the slot's "Choose another" button opens, keeping the current file until then. */
+function ReplaceInput({
+  accept,
   onFile,
-  onClear,
+  testId,
+  inputRef,
 }: {
-  video: OverlayVideo | undefined;
+  accept: readonly string[];
   onFile: (file: File) => void;
-  onClear: () => void;
+  testId: string;
+  inputRef: RefObject<HTMLInputElement | null>;
 }) {
   return (
-    <section className="prose" aria-label="Video">
-      <h3 className="prose__title">Video</h3>
+    <input
+      ref={inputRef}
+      type="file"
+      hidden
+      accept={accept.map((extension) => `.${extension}`).join(',')}
+      data-testid={testId}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (file) onFile(file);
+      }}
+    />
+  );
+}
+
+function VideoSlot({
+  slotRef,
+  video,
+  activity,
+  media,
+  compact,
+  state,
+  reading,
+  onCancelReading,
+  onFile,
+  onDismiss,
+  onRemove,
+}: {
+  slotRef: RefObject<HTMLElement | null>;
+  video: OverlayVideo | undefined;
+  activity: Activity | undefined;
+  media: OverlayMedia | undefined;
+  /** In the workspace: one line, the details folded away. */
+  compact: boolean;
+  state: SlotState;
+  reading: VideoReadProgressState | undefined;
+  onCancelReading: () => void;
+  onFile: (file: File) => void;
+  onDismiss: () => void;
+  onRemove: () => void;
+}) {
+  const replace = useRef<HTMLInputElement>(null);
+  // The container's clock where it has one, else the length the browser read.
+  const duration = video?.timing?.durationSeconds ?? media?.durationSeconds;
+  return (
+    <section className="prose overlay-slot" aria-label="Video" ref={slotRef}>
+      <h3 className="prose__title" tabIndex={-1}>
+        Video
+      </h3>
+      {reading && <VideoReadProgress progress={reading} onCancel={onCancelReading} />}
+      {state.status === 'error' && (
+        <ErrorPanel error={state.error} fileName={state.fileName} onDismiss={onDismiss} />
+      )}
       {video ? (
         <>
-          <dl className="summary__grid">
-            <div className="summary__stat">
-              <dt className="summary__label">File</dt>
-              <dd className="summary__value">{video.file.name}</dd>
-            </div>
-            <div className="summary__stat">
-              <dt className="summary__label">Size</dt>
-              <dd className="summary__value">{formatFileSize(video.file.size)}</dd>
-            </div>
-            {video.timing && (
+          {compact ? (
+            <p className="overlay-slot__line">
+              <span className="overlay-slot__name">{video.file.name}</span>
+              <span>{formatFileSize(video.file.size)}</span>
+              {duration !== undefined && <span>{formatDuration(duration)}</span>}
+            </p>
+          ) : (
+            <dl className="summary__grid">
               <div className="summary__stat">
-                <dt className="summary__label">Duration</dt>
-                <dd className="summary__value">{formatDuration(video.timing.durationSeconds)}</dd>
+                <dt className="summary__label">File</dt>
+                <dd className="summary__value">{video.file.name}</dd>
               </div>
-            )}
-          </dl>
-          {video.telemetryNote && <p>{video.telemetryNote}</p>}
-          <p>
-            <button type="button" className="button" onClick={onClear}>
+              <div className="summary__stat">
+                <dt className="summary__label">Size</dt>
+                <dd className="summary__value">{formatFileSize(video.file.size)}</dd>
+              </div>
+              {duration !== undefined && (
+                <div className="summary__stat">
+                  <dt className="summary__label">Duration</dt>
+                  <dd className="summary__value">{formatDuration(duration)}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+          {/* With an activity chosen, a video without telemetry is not a problem: said as a note. */}
+          {video.telemetryNote && (
+            <p className={activity ? 'overlay-slot__note' : undefined}>
+              {video.telemetryNote}
+              {activity && ' The activity file below is drawn over it instead.'}
+            </p>
+          )}
+          <p className="overlay-slot__actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() => replace.current?.click()}
+              disabled={Boolean(reading)}
+            >
               Choose another video
             </button>
+            <button type="button" className="button" onClick={onRemove} disabled={Boolean(reading)}>
+              Remove
+            </button>
           </p>
+          <ReplaceInput
+            accept={VIDEO_EXTENSIONS}
+            onFile={onFile}
+            testId="overlay-video-input"
+            inputRef={replace}
+          />
         </>
       ) : (
-        <FileDropZone
-          acceptedExtensions={VIDEO_EXTENSIONS}
-          onFile={onFile}
-          testId="overlay-video-input"
-        />
+        !reading && (
+          <FileDropZone
+            acceptedExtensions={VIDEO_EXTENSIONS}
+            onFile={onFile}
+            testId="overlay-video-input"
+          />
+        )
       )}
     </section>
   );
 }
 
 function ActivitySlot({
+  slotRef,
   activity,
   focusedSection,
   units,
+  compact,
+  state,
   onFile,
-  onClear,
+  onDismiss,
+  onRemove,
 }: {
+  slotRef: RefObject<HTMLElement | null>;
   activity: Activity | undefined;
   focusedSection?: boolean;
   units: UnitSystem;
+  /** In the workspace: one line, the details folded away. */
+  compact: boolean;
+  state: SlotState;
   onFile: (file: File) => void;
-  onClear: () => void;
+  onDismiss: () => void;
+  onRemove: () => void;
 }) {
+  const replace = useRef<HTMLInputElement>(null);
   const charted = activity?.sensorStreams?.filter((stream) => stream.display === 'chart') ?? [];
+  const busy = state.status === 'reading';
 
   return (
-    <section className="prose" aria-label="Activity">
-      <h3 className="prose__title">Activity</h3>
+    <section className="prose overlay-slot" aria-label="Activity" ref={slotRef}>
+      <h3 className="prose__title" tabIndex={-1}>
+        Activity
+      </h3>
+      {busy && <p role="status">Reading {state.fileName} in this tab…</p>}
+      {state.status === 'error' && (
+        <ErrorPanel error={state.error} fileName={state.fileName} onDismiss={onDismiss} />
+      )}
+      {activity && compact && (
+        <p className="overlay-slot__line">
+          <span className="overlay-slot__name">
+            {activity.source.fileName ?? activity.source.format.toUpperCase()}
+          </span>
+          <span>{formatDistance(activity.derived?.distanceMeters, units)}</span>
+          <span>{formatDuration(activity.derived?.durationSeconds)}</span>
+          {focusedSection && <span>Focused section only</span>}
+        </p>
+      )}
       {activity ? (
         <>
-          <dl className="summary__grid">
-            <div className="summary__stat">
-              <dt className="summary__label">From</dt>
-              <dd className="summary__value">
-                {activity.source.fileName ?? activity.source.format.toUpperCase()}
-              </dd>
-            </div>
-            {focusedSection && (
+          {/* Folded away in the workspace: what was read, for whoever wants it. */}
+          <SlotDetails folded={compact}>
+            <dl className="summary__grid">
+              {/* In the workspace the name, distance and duration are on the line above. */}
+              {!compact && (
+                <div className="summary__stat">
+                  <dt className="summary__label">From</dt>
+                  <dd className="summary__value">
+                    {activity.source.fileName ?? activity.source.format.toUpperCase()}
+                  </dd>
+                </div>
+              )}
+              {focusedSection && !compact && (
+                <div className="summary__stat">
+                  <dt className="summary__label">Scope</dt>
+                  <dd className="summary__value">Focused section only</dd>
+                </div>
+              )}
               <div className="summary__stat">
-                <dt className="summary__label">Scope</dt>
-                <dd className="summary__value">Focused section only</dd>
+                <dt className="summary__label">Points</dt>
+                <dd className="summary__value">{activity.points.length}</dd>
               </div>
-            )}
-            <div className="summary__stat">
-              <dt className="summary__label">Points</dt>
-              <dd className="summary__value">{activity.points.length}</dd>
-            </div>
-            <div className="summary__stat">
-              <dt className="summary__label">Distance</dt>
-              <dd className="summary__value">
-                {formatDistance(activity.derived?.distanceMeters, units)}
-              </dd>
-            </div>
-            <div className="summary__stat">
-              <dt className="summary__label">Duration</dt>
-              <dd className="summary__value">{formatDuration(activity.derived?.durationSeconds)}</dd>
-            </div>
-            {charted.length > 0 && (
-              <div className="summary__stat">
-                <dt className="summary__label">Camera streams</dt>
-                <dd className="summary__value">
-                  {charted.map((stream) => stream.label).join(', ')}
-                </dd>
-              </div>
-            )}
-          </dl>
+              {!compact && (
+                <>
+                  <div className="summary__stat">
+                    <dt className="summary__label">Distance</dt>
+                    <dd className="summary__value">
+                      {formatDistance(activity.derived?.distanceMeters, units)}
+                    </dd>
+                  </div>
+                  <div className="summary__stat">
+                    <dt className="summary__label">Duration</dt>
+                    <dd className="summary__value">
+                      {formatDuration(activity.derived?.durationSeconds)}
+                    </dd>
+                  </div>
+                </>
+              )}
+              {charted.length > 0 && (
+                <div className="summary__stat">
+                  <dt className="summary__label">Camera streams</dt>
+                  <dd className="summary__value">
+                    {charted.map((stream) => stream.label).join(', ')}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </SlotDetails>
           <WarningList warnings={activity.warnings} />
-          <p>
-            <button type="button" className="button" onClick={onClear}>
+          <p className="overlay-slot__actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() => replace.current?.click()}
+              disabled={busy}
+            >
               Choose another activity
             </button>
+            <button type="button" className="button" onClick={onRemove} disabled={busy}>
+              Remove
+            </button>
           </p>
+          <ReplaceInput
+            accept={SUPPORTED_FORMATS}
+            onFile={onFile}
+            testId="overlay-activity-input"
+            inputRef={replace}
+          />
         </>
       ) : (
-        <FileDropZone
-          acceptedExtensions={SUPPORTED_FORMATS}
-          onFile={onFile}
-          testId="overlay-activity-input"
-        />
+        !busy && (
+          <FileDropZone
+            acceptedExtensions={SUPPORTED_FORMATS}
+            onFile={onFile}
+            testId="overlay-activity-input"
+          />
+        )
       )}
     </section>
+  );
+}
+
+/** What a slot read, shown as it is, or folded under "Details" in the workspace. */
+function SlotDetails({ folded, children }: { folded: boolean; children: ReactNode }) {
+  if (!folded) return <>{children}</>;
+  return (
+    <details className="overlay-slot__details">
+      <summary>Details</summary>
+      {children}
+    </details>
   );
 }

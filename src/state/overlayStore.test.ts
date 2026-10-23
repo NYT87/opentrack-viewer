@@ -4,7 +4,10 @@ import { makeActivity } from '../test/helpers/activity';
 
 const activity = () => makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20.001 }]);
 
-beforeEach(() => useOverlayStore.getState().clear());
+beforeEach(() => {
+  useOverlayStore.getState().clear();
+  useOverlayStore.setState({ controls: useOverlayStore.getInitialState().controls });
+});
 
 describe('a focused section on the overlay store (AV-1009)', () => {
   it('is recorded when handed over as a section, and not otherwise', () => {
@@ -35,6 +38,20 @@ describe('a focused section on the overlay store (AV-1009)', () => {
     useOverlayStore.getState().setActivity(activity(), 'hand', { focusedSection: true });
     useOverlayStore.getState().clear();
     expect(useOverlayStore.getState().source).toEqual({});
+  });
+
+  it('keeps the overlay settings through Start over, and can put the files back (TD-059)', () => {
+    useOverlayStore.getState().setActivity(activity(), 'hand');
+    useOverlayStore.getState().setOffsetSeconds(4);
+    useOverlayStore.getState().setControls({ accentColor: '#00ff00' });
+    const snapshot = useOverlayStore.getState().clear();
+    expect(useOverlayStore.getState().source).toEqual({});
+    expect(useOverlayStore.getState().offsetSeconds).toBe(0);
+    expect(useOverlayStore.getState().controls.accentColor).toBe('#00ff00');
+
+    useOverlayStore.getState().restore(snapshot);
+    expect(useOverlayStore.getState().source.activity).toBeDefined();
+    expect(useOverlayStore.getState().offsetSeconds).toBe(4);
   });
 
   it('is set, with no video, by a standalone hand-off', () => {

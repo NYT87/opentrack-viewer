@@ -180,8 +180,9 @@ A cool slate neutral scale in both themes, with Trail Blue as the single accent 
 ### Tertiary (map only)
 - **Map Night** (`{colors.map-night}`): the map background in route-only mode and behind tiles, in both themes.
 - **Route Casing** (`{colors.route-casing}`): the 7px, 60% casing under the route line and the stroke around every map marker. It is the same value as the dark canvas.
-- **Lap Amber** (`{colors.lap-amber}`): a selected lap's stretch of route and the hover marker.
+- **Lap Amber** (`{colors.lap-amber}`): a selected lap's stretch of route.
 - **Selection Violet** (`{colors.selection-violet}`): the chart-selected section of route and its endpoints.
+- **Marker** (`{colors.ink-dark}`): the hover marker, a neutral bright dot with a Route Casing stroke. Neither amber nor violet, so it never vanishes on the lap or the section it points at.
 
 ### Neutral
 - **Canvas** (`{colors.canvas}` / `{colors.canvas-dark}`): the page background and the active state of toggle-style buttons.
@@ -211,12 +212,14 @@ A cool slate neutral scale in both themes, with Trail Blue as the single accent 
 ### Hierarchy
 - **Display** (700, 24px, 1.25, -0.01em, balanced wrap): the Home title only. It is the one step above Headline, because the front door is the one page whose title must read as "this is the product" rather than "this is a section". Followed by a 15px intro capped at 60ch.
 - **Headline** (700, 18px, 1.5): the page title on Tools pages and Terms. The dialog title sits one step down at 17px, as does the footer wordmark, which is uppercase with 0.06em tracking.
-- **Title** (700, 15px, 1.5): a box or section title (summary, export, prose sections). Chart, lap and editor titles drop to 13px.
+- **Title** (700, 15px, 1.5): a box or section title (export, prose sections). Chart, lap and editor titles drop to 13px. The activity's name in the viewer's summary is the page's title and takes the Headline step (18px, line-height 1.3).
 - **Body** (400, 14px, 1.5): the base size. Prose paragraphs run in Ink Muted at line-height 1.6 and are capped at 66ch; help text at 60ch.
 - **Control** (400, 13px): buttons in the header and menus, section-nav links, choices and editor status.
 - **Reading** (400, 12px): supporting copy, hints, lap tables, axis options and notices.
-- **Label** (400, 11px, 0.04em, UPPERCASE): the caption above every figure, table headers, device and sensor headings (those at 700), axis-switch labels and chart axis labels.
+- **Label** (400, 11px, 0.04em, UPPERCASE): the caption above every figure (stat grid, device rows, the chart readout), table headers, device and sensor headings (those at 700), axis-switch labels and chart axis labels. Never a sentence: supporting copy is Reading or larger.
 - **Figure** (400, 16px, tabular-nums): the number under a label in the stat grid. Lap and overlay values are also tabular at their own sizes.
+
+The ladder is in the stylesheet as tokens, `--text-label` through `--text-display`, one per step above.
 
 ### Named Rules
 **The Caption-Over-Figure Rule.** A statistic is an 11px uppercase muted label with a 16px tabular figure beneath it, 2px apart. Nothing else is added: no icon, no tint, no unit badge.
@@ -262,7 +265,8 @@ Quiet and precise. Controls are bordered rectangles with exact alignment; state 
 - **Icon button:** 34px square, same border and radius, Ink Muted glyph at 18px that turns Ink on hover. The Settings gear is the canonical instance.
 - **Tools button:** the header dropdown trigger, 13px, 6px 10px padding, with a 10px caret. Open state matches hover.
 - **Axis switch and segmented options:** 12px, 4px 10px padding; the active option drops to Canvas background with a Trail Blue border; disabled is 45% opacity.
-- **Lap toggle:** borderless until hover; pressed shows Trail Blue border, Well background and weight 600.
+- **Lap toggle:** one name ("Highlight lap 2") with its state in `aria-pressed`; a hairline border at rest, so the lap a reader can press looks pressable; hover turns it Trail Blue; pressed shows Trail Blue border, Well background and weight 600. A lap that cannot be highlighted shows its number plainly, with the reason in a Reading-size note under the table, never in a tooltip.
+- **Disabled:** every button, the primary one included, fades to 45% with a not-allowed cursor and no hover change.
 
 ### Status Captions
 - **Style:** a status is an 11px uppercase Ink Muted caption at 0.04em, set inline with no border or fill: "Read · Write", "Read only". A status that would read the same on every row is not shown.
@@ -283,8 +287,9 @@ Quiet and precise. Controls are bordered rectangles with exact alignment; state 
 - **Dropzone:** a 1.5px dashed hairline box on Panel, 28px 16px padding, centred title at 600 with a 12px muted subtitle. Dragging turns the border Trail Blue and the fill Well.
 
 ### Navigation
-- **Header:** the brand title at 16px with 0.01em tracking is the home link; it turns Trail Blue on hover. The Tools dropdown opens a 180px Panel menu with a 4px inset, 6px-radius items at 13px, the current item in Ink at 600. Settings is the icon button on the right.
-- **Section sidebar:** sticky, a column of 13px links with a 2px hairline left rule that turns Trail Blue on hover. Hidden at 1100px and below.
+- **Header:** the brand title at 16px with 0.01em tracking is the home link; it turns Trail Blue on hover. At 420px and below it shortens to "OpenTrack" so the header keeps one line; its accessible name stays "OpenTrack Viewer". The Tools dropdown opens a 180px Panel menu with a 4px inset, 6px-radius items at 13px, the current item in Ink at 600. Settings is the icon button on the right.
+- **Section sidebar:** sticky, a column of 13px links with a 2px hairline left rule that turns Trail Blue on hover. A link scrolls to its section and moves focus into it; the scroll is instant under reduced motion. At 1100px and below the same links run as one row above the content, scrolling sideways, with the rule underneath instead.
+- **Drop to replace:** a file dragged over an open activity dims the page under a 1.5px dashed Trail Blue frame with "Drop to open this file instead. This one stays open if it cannot be read." The new file is parsed first and replaces the open one only on success; a failure or a refused type is a dismissible notice above the activity it left alone.
 - **Footer:** Panel with a hairline top, an uppercase 17px wordmark beside a 26px Trail Blue route glyph, 12px uppercase column headings at 0.09em, and muted links that turn Ink on hover.
 
 ### Links
@@ -297,13 +302,26 @@ Four entries in a two-column grid (one column at 860px and below), each a hairli
 What the browser tests hold at zero, set in the stat idiom rather than as a sentence. An 11px uppercase 700 Ink Muted heading ("Held at zero by the browser tests"), then three hairline-topped rows, each an 11px uppercase Ink Muted caption over a 16px tabular Ink figure "0" with a 13px muted "allowed". One 13px text link closes it. No tint, no box, no accent except the link. The figures are what the suite enforces, not a live measurement, and each caption claims exactly what its test asserts: never "nothing leaves the page", since with the basemap on, tiles do once a file is open.
 
 ### Stat Grid (signature)
-A grid of `auto-fit, minmax(150px, 1fr)` cells, 12px 16px apart, under a hairline-divided header carrying the activity title at 15px and its source at 11px. Each cell is a caption over a figure. The device card below repeats the pattern with a 700-weight uppercase heading.
+The overview leads with three primary fields, the bike computer's: distance, duration, and the sport's pace or speed (averaged over moving time and captioned so), as captions over 24px figures in their own row (18px, still one row, on a phone). A file without one of them leads with the next figure it has rather than a dash. The rest follow in a grid of `auto-fit, minmax(150px, 1fr)` cells, 12px 16px apart (two fixed columns at 480px and below), below a hairline. Both sit under a hairline-divided header carrying the activity title at 18px and its source at 12px; the source line also carries the point count, which describes the file rather than the effort. A title that is only a timestamp, as TCX writes it, reads as the sport and date it is ("Run on 1 May 2024, 08:00"). Each cell is a caption over a figure. The device card below repeats the pattern with a 700-weight uppercase heading, 20px below the grid.
 
 ### Chart (signature)
 An SVG whose viewBox is 1:1 with pixels so text is never stretched. Hairline gridlines and ticks, 11px tabular axis labels in Ink Muted, a 2px Trail Blue line over a 16% Trail Blue area, an amber cursor with a canvas-stroked dot, and an 18% Trail Blue selection rectangle with a 1px accent stroke. A near-flat series is drawn flat with one label. The focused-range bar above is a 10% Trail Blue tint with a Trail Blue border.
 
+Every chart in the panel shares one x extent and one left gutter (the widest any chart needs), so one vertical line reads all of them. Both ends of the x axis are written in the scale's unit. A flat series is a level line with no area beneath it. The shared x axis is labelled once, under the last chart; the others keep its tick marks. A greyed axis option says why beside it. Each plot is a keyboard slider with the 2px focus ring drawn inset: the arrows move the shared cursor, Shift extends a section, Enter keeps it, Escape lets go. Only charts the data supports are drawn; an unavailable one takes no title, message or space.
+
+### Chart Readout (signature)
+The instrument panel's readout, between the chart controls and the first chart, sticky at the top of the scroll region while the charts pass under it. Two rows:
+
+- **Scope** (on Well): what the figures describe. At rest, "Whole activity · N points" and how to look at a section. With a section, the section itself: its title, "N of M points", "Your file is unchanged.", its figures inline (14px, captions over figures, scrolling sideways) and Reset View at the row's end. The row keeps its height either way, so selecting moves nothing below it, and Reset View never scrolls away.
+- **Values** (on Panel): "At" over the cursor's position, then every drawn chart's value there, captions over 16px figures; a chart with no reading at that point shows the missing dash. With no cursor, one line says how to get one.
+
+A row that scrolls sideways fades at its right edge, so hidden values are seen to be there.
+
+### Overlay Workspace
+With a video, the overlay page is a workspace: at 1100px and wider a 1180px grid of a sticky stage (the picture, its transport and a one-line sync summary, never scrolling inside itself) beside a scrolling column that opens with the sync panel (the full line, the "Video starts at" field and its four steps, the line-up form), then the files as a line each with their details folded, the overlay controls and the exports; narrower, the stage sticks to the top of a flex column. Under the transport sit a one-line 11px Ink Muted key hint (hidden on touch screens) and the sync bar. The bar is a 14px Well track with the activity's span in a 22% Trail Blue tint, the video's span as a solid Trail Blue block within it, and an Ink playhead. Above it, a 1.25px Ink Muted trace of the activity's speed or elevation, and beneath it a caption key that ends in how to use it. The bar is a slider, with a grab cursor and the 2px focus ring. A video that does not overlap the activity gets an amber line in the stage, under the bar, with its one-press fix, and the longer amber notice in the sync panel, in Ink at 60ch. The metric strip is one row of tiles a hair apart, with its type shrinking to no less than 60% before it wraps and says so, and its route a square as tall as the figures. Figures on a background under 30% carry a dark halo. The overlay's own palette (its accent, its route markers) is the reader's choice for their video and is not bound by the One Lit Colour Rule.
+
 ### Map (signature)
-The map fills its box edge to edge at `clamp(280px, 46vh, 560px)`. Night background, dimmed raster tiles, a 3.5px Trail Blue route on a 7px 60% Route Casing, round caps and joins. Lap highlight in Lap Amber at 4.5px; chart selection in Selection Violet at 5px; markers are filled circles with a Route Casing stroke. The basemap notice is a 12px amber-bordered Panel chip at the bottom left.
+The map fills its box edge to edge at `clamp(280px, 46vh, 560px)`. Night background, dimmed raster tiles, a 3.5px Trail Blue route on a 7px 60% Route Casing, round caps and joins. Lap highlight in Lap Amber at 4.5px; chart selection in Selection Violet at 5px; the hover marker is a neutral bright circle and every marker has a Route Casing stroke. The route's start is a Trail Blue dot and its finish a night dot, both ringed in the marker's light (not in Route Builder, whose handles mark every point). A scale sits top left. MapLibre's controls take the night frame's colours in both themes, the canvas announces the route and how to move along it, and in the dark theme the map box gets a lighter edge so the night frame does not merge into the page. Raster tiles are dimmed hard (saturation −0.75, brightness capped at 0.6) so the route stays the brightest line on a light street map. MapLibre's own controls take the app's 2px focus ring. A file with no coordinates gets no map box: one sentence in the overview says why. The basemap notice is a 12px amber-bordered Panel chip at the bottom left.
 
 ## Do's and Don'ts
 

@@ -18,11 +18,11 @@ async function openWithFiles(page: Page, outputDir: string) {
   writeFileSync(gpx, widestGpx());
   await page.goto('./#/overlays');
   await page.getByTestId('overlay-video-input').setInputFiles(FIXTURE);
-  await expect(page.getByRole('region', { name: 'Video' })).toContainText('hero8.mp4', {
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('hero8.mp4', {
     timeout: 30_000,
   });
   await page.getByTestId('overlay-activity-input').setInputFiles(gpx);
-  return page.getByRole('region', { name: 'Burned-in export' });
+  return page.getByRole('region', { name: 'Export video with the overlay' });
 }
 
 const storedArchives = (page: Page) =>
@@ -133,6 +133,8 @@ test('renders the video with the overlay burned in, keeps the sound, and uploads
   // The stored render goes when the reader moves on.
   expect(await storedArchives(page)).toHaveLength(1);
   await page.getByRole('button', { name: 'Start over' }).click();
+  // A finished export is waiting, so Start over asks first (TD-059).
+  await page.getByRole('button', { name: 'Start over anyway' }).click();
   await expect.poll(() => storedArchives(page)).toEqual([]);
 });
 

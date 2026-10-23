@@ -97,7 +97,7 @@ export function RouteOverlayPanel({
         {focusedSection
           ? 'The focused section of the activity, as a route on a transparent background.'
           : 'The whole activity, as a route on a transparent background.'}{' '}
-        No map is drawn under it. The image is made in this tab and never uploaded.
+        No map is drawn under it.
       </p>
 
       <fieldset className="overlay-controls__group">

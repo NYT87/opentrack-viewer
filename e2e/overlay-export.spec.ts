@@ -19,7 +19,7 @@ async function openWithFiles(page: Page, outputDir: string) {
 
   await page.goto('./#/overlays');
   await page.getByTestId('overlay-video-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
-  await expect(page.getByRole('region', { name: 'Video' })).toContainText('hero8.mp4', {
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('hero8.mp4', {
     timeout: 30_000,
   });
   await page.getByTestId('overlay-activity-input').setInputFiles(gpx);
@@ -110,6 +110,10 @@ test('exports a transparent PNG sequence of the overlay, drawn and stored on thi
   // The stored archive goes when the reader moves on.
   expect(await storedArchives(page)).toHaveLength(1);
   await page.getByRole('button', { name: 'Start over' }).click();
+  // A finished export is waiting, so Start over asks first (TD-059), with
+  // focus on the safe answer rather than lost to the page.
+  await expect(page.getByRole('button', { name: 'Keep it' })).toBeFocused();
+  await page.getByRole('button', { name: 'Start over anyway' }).click();
   await expect.poll(() => storedArchives(page)).toEqual([]);
 });
 
@@ -162,7 +166,7 @@ test('reports an export engine that cannot start, instead of waiting on it', asy
 test('exports a short overlay-only asset from the committed clip and ride, fast and exactly sized', async ({ page }) => {
   await page.goto('./#/overlays');
   await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video' })).toContainText('overlay-test-clip.mp4', {
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
     timeout: 30_000,
   });
   await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);

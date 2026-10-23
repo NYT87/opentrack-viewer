@@ -218,6 +218,13 @@ export interface ActivityDerivedStats {
   averageSpeedMetersPerSecond?: number;
   /** The same average expressed as pace, which is how runners read it. */
   averagePaceSecondsPerKm?: number;
+  /**
+   * TD-058. Distance over *moving* time: what a watch or a training log shows
+   * as the average, and what the overview leads with. Absent when no moving
+   * time could be worked out.
+   */
+  averageMovingSpeedMetersPerSecond?: number;
+  averageMovingPaceSecondsPerKm?: number;
   elevationGainMeters?: number;
   elevationLossMeters?: number;
   minElevationMeters?: number;

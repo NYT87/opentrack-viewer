@@ -33,11 +33,7 @@ export function FileDropZone({
       if (!file) return;
       const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
       if (!acceptedExtensions.includes(extension)) {
-        setRejection(
-          `"${file.name}" is not supported. Choose a ${acceptedExtensions
-            .map((value) => `.${value}`)
-            .join(' or ')} file.`,
-        );
+        setRejection(`"${file.name}" is not supported. Choose ${describeFormats(acceptedExtensions)}.`);
         return;
       }
       setRejection(undefined);
@@ -79,7 +75,8 @@ export function FileDropZone({
         aria-describedby={`${inputId}-hint`}
       >
         <span className="dropzone__title">Drop {describeFormats(acceptedExtensions)} here</span>
-        <span className="dropzone__subtitle">or click to choose one</span>
+        {/* "Choose", not "click": it is pressed, tapped or chosen with Enter. */}
+        <span className="dropzone__subtitle">or choose one</span>
         <input
           ref={inputRef}
           id={inputId}
@@ -117,5 +114,7 @@ export function describeFormats(extensions: readonly string[]): string {
     names.length === 1
       ? names[0]!
       : `${names.slice(0, -1).join(', ')} or ${names.at(-1)!}`;
-  return `a ${joined} file`;
+  // Said as it is read aloud: "an MP4", spelled out, but "a GPX" and "a FIT".
+  const article = /^(?:[AEIOU]|MP|M4)/.test(joined) ? 'an' : 'a';
+  return `${article} ${joined} file`;
 }

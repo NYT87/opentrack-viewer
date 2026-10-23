@@ -36,6 +36,15 @@ export function ChartXAxisSwitch({ availability, activeMode, onChange }: ChartXA
           {LABELS[entry.mode]}
         </button>
       ))}
+
+      {/* Said on the page: a tooltip reaches neither keyboard nor touch. */}
+      {availability
+        .filter((entry) => !entry.available && entry.reason)
+        .map((entry) => (
+          <span key={`reason-${entry.mode}`} className="axis-switch__reason">
+            {entry.reason}
+          </span>
+        ))}
     </div>
   );
 }

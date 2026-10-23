@@ -43,7 +43,7 @@ for (const { name, video, viewport } of CASES) {
 
     await page.goto('./#/overlays');
     await page.getByTestId('overlay-video-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
-    await expect(page.getByRole('region', { name: 'Video' })).toContainText('hero8.mp4', {
+    await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('hero8.mp4', {
       timeout: 30_000,
     });
     await page.getByTestId('overlay-activity-input').setInputFiles(gpx);

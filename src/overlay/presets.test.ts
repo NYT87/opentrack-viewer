@@ -3,6 +3,8 @@ import {
   BASE_FONT_CQW,
   TILE_HEIGHT_EMS,
   TILE_WIDTH_EMS,
+  MIN_STRIP_TYPE,
+  metricStripCapacity,
   DEFAULT_OVERLAY_CONTROLS,
   OVERLAY_PRESETS,
   buildOverlay,
@@ -217,21 +219,60 @@ describe('overlay presets (AV-1005)', () => {
     it('keeps each figure as wide as its value needs, wrapping onto rows on a narrow frame', () => {
       const timeline = buildOverlayTimeline(full());
       const everything = Object.fromEntries(overlayCatalog(timeline).map((entry) => [entry.key, true]));
-      for (const presetId of ['metric-strip', 'route-inset'] as const) {
-        for (const scale of [0.75, 1, 1.5]) {
-          for (const aspect of [0.5625, 1, 16 / 9]) {
-            const { template } = buildOverlay(controls({ presetId, scale, enabled: everything }), timeline, aspect);
-            const tiles = template.components.filter((c) => c.type === 'text' || c.type === 'gauge');
-            // 10 figures, none narrower than the em budget the widest value needs in a wide font.
-            expect(tiles).toHaveLength(10);
-            for (const tile of tiles) expect(tile.rect.width).toBeGreaterThanOrEqual(((BASE_FONT_CQW * TILE_WIDTH_EMS) / 100) * scale - 1e-9);
-          }
+      for (const scale of [0.75, 1, 1.5]) {
+        for (const aspect of [0.5625, 1, 16 / 9]) {
+          const { template } = buildOverlay(controls({ presetId: 'route-inset', scale, enabled: everything }), timeline, aspect);
+          const tiles = template.components.filter((c) => c.type === 'text' || c.type === 'gauge');
+          // 10 figures, none narrower than the em budget the widest value needs in a wide font.
+          expect(tiles).toHaveLength(10);
+          for (const tile of tiles) expect(tile.rect.width).toBeGreaterThanOrEqual(((BASE_FONT_CQW * TILE_WIDTH_EMS) / 100) * scale - 1e-9);
         }
       }
       // Narrow frame, everything on: the figures use more than one row.
-      const narrow = buildOverlay(controls({ enabled: everything, scale: 1.5 }), timeline, 0.5625).template;
+      const narrow = buildOverlay(controls({ presetId: 'route-inset', enabled: everything, scale: 1.5 }), timeline, 0.5625).template;
       const rows = new Set(narrow.components.filter((c) => c.type === 'text').map((c) => c.rect.y));
       expect(rows.size).toBeGreaterThan(1);
+    });
+
+    it('keeps the metric strip to one row while its type stays readable, and wraps only past that (TD-059)', () => {
+      const timeline = buildOverlayTimeline(full());
+      const keys = overlayCatalog(timeline)
+        .filter((entry) => entry.kind === 'metric' || entry.kind === 'sensor')
+        .map((entry) => entry.key);
+      for (const scale of [0.75, 1, 1.5]) {
+        for (const aspect of [0.5625, 1, 16 / 9]) {
+          const holds = metricStripCapacity(scale, aspect, false);
+          for (const count of [holds, holds + 1]) {
+            if (count > keys.length) continue;
+            const enabled = Object.fromEntries(keys.map((key, i) => [key, i < count]));
+            const { template } = buildOverlay(controls({ presetId: 'metric-strip', scale, enabled: { ...enabled, route: false, progress: false } }), timeline, aspect);
+            const tiles = template.components.filter((c) => c.type === 'text' || c.type === 'gauge');
+            expect(tiles).toHaveLength(count);
+            const rows = new Set(tiles.map((tile) => tile.rect.y)).size;
+            expect(rows, `${count} at ${scale}, ${aspect}`).toBe(count > holds ? 2 : 1);
+            for (const tile of tiles) {
+              const type = tile.style.fontScale ?? scale;
+              // Never below the floor, and never clipped: the tile is as wide as its type needs.
+              expect(type).toBeGreaterThanOrEqual(Math.min(scale, MIN_STRIP_TYPE) - 1e-9);
+              expect(tile.rect.width).toBeGreaterThanOrEqual(((BASE_FONT_CQW * TILE_WIDTH_EMS) / 100) * type - 1e-9);
+            }
+            // Tiles stand apart: no two in a row touch.
+            const row = tiles.filter((tile) => tile.rect.y === tiles[0]!.rect.y).sort((x, y) => x.rect.x - y.rect.x);
+            for (let i = 1; i < row.length; i += 1) {
+              expect(row[i]!.rect.x).toBeGreaterThan(row[i - 1]!.rect.x + row[i - 1]!.rect.width);
+            }
+          }
+        }
+      }
+    });
+
+    it('docks the strip\'s route as a square no taller than its figures (TD-059)', () => {
+      const timeline = buildOverlayTimeline(full());
+      const { template } = buildOverlay(controls({ presetId: 'metric-strip', scale: 1.5 }), timeline, 16 / 9);
+      const route = template.components.find((c) => c.type === 'routeInset')!;
+      const tile = template.components.find((c) => c.type === 'text')!;
+      expect(route.rect.height).toBeCloseTo(tile.rect.height, 6);
+      expect(route.rect.width).toBeLessThan(0.15);
     });
 
     it('sizes the type to the tile, so nothing clips, at every size and aspect', () => {

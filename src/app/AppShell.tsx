@@ -43,8 +43,12 @@ export function AppShell() {
         {/* AV-010: the brand is the way home, so there is no Home nav item. */}
         <div className="shell__lead">
           <h1 className="shell__title">
-            <Link className="shell__brand" to={ROUTES.home}>
-              OpenTrack Viewer
+            {/*
+              On a phone the brand shortens to the product's short name, so the
+              header holds one line; the link keeps its full name throughout.
+            */}
+            <Link className="shell__brand" to={ROUTES.home} aria-label="OpenTrack Viewer">
+              OpenTrack<span className="shell__brand-rest"> Viewer</span>
             </Link>
           </h1>
 
@@ -63,7 +67,7 @@ export function AppShell() {
             activity state, so the control would act on nothing.
           */}
           {!isHome && activity && (
-            <button type="button" className="button" onClick={clear}>
+            <button type="button" className="button shell__close" onClick={clear}>
               Close activity
             </button>
           )}

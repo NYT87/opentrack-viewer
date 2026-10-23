@@ -244,3 +244,35 @@ describe('buildOverlayTimeline (AV-1003)', () => {
     expect(buildOverlayTimeline(undefined).hasRoute).toBe(false);
   });
 });
+
+describe('how the video is laid against the activity (TD-059)', () => {
+  const ride = makeActivity(
+    Array.from({ length: 61 }, (_, i) => ({ lat: 0, lon: i * 0.0001, time: new Date(Date.UTC(2024, 0, 1, 10, 0, i)) })),
+  );
+
+  it('says it used the camera clock, and where the video falls in the activity', () => {
+    const timeline = buildOverlayTimeline(ride, {
+      video: { durationSeconds: 20, start: new Date(Date.UTC(2024, 0, 1, 10, 0, 30)) },
+    });
+    expect(timeline.alignment).toMatchObject({
+      anchoredBy: 'videoClock',
+      anchorSeconds: 30,
+      activitySpanSeconds: 60,
+      videoStartInActivity: 30,
+      videoEndInActivity: 50,
+      overlaps: true,
+    });
+  });
+
+  it('says it fell back to the activity start for a video with no clock, and the offset moves it', () => {
+    const timeline = buildOverlayTimeline(ride, { video: { durationSeconds: 20 }, offsetSeconds: -10 });
+    expect(timeline.alignment).toMatchObject({ anchoredBy: 'activityStart', videoStartInActivity: 10, videoEndInActivity: 30 });
+  });
+
+  it('knows when the two do not overlap at all', () => {
+    const timeline = buildOverlayTimeline(ride, {
+      video: { durationSeconds: 20, start: new Date(Date.UTC(2024, 0, 1, 12, 0, 0)) },
+    });
+    expect(timeline.alignment?.overlaps).toBe(false);
+  });
+});

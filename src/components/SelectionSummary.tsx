@@ -15,6 +15,8 @@ export interface SelectionSummaryProps {
    * short selection reads the same way as the charts above it.
    */
   metric?: PerformanceMetric;
+  /** AV-512. Clears the selection; the button sits at the end of the row. */
+  onReset?: () => void;
 }
 
 /**
@@ -34,10 +36,17 @@ export function SelectionSummary({
   totalPoints,
   units,
   metric,
+  onReset,
 }: SelectionSummaryProps) {
   const stats = buildSummaryStats(selection, units, metric).filter((stat) => SHOWN.has(stat.key));
   const points = selection.derived?.pointCount ?? selection.points.length;
 
+  /*
+   * TD-056. One row of the sticky chart readout rather than a panel inserted
+   * above the charts: selecting no longer pushes the chart just used down the
+   * page, and the section's figures and the way back out stay on screen while
+   * the charts scroll under them.
+   */
   return (
     <section className="selection-summary" aria-label="Selected section summary">
       <header className="selection-summary__header">
@@ -45,9 +54,17 @@ export function SelectionSummary({
         <p className="selection-summary__scope">
           {points} of {totalPoints} points
         </p>
+        {/* AV-512: said where the narrowed view is, not left for the reader to infer. */}
+        <p className="selection-summary__note">Your file is unchanged.</p>
       </header>
 
-      <StatGrid stats={stats} />
+      <StatGrid stats={stats} variant="inline" />
+
+      {onReset && (
+        <button type="button" className="button selection-summary__reset" onClick={onReset}>
+          Reset View
+        </button>
+      )}
     </section>
   );
 }

@@ -42,6 +42,15 @@ export function buildSummaryStats(
   // Pace is a running convention; speed is meaningful for any movement. Which
   // one appears is the sport's answer unless the sport had none (AV-908).
   const usePace = metric === 'pace';
+  const movingAverage = usePace
+    ? derived?.averageMovingPaceSecondsPerKm !== undefined
+    : derived?.averageMovingSpeedMetersPerSecond !== undefined;
+  // A start and end in the same minute (a short section) would read as the
+  // same time; seconds tell them apart.
+  const start = derived?.startTime;
+  const end = derived?.endTime;
+  const seconds =
+    start instanceof Date && end instanceof Date && Math.floor(start.getTime() / 60_000) === Math.floor(end.getTime() / 60_000);
   const stats: Stat[] = [
     {
       key: 'distance',
@@ -64,13 +73,20 @@ export function buildSummaryStats(
     {
       /*
        * The overview's primary performance metric is sport-aware: runners read
-       * a workout in minutes per kilometre, riders in kilometres per hour. Only
-       * one is shown, because every stat in this grid carries equal weight —
-       * showing both would make both primary.
+       * a workout in minutes per kilometre, riders in kilometres per hour.
+       *
+       * TD-058. Over *moving* time where there is one, and labelled so: that is
+       * the average a watch or a training log shows, and the elapsed one read
+       * as a contradiction of the pace chart beneath it ("60:19 /mi" over a
+       * chart at 8:02). The elapsed average follows in the grid, labelled too.
        */
       ...(usePace
-        ? { key: 'primary', label: 'Avg pace', value: formatPace(derived?.averagePaceSecondsPerKm, units) }
-        : { key: 'primary', label: 'Avg speed', value: formatSpeed(derived?.averageSpeedMetersPerSecond, units) }),
+        ? movingAverage
+          ? { key: 'primary', label: 'Avg pace (moving)', value: formatPace(derived?.averageMovingPaceSecondsPerKm, units) }
+          : { key: 'primary', label: 'Avg pace', value: formatPace(derived?.averagePaceSecondsPerKm, units) }
+        : movingAverage
+          ? { key: 'primary', label: 'Avg speed (moving)', value: formatSpeed(derived?.averageMovingSpeedMetersPerSecond, units) }
+          : { key: 'primary', label: 'Avg speed', value: formatSpeed(derived?.averageSpeedMetersPerSecond, units) }),
       missingReason: !(activity.streams.hasLocation && activity.streams.hasTime)
         ? 'Needs distance and timestamps'
         : /*
@@ -83,6 +99,14 @@ export function buildSummaryStats(
           ? 'No distance covered'
           : undefined,
     },
+    // TD-058. The elapsed average beside the moving one, never instead of it.
+    ...(movingAverage
+      ? [
+          usePace
+            ? { key: 'primaryElapsed', label: 'Avg pace (elapsed)', value: formatPace(derived?.averagePaceSecondsPerKm, units) }
+            : { key: 'primaryElapsed', label: 'Avg speed (elapsed)', value: formatSpeed(derived?.averageSpeedMetersPerSecond, units) },
+        ]
+      : []),
     {
       key: 'elevationGain',
       label: 'Elevation gain',
@@ -98,13 +122,13 @@ export function buildSummaryStats(
     {
       key: 'start',
       label: 'Start',
-      value: formatDateTime(derived?.startTime),
+      value: formatDateTime(start, { seconds }),
       missingReason: activity.streams.hasTime ? undefined : 'No timestamps',
     },
     {
       key: 'end',
       label: 'End',
-      value: formatDateTime(derived?.endTime),
+      value: formatDateTime(end, { seconds }),
       missingReason: activity.streams.hasTime ? undefined : 'No timestamps',
     },
     { key: 'points', label: 'Points', value: String(derived?.pointCount ?? activity.points.length) },

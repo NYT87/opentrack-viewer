@@ -165,3 +165,11 @@ describe('drawing the overlay on a canvas (AV-1006)', () => {
     expect(texts(drawn)).toEqual(expect.arrayContaining(['ACCELERATION', '5 m/s²', 'POWER', '200 W']));
   });
 });
+
+describe('figures on a clear background (TD-059)', () => {
+  it('draws the same halo under the type as the preview, below the halo opacity', async () => {
+    const { needsHalo, HALO_BELOW_OPACITY } = await import('../template');
+    expect(needsHalo({ backgroundOpacity: 0 })).toBe(true);
+    expect(needsHalo({ backgroundOpacity: HALO_BELOW_OPACITY })).toBe(false);
+  });
+});

@@ -40,7 +40,7 @@ export const OVERLAY_PRESETS: readonly {
   {
     id: 'metric-strip',
     name: 'Metric strip',
-    description: 'A full-width strip of figures along one edge.',
+    description: 'One row of figures along an edge; the more are on, the smaller each is.',
   },
 ];
 
@@ -145,6 +145,10 @@ export function isEntryEnabled(entry: OverlayCatalogEntry, controls: OverlayCont
 // Placement
 
 const MARGIN = 0.02;
+/** Between neighbouring tiles, in frame widths. */
+const TILE_GAP = 0.004;
+/** The smallest type, as a share of the base, a metric strip shrinks its figures to. */
+export const MIN_STRIP_TYPE = 0.6;
 
 /**
  * Type is sized in frame widths (`2.2cqw` at scale 1, see `OverlayLayer`), and
@@ -165,6 +169,26 @@ export const TILE_HEIGHT_EMS = 3.2;
  */
 export const TILE_WIDTH_EMS = 8.2;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+/** A figure tile's height, in frame heights, and width, in frame widths, at this size. */
+const tileHeight = (scale: number, frameAspect: number) => clamp(0.075 * scale * frameAspect, 0.02, 0.2);
+const tileWidth = (scale: number) => clamp(((BASE_FONT_CQW * TILE_WIDTH_EMS) / 100) * scale, 0.05, 0.3);
+/** The metric strip's route: a square as tall as its tiles. */
+const stripRouteWidth = (scale: number, frameAspect: number) => tileHeight(scale, frameAspect) / frameAspect;
+
+/**
+ * TD-059. How many figures the metric strip holds in one row at this size
+ * before its type would go below MIN_STRIP_TYPE: past it, they wrap, and the
+ * controls say so.
+ */
+export function metricStripCapacity(scale: number, frameAspect: number, route: boolean): number {
+  const size = clamp(scale, SCALE_RANGE.min, SCALE_RANGE.max);
+  const aspect = frameAspect > 0 ? frameAspect : 16 / 9;
+  const room = route ? 1 - stripRouteWidth(size, aspect) - 3 * MARGIN : 1 - 2 * MARGIN;
+  const full = tileWidth(size);
+  const floor = Math.min(full, (full * MIN_STRIP_TYPE) / size);
+  return Math.max(1, Math.floor((room + TILE_GAP) / (floor + TILE_GAP)));
+}
 
 interface PlaceOptions {
   position: OverlayPosition;
@@ -199,9 +223,9 @@ function placeEntries(
   { position, scale, frameAspect }: PlaceOptions,
 ): Map<string, Placed> {
   const rects = new Map<string, Placed>();
-  const tileH = clamp(0.075 * scale * frameAspect, 0.02, 0.2);
+  const tileH = tileHeight(scale, frameAspect);
   // Width in frame widths, from the em budget: type is sized in frame widths too.
-  const tileW = clamp(((BASE_FONT_CQW * TILE_WIDTH_EMS) / 100) * scale, 0.05, 0.3);
+  const tileW = tileWidth(scale);
   const progressH = clamp(0.012 * frameAspect, 0.006, 0.02);
   const toY = (distanceFromEdge: number, height: number) =>
     position === 'bottom' ? 1 - distanceFromEdge - height : distanceFromEdge;
@@ -240,27 +264,58 @@ function placeEntries(
    * Tiles keep the width a value needs ("100.0 km/h" at this type size) and
    * wrap onto further rows rather than squeezing into one — a squeezed tile
    * clips its text. Only if the rows would not fit the frame's height do they
-   * get shorter, which is the last resort rather than the first.
+   * get shorter, which is the last resort rather than the first. Tiles stand a
+   * hair apart, so rounded corners never meet in a notch of video.
    */
   const flowRows = (x0: number, room: number) => {
-    const perRow = Math.max(1, Math.floor(room / tileW));
+    const perRow = Math.max(1, Math.floor((room + TILE_GAP) / (tileW + TILE_GAP)));
     const rows = Math.max(1, Math.ceil(tiles.length / perRow));
-    const height = Math.min(tileH, avail / rows);
+    const gapH = TILE_GAP * frameAspect;
+    const height = Math.min(tileH, (avail - gapH * (rows - 1)) / rows);
     tiles.forEach((tile, index) =>
       placeTile(
         tile.key,
-        x0 + (index % perRow) * tileW,
-        edge + Math.floor(index / perRow) * height,
+        x0 + (index % perRow) * (tileW + TILE_GAP),
+        edge + Math.floor(index / perRow) * (height + gapH),
         tileW,
         height,
       ),
     );
   };
 
+  /**
+   * TD-059. A strip stays one row while its type can: its tiles share the
+   * edge, the type smaller to fit a narrower tile, down to a floor
+   * (MIN_STRIP_TYPE of the base). Past that floor a smaller figure is not a
+   * figure any more, so the tiles keep the floor's width and wrap, and the
+   * controls say the strip is full (`metricStripCapacity`).
+   */
+  const stripRow = (x0: number, room: number) => {
+    const count = Math.max(1, tiles.length);
+    const floorW = (tileW * MIN_STRIP_TYPE) / scale;
+    const shared = (room - TILE_GAP * (count - 1)) / count;
+    const width = Math.min(tileW, Math.max(shared, Math.min(floorW, tileW)));
+    const perRow = Math.max(1, Math.floor((room + TILE_GAP) / (width + TILE_GAP)));
+    const gapH = TILE_GAP * frameAspect;
+    tiles.forEach((tile, index) => {
+      placeTile(
+        tile.key,
+        x0 + (index % perRow) * (width + TILE_GAP),
+        edge + Math.floor(index / perRow) * (tileH + gapH),
+        width,
+        tileH,
+      );
+      const placed = rects.get(tile.key);
+      if (placed && width < tileW) placed.fontScale = Math.min(placed.fontScale ?? scale, (scale * width) / tileW);
+    });
+  };
+
   if (presetId === 'metric-strip') {
-    // The route takes the far end of the strip's edge, so rows never run under it.
-    const box = square(0.18 * scale);
-    flowRows(MARGIN, route ? 1 - box.w - 3 * MARGIN : 1 - 2 * MARGIN);
+    // The route takes the far end of the strip's edge, so rows never run under
+    // it: a square as tall as a tile, docked beside the figures, not a third of
+    // the strip's width.
+    const box = square(stripRouteWidth(scale, frameAspect));
+    stripRow(MARGIN, route ? 1 - box.w - 3 * MARGIN : 1 - 2 * MARGIN);
     if (route) place('route', 1 - MARGIN - box.w, edge, box.w, box.h);
   } else if (presetId === 'compact-hud') {
     // A column as tall as the frame allows, then another beside it: a long
@@ -270,16 +325,17 @@ function placeEntries(
     const room = route ? 1 - box.w - 3 * MARGIN : 1 - 2 * MARGIN;
     const maxColumns = Math.max(1, Math.floor(room / columnW));
     const perColumn = Math.max(
-      Math.floor(avail / tileH),
+      Math.floor((avail + TILE_GAP * frameAspect) / (tileH + TILE_GAP * frameAspect)),
       Math.ceil(tiles.length / maxColumns),
       1,
     );
-    const height = Math.min(tileH, avail / perColumn);
+    const gapH = TILE_GAP * frameAspect;
+    const height = Math.min(tileH, (avail - gapH * (perColumn - 1)) / perColumn);
     tiles.forEach((tile, index) =>
       placeTile(
         tile.key,
-        MARGIN + Math.floor(index / perColumn) * columnW,
-        edge + (index % perColumn) * height,
+        MARGIN + Math.floor(index / perColumn) * (columnW + TILE_GAP),
+        edge + (index % perColumn) * (height + gapH),
         columnW,
         height,
       ),

@@ -18,7 +18,7 @@ async function openOverlays(page: Page) {
 
 async function chooseFiles(page: Page, ridePath = RIDE_PATH) {
   await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video' })).toContainText('overlay-test-clip.mp4', {
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
     timeout: 30_000,
   });
   await page.getByTestId('overlay-activity-input').setInputFiles(ridePath);
@@ -132,7 +132,7 @@ test('stays aligned with the picture through real playback, and stops where the 
   expect(Math.abs(last - ride.speedKmh(await videoTime(page)))).toBeLessThan(0.1);
 });
 
-test('an offset shifts the telemetry against the picture, and a gap in the telemetry is said, not filled', async ({
+test('where the video starts shifts the telemetry against the picture, and a gap in the telemetry is said, not filled', async ({
   page,
 }) => {
   await openOverlays(page);
@@ -140,26 +140,46 @@ test('an offset shifts the telemetry against the picture, and a gap in the telem
   await scrubTo(page, 5);
   await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(5).toFixed(1)} km/h`);
 
-  // Delay the telemetry by two seconds: at 5 s of video, the ride as it was at 3 s.
-  const offset = page.getByRole('group', { name: 'Telemetry offset' });
-  await offset.getByRole('button', { name: '+1 s' }).click();
-  await offset.getByRole('button', { name: '+1 s' }).click();
+  // Start the video two seconds earlier in the ride: at 5 s of video, the ride as it was at 3 s.
+  const start = page.getByRole('group', { name: 'Video start' });
+  await start.getByRole('button', { name: '−1 s, earlier' }).click();
+  await start.getByRole('button', { name: '−1 s, earlier' }).click();
   await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(3).toFixed(1)} km/h`);
   await expect(item(page, 'heartRate')).toContainText(`${ride.heartRate(3)} bpm`);
 
-  // Typed offsets work too, and negative ones bring the ride forward.
-  await offset.getByRole('spinbutton').fill('-1.5');
+  // Typed starts work too, and a later start brings the ride forward.
+  const field = start.getByRole('textbox', { name: 'Video starts at' });
+  await field.fill('1.5');
   await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(6.5).toFixed(1)} km/h`);
 
-  // Far enough that the ride has not begun: nothing is drawn, and the page says why.
-  await offset.getByRole('spinbutton').fill('30');
+  // Far enough before the ride that it has not begun: nothing is drawn, and the page says why.
+  await field.fill('-30');
   await expect(layer(page).locator('.overlay-item')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Preview' }).getByRole('status')).toContainText(
     /no telemetry for this moment/i,
   );
 
-  await offset.getByRole('button', { name: 'Reset' }).click();
+  await start.getByRole('button', { name: /^Back to the/ }).click();
   await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(5).toFixed(1)} km/h`);
+});
+
+test('the bar under the picture slides the video along the ride when dragged', async ({ page }) => {
+  await openOverlays(page);
+  await chooseFiles(page);
+  const bar = page.getByRole('region', { name: 'Preview' }).getByRole('slider', {
+    name: 'Where the video starts in the activity',
+  });
+  await bar.scrollIntoViewIfNeeded();
+  await expect(bar).toBeInViewport();
+  const field = page.getByRole('textbox', { name: 'Video starts at' });
+  const before = await field.inputValue();
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height - 4);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height - 4, { steps: 5 });
+  await page.mouse.up();
+  await expect(field).not.toHaveValue(before);
+  await expect(bar).toHaveAttribute('aria-valuetext', /^Video at /);
 });
 
 test('templates and components change what is drawn, and the session remembers them', async ({ page }) => {
@@ -214,7 +234,7 @@ test('stays responsive with a four-hour activity, and draws its route thinned to
 
   await openOverlays(page);
   await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video' })).toContainText('overlay-test-clip.mp4', {
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
     timeout: 30_000,
   });
   await page.getByTestId('overlay-activity-input').setInputFiles(longRide);
@@ -256,4 +276,25 @@ test('stays responsive with a four-hour activity, and draws its route thinned to
     return worst;
   });
   expect(longest).toBeLessThan(500);
+});
+
+test('keeps the picture in view while the controls and exports beside it scroll (TD-059)', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openOverlays(page);
+  await chooseFiles(page);
+
+  const frame = page.locator('.overlay-preview__frame');
+  const side = page.locator('.overlay-workspace__side');
+  // Side by side: the controls are to the right of the picture, not below it.
+  const frameBox = (await frame.boundingBox())!;
+  const sideBox = (await side.boundingBox())!;
+  expect(sideBox.x).toBeGreaterThan(frameBox.x + frameBox.width - 1);
+
+  // Scrolled down to the exports, the picture is still on screen.
+  await page.getByRole('region', { name: 'Export overlay' }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('region', { name: 'Export overlay' })).toBeInViewport();
+  await expect(frame).toBeInViewport();
+
+  // And it says how the two were lined up.
+  await expect(page.getByRole('region', { name: 'Preview' })).toContainText(/Lined up/);
 });

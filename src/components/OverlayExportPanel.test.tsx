@@ -104,6 +104,17 @@ describe('the export panel (AV-1006)', () => {
     expect(within(panel()).getByLabelText('Frame rate')).toHaveValue('25');
   });
 
+  it('offers the NTSC rates, and starts a 29.97 fps clip at 29.97, not at a drifting 30 (TD-059)', () => {
+    setup({ video: { ...video, timing: { durationSeconds: 10, frameIntervalSeconds: 1001 / 30000 } } });
+    const select = within(panel()).getByLabelText('Frame rate') as HTMLSelectElement;
+    expect(select.selectedOptions[0]!.textContent).toBe('29.97 fps');
+    expect([...select.options].map((option) => option.textContent)).toEqual(
+      expect.arrayContaining(['23.976 fps', '29.97 fps', '59.94 fps']),
+    );
+    // Ten seconds at 30000/1001 is 300 frames, rounded up.
+    expect(screen.getByTestId('export-plan')).toHaveTextContent(/300 frames/);
+  });
+
   it('re-plans when the frame rate or size changes', async () => {
     setup();
     await userEvent.selectOptions(within(panel()).getByLabelText('Frame rate'), '60');
@@ -399,5 +410,13 @@ describe('the export panel (AV-1006)', () => {
   it('draws nothing for an activity that cannot be lined up with the video', () => {
     const { container } = setup({ activity: makeActivity([{ lat: 1, lon: 1 }, { lat: 2, lon: 2 }]) });
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('an export that would draw nothing (TD-059)', () => {
+  it('waits, and says why, when the activity covers none of the video', () => {
+    setup({ video: { ...video, timing: { durationSeconds: 10, frameIntervalSeconds: 1 / 30, start: new Date('2001-01-01T00:00:00Z') } } });
+    expect(within(panel()).getByText(/covers none of this video, so nothing would be drawn/)).toBeInTheDocument();
+    expect(within(panel()).getByRole('button', { name: 'Export PNG sequence' })).toBeDisabled();
   });
 });

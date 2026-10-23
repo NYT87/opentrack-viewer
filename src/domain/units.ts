@@ -29,6 +29,25 @@ export function formatDistance(meters: number | undefined, units: UnitSystem = '
   return value < 1000 ? `${Math.round(value)} m` : `${(value / 1000).toFixed(2)} km`;
 }
 
+/**
+ * A distance written in the unit a whole scale is written in, so an axis reads
+ * "0.00 km … 1.20 km" rather than "0 m … 1.20 km": the scale's largest value
+ * picks the unit, and every label on it follows.
+ */
+export function formatDistanceOnScale(
+  meters: number,
+  scaleMaxMeters: number,
+  units: UnitSystem = 'metric',
+): string {
+  if (!Number.isFinite(meters)) return MISSING;
+  if (units === 'imperial') {
+    return scaleMaxMeters / METERS_PER_MILE < 0.1
+      ? `${Math.round(meters / METERS_PER_FOOT)} ft`
+      : `${(meters / METERS_PER_MILE).toFixed(2)} mi`;
+  }
+  return scaleMaxMeters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(2)} km`;
+}
+
 export function formatElevation(meters: number | undefined, units: UnitSystem = 'metric'): string {
   if (!Number.isFinite(meters)) return MISSING;
   const value = meters as number;
@@ -49,11 +68,15 @@ export function formatDuration(seconds: number | undefined): string {
 }
 
 /** Local-time rendering; the file's own timestamps are never sent anywhere. */
-export function formatDateTime(date: Date | undefined): string {
+export function formatDateTime(
+  date: Date | undefined,
+  /** Seconds, for two times that would otherwise read the same (a short section). */
+  { seconds = false }: { seconds?: boolean } = {},
+): string {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return MISSING;
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
-    timeStyle: 'short',
+    timeStyle: seconds ? 'medium' : 'short',
   }).format(date);
 }
 

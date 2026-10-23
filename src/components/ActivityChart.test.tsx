@@ -106,7 +106,7 @@ describe('ActivityChart (AV-503)', () => {
     render(<ActivityChart series={indexSeries} />);
 
     expect(indexSeries.xAxis).toBe('index');
-    expect(screen.getByText(/no distance or time available/)).toBeInTheDocument();
+    expect(screen.getByText(/x-axis: point index \(no distance or time available\)/)).toBeInTheDocument();
   });
 
   it('keeps axis labels distinct on a narrow elevation range', () => {
@@ -461,5 +461,136 @@ describe('ActivityChart (AV-503)', () => {
       ?.split('L').length;
 
     expect(commands).toBeLessThan(1000);
+  });
+});
+
+describe('ActivityChart from the keyboard (TD-056)', () => {
+  const svg = () => screen.getByTestId('elevation-chart-svg');
+
+  it('is a focusable slider named for its series, described with its range and keys', () => {
+    render(<ActivityChart series={elevationSeries} />);
+
+    expect(screen.getByRole('slider', { name: 'Elevation chart' })).toBe(svg());
+    expect(svg()).toHaveAttribute('tabindex', '0');
+    expect(svg()).toHaveAccessibleDescription(/Elevation from 100 m to 150 m.*Arrow keys move along the activity/);
+    expect(svg()).toHaveAttribute('aria-valuetext', 'No point selected');
+  });
+
+  it('moves the shared cursor with the arrow keys, Home and End', () => {
+    const onHoverPoint = vi.fn();
+    const { rerender } = render(<ActivityChart series={elevationSeries} onHoverPoint={onHoverPoint} />);
+
+    // From no cursor, a step forward lands on the first sample.
+    fireEvent.keyDown(svg(), { key: 'ArrowRight' });
+    expect(onHoverPoint).toHaveBeenLastCalledWith(0);
+
+    rerender(<ActivityChart series={elevationSeries} onHoverPoint={onHoverPoint} activePointIndex={0} />);
+    fireEvent.keyDown(svg(), { key: 'ArrowRight' });
+    expect(onHoverPoint).toHaveBeenLastCalledWith(1);
+    fireEvent.keyDown(svg(), { key: 'End' });
+    expect(onHoverPoint).toHaveBeenLastCalledWith(2);
+    fireEvent.keyDown(svg(), { key: 'Home' });
+    expect(onHoverPoint).toHaveBeenLastCalledWith(0);
+  });
+
+  it('reads back the value at the cursor', () => {
+    render(<ActivityChart series={elevationSeries} activePointIndex={1} />);
+    // A sentence, so the two numbers cannot be confused.
+    expect(svg().getAttribute('aria-valuetext')).toMatch(/^at [\d.]+ km, elevation 150 m$/);
+  });
+
+  it('marks a section with Shift and the arrows, and keeps it with Enter', () => {
+    const onSelectRange = vi.fn();
+    const onHoverPoint = vi.fn();
+    const { rerender } = render(
+      <ActivityChart series={elevationSeries} activePointIndex={0} onHoverPoint={onHoverPoint} onSelectRange={onSelectRange} />,
+    );
+
+    fireEvent.keyDown(svg(), { key: 'ArrowRight', shiftKey: true });
+    rerender(
+      <ActivityChart series={elevationSeries} activePointIndex={1} onHoverPoint={onHoverPoint} onSelectRange={onSelectRange} />,
+    );
+    fireEvent.keyDown(svg(), { key: 'ArrowRight', shiftKey: true });
+    rerender(
+      <ActivityChart series={elevationSeries} activePointIndex={2} onHoverPoint={onHoverPoint} onSelectRange={onSelectRange} />,
+    );
+    // The band is drawn while it is being marked, and said in the value.
+    expect(screen.getByTestId('chart-selection')).toBeInTheDocument();
+    // In the axis's own unit, as the axis is written.
+    expect(svg().getAttribute('aria-valuetext')).toMatch(/marking a section from 0\.00 km/);
+
+    fireEvent.keyDown(svg(), { key: 'Enter' });
+    const first = elevationSeries.samples[0]!.x;
+    const last = elevationSeries.samples[2]!.x;
+    expect(onSelectRange).toHaveBeenCalledWith({ start: first, end: last });
+    expect(screen.queryByTestId('chart-selection')).not.toBeInTheDocument();
+  });
+
+  it('selects the point at the cursor with Enter, and lets go with Escape', () => {
+    const onSelectPoint = vi.fn();
+    const onClear = vi.fn();
+    const onSelectRange = vi.fn();
+    render(
+      <ActivityChart
+        series={elevationSeries}
+        activePointIndex={1}
+        onSelectPoint={onSelectPoint}
+        onSelectRange={onSelectRange}
+        onClear={onClear}
+      />,
+    );
+
+    fireEvent.keyDown(svg(), { key: 'Enter' });
+    expect(onSelectPoint).toHaveBeenCalledWith(1);
+
+    // Escape first drops a section still being marked, and only then clears.
+    fireEvent.keyDown(svg(), { key: 'ArrowRight', shiftKey: true });
+    fireEvent.keyDown(svg(), { key: 'Escape' });
+    expect(onClear).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('chart-selection')).not.toBeInTheDocument();
+    fireEvent.keyDown(svg(), { key: 'Escape' });
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(onSelectRange).not.toHaveBeenCalled();
+  });
+
+  it('leaves keys it does not use to the page', () => {
+    render(<ActivityChart series={elevationSeries} />);
+    // fireEvent returns false when the default was prevented.
+    expect(fireEvent.keyDown(svg(), { key: 'Tab' })).toBe(true);
+    expect(fireEvent.keyDown(svg(), { key: 'ArrowRight' })).toBe(false);
+  });
+});
+
+describe('ActivityChart on a shared x extent (TD-056)', () => {
+  it('draws a series that starts late where it starts, not stretched to the left edge', () => {
+    const own = render(<ActivityChart series={elevationSeries} />);
+    const startOwn = Number(/^M([\d.]+)/.exec(own.container.querySelector('.chart__line')!.getAttribute('d')!)![1]);
+    own.unmount();
+
+    // The panel's extent starts well before this series does.
+    const span = elevationSeries.xMax - elevationSeries.xMin;
+    render(<ActivityChart series={elevationSeries} xDomain={{ min: elevationSeries.xMin - span, max: elevationSeries.xMax }} />);
+    const startShared = Number(/^M([\d.]+)/.exec(document.querySelector('.chart__line')!.getAttribute('d')!)![1]);
+
+    expect(startShared).toBeGreaterThan(startOwn + 100);
+    expect(screen.getByTestId('elevation-chart-svg')).toHaveAttribute('aria-valuemin', String(elevationSeries.xMin - span));
+  });
+});
+
+describe('a flat series (TD-056)', () => {
+  it('is drawn as a level line, not filled down to the baseline as a block', () => {
+    const flat = buildSeries(
+      makeActivity([
+        { lat: 0, lon: 0.0001, elevationMeters: 100 },
+        { lat: 0.5, lon: 0.0001, elevationMeters: 100 },
+        { lat: 1, lon: 0.0001, elevationMeters: 100 },
+      ]),
+      'elevation',
+      'distance',
+    );
+    render(<ActivityChart series={flat} />);
+    const svg = screen.getByTestId('elevation-chart-svg');
+    expect(svg.querySelector('.chart__line')).not.toBeNull();
+    expect(svg.querySelector('.chart__area')).toBeNull();
   });
 });

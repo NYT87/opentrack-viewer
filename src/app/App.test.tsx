@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FakeMap, latestMap, resetMapLibreMock } from '../test/helpers/maplibreMock';
 
 vi.mock('maplibre-gl', async () => {
   const { FakeMap, setWorkerUrl } = await import('../test/helpers/maplibreMock');
   return {
-    default: { Map: FakeMap, NavigationControl: class {}, setWorkerUrl },
+    default: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class { setUnit() {} }, setWorkerUrl },
     Map: FakeMap,
-    NavigationControl: class {},
+    NavigationControl: class {}, ScaleControl: class { setUnit() {} },
     setWorkerUrl,
   };
 });
@@ -122,13 +122,18 @@ describe('App vertical slice (AV-304)', () => {
     await waitFor(() => expect(screen.queryByTestId('map-placeholder')).not.toBeInTheDocument());
   });
 
-  it('shows the placeholder, not a map, for an activity with no route', async () => {
+  it('says once that there is no route, rather than holding a map box open for it', async () => {
     render(<App />);
 
     await loadFixture('no-location.gpx');
 
     expect(FakeMap.instances).toHaveLength(0);
-    expect(screen.getByTestId('map-placeholder')).toHaveTextContent(/no route to display/i);
+    // No map section and no map placeholder; one sentence in the overview.
+    expect(screen.queryByRole('region', { name: 'Route map' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-placeholder')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Activity overview' })).getByTestId('no-route-note')).toHaveTextContent(
+      /no GPS coordinates/,
+    );
     // The activity is still usable: stats and chart come from the other streams.
     expect(screen.getByTestId('elevation-chart-svg')).toBeInTheDocument();
   });
@@ -309,22 +314,21 @@ describe('App vertical slice (AV-304)', () => {
     expect(useInteractionStore.getState().chartXAxisMode).toBe('time');
   });
 
-  it('shows the chart empty state for a file without elevation', async () => {
+  it('draws only the charts a file without elevation supports (AV-516)', async () => {
     render(<App />);
 
     await loadFixture('simple-route.gpx');
 
-    // AV-507 explains the absence per chart rather than hiding the panel.
-    expect(screen.getByRole('region', { name: 'Elevation chart' })).toHaveTextContent(
-      /no elevation data/i,
-    );
+    // No elevation and no cadence: those charts are not drawn at all, with no
+    // title and no message standing in for them (TD-028).
+    expect(screen.queryByRole('region', { name: 'Elevation chart' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Cadence chart' })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Activity charts' })).queryByText(/no elevation data|no cadence data|is shown for/i),
+    ).not.toBeInTheDocument();
     // The fixture is a run with distance and time, so pace is charted (AV-505):
     // 111 m every 60 s is 9:00 /km.
     expect(screen.getByRole('region', { name: 'Pace chart' })).toHaveTextContent('9:00 /km');
-    // ...but it carries no cadence, so that chart explains its absence (AV-507).
-    expect(screen.getByRole('region', { name: 'Cadence chart' })).toHaveTextContent(
-      /no cadence data/i,
-    );
   });
 
   it('switches every displayed unit when the unit system changes', async () => {
@@ -365,7 +369,7 @@ describe('App vertical slice (AV-304)', () => {
     await loadFixture('malformed.gpx');
 
     const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent(/could not open this file/i);
+    expect(alert).toHaveTextContent(/could not open malformed\.gpx/i);
     expect(alert).toHaveTextContent('invalid_gpx_xml');
   });
 
@@ -470,5 +474,152 @@ describe('map and chart synchronization (Epic E6)', () => {
 
     expect(useInteractionStore.getState().selectedPointIndex).toBeUndefined();
     expect(useInteractionStore.getState().hoveredPointIndex).toBeUndefined();
+  });
+});
+
+describe('the viewer keeps focus and says what happened (TD-056)', () => {
+  beforeEach(() => {
+    resetMapLibreMock();
+    useActivityStore.getState().clear();
+    window.location.hash = '#/viewer';
+    useInteractionStore.setState({ unitSystem: 'metric', basemapEnabled: false, themeMode: 'system' });
+  });
+
+  const live = () => document.querySelector('.viewer [role="status"][aria-live="polite"]');
+
+  it('moves focus to the activity title when a file opens, and announces it', async () => {
+    render(<App />);
+    await loadFixture('run-with-laps.tcx');
+
+    // Formatted in the reader's locale, so only the sport and year are pinned.
+    const title = screen.getByRole('heading', { level: 2, name: /^Run on .*2024/ });
+    expect(title).toHaveFocus();
+    // The title is the date the file gave, not the raw timestamp TCX stores.
+    expect(title).not.toHaveTextContent('2024-05-01T07:00:00Z');
+    expect(live()).toHaveTextContent(/^Activity opened: distance .+, duration .+\.$/);
+  });
+
+  it('moves focus back to the drop zone when the activity is closed, and says so', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close activity' }));
+    expect(screen.getByRole('button', { name: /^Drop a GPX/ })).toHaveFocus();
+    expect(live()).toHaveTextContent('Activity closed. Choose a file to open another.');
+  });
+
+  it('moves focus into the section the sidebar jumps to', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Activity sections' })).getByRole('button', { name: 'Export' }));
+    expect(document.getElementById('activity-export')).toHaveFocus();
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('omits the charts section, and its link, when the file has nothing to chart (AV-516)', async () => {
+    render(<App />);
+    const bare = new File(
+      [
+        '<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>' +
+          '<trkpt lat="51.5" lon="-0.1"></trkpt><trkpt lat="51.51" lon="-0.1"></trkpt></trkseg></trk></gpx>',
+      ],
+      'bare.gpx',
+      { type: 'application/gpx+xml' },
+    );
+    await userEvent.upload(screen.getByTestId('file-input'), bare);
+    await waitFor(() => expect(useActivityStore.getState().status).toBe('ready'));
+    await settleMap();
+
+    expect(document.getElementById('activity-charts')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Activity charts' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Activity sections' })).queryByRole('button', { name: 'Charts' })).not.toBeInTheDocument();
+  });
+
+  it('opens Settings from the empty state, where it says the basemap can be turned off', async () => {
+    render(<App />);
+    await userEvent.click(within(document.querySelector<HTMLElement>('.empty-state')!).getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('a file dropped on an open activity replaces it (TD-056)', () => {
+  beforeEach(() => {
+    resetMapLibreMock();
+    useActivityStore.getState().clear();
+    window.location.hash = '#/viewer';
+    useInteractionStore.setState({ unitSystem: 'metric', basemapEnabled: false, themeMode: 'system' });
+  });
+
+  const drop = (file: File) => {
+    const main = document.querySelector('main.viewer')!;
+    const dataTransfer = { files: [file], types: ['Files'] };
+    fireEvent.dragOver(main, { dataTransfer });
+    fireEvent.drop(main, { dataTransfer });
+  };
+
+  it('opens the dropped file in place of the one open', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+    expect(useActivityStore.getState().activity?.source.fileName).toBe('route-with-elevation.gpx');
+
+    drop(fixtureFile('run-with-laps.tcx'));
+    await waitFor(() => expect(useActivityStore.getState().activity?.source.fileName).toBe('run-with-laps.tcx'));
+    await settleMap();
+    expect(screen.getByRole('heading', { level: 2, name: /^Run on/ })).toHaveFocus();
+  });
+
+  it('keeps the open activity when the dropped file fails to parse, and says so beside it', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+    const before = useActivityStore.getState().activity;
+
+    drop(fixtureFile('malformed.gpx'));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not open malformed.gpx');
+    expect(screen.getByText('The activity you had open is still open below.')).toBeInTheDocument();
+    // Nothing was replaced: same activity, same page.
+    expect(useActivityStore.getState().activity).toBe(before);
+    expect(useActivityStore.getState().status).toBe('ready');
+    expect(screen.getByRole('region', { name: 'Activity summary' })).toBeInTheDocument();
+
+    await userEvent.click(within(alert).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('refuses a file it cannot read, says so, and keeps the activity', async () => {
+    render(<App />);
+    await loadFixture('route-with-elevation.gpx');
+
+    drop(new File(['hello'], 'notes.txt', { type: 'text/plain' }));
+    expect(document.querySelector('.viewer [role="status"][aria-live="polite"]')).toHaveTextContent(
+      '"notes.txt" is not supported. Choose a GPX, FIT, TCX or KML file.',
+    );
+    expect(useActivityStore.getState().activity?.source.fileName).toBe('route-with-elevation.gpx');
+    // Said on the page too, not only to a screen reader.
+    expect(document.querySelector('.viewer__notice')).toHaveTextContent(
+      /"notes\.txt" is not supported\. .* The open activity is unchanged\./,
+    );
+  });
+});
+
+describe('a file without a route (TD-056)', () => {
+  beforeEach(() => {
+    resetMapLibreMock();
+    useActivityStore.getState().clear();
+    window.location.hash = '#/viewer';
+  });
+
+  it('offers no route tools, and no hint about pointing at a route', async () => {
+    render(<App />);
+    await loadFixture('no-location.gpx');
+
+    expect(screen.queryByRole('button', { name: /route overlay/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /custom track/i })).not.toBeInTheDocument();
+    const readout = screen.getByRole('region', { name: 'Values at the cursor' });
+    expect(readout).toHaveTextContent(/^Point at a chart, or focus one/);
+    expect(readout).not.toHaveTextContent(/route/);
   });
 });

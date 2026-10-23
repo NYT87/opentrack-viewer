@@ -30,6 +30,8 @@ interface BurnedInExportPanelProps {
   probeStorage?: () => Promise<ArchiveStorage>;
   freeSpace?: () => Promise<number | undefined>;
   support?: BurnSupport;
+  /** Told whether a finished file is waiting to be downloaded, so Start over can ask first. */
+  onFinishedChange?: (finished: boolean) => void;
 }
 
 /** What was learned about the video, and for which picture size and file it was asked. */
@@ -86,6 +88,7 @@ export function BurnedInExportPanel({
   probeStorage = probeExportStorage,
   freeSpace = browserFreeSpace,
   support = getBurnSupport(),
+  onFinishedChange,
 }: BurnedInExportPanelProps) {
   const id = useId();
   const [heightChoice, setHeightChoice] = useState<string>(NATIVE);
@@ -182,7 +185,16 @@ export function BurnedInExportPanel({
     [phase],
   );
 
+  const isFinished = phase.status === 'done';
+  useEffect(() => onFinishedChange?.(isFinished), [isFinished, onFinishedChange]);
+
   if (timeline.unavailable) return null;
+
+  /*
+   * TD-059. A video the activity covers none of would export an empty overlay:
+   * blocked like "nothing switched on", with the way out named.
+   */
+  const noOverlap = timeline.alignment?.overlaps === false;
 
   const signature = JSON.stringify([built.template, units, offsetSeconds, outWidth, outHeight]);
   const running = phase.status === 'running';
@@ -197,7 +209,7 @@ export function BurnedInExportPanel({
           fileStorage: storage === 'opfs',
         })
       : undefined;
-  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn;
+  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn || noOverlap;
 
   const begin = () => {
     if (!ready || running || blocked) return;
@@ -260,8 +272,12 @@ export function BurnedInExportPanel({
     );
   };
 
+  const stale =
+    phase.status === 'done' &&
+    (phase.made.signature !== signature || phase.made.activity !== activity || phase.made.file !== video.file);
+
   return (
-    <section className="prose overlay-export" aria-label="Burned-in export">
+    <section className="prose overlay-export overlay-export--burned" aria-label="Export video with the overlay">
       <h3 className="prose__title">Export video with the overlay</h3>
       <p>
         Renders a copy of your video with the overlay drawn into the picture: an MP4 with H.264
@@ -284,9 +300,10 @@ export function BurnedInExportPanel({
       {support.supported && ready && media && source.status === 'ready' && (
         <>
           <div className="overlay-export__settings">
-            <label className="overlay-controls__field" htmlFor={`${id}-size`}>
-              Picture size
+            <div className="overlay-controls__field">
+              <label htmlFor={`${id}-size`}>Picture size</label>
               <select
+                className="select"
                 id={`${id}-size`}
                 value={heightChoice}
                 disabled={running}
@@ -303,23 +320,9 @@ export function BurnedInExportPanel({
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
           </div>
 
-          <p data-testid="burn-plan">
-            {outWidth} × {outHeight}, H.264 at about {(plan.bitrate / 1e6).toFixed(1)} Mbps — roughly{' '}
-            {formatBytes(plan.estimatedBytes)}. Rendering takes roughly{' '}
-            {formatDuration(Math.max(1, plan.estimatedSeconds))} for {formatDuration(durationSeconds)}{' '}
-            of video (about {plan.realtimeMultiple.toFixed(1)}× faster than playing it).
-          </p>
-
-          {readiness && readiness.notes.length > 0 && (
-            <ul aria-label="About this render">
-              {readiness.notes.map((note) => (
-                <li key={note}>{note}</li>
-              ))}
-            </ul>
-          )}
           {readiness && readiness.errors.length > 0 && (
             <div role="alert">
               {readiness.errors.map((error) => (
@@ -327,9 +330,33 @@ export function BurnedInExportPanel({
               ))}
             </div>
           )}
+          {/*
+            The blocker comes first, and the plan only when it can be followed:
+            promising "10x faster than playing it" just above "cannot render"
+            put the reassurance before the refusal.
+          */}
+          {!(readiness && readiness.errors.length > 0) && (
+            <>
+              <p data-testid="burn-plan">
+                {outWidth} × {outHeight}, H.264 at about {(plan.bitrate / 1e6).toFixed(1)} Mbps — roughly{' '}
+                {formatBytes(plan.estimatedBytes)}. Rendering takes roughly{' '}
+                {formatDuration(Math.max(1, plan.estimatedSeconds))} for {formatDuration(durationSeconds)}{' '}
+                of video (about {plan.realtimeMultiple.toFixed(1)}× faster than playing it).
+              </p>
+
+              {readiness && readiness.notes.length > 0 && (
+                <ul aria-label="About this render">
+                  {readiness.notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
           {nothingOn && (
             <p role="status">No component is switched on, so there is nothing to draw.</p>
           )}
+          {noOverlap && <p role="status">The activity covers none of this video, so nothing would be drawn. Change where the video starts, in Sync.</p>}
 
           <p className="video__actions">
             {running ? (
@@ -339,11 +366,12 @@ export function BurnedInExportPanel({
             ) : (
               <button
                 type="button"
-                className="button button--primary"
+                // Secondary: the PNG sequence is the page's one primary action.
+                className="button"
                 onClick={begin}
                 disabled={blocked || storage === undefined}
               >
-                Render video with overlay
+                {stale ? 'Render again' : 'Render video with overlay'}
               </button>
             )}
           </p>
@@ -362,10 +390,12 @@ export function BurnedInExportPanel({
           {formatDuration(durationSeconds)}
         </p>
       )}
-      {phase.status === 'done' &&
-        (phase.made.signature !== signature ||
-          phase.made.activity !== activity ||
-          phase.made.file !== video.file) && (
+      {phase.status === 'running' && (
+        <p className="visually-hidden" role="status">
+          Rendering: {Math.floor(phase.fraction * 4) * 25}% done.
+        </p>
+      )}
+      {stale && (
           <p role="alert">
             This video was rendered with earlier settings, and no longer matches the preview. Render
             again to match it.
@@ -374,7 +404,8 @@ export function BurnedInExportPanel({
       {phase.status === 'done' && (
         <p role="status">
           Done: {formatBytes(phase.bytes)}.{' '}
-          <a className="button button--primary" href={phase.url} download={phase.fileName}>
+          {/* A stale file is still offered, but not as the thing to do next. */}
+          <a className={stale ? 'button' : 'button button--primary'} href={phase.url} download={phase.fileName}>
             Download {phase.fileName}
           </a>
         </p>

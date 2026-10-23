@@ -104,7 +104,8 @@ describe('a lap row highlights its stretch of the route', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Highlight lap 2' }));
 
     expect(useInteractionStore.getState().selectedLapIndex).toBe(1);
-    expect(screen.getByRole('button', { name: 'Stop highlighting lap 2' })).toHaveAttribute(
+    // One name throughout; the state is in aria-pressed alone.
+    expect(screen.getByRole('button', { name: 'Highlight lap 2' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -114,7 +115,7 @@ describe('a lap row highlights its stretch of the route', () => {
     render(<LapsPanel laps={twoLaps} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Highlight lap 1' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Stop highlighting lap 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Highlight lap 1', pressed: true }));
 
     expect(useInteractionStore.getState().selectedLapIndex).toBeUndefined();
   });
@@ -154,7 +155,10 @@ describe('a lap with nothing to highlight offers no control', () => {
     const rows = screen.getAllByRole('row');
     expect(rows[2]).toHaveTextContent('2');
     expect(rows[2]).toHaveTextContent('1.00 km');
-    expect(screen.getByTitle(/either side of a recording gap/i)).toHaveTextContent('2');
+    // Said in the panel, where keyboard and touch readers see it too, and tied
+    // to the number it explains rather than left in a tooltip.
+    const note = screen.getByText("Lap 2 can't be highlighted on the map: its points sit either side of a recording gap.");
+    expect(screen.getByText('2', { selector: '.laps__number' })).toHaveAttribute('aria-describedby', note.id);
   });
 
   it('offers every lap when the caller says nothing', () => {

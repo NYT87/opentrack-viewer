@@ -1,89 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildXTicks, endpointFits, thinTicks } from '../domain/axis';
-import type { ChartSeries, SeriesSample, SeriesXAxis } from '../domain/series';
+import type { ChartSeries, SeriesSample } from '../domain/series';
 import { downsampleSeries, findNearestSample } from '../domain/series';
+import { type UnitSystem } from '../domain/units';
 import {
-  elevationUnitLabel,
-  formatDistance,
-  formatDuration,
-  formatElevation,
-  formatPace,
-  formatSpeed,
-  paceUnitLabel,
-  speedUnitLabel,
-  toDisplaySpeed,
-  toDisplayElevation,
-  toDisplayPace,
-  type UnitSystem,
-  formatTemperature,
-  temperatureUnitLabel,
-  toDisplayTemperature,
-} from '../domain/units';
+  X_AXIS_LABEL,
+  formatSeriesValue as formatY,
+  formatTick,
+  formatXValue,
+  toDisplayY,
+  yUnitLabel,
+} from './chartFormat';
 
 /** Cap on rendered points; the full series still backs every statistic (§14). */
 const MAX_RENDERED_SAMPLES = 900;
 
-/**
- * A series measuring temperature, whichever it is.
- *
- * Matched on the recorded unit rather than on a list of keys: `AV-905` added a
- * camera-temperature stream whose key is not `temperature`, and a reader who
- * has chosen imperial wants Fahrenheit from every temperature on the page, not
- * from the ones this function happened to have heard of.
- */
-function isTemperature(series: ChartSeries): boolean {
-  return series.unit === '°C';
-}
-
-/**
- * Y-axis presentation per series kind. Elevation, pace and temperature convert
- * into the user's unit system; everything else is plotted in the unit it was
- * recorded in.
- */
-function yUnitLabel(series: ChartSeries, units: UnitSystem): string {
-  if (series.key === 'elevation') return elevationUnitLabel(units);
-  if (series.key === 'pace') return paceUnitLabel(units);
-  if (series.key === 'speed') return speedUnitLabel(units);
-  if (isTemperature(series)) return temperatureUnitLabel(units);
-  return series.unit;
-}
-
-function toDisplayY(value: number, series: ChartSeries, units: UnitSystem): number {
-  if (series.key === 'elevation') return toDisplayElevation(value, units);
-  if (series.key === 'pace') return toDisplayPace(value, units);
-  if (series.key === 'speed') return toDisplaySpeed(value, units);
-  if (isTemperature(series)) return toDisplayTemperature(value, units);
-  return value;
-}
-
-function formatY(value: number, series: ChartSeries, units: UnitSystem): string {
-  if (series.key === 'elevation') return formatElevation(value, units);
-  if (series.key === 'pace') return formatPace(value, units);
-  if (series.key === 'speed') return formatSpeed(value, units);
-  if (isTemperature(series)) return formatTemperature(value, units);
-  // AV-905: a sensor stream can be small — rotation rate lives between 0 and a
-  // few rad/s — and rounding those to whole numbers would show a flat line of
-  // zeros. Larger readings, like heart rate or power, stay whole.
-  const rounded = Math.abs(value) < 10 ? value.toFixed(2) : String(Math.round(value));
-  return `${rounded} ${series.unit}`;
-}
-
-/** Pace ticks read as M:SS; other kinds are plain numbers. */
-function formatTick(value: number, series: ChartSeries, units: UnitSystem, decimals: number): string {
-  if (series.key === 'pace') {
-    const total = Math.round(toDisplayPace(value, units));
-    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-  }
-  if (series.key === 'speed') return toDisplaySpeed(value, units).toFixed(decimals ? 1 : 0);
-  return toDisplayY(value, series, units).toFixed(decimals);
-}
-
-/** How each x-axis names itself in the chart header. */
-const X_AXIS_LABEL: Record<SeriesXAxis, string> = {
-  distance: 'Distance',
-  time: 'Elapsed time',
-  index: 'Point index (no distance or time available)',
-};
+/** PageUp and PageDown move the keyboard cursor this share of the chart (TD-056). */
+const PAGE_STEP_FRACTION = 0.1;
 
 const CHART_HEIGHT = 190;
 /** Used until the container reports its width, and in environments with no ResizeObserver. */
@@ -115,6 +48,17 @@ function measureGutter(labels: string[]): number {
   return Math.ceil(widest * AXIS_CHAR_WIDTH) + Y_LABEL_GAP;
 }
 
+/**
+ * TD-056. The gutter a series needs on its own. The panel takes the widest of
+ * its charts' and gives that one value to all of them, so every plot starts at
+ * the same pixel and the shared cursor is one vertical line, not a ragged one.
+ */
+export function chartGutter(series: ChartSeries, units: UnitSystem = 'metric'): number {
+  if (series.isEmpty) return 0;
+  const rendered = downsampleSeries(series, MAX_RENDERED_SAMPLES);
+  return measureGutter(buildGridLines(rendered, units).map((line) => line.label));
+}
+
 /** Tracks the rendered width so ticks can be thinned against real pixels. */
 function useMeasuredWidth(ref: React.RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(FALLBACK_WIDTH);
@@ -140,6 +84,12 @@ export interface ChartRange {
   end: number;
 }
 
+/** The x extent a chart is drawn over, in its axis's own units. */
+export interface ChartXDomain {
+  min: number;
+  max: number;
+}
+
 export interface ActivityChartProps {
   series: ChartSeries;
   activePointIndex?: number;
@@ -151,6 +101,22 @@ export interface ActivityChartProps {
   onHoverPoint?: (pointIndex: number | undefined) => void;
   onSelectPoint?: (pointIndex: number | undefined) => void;
   onSelectRange?: (range: ChartRange) => void;
+  /**
+   * TD-056. The x extent shared by every chart in the panel, so one vertical
+   * line reads all of them. A series that starts late (a pace that needs a few
+   * points of distance first) is drawn where it starts, not stretched to fill.
+   * Left out, the chart spans its own series.
+   */
+  xDomain?: ChartXDomain;
+  /** Escape on a focused chart with nothing pending: clear what it set. */
+  onClear?: () => void;
+  /**
+   * TD-056. The left gutter shared by every chart in the panel. Left out, the
+   * chart sizes its own from its labels.
+   */
+  gutter?: number;
+  /** TD-056. Writes the x-axis labels; tick marks are drawn either way. */
+  showXAxisLabels?: boolean;
 }
 
 /**
@@ -167,8 +133,13 @@ export function ActivityChart({
   onHoverPoint,
   onSelectPoint,
   onSelectRange,
+  xDomain,
+  onClear,
+  gutter: sharedGutter,
+  showXAxisLabels = true,
 }: ActivityChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const descriptionId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const width = useMeasuredWidth(containerRef);
 
@@ -178,10 +149,11 @@ export function ActivityChart({
   );
 
   const gridLines = useMemo(() => buildGridLines(rendered, units), [rendered, units]);
-  const gutter = useMemo(
+  const ownGutter = useMemo(
     () => measureGutter(gridLines.map((line) => line.label)),
     [gridLines],
   );
+  const gutter = Math.max(sharedGutter ?? 0, ownGutter);
 
   const plot = useMemo(
     () => ({
@@ -193,26 +165,24 @@ export function ActivityChart({
     [gutter, width],
   );
 
-  const scale = useMemo(() => buildScale(rendered, plot), [rendered, plot]);
+  const domainMin = xDomain?.min ?? series.xMin;
+  const domainMax = xDomain?.max ?? series.xMax;
+  const domain = useMemo(() => ({ min: domainMin, max: domainMax }), [domainMin, domainMax]);
+
+  const scale = useMemo(() => buildScale(rendered, plot, domain), [rendered, plot, domain]);
 
   const xAxis = useMemo(() => {
     const available = plot.right - plot.left;
-    const generated = buildXTicks(rendered.xMin, rendered.xMax, rendered.xAxis, units);
-    const { ticks, labelled } = thinTicks(
-      generated,
-      rendered.xMin,
-      rendered.xMax,
-      available,
-      MIN_X_LABEL_SPACING,
-    );
+    const generated = buildXTicks(domain.min, domain.max, rendered.xAxis, units);
+    const { ticks, labelled } = thinTicks(generated, domain.min, domain.max, available, MIN_X_LABEL_SPACING);
     return {
       ticks,
       labelled,
       // Endpoints stay unless an interval label is already sitting on them.
-      showStart: endpointFits(rendered.xMin, labelled, rendered.xMin, rendered.xMax, available, MIN_X_LABEL_SPACING),
-      showEnd: endpointFits(rendered.xMax, labelled, rendered.xMin, rendered.xMax, available, MIN_X_LABEL_SPACING),
+      showStart: endpointFits(domain.min, labelled, domain.min, domain.max, available, MIN_X_LABEL_SPACING),
+      showEnd: endpointFits(domain.max, labelled, domain.min, domain.max, available, MIN_X_LABEL_SPACING),
     };
-  }, [rendered, plot, units]);
+  }, [rendered, plot, units, domain]);
 
   const path = useMemo(() => {
     if (!scale || rendered.samples.length === 0) return '';
@@ -261,9 +231,84 @@ export function ActivityChart({
     (offsetX: number) => {
       if (!scale) return undefined;
       // A drag that runs past the plot selects up to the end, not beyond it.
-      return Math.min(Math.max(scale.invertX(offsetX), series.xMin), series.xMax);
+      return Math.min(Math.max(scale.invertX(offsetX), domain.min), domain.max);
     },
-    [scale, series.xMin, series.xMax],
+    [scale, domain],
+  );
+
+  /*
+   * TD-056. The keyboard's way through the chart, which the pointer has had
+   * since AV-508: the arrows move the shared cursor sample by sample (so the
+   * map marker and every other chart follow), Shift extends a section from
+   * where it started, Enter keeps it, Escape lets go. The section being marked
+   * lives here until it is kept; only a kept one reaches shared state.
+   */
+  const [keyBand, setKeyBand] = useState<{ anchor: number; to: number } | undefined>();
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<SVGSVGElement>) => {
+      const samples = rendered.samples;
+      if (samples.length === 0) return;
+      const last = samples.length - 1;
+      const current = activeSample ? samples.indexOf(activeSample) : -1;
+      const page = Math.max(1, Math.round(samples.length * PAGE_STEP_FRACTION));
+      // From no cursor, a step forward lands on the first sample and a step
+      // back on the last, as a slider's ends would.
+      const step = (delta: number) =>
+        Math.min(last, Math.max(0, (current < 0 ? (delta > 0 ? -1 : last + 1) : current) + delta));
+
+      let next: number | undefined;
+      switch (event.key) {
+        case 'ArrowRight':
+        case 'ArrowUp':
+          next = step(1);
+          break;
+        case 'ArrowLeft':
+        case 'ArrowDown':
+          next = step(-1);
+          break;
+        case 'PageUp':
+          next = step(page);
+          break;
+        case 'PageDown':
+          next = step(-page);
+          break;
+        case 'Home':
+          next = 0;
+          break;
+        case 'End':
+          next = last;
+          break;
+        case 'Enter': {
+          event.preventDefault();
+          if (keyBand && keyBand.anchor !== keyBand.to) {
+            onSelectRange?.({ start: Math.min(keyBand.anchor, keyBand.to), end: Math.max(keyBand.anchor, keyBand.to) });
+          } else if (activeSample) {
+            onSelectPoint?.(activeSample.pointIndex);
+          }
+          setKeyBand(undefined);
+          return;
+        }
+        case 'Escape':
+          event.preventDefault();
+          if (keyBand) setKeyBand(undefined);
+          else onClear?.();
+          return;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      const sample = samples[next]!;
+      if (event.shiftKey) {
+        const from = activeSample?.x ?? sample.x;
+        setKeyBand((band) => ({ anchor: band?.anchor ?? from, to: sample.x }));
+      } else {
+        setKeyBand(undefined);
+      }
+      onHoverPoint?.(sample.pointIndex);
+    },
+    [rendered.samples, activeSample, keyBand, onSelectRange, onSelectPoint, onClear, onHoverPoint],
   );
 
   const handlePointerDown = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
@@ -333,6 +378,16 @@ export function ActivityChart({
     );
   }
 
+  const rangeText = `${series.label} from ${formatY(series.yMin, series, units)} to ${formatY(series.yMax, series, units)}, by ${X_AXIS_LABEL[series.xAxis].toLowerCase()}`;
+  // Read as a sentence, so the two numbers cannot be confused: "at 142 ft,
+  // elevation 358 ft" rather than "142 ft: 358 ft".
+  const at = (x: number) =>
+    series.xAxis === 'index' ? `at point ${Math.round(x)}` : `at ${formatXValue(x, series.xAxis, units, domain.max)}`;
+  const valueText = activeSample
+    ? `${at(activeSample.x)}, ${series.label.toLowerCase()} ${formatY(activeSample.y, series, units)}` +
+      (keyBand ? `, marking a section from ${formatXValue(keyBand.anchor, series.xAxis, units, domain.max)}` : '')
+    : 'No point selected';
+
   return (
     <section className="chart" aria-label={`${series.label} chart`}>
       <header className="chart__header">
@@ -353,9 +408,20 @@ export function ActivityChart({
           width={width}
           height={CHART_HEIGHT}
           viewBox={`0 0 ${width} ${CHART_HEIGHT}`}
-          role="img"
-          aria-label={`${series.label} from ${formatY(series.yMin, series, units)} to ${formatY(series.yMax, series, units)}, by ${X_AXIS_LABEL[series.xAxis].toLowerCase()}`}
+          // TD-056. A slider over the activity: focusable, moved by the keys
+          // handled above, and read back as the value at the cursor.
+          role="slider"
+          tabIndex={0}
+          aria-label={`${series.label} chart`}
+          aria-describedby={descriptionId}
+          aria-orientation="horizontal"
+          aria-valuemin={domain.min}
+          aria-valuemax={domain.max}
+          aria-valuenow={activeSample?.x ?? domain.min}
+          aria-valuetext={valueText}
           data-testid={`${series.key}-chart-svg`}
+          onKeyDown={handleKeyDown}
+          onBlur={() => setKeyBand(undefined)}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -393,7 +459,8 @@ export function ActivityChart({
               </g>
             ))}
 
-          <path className="chart__area" d={areaPath} />
+          {/* A flat series is a level line: filled to the baseline it read as a block. */}
+          {!isEffectivelyFlat(series) && <path className="chart__area" d={areaPath} />}
           <path className="chart__line" d={path} />
 
           {/* AV-514: marks at every generated interval; labels only where they fit. */}
@@ -410,6 +477,7 @@ export function ActivityChart({
             ))}
 
           {scale &&
+            showXAxisLabels &&
             xAxis.labelled.map((tick) => (
               <text
                 key={`label-${tick.value}`}
@@ -422,24 +490,24 @@ export function ActivityChart({
               </text>
             ))}
 
-          {scale && xAxis.showStart && (
+          {scale && showXAxisLabels && xAxis.showStart && (
             <text
               className="chart__axis-label chart__axis-label--x is-endpoint"
               x={plot.left}
               y={plot.bottom + 18}
               textAnchor="start"
             >
-              {formatXValue(series.xMin, series.xAxis, units)}
+              {formatXValue(domain.min, series.xAxis, units, domain.max)}
             </text>
           )}
-          {scale && xAxis.showEnd && (
+          {scale && showXAxisLabels && xAxis.showEnd && (
             <text
               className="chart__axis-label chart__axis-label--x is-endpoint"
               x={plot.right}
               y={plot.bottom + 18}
               textAnchor="end"
             >
-              {formatXValue(series.xMax, series.xAxis, units)}
+              {formatXValue(domain.max, series.xAxis, units, domain.max)}
             </text>
           )}
 
@@ -450,7 +518,9 @@ export function ActivityChart({
                     start: domainAtOffset(drag.startX - drag.left),
                     end: domainAtOffset(drag.currentX - drag.left),
                   }
-                : selectedRange;
+                : keyBand
+                  ? { start: keyBand.anchor, end: keyBand.to }
+                  : selectedRange;
               if (!band || band.start === undefined || band.end === undefined) return null;
 
               const from = scale.x(Math.min(band.start, band.end));
@@ -482,6 +552,10 @@ export function ActivityChart({
           )}
         </svg>
       </div>
+      <p id={descriptionId} className="visually-hidden">
+        {rangeText}. Arrow keys move along the activity. Hold Shift to mark a section, Enter keeps it,
+        Escape clears it.
+      </p>
     </section>
   );
 }
@@ -492,13 +566,6 @@ interface Scale {
   invertX: (pixel: number) => number;
 }
 
-/** x values carry a different meaning per axis: meters, seconds, or an index. */
-function formatXValue(value: number, axis: SeriesXAxis, units: UnitSystem): string {
-  if (axis === 'distance') return formatDistance(value, units);
-  if (axis === 'time') return formatDuration(value);
-  return String(Math.round(value));
-}
-
 interface PlotBox {
   left: number;
   right: number;
@@ -506,18 +573,18 @@ interface PlotBox {
   bottom: number;
 }
 
-function buildScale(series: ChartSeries, plot: PlotBox): Scale | undefined {
+function buildScale(series: ChartSeries, plot: PlotBox, domain: ChartXDomain): Scale | undefined {
   if (series.samples.length === 0) return undefined;
 
   const innerWidth = Math.max(1, plot.right - plot.left);
   const innerHeight = Math.max(1, plot.bottom - plot.top);
   const flat = isEffectivelyFlat(series);
-  const xRange = series.xMax - series.xMin || 1;
+  const xRange = domain.max - domain.min || 1;
   // Pad a flat profile so the line sits mid-plot instead of on the axis.
   const yRange = series.yMax - series.yMin || 1;
 
   return {
-    x: (value) => plot.left + ((value - series.xMin) / xRange) * innerWidth,
+    x: (value) => plot.left + ((value - domain.min) / xRange) * innerWidth,
     y: (value) => {
       // A near-constant series is drawn as the flat line it is, mid-plot,
       // rather than having its noise stretched across the whole height.
@@ -528,7 +595,7 @@ function buildScale(series: ChartSeries, plot: PlotBox): Scale | undefined {
         ? plot.top + fraction * innerHeight
         : plot.top + innerHeight - fraction * innerHeight;
     },
-    invertX: (pixel) => series.xMin + ((pixel - plot.left) / innerWidth) * xRange,
+    invertX: (pixel) => domain.min + ((pixel - plot.left) / innerWidth) * xRange,
   };
 }
 

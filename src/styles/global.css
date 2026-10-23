@@ -19,6 +19,20 @@
   --scrim: rgba(22, 32, 43, 0.45);
   --shadow: rgba(22, 32, 43, 0.18);
   --radius: 10px;
+  /*
+   * The type ladder from DESIGN.md, as tokens. Label is the uppercase caption
+   * only; every sentence of supporting copy is Reading or larger.
+   */
+  --text-label: 11px;
+  --text-reading: 12px;
+  --text-control: 13px;
+  --text-body: 14px;
+  --text-title: 15px;
+  --text-figure: 16px;
+  --text-headline: 18px;
+  --text-display: 24px;
+  /* Native checkboxes, radios and sliders in the one lit colour, not the browser's blue. */
+  accent-color: var(--accent);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -39,6 +53,29 @@
 }
 
 * { box-sizing: border-box; }
+
+/* Read by assistive technology, not drawn: live regions and chart help. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A reader who asked the system for less motion gets none from the page. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 body {
   margin: 0;
@@ -65,6 +102,9 @@ body {
 }
 
 .shell__scroll {
+  /* The containing block for screen-reader-only text, which would otherwise
+     be placed against the document and stretch it past the viewport. */
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -85,7 +125,17 @@ body {
 
 .shell__title { margin: 0; font-size: 16px; letter-spacing: 0.01em; }
 
-.shell__brand { color: var(--text); text-decoration: none; }
+.shell__brand { color: var(--text); text-decoration: none; white-space: nowrap; }
+.shell__close { white-space: nowrap; }
+@media (max-width: 420px) {
+  .shell__header { padding: 10px 16px; gap: 10px; }
+  .shell__lead { gap: 10px; }
+  .shell__actions { gap: 8px; }
+  .shell__brand-rest { display: none; }
+  .shell__close { padding: 6px 8px; font-size: var(--text-control); }
+  .tools__button { padding: 6px 8px; }
+  .shell__header { gap: 12px; }
+}
 .shell__brand:hover { color: var(--accent); }
 .shell__brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 
@@ -267,11 +317,14 @@ body {
 .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Routed pages that are not the viewer's split layout. */
-.page { flex: 1; padding: 24px 20px; }
+/* min-width: 0 so a page is never wider than the screen: as a flex item it would
+   otherwise grow to its widest unbreakable line (a nowrap hint, a transport row)
+   and scroll sideways, eating the right gutter. */
+.page { flex: 1; min-width: 0; padding: 24px 20px; }
 .page__inner { max-width: 620px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 .page__header { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
 .page__title { margin: 0 0 4px; font-size: 18px; }
-.page__intro { margin: 0; color: var(--text-muted); }
+.page__intro { margin: 0; max-width: 68ch; color: var(--text-muted); }
 
 .setting { display: flex; flex-direction: column; gap: 6px; }
 .setting--group { border: none; margin: 0; padding: 0; }
@@ -298,6 +351,9 @@ body {
 }
 .button:hover { border-color: var(--accent); }
 .button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Disabled reads as disabled, the primary button included: faded, no hover. */
+.button:disabled { opacity: 0.45; cursor: not-allowed; }
+.button:disabled:hover { border-color: var(--border); }
 
 .select {
   align-self: flex-start;
@@ -310,6 +366,33 @@ body {
   font-size: 12px;
 }
 .select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A text or number field, from the same recipe as the select. */
+.input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-control);
+  font-variant-numeric: tabular-nums;
+}
+.input:hover { border-color: var(--accent); }
+.input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Ink Muted, not the browser's grey: 4.5:1 and more on the Canvas fill. */
+.input::placeholder { color: var(--text-muted); opacity: 1; }
+.input[aria-invalid='true'] { border-color: var(--error); }
+.select { max-width: 100%; }
+
+/* Native controls show the system's ring when reached by keyboard. */
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible,
+input[type='range']:focus-visible,
+input[type='color']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* File drop zone */
 .dropzone { display: flex; flex-direction: column; gap: 6px; }
@@ -332,14 +415,14 @@ body {
 .dropzone__title { font-weight: 600; }
 .dropzone__subtitle { color: var(--text-muted); font-size: 12px; }
 .dropzone__input { display: none; }
-.dropzone__hint { margin: 0; color: var(--text-muted); font-size: 11px; }
+.dropzone__hint { margin: 0; color: var(--text-muted); font-size: var(--text-reading); }
 .dropzone__rejection { margin: 0; color: var(--error); font-size: 12px; }
 
 /* Empty state and panels */
 .empty-state { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
 .empty-state__title { margin: 0 0 6px; font-size: 14px; }
 .empty-state__body { margin: 0 0 8px; color: var(--text-muted); }
-.empty-state__note { margin: 0; color: var(--text-muted); font-size: 12px; }
+.empty-state__note { margin: 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 
 .status { margin: 0; color: var(--text-muted); }
 
@@ -359,6 +442,8 @@ body {
 }
 
 .warnings { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
+/* In the overview, the parser notes are a group of their own, not a last stat row. */
+.box > .warnings { margin-top: 16px; }
 .warnings__summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
 .warnings__list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; }
 .warnings__item.is-warning { color: var(--warn); }
@@ -368,11 +453,19 @@ body {
 /* Summary */
 .summary { display: flex; flex-direction: column; gap: 10px; }
 .summary__header { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-.summary__title { margin: 0; font-size: 15px; }
-.summary__source { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; }
+/* The activity's name is the viewer's page title, so it takes the Headline step. */
+.summary__title { margin: 0; font-size: var(--text-headline); line-height: 1.3; overflow-wrap: anywhere; }
+.summary__title:focus { outline: none; }
+/* The ring hugs the words: a full-width box read as a text field, an
+   underline as a link. */
+.summary__title { width: fit-content; max-width: 100%; }
+.summary__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.summary__source { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-reading); overflow-wrap: anywhere; }
+.summary__note { margin: 14px 0 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 .summary__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  /* Wide enough for a date with seconds ("2 Mar 2024, 18:00:50") on one line. */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px 16px;
   margin: 0;
 }
@@ -384,6 +477,10 @@ body {
   letter-spacing: 0.04em;
 }
 .summary__value { margin: 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+/* TD-057. The primary fields: a reader's first three questions, answered larger. */
+.summary__grid--lead { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px 24px; }
+.summary__grid--lead .summary__value { font-size: var(--text-display); line-height: 1.2; }
+.summary__grid--lead + .summary__grid { padding-top: 12px; border-top: 1px solid var(--border); }
 .summary__missing { color: var(--text-muted); }
 .summary__missing small { display: block; font-size: 11px; }
 
@@ -426,6 +523,10 @@ body {
 .section-nav__link:hover { color: var(--text); border-left-color: var(--accent); }
 .section-nav__link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
+/* A section the sidebar jumped to shows the ring only when reached by keyboard. */
+.box:focus, .map-section:focus { outline: none; }
+.box:focus-visible, .map-section:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .box {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -438,11 +539,14 @@ body {
 
 /* The map draws its own surface, so it fills its box edge to edge. */
 .box--map { padding: 0; overflow: hidden; }
+/* On the dark page the night frame needs an edge of its own. */
+:root[data-theme='dark'] .box--map { border-color: #2c3d52; }
 
 /* AV-406: laps to the left of the map on large screens. */
 .map-section { display: grid; gap: 20px; min-width: 0; }
 .map-section.has-laps { grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); }
-.map-section__laps { display: flex; flex-direction: column; min-height: 0; }
+/* Laps keep their own height beside the map instead of stretching to it. */
+.map-section__laps { display: flex; flex-direction: column; min-height: 0; align-self: start; }
 .map-section__map { min-width: 0; }
 
 .laps { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
@@ -476,9 +580,49 @@ body {
 }
 
 @media (max-width: 1100px) {
-  /* AV-011: the sidebar is a large-screen affordance only. */
-  .section-nav { display: none; }
+  /* TD-056: below the sidebar's width the same links run as one row that
+     scrolls sideways, so Export is a tap away rather than a long scroll. */
   .viewer__content { grid-template-columns: minmax(0, 1fr); }
+  .section-nav { position: static; }
+  .section-nav__list { flex-direction: row; gap: 0; overflow-x: auto; scrollbar-width: none; }
+  .section-nav__link {
+    width: auto;
+    white-space: nowrap;
+    border-left: 0;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-nav__link:hover { border-bottom-color: var(--accent); }
+}
+
+/* A dropped file's progress, refusal or failure, above the activity it left alone. */
+.viewer__notice { display: flex; flex-direction: column; gap: 8px; }
+.viewer__notice.panel { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.viewer__notice .panel__message { margin: 0; }
+.viewer__notice-kept { margin: 0; color: var(--text-muted); font-size: var(--text-reading); }
+
+/* TD-056: a file dragged over an open activity can replace it. */
+.viewer { position: relative; }
+.viewer.is-dropping .viewer__content { opacity: 0.35; }
+.viewer__drop {
+  position: absolute;
+  inset: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120px;
+  border: 1.5px dashed var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* A phone: two figures a row, so the overview is not a list of eleven. */
+@media (max-width: 480px) {
+  .summary__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .viewer__content { padding: 16px; }
 }
 
 /* Homepage */
@@ -618,6 +762,7 @@ body {
   text-decoration: none;
 }
 .button--primary:hover { filter: brightness(1.08); }
+.button--primary:disabled:hover { border-color: var(--accent); filter: none; }
 
 .format-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 
@@ -692,7 +837,9 @@ body {
 .modal__close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Device information (AV-405) */
-.device { display: flex; flex-direction: column; gap: 8px; }
+/* Device and other telemetry are groups of their own under the stat grid. */
+.device { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+.sensor-streams { margin-top: 20px; }
 .device__title {
   margin: 0;
   color: var(--text-muted);
@@ -708,8 +855,16 @@ body {
   margin: 0;
 }
 .device__row { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.device__label { color: var(--text-muted); font-size: 11px; }
+.device__label {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .device__value { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .device__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* Other telemetry the file carries but the charts do not show (AV-905) */
 .sensor-streams { display: flex; flex-direction: column; gap: 6px; }
@@ -721,7 +876,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.sensor-streams__intro { margin: 0; color: var(--text-muted); font-size: 11px; }
+.sensor-streams__intro { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 .sensor-streams__list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -732,7 +887,7 @@ body {
 }
 .sensor-streams__item { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sensor-streams__label { overflow-wrap: anywhere; }
-.sensor-streams__detail { color: var(--text-muted); font-size: 11px; }
+.sensor-streams__detail { color: var(--text-muted); font-size: var(--text-reading); }
 
 /* Chart panel */
 .chart-panel { border-top: 1px solid var(--border); background: var(--bg-raised); }
@@ -745,23 +900,58 @@ body {
   padding: 8px 16px 0;
 }
 
-.chart-panel__notice { margin: 0; color: var(--text-muted); font-size: 11px; }
+.chart-panel__notice { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 
-/* Focused-range bar (AV-511, AV-512) */
-.focus-bar {
+/*
+ * TD-056. The readout: what every chart says at the cursor, in the stat grid's
+ * caption-over-figure idiom. It sticks to the top of the scroll region while
+ * the charts pass under it, and keeps one row's height whether it holds the
+ * hint or the figures, so nothing below it jumps as the pointer comes and goes.
+ */
+.chart-readout {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+/* What the figures describe. One height at rest and with a section, so
+   selecting moves nothing below it. */
+.chart-readout__scope {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px 16px;
-  flex-wrap: wrap;
-  margin: 8px 16px 0;
-  padding: 8px 12px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  font-size: 12px;
+  min-height: 48px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
 }
-.focus-bar__text { color: var(--text); }
+.chart-readout__whole { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+.chart-readout__whole-title { color: var(--text); font-weight: 600; }
+.chart-readout__values { display: flex; align-items: center; min-height: 58px; padding: 8px 16px; }
+.chart-readout__hint { margin: 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+/* A row that scrolls sideways fades at its edge, so hidden values are seen to be there. */
+.chart-readout__list,
+.summary__grid--inline {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px 24px;
+  margin: 0;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.chart-readout__cell { display: flex; flex-direction: column; gap: 2px; flex: none; }
+.chart-readout__label {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.chart-readout__value { margin: 0; font-size: var(--text-figure); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .axis-switch { display: flex; align-items: center; gap: 6px; }
 .axis-switch__label {
@@ -785,16 +975,18 @@ body {
 .axis-switch__option.is-active { background: var(--bg); color: var(--text); border-color: var(--accent); }
 .axis-switch__option:disabled { opacity: 0.45; cursor: not-allowed; }
 .axis-switch__option:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Why an option is greyed, said beside it rather than in a tooltip. */
+.axis-switch__reason { color: var(--text-muted); font-size: var(--text-reading); }
 
 /* Chart */
 .chart { padding: 6px 16px 14px; }
 .chart--empty { color: var(--text-muted); padding: 8px 16px 12px; }
 .chart--empty .chart__title { margin-bottom: 2px; }
-.chart__note { margin: 0 0 4px; color: var(--text-muted); font-size: 11px; }
-.chart__empty { margin: 0; font-size: 12px; }
-.chart__header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.chart__note { margin: 0 0 4px; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+.chart__empty { margin: 0; font-size: var(--text-reading); text-wrap: pretty; }
+.chart__header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
 .chart__title { margin: 0; font-size: 13px; }
-.chart__meta { margin: 0; color: var(--text-muted); font-size: 11px; }
+.chart__meta { margin: 0; color: var(--text-muted); font-size: var(--text-reading); }
 .chart__plot { width: 100%; overflow: hidden; }
 /* The viewBox is 1:1 with pixels, so text is never stretched by the SVG. */
 .chart__svg {
@@ -804,6 +996,9 @@ body {
   touch-action: pan-y;
   user-select: none;
 }
+/* Inset, because the plot clips anything drawn outside it. */
+.chart__svg:focus { outline: none; }
+.chart__svg:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
 .chart__grid { stroke: var(--border); stroke-width: 1; }
 .chart__axis-label { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .chart__axis-label.is-endpoint { fill: var(--text-muted); opacity: 0.85; }
@@ -822,11 +1017,15 @@ body {
 
 /* AV-554: export controls, shown only once an activity is loaded. */
 .export__title { margin: 0; font-size: 15px; }
+/* Export, route overlay and custom track are three jobs in one box: each
+   after the first starts below a hairline, with room above its title. */
+.export + .export { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
 .export__body {
   margin: 6px 0 14px;
   max-width: 60ch;
-  font-size: 13px;
+  font-size: var(--text-control);
   color: var(--text-muted);
+  text-wrap: pretty;
 }
 .export__controls {
   display: flex;
@@ -877,23 +1076,16 @@ body {
 }
 .export__warnings li { margin-top: 4px; }
 
-/* AV-605: what the selected section adds up to, beside the focus controls. */
-.selection-summary {
-  margin: 12px 0 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-sunken);
-}
-.selection-summary__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.selection-summary__title { margin: 0; font-size: 13px; }
-.selection-summary__scope { margin: 0; font-size: 12px; color: var(--text-muted); }
+/* AV-605, TD-056: the selected section, as the readout's scope row. Its title
+   and the reassurance, then its figures scrolling sideways, then the way out. */
+.selection-summary { display: flex; align-items: center; gap: 8px 20px; width: 100%; min-width: 0; }
+.selection-summary__header { display: flex; flex-direction: column; flex: none; }
+.selection-summary__title { margin: 0; font-size: var(--text-control); }
+.selection-summary__scope,
+.selection-summary__note { margin: 0; color: var(--text-muted); font-size: var(--text-reading); white-space: nowrap; }
+.selection-summary__reset { flex: none; }
+.summary__grid--inline .summary__stat { flex: none; }
+.summary__grid--inline .summary__value { font-size: var(--text-body); white-space: nowrap; }
 
 /* AV-555: says whether the chosen target is a rewrite or a conversion. */
 .export__hint {
@@ -901,19 +1093,22 @@ body {
   max-width: 70ch;
   font-size: 12px;
   color: var(--text-muted);
+  text-wrap: pretty;
 }
 
 /* §17: a lap row is a toggle that recolours its stretch of the route. */
+/* A hairline at rest, so the lap a reader can press looks pressable. */
 .laps__select {
+  min-width: 28px;
   padding: 2px 6px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: none;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
-.laps__select:hover { border-color: var(--border); }
+.laps__select:hover { border-color: var(--accent); }
 .laps__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .laps__select[aria-pressed='true'] {
   border-color: var(--accent);
@@ -921,7 +1116,8 @@ body {
   font-weight: 600;
 }
 .laps__row.is-selected td { font-weight: 600; }
-.laps__number { padding: 2px 6px; color: var(--text-muted); cursor: help; }
+.laps__number { display: inline-block; min-width: 28px; padding: 2px 6px; color: var(--text-muted); text-align: center; }
+.laps__note { margin: 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 
 /* AV-907: the video telemetry page's progress and actions. */
 .video__progress { width: min(100%, 420px); height: 10px; }
@@ -1021,3 +1217,201 @@ body {
    flex child it may shrink below its text's width, or a long name with no
    space in it would widen a phone screen. */
 .route-draft__appended { min-width: 0; flex: 1 1 16rem; overflow-wrap: anywhere; }
+
+/* Phone overrides for the chart readout, last so they win over its base rules. */
+@media (max-width: 480px) {
+  /* On a phone the readout's resting scope is one line: the hint goes. */
+  /* On a phone the readout's hint keeps its first sentence. */
+  .chart-readout__hint-more { display: none; }
+  /* The three lead figures stay one row, a step smaller. */
+  .summary__grid--lead { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+  .summary__grid--lead .summary__value { font-size: var(--text-headline); }
+  /* The section on a phone: title, size and the way out on one line, its
+     figures scrolling on the next. The reassurance is still announced. */
+  .selection-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'head reset' 'figures figures';
+    gap: 4px 12px;
+  }
+  .selection-summary__header { grid-area: head; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+  .selection-summary__note { display: none; }
+  .selection-summary__reset { grid-area: reset; padding: 4px 10px; font-size: var(--text-control); }
+  .selection-summary .summary__grid--inline { grid-area: figures; }
+  .chart-readout__values { min-height: 52px; padding: 6px 16px; }
+}
+
+/*
+ * TD-059. The overlay workspace. At 1100px and wider the picture, its
+ * transport and the sync line stay in view in one column while the files, the
+ * overlay controls and the exports scroll beside them; narrower, the picture
+ * alone sticks to the top while everything else scrolls under it.
+ */
+.page--overlays.is-workspace .page__inner { max-width: 1180px; }
+.overlay-workspace, .overlay-column { display: grid; gap: 24px; }
+.overlay-column .overlay-workspace__stage:empty { display: none; }
+.overlay-workspace__side { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+@media (min-width: 1100px) {
+  .overlay-workspace { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+  /* The stage is only the picture, its transport and a line: it fits the screen
+     without scrolling inside itself, so nothing in it can scroll the picture away. */
+  .overlay-workspace__stage { position: sticky; top: 16px; }
+  /* The picture leaves room for what sits under it, so the whole stage, bar
+     included, fits the screen while it sticks. */
+  .overlay-workspace__stage .overlay-preview__frame {
+    width: min(100%, calc(max(200px, 100vh - 300px) * var(--frame-aspect)));
+  }
+}
+@media (max-width: 1099px) {
+  /* Focus moved by Tab lands clear of the sticky stage, never under it (WCAG 2.4.11). */
+  /* The stage's height, measured by the page and set inline over this default. */
+  .shell__scroll:has(.overlay-workspace) {
+    --overlay-stage-height: 0px;
+    scroll-padding-top: calc(var(--overlay-stage-height) + 12px);
+  }
+  /* A flex column, not a grid: a sticky grid item is held to its own row, so
+     the picture would let go as soon as the controls began. */
+  .overlay-workspace { display: flex; flex-direction: column; }
+  .overlay-workspace__stage {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding-bottom: 8px;
+    background: var(--bg);
+  }
+  .overlay-workspace__stage .overlay-preview .prose__title { display: none; }
+  /* Sticking on a phone, the picture keeps to under half the screen: a portrait
+     clip at full width would cover every control below it. */
+  .overlay-workspace__stage .overlay-preview__frame { width: min(100%, calc(38vh * var(--frame-aspect))); }
+  /* Kept short while it sticks: the sync line says the same in the column below. */
+  .overlay-workspace__stage .overlay-preview__summary { display: none; }
+}
+.overlay-preview__frame:focus { outline: none; }
+.overlay-preview__frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The keys the stage answers to: always one quiet line, so nothing moves when it is used. */
+.overlay-preview__keys { margin: 6px 0 0; overflow: hidden; color: var(--text-muted); font-size: var(--text-label); white-space: nowrap; text-overflow: ellipsis; }
+@media (hover: none) { .overlay-preview__keys { display: none; } }
+/* On a narrow screen the line wraps rather than losing its last keys to an ellipsis. */
+@media (max-width: 520px) { .overlay-preview__keys { white-space: normal; } }
+.overlay-preview__off {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.prose .overlay-preview__off p { margin: 0; color: var(--text); font-size: var(--text-reading); }
+.overlay-preview__summary { margin: 8px 0 0; color: var(--text-muted); font-size: var(--text-reading); }
+
+/* The transport keeps one line: the time never wraps under the scrubber. */
+.overlay-preview__controls { flex-wrap: nowrap; }
+.overlay-preview__time { white-space: nowrap; }
+
+/* The offset: steps around one field, wrapping as a group, never one by one. */
+.overlay-preview__offset { flex-direction: column; align-items: stretch; padding: 10px 12px; }
+.overlay-preview__offset .overlay-preview__hint { max-width: none; }
+.overlay-preview__steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.overlay-preview__field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-control); }
+.overlay-preview__field .input { width: 9ch; }
+.overlay-preview__nudges { display: inline-flex; flex-wrap: nowrap; gap: 6px; }
+.overlay-preview__against { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--text-muted); font-size: var(--text-reading); }
+.overlay-preview__lineup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--text-control); }
+
+/* How the video sits in the activity: a line, and a bar of the same facts. */
+.overlay-sync { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.overlay-sync__line { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+.overlay-sync__warning {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--text);
+  font-size: var(--text-reading);
+}
+.overlay-sync__track { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+/* The bar and its trace are one control: dragged, clicked, or stepped by key. */
+.overlay-sync__scale { cursor: grab; touch-action: pan-y; border-radius: 6px; }
+.overlay-sync__scale:active { cursor: grabbing; }
+.overlay-sync__scale:focus { outline: none; }
+.overlay-sync__scale:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.overlay-sync__how { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.prose .overlay-sync__legend { max-width: none; flex-wrap: wrap; }
+.overlay-sync__bar {
+  position: relative;
+  height: 14px;
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.overlay-sync__activity,
+.overlay-sync__video,
+.overlay-sync__playhead { position: absolute; top: 0; bottom: 0; }
+.overlay-sync__activity { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.overlay-sync__video { top: 3px; bottom: 3px; border-radius: 3px; background: var(--accent); }
+.overlay-sync__playhead { width: 2px; margin-left: -1px; background: var(--text); }
+.overlay-sync__legend { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--text-label); text-transform: uppercase; letter-spacing: 0.04em; }
+.overlay-sync__key { display: inline-block; width: 12px; height: 8px; border-radius: 2px; }
+.overlay-sync__key--activity { background: color-mix(in srgb, var(--accent) 22%, transparent); margin-left: 8px; }
+.overlay-sync__key--activity:first-child { margin-left: 0; }
+.overlay-sync__key--video { background: var(--accent); margin-left: 8px; }
+
+/* The files: what is held, and the ways to change it, in one row. */
+.overlay-slot__actions, .overlay-files__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.overlay-slot .prose__title:focus { outline: none; }
+.overlay-slot .prose__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.overlay-undo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.overlay-undo .panel__message { margin: 0; }
+.overlay-export__import { margin: 8px 0 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+
+/* In the workspace's narrower column the control groups stack, each full width. */
+.overlay-workspace .overlay-controls { grid-template-columns: minmax(0, 1fr); }
+
+/* TD-059. The trace of the activity's speed or elevation, over the sync bar. */
+.overlay-sync__trace { display: block; width: 100%; height: 22px; overflow: visible; }
+.overlay-sync__trace polyline {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+.overlay-sync__key--trace { background: var(--text-muted); height: 2px; margin-left: 8px; }
+.overlay-sync__warning { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.prose .overlay-sync__warning p { margin: 0; max-width: 60ch; color: var(--text); }
+.overlay-sync-panel .overlay-preview__offset { margin-top: 12px; }
+.overlay-preview__hint.is-invalid { color: var(--error); }
+.overlay-sync-slot:empty { display: none; }
+
+/* A slider's value beside it, so it can be set to a number. */
+.overlay-controls__value { min-width: 4ch; text-align: right; color: var(--text-muted); font-size: var(--text-reading); font-variant-numeric: tabular-nums; }
+
+/* Settings fit the side column rather than overflowing it. */
+.overlay-workspace__side .overlay-export__settings { grid-template-columns: minmax(0, 1fr); }
+
+/* The burned-in render is a desktop browser's: on a phone it is not offered. */
+@media (max-width: 700px) {
+  .overlay-export--burned { display: none; }
+}
+/* The activity's span reads on the dark well too. */
+:root[data-theme='dark'] .overlay-sync__activity,
+:root[data-theme='dark'] .overlay-sync__key--activity { background: color-mix(in srgb, var(--accent) 38%, transparent); }
+
+/* TD-059. A skip past the files and settings to the exports, and the notes around them. */
+.overlay-skip { margin: 0; }
+/* TD-059. A held file in the workspace is one line: its name, then what matters. */
+.prose .overlay-slot__line { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; color: var(--text-muted); font-size: var(--text-reading); max-width: none; }
+.overlay-slot__name { min-width: 0; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.overlay-slot__details > summary { cursor: pointer; color: var(--text-muted); font-size: var(--text-reading); }
+.overlay-slot__details[open] > summary { margin-bottom: 8px; }
+.overlay-exports { display: flex; flex-direction: column; gap: 24px; }
+.overlay-export .prose__title:focus { outline: none; }
+.overlay-export .prose__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.overlay-slot__note { color: var(--text-muted); font-size: var(--text-reading); }
+.overlay-controls__note { margin: 6px 0 0; color: var(--text); font-size: var(--text-reading); max-width: 60ch; text-wrap: pretty; }
+.overlay-controls__reset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.panel__code-line { margin: 0 0 8px; color: var(--text-muted); font-size: var(--text-label); }

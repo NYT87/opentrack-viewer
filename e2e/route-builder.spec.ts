@@ -80,7 +80,7 @@ test('has the app’s header and Settings, which opens over the page without lea
   await page.goto('./#/route-builder');
   await page.getByRole('button', { name: 'Start a blank track' }).click();
 
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   expect(new URL(page.url()).hash).toBe('#/route-builder');
@@ -100,7 +100,7 @@ test('copies the viewed route into Route Builder, and the viewer keeps its activ
   await page.goto('./#/viewer');
   // Route-only basemap, so the viewer's map fetches no tiles and the request
   // list below measures the handoff alone.
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -161,7 +161,7 @@ test('fits a phone screen without a sideways scroll', async ({ page }) => {
 
 test('draws the draft on a map and edits it point by point (AV-1104)', async ({ page }) => {
   await page.goto('./#/route-builder');
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
   await page.getByRole('button', { name: 'Start a blank track' }).click();
@@ -198,7 +198,7 @@ test('draws the draft on a map and edits it point by point (AV-1104)', async ({ 
 
 test('cuts a section out of the track, shows it first, and takes it back (AV-1105)', async ({ page }) => {
   await page.goto('./#/route-builder');
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
   await page.getByRole('button', { name: 'Start a blank track' }).click();
@@ -237,7 +237,7 @@ test('appends a TCX after a GPX, warns of the far jump, and sends nothing anywhe
   const requests: Request[] = [];
   page.on('request', (request) => requests.push(request));
   await page.goto('./#/route-builder');
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
 
@@ -282,7 +282,7 @@ test('exports the planned track as a GPX that the viewer reads back as the same 
   const requests: Request[] = [];
   page.on('request', (request) => requests.push(request));
   await page.goto('./#/route-builder');
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
   await page.getByTestId('route-builder-input').setInputFiles(RIDE_PATH);

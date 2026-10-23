@@ -11,23 +11,23 @@ fillText("14.4 km/h", 42.5, 649.86) fill="#ffffff" font="bold 30.976000000000006
 restore()
 save()
 beginPath()
-roundRect(256.51, 609.6, 230.91, 96, 11.26)
+roundRect(261.63, 609.6, 230.91, 96, 11.26)
 clip()
 beginPath()
-roundRect(256.51, 609.6, 230.91, 96, 11.26)
+roundRect(261.63, 609.6, 230.91, 96, 11.26)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("DISTANCE", 273.41, 631.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("0 m", 273.41, 649.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("DISTANCE", 278.53, 631.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0 m", 278.53, 649.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()
-roundRect(487.42, 609.6, 230.91, 96, 11.26)
+roundRect(497.66, 609.6, 230.91, 96, 11.26)
 clip()
 beginPath()
-roundRect(487.42, 609.6, 230.91, 96, 11.26)
+roundRect(497.66, 609.6, 230.91, 96, 11.26)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("TIME", 504.32, 631.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("0:00", 504.32, 649.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("TIME", 514.56, 631.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:00", 514.56, 649.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()

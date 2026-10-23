@@ -212,6 +212,10 @@ must be opt-in and scrubbed of activity data.
 | Appending another track to a plan | Through the viewer's own intake; the jump is measured and said, never joined for you | `AV-1106`, TD-053. GPX, FIT, TCX and KML append after the draft's points in their order, as a stretch of their own, as one undoable edit. The page says how far the new start is from where the track ended and, past a kilometre, that the two are far apart; *Select the join* picks the first new point, where *Join to the point before* is offered. A track with no route is refused as such and the plan is left exactly as it was. Nothing leaves the tab, which a browser test checks request by request. |
 | Exporting a planned track | A GPX of places, without times, named `…-planned-track.gpx` | `AV-1107`, TD-054. Through the same exporter registry as a recording, once the draft has two joined points. FIT and TCX are listed but disabled: the registry writes them as recorded activities keyed by time, which would make a plan show on a watch as a workout already done. The page says what was left out and why, and warns when several stretches become several segments. A browser test downloads the file and reads it back in the viewer as the same route, with nothing sent anywhere. |
 | Route Builder coverage | One journey, by keyboard, on two screens, at scale, request by request | `AV-1108`, TD-055. From a viewed ride to a planned GPX the viewer reads back; a blank track built and edited with the keyboard alone; named controls, visible focus and a dialog that returns focus; no sideways scroll at 1280 and 360 px. A 14,402-point draft is timed through append, edit, discard, undo and export. That timing found an edit costing 1.2 s, now 150–400 ms: the preview is computed once, and long tracks get handles only where they matter, with a press on the line selecting the nearest point. Every test audits every request: same origin, GET, no body, no file names. |
+| Viewer charts and focus | One instrument, by pointer or keyboard; focus follows the file | `AV-516`, TD-028, TD-056. Only charts the data supports are drawn, over one shared x extent, with a readout of every chart's value at the cursor. Each chart is a keyboard slider: arrows move the cursor, Shift marks a section, Enter keeps it, Escape lets go. Opening a file focuses and announces its title; closing one returns focus to the drop zone. Lap amber and selection violet as DESIGN.md specifies; disabled buttons look disabled. |
+| Average pace and speed | Over moving time, labelled; the elapsed average beside it | TD-058. The overview's primary metric is the moving average ("Avg pace (moving)"), what a watch shows; the elapsed one follows in the grid, labelled too. |
+| Overview lead figures | Distance, duration, pace or speed, set larger | TD-057. The bike computer's primary fields lead the overview; the other figures follow in the grid, and the point count moves to the file's source line. |
+| Overlay page | A workspace that says how it synced and never loses its place | TD-059. The preview stays in view beside the controls; the page says whether the camera's clock or the activity's start lined the two up, warns when they do not overlap, and takes offsets as m:ss with a "this frame is…" action. A failed file is said in its slot and takes nothing else down. Start over keeps the overlay settings and can be undone. Export offers 23.976, 29.97 and 59.94 fps exactly. |
 | Map vs app theme | Independent | §17 leaves this open. The basemap keeps its own styling rather than following the app theme, so route-only mode and the tile treatment stay predictable. |
 | Terms and Conditions | A route, not a modal | A legal document needs a stable, shareable link, and it must be readable without a loaded activity. The copy is marked **draft** in the page itself: it describes how the app actually behaves, but it has not been reviewed by anyone qualified and must be before release. |
 | Routing | React Router, `HashRouter`; `/` homepage and `/viewer`, with settings as modal state rather than a route (`AV-006`, `AV-007`) | The plan defers routing until "multiple views become useful" (§4); the Settings page is that point, and §9 already reserved `src/app/routes.ts`. Hash routing because this is a static, backend-free app: on static hosting such as GitHub Pages a deep link to `/settings` would 404 without server rewrites. |
@@ -254,17 +258,6 @@ the camera's end-of-file `moov` arrived, so the extractor was rewritten to read
 the telemetry straight from the index (TD-038).
 
 ### Known debt
-
-**Unavailable charts still render placeholders, against TD-028.** The chart
-panel draws a title and an explanatory message for every chart an activity
-cannot support — "Pace is shown for running activities", and so on — while
-TD-028 says those should be skipped entirely. The decision and the task that
-implements it (`AV-516`, *Hide Unavailable Chart Sections*) arrived in the same
-commit, and only the decision is in place so far. `AV-908` made this more
-visible, because a file with no stated sport now leaves a placeholder for
-whichever of speed and pace is not selected; it did not introduce it, and its
-tests deliberately assert on what is *drawn* rather than on placeholder copy,
-so `AV-516` can remove them without touching `AV-908`'s coverage.
 
 The generic file intake still refuses an MP4, deliberately: `AV-907`'s first
 criterion is that "extraction does not happen inside the generic file viewer

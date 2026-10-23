@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Map as MapLibreMap,
   NavigationControl,
+  ScaleControl,
   setWorkerUrl,
   type GeoJSONSource,
   type LngLatBoundsLike,
@@ -38,6 +39,8 @@ const FOCUS_SOURCE = 'activity-focus';
 const FOCUS_LAYER = 'activity-focus-line';
 const MARKER_SOURCE = 'activity-marker';
 const MARKER_LAYER = 'activity-marker-point';
+const ENDS_SOURCE = 'activity-ends';
+const ENDS_LAYER = 'activity-ends-point';
 const LAP_SOURCE = 'activity-lap';
 const LAP_LAYER = 'activity-lap-line';
 const EDIT_POINT_SOURCE = 'draft-points';
@@ -89,9 +92,10 @@ export const DEFAULT_BASEMAP_STYLE: StyleSpecification = {
       id: 'osm',
       type: 'raster',
       source: 'osm',
-      // Muted so the bright raster sits behind a dark UI without washing out
-      // the route line drawn on top of it.
-      paint: { 'raster-saturation': -0.3, 'raster-brightness-max': 0.9 },
+      // Dimmed and desaturated so the bright raster sits behind the night
+      // frame, and a Trail Blue route on a light street map still reads as the
+      // brightest thing on it (DESIGN.md, the Fixed Map Rule).
+      paint: { 'raster-saturation': -0.75, 'raster-brightness-max': 0.6, 'raster-contrast': -0.1 },
     },
   ],
 };
@@ -137,6 +141,10 @@ function fitToBounds(
   duration: number,
 ): void {
   const [west, south, east, north] = bounds;
+  // The camera jumps rather than glides for a reader who asked for less motion.
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    duration = 0;
+  }
   if (west === east && south === north) {
     map.easeTo({ center: [west, south], zoom: 14, duration });
     return;
@@ -192,6 +200,34 @@ export interface ActivityMapProps {
    * viewer's behaviour — a fit on every new route — is unchanged.
    */
   fitKey?: string;
+  /**
+   * TD-056. Said by a screen reader on the map's canvas in place of MapLibre's
+   * bare "Map": what the route is and how to move along it.
+   */
+  description?: string;
+  /** The scale bar's units, following the reader's choice. */
+  units?: 'metric' | 'imperial';
+}
+
+/**
+ * TD-056. Where the route starts and finishes, as two points: the first
+ * coordinate of the first drawn run and the last of the last. Neither is
+ * drawn for Route Builder, whose own handles already mark every point.
+ */
+const EMPTY_POINTS_ENDS: FeatureCollection<Point, { end: 'start' | 'finish' }> = { type: 'FeatureCollection', features: [] };
+
+function routeEnds(route: ActivityMapProps['route']): FeatureCollection<Point, { end: 'start' | 'finish' }> {
+  const features = route.featureCollection.features;
+  const first = features[0]?.geometry.coordinates[0];
+  const lastRun = features[features.length - 1]?.geometry.coordinates;
+  const last = lastRun?.[lastRun.length - 1];
+  return {
+    type: 'FeatureCollection',
+    features: [
+      ...(first ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: first }, properties: { end: 'start' as const } }] : []),
+      ...(last ? [{ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: last }, properties: { end: 'finish' as const } }] : []),
+    ],
+  };
 }
 
 /**
@@ -212,6 +248,8 @@ export function ActivityMap({
   onPointClick,
   onMapClick,
   fitKey,
+  description,
+  units = 'metric',
 }: ActivityMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -225,6 +263,11 @@ export function ActivityMap({
   const lapRouteRef = useRef(lapRoute);
   const markerRef = useRef(marker);
   const editPointsRef = useRef(editPoints);
+  const unitsRef = useRef(units);
+  const scaleRef = useRef<ScaleControl | null>(null);
+  // Ends are the viewer's; Route Builder's handles already mark every point.
+  const ends = useMemo(() => (editPoints ? EMPTY_POINTS_ENDS : routeEnds(route)), [route, editPoints]);
+  const endsRef = useRef(ends);
   /** The `fitKey` the camera was last fitted for, so a route edit does not re-fit. */
   const fittedKeyRef = useRef<string | undefined>(undefined);
   /** Bounds of the route currently displayed, for re-fitting after a resize. */
@@ -240,7 +283,28 @@ export function ActivityMap({
     lapRouteRef.current = lapRoute;
     markerRef.current = marker;
     editPointsRef.current = editPoints;
-  }, [route, focusRoute, lapRoute, marker, editPoints]);
+    endsRef.current = ends;
+    unitsRef.current = units;
+  }, [route, focusRoute, lapRoute, marker, editPoints, ends, units]);
+
+  // The scale follows the unit setting.
+  useEffect(() => {
+    scaleRef.current?.setUnit?.(units);
+  }, [units]);
+
+  // The canvas says what it shows, not just "Map".
+  useEffect(() => {
+    const canvas = mapRef.current?.getCanvas?.();
+    if (canvas && description) canvas.setAttribute('aria-label', description);
+  }, [description, isStyleReady]);
+
+  // Push the route's ends with the route.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isStyleReady) return;
+    const source = map.getSource(ENDS_SOURCE);
+    if (source && 'setData' in source) (source as GeoJSONSource).setData(ends);
+  }, [ends, isStyleReady]);
 
   // A newly loaded activity gets a fresh automatic fit even if the user had
   // moved the camera while viewing the previous one. With a fit key, only a
@@ -272,6 +336,11 @@ export function ActivityMap({
     mapRef.current = map;
 
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
+    // TD-056. A scale, so a route says how big it is; top left, clear of the
+    // basemap notice and the attribution at the bottom.
+    const scale = new ScaleControl({ unit: unitsRef.current });
+    scaleRef.current = scale;
+    map.addControl(scale, 'top-left');
 
     // Only camera moves the user started should suppress automatic re-fitting;
     // our own fitBounds calls fire the same events without an originalEvent.
@@ -295,7 +364,7 @@ export function ActivityMap({
       // problems belong in the notice. A failed basemap must not invalidate the
       // loaded activity (§15).
       const sourceId = (event as { sourceId?: string }).sourceId;
-      if (sourceId === ROUTE_SOURCE || sourceId === MARKER_SOURCE) return;
+      if (sourceId === ROUTE_SOURCE || sourceId === MARKER_SOURCE || sourceId === ENDS_SOURCE) return;
       setStyleError(event.error?.message ?? 'The basemap could not be loaded.');
     });
 
@@ -352,7 +421,8 @@ export function ActivityMap({
           type: 'line',
           source: FOCUS_SOURCE,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': '#ffd166', 'line-width': 4.5 },
+          // Selection Violet at 5px: the chart-selected section (DESIGN.md).
+          paint: { 'line-color': '#c77dff', 'line-width': 5 },
         });
       }
       if (!map.getSource(LAP_SOURCE)) {
@@ -365,9 +435,10 @@ export function ActivityMap({
           type: 'line',
           source: LAP_SOURCE,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          // A colour of its own: not the route's blue, and not the focus amber,
-          // so a highlighted lap inside a focused section still reads as one.
-          paint: { 'line-color': '#c77dff', 'line-width': 5 },
+          // Lap Amber at 4.5px: a colour of its own, not the route's blue and
+          // not the selection's violet, so a highlighted lap inside a focused
+          // section still reads as one (DESIGN.md).
+          paint: { 'line-color': '#ffd166', 'line-width': 4.5 },
         });
       }
       if (!map.getSource(EDIT_POINT_SOURCE)) {
@@ -397,6 +468,22 @@ export function ActivityMap({
           },
         });
       }
+      if (!map.getSource(ENDS_SOURCE)) {
+        map.addSource(ENDS_SOURCE, { type: 'geojson', data: endsRef.current });
+        map.addLayer({
+          id: ENDS_LAYER,
+          type: 'circle',
+          source: ENDS_SOURCE,
+          // Start: a Trail Blue dot, the route's own colour. Finish: a night
+          // dot. Both ringed in the marker's light so they read on the line.
+          paint: {
+            'circle-radius': 6,
+            'circle-color': ['match', ['get', 'end'], 'start', '#4aa3ff', '#0b0f14'],
+            'circle-stroke-color': '#e6edf3',
+            'circle-stroke-width': 2.5,
+          },
+        });
+      }
       if (!map.getSource(MARKER_SOURCE)) {
         map.addSource(MARKER_SOURCE, { type: 'geojson', data: markerRef.current });
         map.addLayer({
@@ -405,7 +492,10 @@ export function ActivityMap({
           source: MARKER_SOURCE,
           paint: {
             'circle-radius': 6,
-            'circle-color': '#ffd166',
+            // The hover marker is neutral and bright: amber is the lap and
+            // violet the selection, and a marker in either would vanish on
+            // the very stretch it is pointing at.
+            'circle-color': '#e6edf3',
             'circle-stroke-color': '#0b0f14',
             'circle-stroke-width': 2,
           },

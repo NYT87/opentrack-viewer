@@ -82,11 +82,11 @@ describe('SelectionSummary (AV-605)', () => {
     const { rerender } = render(
       <SelectionSummary selection={selectionOf(ride)} totalPoints={4} />,
     );
-    expect(within(panel()).getByText('Avg speed')).toBeInTheDocument();
+    expect(within(panel()).getByText(/^Avg speed( \(moving\))?$/)).toBeInTheDocument();
 
     const run = { ...activity, metadata: { ...activity.metadata, sport: 'running' as const } };
     rerender(<SelectionSummary selection={selectionOf(run)} totalPoints={4} />);
-    expect(within(panel()).getByText('Avg pace')).toBeInTheDocument();
+    expect(within(panel()).getByText(/^Avg pace( \(moving\))?$/)).toBeInTheDocument();
   });
 
   it('uses the chosen unit system', () => {

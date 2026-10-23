@@ -11,75 +11,75 @@ fillText("16.2 km/h", 23.9, 1201.6) fill="#ffffff" font="bold 17.424000000000003
 restore()
 save()
 beginPath()
-roundRect(14.4, 1124.96, 144, 54, 6.34)
+roundRect(14.4, 1122.08, 144, 54, 6.34)
 clip()
 beginPath()
-roundRect(14.4, 1124.96, 144, 54, 6.34)
+roundRect(14.4, 1122.08, 144, 54, 6.34)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("PACE", 23.9, 1137.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("3:42 /km", 23.9, 1147.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("PACE", 23.9, 1134.27) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("3:42 /km", 23.9, 1144.72) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()
-roundRect(14.4, 1070.96, 144, 54, 6.34)
+roundRect(14.4, 1065.2, 144, 54, 6.34)
 clip()
 beginPath()
-roundRect(14.4, 1070.96, 144, 54, 6.34)
+roundRect(14.4, 1065.2, 144, 54, 6.34)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("DISTANCE", 23.9, 1083.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("10 m", 23.9, 1093.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("DISTANCE", 23.9, 1077.39) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("10 m", 23.9, 1087.84) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()
-roundRect(14.4, 1016.96, 144, 54, 6.34)
+roundRect(14.4, 1008.32, 144, 54, 6.34)
 clip()
 beginPath()
-roundRect(14.4, 1016.96, 144, 54, 6.34)
+roundRect(14.4, 1008.32, 144, 54, 6.34)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("TIME", 23.9, 1029.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("0:03", 23.9, 1039.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("TIME", 23.9, 1020.51) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:03", 23.9, 1030.96) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()
-roundRect(14.4, 962.96, 144, 54, 6.34)
+roundRect(14.4, 951.44, 144, 54, 6.34)
 clip()
 beginPath()
-roundRect(14.4, 962.96, 144, 54, 6.34)
+roundRect(14.4, 951.44, 144, 54, 6.34)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("ELEVATION", 23.9, 975.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("103 m", 23.9, 985.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("ELEVATION", 23.9, 963.63) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("103 m", 23.9, 974.08) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()
-roundRect(14.4, 908.96, 144, 54, 6.34)
+roundRect(14.4, 894.56, 144, 54, 6.34)
 clip()
 beginPath()
-roundRect(14.4, 908.96, 144, 54, 6.34)
+roundRect(14.4, 894.56, 144, 54, 6.34)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("HEART RATE", 23.9, 917.59) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("103 bpm", 23.9, 928.04) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
-fillRect(23.9, 950.37, 124.99, 3.96) fill="rgb(255 255 255 / 0.25)" alpha=1
-fillRect(23.9, 950.37, 43.75, 3.96) fill="#ff6a00" alpha=1
+fillText("HEART RATE", 23.9, 903.19) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("103 bpm", 23.9, 913.64) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillRect(23.9, 935.97, 124.99, 3.96) fill="rgb(255 255 255 / 0.25)" alpha=1
+fillRect(23.9, 935.97, 43.75, 3.96) fill="#ff6a00" alpha=1
 restore()
 save()
 beginPath()
-roundRect(14.4, 854.96, 144, 54, 6.34)
+roundRect(14.4, 837.68, 144, 54, 6.34)
 clip()
 beginPath()
-roundRect(14.4, 854.96, 144, 54, 6.34)
+roundRect(14.4, 837.68, 144, 54, 6.34)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("CYCLING CADENCE", 23.9, 867.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("83 rpm", 23.9, 877.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("CYCLING CADENCE", 23.9, 849.87) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("83 rpm", 23.9, 860.32) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()
-roundRect(14.4, 800.96, 144, 54, 6.34)
+roundRect(14.4, 780.8, 144, 54, 6.34)
 clip()
 beginPath()
-roundRect(14.4, 800.96, 144, 54, 6.34)
+roundRect(14.4, 780.8, 144, 54, 6.34)
 fill() fill="rgb(0 0 0 / 0.35)" alpha=1
-fillText("POWER", 23.9, 813.15) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
-fillText("155 W", 23.9, 823.6) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillText("POWER", 23.9, 792.99) fill="#ffffff" font="8.712000000000002px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("155 W", 23.9, 803.44) fill="#ffffff" font="bold 17.424000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
 restore()
 save()
 beginPath()

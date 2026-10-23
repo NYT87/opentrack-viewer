@@ -170,33 +170,172 @@ describe('overlay preview synchronization (AV-1004)', () => {
   });
 });
 
-describe('overlay preview offset (AV-1004)', () => {
-  it('delays the telemetry for a positive offset and advances it for a negative one', async () => {
+describe('overlay preview sync (AV-1004, TD-059)', () => {
+  it('starts the video earlier or later in the activity, and goes back to where it was placed', async () => {
     render(<Harness />);
     act(() => seekTo(5));
     expect(within(layer()).getByText('18.0 km/h')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '+1 s' }));
+    await userEvent.click(screen.getByRole('button', { name: '−1 s, earlier' }));
     expect(within(layer()).getByText('14.4 km/h')).toBeInTheDocument(); // telemetry of t = 4
 
-    await userEvent.click(screen.getByRole('button', { name: '−1 s' }));
-    await userEvent.click(screen.getByRole('button', { name: '−1 s' }));
+    await userEvent.click(screen.getByRole('button', { name: '+1 s, later' }));
+    await userEvent.click(screen.getByRole('button', { name: '+1 s, later' }));
     expect(within(layer()).getByText('21.6 km/h')).toBeInTheDocument(); // t = 6
 
-    await userEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await userEvent.click(screen.getByRole('button', { name: "Back to the activity's start" }));
     expect(within(layer()).getByText('18.0 km/h')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: "Back to the activity's start" })).not.toBeInTheDocument();
   });
 
-  it('takes a typed offset without rewriting what is half typed', async () => {
+  it('takes a typed start without rewriting what is half typed', async () => {
     render(<Harness />);
     act(() => seekTo(5));
-    const field = screen.getByRole('spinbutton');
+    const field = screen.getByRole('textbox', { name: 'Video starts at' });
     await userEvent.clear(field);
-    await userEvent.type(field, '2');
-    expect(field).toHaveValue(2);
+    await userEvent.type(field, '-2');
+    expect(field).toHaveValue('-2');
     expect(within(layer()).getByText('10.8 km/h')).toBeInTheDocument(); // t = 3
     await userEvent.tab();
-    expect(field).toHaveValue(2);
+    expect(field).toHaveValue('-2');
+  });
+
+  it('reads minutes and seconds, and steps by key: a second, ten with Shift', async () => {
+    render(<Harness />);
+    const field = screen.getByRole('textbox', { name: 'Video starts at' });
+    await userEvent.clear(field);
+    await userEvent.type(field, '-1:30');
+    await userEvent.tab();
+    // Typed, it is taken as typed, even off the activity.
+    expect(field).toHaveValue('-1:30');
+    await userEvent.clear(field);
+    await userEvent.type(field, '-0:05');
+    await userEvent.keyboard('{ArrowUp}');
+    expect(field).toHaveValue('-4');
+    await userEvent.keyboard('{Shift>}{ArrowUp}{/Shift}');
+    expect(field).toHaveValue('6');
+    // A step is held to where the video still touches the ten-second activity.
+    await userEvent.keyboard('{Shift>}{ArrowUp}{/Shift}');
+    expect(field).toHaveValue('10');
+  });
+
+  it('lines up the frame shown with a moment of the activity', async () => {
+    render(<Harness />);
+    act(() => seekTo(5));
+    // This frame is the activity's 0:02: the telemetry of t = 2 is shown here.
+    const form = screen.getByRole('form', { name: 'Line up this frame' });
+    await userEvent.type(within(form).getByRole('textbox'), '0:02');
+    await userEvent.click(within(form).getByRole('button', { name: 'Line up' }));
+    expect(screen.getByRole('textbox', { name: 'Video starts at' })).toHaveValue('-3');
+    expect(within(layer()).getByText('7.2 km/h')).toBeInTheDocument(); // t = 2
+  });
+
+  it('refuses a moment that is not a time, or is past the activity, and says why', async () => {
+    render(<Harness />);
+    const form = screen.getByRole('form', { name: 'Line up this frame' });
+    const moment = within(form).getByRole('textbox');
+    await userEvent.type(moment, '9:99');
+    expect(within(form).getByRole('button', { name: 'Line up' })).toBeDisabled();
+    expect(moment).toHaveAccessibleDescription(/"9:99" is not a time/);
+    await userEvent.clear(moment);
+    await userEvent.type(moment, '0:20');
+    expect(within(form).getByRole('button', { name: 'Line up' })).toBeDisabled();
+    expect(moment).toHaveAccessibleDescription(/The activity is 0:10 long/);
+  });
+
+  it('slides the video along the activity from the bar under the picture, by key', async () => {
+    render(<Harness />);
+    const bar = within(screen.getByRole('region', { name: 'Preview' })).getByRole('slider', {
+      name: 'Where the video starts in the activity',
+    });
+    expect(bar).toHaveAttribute('aria-valuetext', 'Video at 0:00 to 0:10 of 0:10');
+    bar.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(screen.getByRole('textbox', { name: 'Video starts at' })).toHaveValue('1');
+    await userEvent.keyboard('{Shift>}{ArrowLeft}{/Shift}');
+    expect(screen.getByRole('textbox', { name: 'Video starts at' })).toHaveValue('-9');
+    await userEvent.keyboard('{Home}');
+    expect(bar).toHaveAttribute('aria-valuenow', '0');
+  });
+
+  it('drops a time it refused once the start is set some other way', async () => {
+    render(<Harness />);
+    const field = screen.getByRole('textbox', { name: 'Video starts at' });
+    await userEvent.clear(field);
+    await userEvent.type(field, 'abc');
+    await userEvent.tab();
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    screen.getByRole('slider', { name: 'Where the video starts in the activity' }).focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(field).toHaveValue('1');
+    expect(field).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('holds the bar to where the video still touches the activity', async () => {
+    render(<Harness />);
+    const bar = screen.getByRole('slider', { name: 'Where the video starts in the activity' });
+    bar.focus();
+    await userEvent.keyboard('{PageUp}{PageUp}');
+    expect(bar).toHaveAttribute('aria-valuenow', '10');
+    expect(Number(bar.getAttribute('aria-valuenow'))).toBeLessThanOrEqual(Number(bar.getAttribute('aria-valuemax')));
+  });
+
+  it('keeps focus on the reset button through a reset and its undo', async () => {
+    render(<Harness />);
+    const reset = screen.getByRole('button', { name: 'Reset overlay settings' });
+    reset.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Undo reset' })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Reset overlay settings' })).toHaveFocus();
+  });
+
+  it('says in the stage when the video is off the activity, with the way back', async () => {
+    render(<Harness />);
+    const field = screen.getByRole('textbox', { name: 'Video starts at' });
+    await userEvent.clear(field);
+    await userEvent.type(field, '30');
+    const stage = screen.getByRole('region', { name: 'Preview' });
+    expect(within(stage).getByText(/do not overlap, so nothing is drawn/)).toBeInTheDocument();
+    await userEvent.click(within(stage).getByRole('button', { name: "Line up at the activity's start" }));
+    expect(field).toHaveValue('0');
+    expect(within(stage).queryByText(/do not overlap/)).not.toBeInTheDocument();
+  });
+
+  it('answers the transport keys anywhere in the stage, not only on the picture', async () => {
+    render(<Harness />);
+    screen.getByRole('slider', { name: 'Video position' }).focus();
+    await userEvent.keyboard('l');
+    expect(screen.getByRole('timer', { name: 'Current time' })).toHaveTextContent(/^0:05/);
+    // The scrubber's own arrows step a frame, held to this video's frame.
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(document.querySelector('video')!.currentTime).toBeCloseTo(5 - 1 / 30, 5);
+  });
+});
+
+describe('parsing a typed offset (TD-059)', () => {
+  it('reads seconds and clock time, signed, and refuses anything else', async () => {
+    const { parseOffset, formatOffset } = await import('./OverlayPreview');
+    expect(parseOffset('12.5')).toBe(12.5);
+    expect(parseOffset('-90')).toBe(-90);
+    expect(parseOffset('-23:00')).toBe(-1380);
+    expect(parseOffset('1:02:03')).toBe(3723);
+    expect(parseOffset('−0:05')).toBe(-5);
+    expect(parseOffset('abc')).toBeUndefined();
+    expect(parseOffset('1:2:3:4')).toBeUndefined();
+    expect(parseOffset('9:99')).toBeUndefined();
+    expect(parseOffset('')).toBeUndefined();
+    expect(formatOffset(-1380)).toBe('-23:00');
+    expect(formatOffset(3723)).toBe('1:02:03');
+    expect(formatOffset(2.5)).toBe('2.5');
+  });
+});
+
+describe('how the video is lined up (TD-059)', () => {
+  it('says what it was lined up by, and draws the bar', () => {
+    render(<Harness />);
+    expect(screen.getByText(/Lined up/)).toBeInTheDocument();
+    expect(document.querySelector('.overlay-sync__bar')).not.toBeNull();
   });
 });
 
@@ -236,7 +375,7 @@ describe('overlay preview with missing data (AV-1004)', () => {
     expect(screen.queryByTestId('overlay-layer')).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(/no timestamps/i);
     expect(screen.queryByRole('list', { name: 'Overlay warnings' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Telemetry offset' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Video start' })).not.toBeInTheDocument();
   });
 
   it('plays the video alone, with a note, when there is no activity yet', () => {
@@ -392,5 +531,55 @@ describe('overlay template controls (AV-1005)', () => {
     expect(screen.queryByRole('region', { name: 'Overlay controls' })).not.toBeInTheDocument();
     render(<Harness source={makeActivity([{ lat: 1, lon: 1 }, { lat: 2, lon: 2 }])} />);
     expect(screen.queryByRole('region', { name: 'Overlay controls' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the sync panel (TD-059)', () => {
+  const far = (start: Date) => (
+    <OverlayPreview
+      video={{ ...video, timing: { durationSeconds: 10, frameIntervalSeconds: 1 / 30, start } }}
+      activity={activity()}
+      offsetSeconds={0}
+      onOffsetChange={onFar}
+      units="metric"
+      controls={DEFAULT_OVERLAY_CONTROLS}
+      onControlsChange={() => {}}
+    />
+  );
+  const onFar = vi.fn();
+
+  it('tells clocks days apart as two dates, not an hour count, and lines up in one press', async () => {
+    onFar.mockClear();
+    render(far(new Date(T0.getTime() - 400 * 86_400_000)));
+    const warning = screen.getByText(/are from different times/);
+    expect(warning).toHaveTextContent(/the activity starts .+, and the video .+\./);
+    expect(warning.textContent).not.toMatch(/\d{3,}:\d\d:\d\d/);
+    expect(document.querySelector('.overlay-sync__bar')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: "Line up at the activity's start" }));
+    // The offset that puts the activity's first point at video 0.
+    expect(onFar).toHaveBeenCalledWith(-400 * 86_400);
+  });
+
+  it('draws the activity\'s speed along the bar, to line a sprint up by', () => {
+    render(<Harness />);
+    expect(document.querySelector('.overlay-sync__trace polyline')?.getAttribute('points')).toMatch(/\d/);
+    expect(document.querySelector('.overlay-sync__legend')).toHaveTextContent(/Video Speed/);
+  });
+
+  it('keeps text that is not a time, and says why, instead of reverting it', async () => {
+    render(<Harness />);
+    const field = screen.getByRole('textbox', { name: 'Video starts at' });
+    await userEvent.clear(field);
+    await userEvent.type(field, 'abc');
+    await userEvent.tab();
+    expect(field).toHaveValue('abc');
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field).toHaveAccessibleDescription(/"abc" is not a time, so the video still starts at 0/);
+  });
+
+  it('shows the slider values beside the sliders', () => {
+    render(<Harness />);
+    expect(screen.getByRole('slider', { name: 'Size' })).toHaveAttribute('aria-valuetext', expect.stringMatching(/%$/));
+    expect(screen.getByRole('combobox', { name: 'Position' })).toBeInTheDocument();
   });
 });

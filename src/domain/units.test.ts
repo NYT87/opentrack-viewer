@@ -5,6 +5,7 @@ import {
   toDisplayElevation,
   formatDateTime,
   formatDistance,
+  formatDistanceOnScale,
   formatDuration,
   formatElevation,
   formatFileSize,
@@ -89,5 +90,23 @@ describe('formatFileSize', () => {
     expect(formatFileSize(5 * 1024 * 1024)).toBe('5.0 MB');
     // A camera's file: gigabytes, where an activity file never goes.
     expect(formatFileSize(3.5 * 1024 * 1024 * 1024)).toBe('3.50 GB');
+  });
+});
+
+describe('formatDistanceOnScale (TD-056)', () => {
+  it('writes every value in the unit the scale\'s largest value picks', () => {
+    expect(formatDistanceOnScale(0, 1200)).toBe('0.00 km');
+    expect(formatDistanceOnScale(1200, 1200)).toBe('1.20 km');
+    expect(formatDistanceOnScale(0, 800)).toBe('0 m');
+    expect(formatDistanceOnScale(0, 600, 'imperial')).toBe('0.00 mi');
+    expect(formatDistanceOnScale(30, 100, 'imperial')).toBe('98 ft');
+  });
+});
+
+describe('formatDateTime with seconds', () => {
+  it('adds seconds only when asked', () => {
+    const date = new Date('2024-01-01T10:00:05Z');
+    expect(formatDateTime(date)).not.toMatch(/:05/);
+    expect(formatDateTime(date, { seconds: true })).toMatch(/:05/);
   });
 });

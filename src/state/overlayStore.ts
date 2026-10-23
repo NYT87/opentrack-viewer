@@ -113,7 +113,22 @@ interface OverlayState {
    * chose an activity by hand. Returns whether it was taken.
    */
   offerVideoActivity: (activity: Activity) => boolean;
-  clear: () => void;
+  /**
+   * TD-059. Lets go of both files, the offset and the measurements, and keeps
+   * the overlay settings: they are the reader's choices, not the files' (the
+   * rule TD-043 already set for replaced files). Returns what it let go of, so
+   * it can be put back.
+   */
+  clear: () => OverlaySnapshot;
+  /** Puts back what `clear` let go of: the undo for Start over. */
+  restore: (snapshot: OverlaySnapshot) => void;
+}
+
+/** What Start over lets go of, held by the page until the reader undoes it or moves on. */
+export interface OverlaySnapshot {
+  source: OverlaySource;
+  offsetSeconds: number;
+  media: OverlayMedia | undefined;
 }
 
 export const useOverlayStore = create<OverlayState>((set, get) => ({
@@ -181,8 +196,13 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
     return true;
   },
 
-  clear: () =>
-    set({ source: {}, offsetSeconds: 0, media: undefined, controls: DEFAULT_OVERLAY_CONTROLS }),
+  clear: () => {
+    const { source, offsetSeconds, media } = get();
+    set({ source: {}, offsetSeconds: 0, media: undefined });
+    return { source, offsetSeconds, media };
+  },
+
+  restore: (snapshot) => set({ ...snapshot }),
 }));
 
 /** Whether there is anything on the page to make an overlay from. */

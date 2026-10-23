@@ -68,6 +68,15 @@ export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
   fontScale: 1,
 };
 
+/**
+ * TD-059. Below this background the figures carry a thin dark halo of their
+ * own: white type on a bright sky or snow is otherwise unreadable. The preview
+ * and the export both draw it, from this one test.
+ */
+export const HALO_BELOW_OPACITY = 0.3;
+export const needsHalo = (style: Pick<OverlayStyle, 'backgroundOpacity'>) =>
+  style.backgroundOpacity < HALO_BELOW_OPACITY;
+
 export interface OverlayComponent {
   id: string;
   type: OverlayComponentType;

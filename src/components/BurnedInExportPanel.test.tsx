@@ -75,7 +75,7 @@ function setup(props: Partial<React.ComponentProps<typeof BurnedInExportPanel>> 
   return { ...utils, start, inspect, jobs, progress, common };
 }
 
-const panel = () => screen.getByRole('region', { name: 'Burned-in export' });
+const panel = () => screen.getByRole('region', { name: 'Export video with the overlay' });
 const renderButton = () => screen.getByRole('button', { name: 'Render video with overlay' });
 
 beforeEach(() => {

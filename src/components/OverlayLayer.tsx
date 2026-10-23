@@ -4,6 +4,7 @@ import type { UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from '../overlay/presets';
 import { projectRoute } from '../overlay/routeProjection';
 import {
+  needsHalo,
   resolveOverlayComponent,
   type OverlayComponent,
   type OverlayTemplate,
@@ -66,6 +67,7 @@ function boxStyle(component: OverlayComponent, resolved: Extract<ResolvedOverlay
     background: `rgb(0 0 0 / ${style.backgroundOpacity})`,
     fontSize: `calc(${style.fontScale} * ${BASE_FONT_CQW}cqw)`,
     ['--overlay-accent' as string]: style.accentColor,
+    ...(needsHalo(style) ? { textShadow: '0 0 0.2em rgb(0 0 0 / 0.8), 0 0 0.06em rgb(0 0 0 / 0.9)' } : {}),
   };
 }
 

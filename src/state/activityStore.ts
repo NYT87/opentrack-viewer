@@ -36,6 +36,13 @@ interface ActivityState extends ActivitySnapshot {
    * behaviour that task asks for and the privacy model requires (§5).
    */
   setActivity: (activity: Activity) => void;
+  /**
+   * TD-056. Opens a file in place of the activity already open, but only once
+   * it has parsed: until then, and if it fails, the open activity is left
+   * exactly as it was. Resolves to the error when it fails, for the caller to
+   * show beside the activity it kept.
+   */
+  replaceFile: (file: File) => Promise<ActivityError | undefined>;
   clear: () => void;
 }
 
@@ -61,6 +68,17 @@ export const useActivityStore = create<ActivityState>((set) => ({
         activity: undefined,
         error: toActivityError(error, 'unsupported_format'),
       });
+    }
+  },
+
+  async replaceFile(file: File) {
+    try {
+      const { activity } = await parseActivityFile(file);
+      useInteractionStore.getState().reset();
+      set({ status: 'ready', activity, error: undefined, fileName: file.name });
+      return undefined;
+    } catch (error) {
+      return toActivityError(error, 'unsupported_format');
     }
   },
 

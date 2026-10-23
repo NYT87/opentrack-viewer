@@ -37,7 +37,10 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
   const sourceFormat = EXPORT_FORMATS.find(
     (entry) => entry.format === activity.source.format,
   )?.format;
-  const [format, setFormat] = useState<ExportFormat>(sourceFormat ?? EXPORT_FORMATS[0]!.format);
+  // What the reader picked, if anything. The format actually offered is derived
+  // below, because a pick can stop being writable (a section with no
+  // coordinates cannot be a GPX) without the reader doing anything.
+  const [picked, setFormat] = useState<ExportFormat | undefined>();
   const [wantsSection, setWantsSection] = useState(true);
   const [outcome, setOutcome] = useState<Outcome | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -48,8 +51,6 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
   // Derived rather than synchronized: when the selection is cleared the choice
   // simply stops applying, with no state to keep in step.
   const exportsSection = Boolean(selectedRange) && wantsSection;
-  const label = EXPORT_FORMATS.find((entry) => entry.format === format)?.label ?? format;
-  const isRewrite = format === sourceFormat;
 
   /*
    * AV-555. A format this activity cannot be written to is offered as a
@@ -61,8 +62,24 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
     () => getExportAvailability(activity, exportsSection ? selectedRange : undefined),
     [activity, exportsSection, selectedRange],
   );
+  /*
+   * The format offered: the reader's pick while it can be written, else the
+   * source format when that can, else the first format that can. A file with
+   * no coordinates used to open on "GPX (same format) — unavailable" over a
+   * disabled button; now it opens on something it can write. Only when nothing
+   * can be written does an unavailable format stay selected, with its reason.
+   */
+  const writable = (candidate: ExportFormat | undefined) =>
+    availability.find((entry) => entry.format === candidate)?.available === true;
+  const format: ExportFormat = writable(picked)
+    ? picked!
+    : writable(sourceFormat)
+      ? sourceFormat!
+      : (availability.find((entry) => entry.available)?.format ?? picked ?? sourceFormat ?? EXPORT_FORMATS[0]!.format);
   const chosen = availability.find((entry) => entry.format === format);
   const isUnavailable = chosen?.available === false;
+  const label = EXPORT_FORMATS.find((entry) => entry.format === format)?.label ?? format;
+  const isRewrite = format === sourceFormat;
 
   const handleExport = async () => {
     setIsWriting(true);

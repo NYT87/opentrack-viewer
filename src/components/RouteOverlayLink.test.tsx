@@ -11,7 +11,10 @@ const ride = makeActivity(
   Array.from({ length: 10 }, (_, i) => ({ lat: 10 + i * 0.001, lon: 20 + i * 0.002 })),
 );
 
-beforeEach(() => useOverlayStore.getState().clear());
+beforeEach(() => {
+  useOverlayStore.getState().clear();
+  useOverlayStore.setState({ controls: useOverlayStore.getInitialState().controls });
+});
 
 type Range = { startIndex: number; endIndex: number } | undefined;
 

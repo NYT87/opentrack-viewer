@@ -123,7 +123,7 @@ describe('ExportPanel (AV-554)', () => {
     expect(screen.queryByText(/could not carry/)).not.toBeInTheDocument();
   });
 
-  it('says up front that it cannot write an empty file, rather than after (AV-555)', async () => {
+  it('opens on a format it can write, and says up front which one it cannot (AV-555, TD-056)', () => {
     const indoor = makeActivity([
       { heartRateBpm: 120, time: new Date('2024-01-01T10:00:00Z') },
       { heartRateBpm: 130, time: new Date('2024-01-01T10:01:00Z') },
@@ -131,13 +131,13 @@ describe('ExportPanel (AV-554)', () => {
     render(<ExportPanel activity={indoor} />);
 
     // GPX is this activity's own format, and the one it cannot be written to.
-    // The reason is stated before a press, and the press cannot happen.
-    expect(screen.getByText(/GPX needs GPS coordinates/i)).toBeInTheDocument();
-    const button = screen.getByRole('button', { name: /GPX/ });
-    expect(button).toBeDisabled();
-
-    await userEvent.click(button);
-    expect(saved).toHaveLength(0);
+    // It is listed as unavailable before any press, and the panel does not
+    // open on it: a converter's first sight is a button that works.
+    const select = screen.getByLabelText('Format') as HTMLSelectElement;
+    expect(select.value).not.toBe('gpx');
+    expect(screen.getByRole('option', { name: /GPX .*unavailable/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Convert to / })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /GPX/ })).not.toBeInTheDocument();
   });
 });
 
@@ -197,7 +197,7 @@ describe('a target that cannot be written is disabled, not broken (AV-555)', () 
     );
   });
 
-  it('explains why, and refuses to be pressed, when the choice is unavailable', async () => {
+  it('does not keep an unavailable choice, even when the control is set directly', async () => {
     // Reaching an unavailable format needs the control set directly, which is
     // what a keyboard or a restored form state can do even with it disabled.
     render(<ExportPanel activity={indoor()} />);
@@ -208,8 +208,11 @@ describe('a target that cannot be written is disabled, not broken (AV-555)', () 
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    expect(screen.getByText(/GPX needs GPS coordinates/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /GPX/ })).toBeDisabled();
+    // The unwritable pick does not stick: the panel stays on a format it can
+    // write, and no GPX is ever offered to be pressed.
+    expect(select.value).not.toBe('gpx');
+    expect(screen.queryByRole('button', { name: /GPX/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Convert to / })).toBeEnabled();
     expect(saved).toHaveLength(0);
   });
 

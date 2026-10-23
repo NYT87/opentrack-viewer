@@ -66,3 +66,10 @@ describe('overlay preview goldens (AV-1008)', () => {
     expect(html).toContain('0:05');
   });
 });
+
+describe('figures on a clear background (TD-059)', () => {
+  it('carry a dark halo of their own below the halo opacity, and none above it', () => {
+    expect(markup({ backgroundOpacity: 0 }, 5)).toMatch(/text-shadow: 0 0 0\.2em/);
+    expect(markup({ backgroundOpacity: 0.35 }, 5)).not.toMatch(/text-shadow/);
+  });
+});

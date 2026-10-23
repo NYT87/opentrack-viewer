@@ -39,6 +39,13 @@ describe('export plan (AV-1006)', () => {
     expect(frameVideoTime(50, 25)).toBe(2);
   });
 
+  it('puts a floor under the estimate for a small frame, as measured (TD-059)', () => {
+    // 180 frames at 256 × 144 came to 781 KB; by area alone it would say 400 KB.
+    const small = planExport({ videoDurationSeconds: 6, fps: 30, width: 256, height: 144 });
+    expect(small.estimatedBytes).toBe(180 * 4_500);
+    expect(Math.abs(small.estimatedBytes - 781_000) / 781_000).toBeLessThan(0.1);
+  });
+
   it('scales the size estimate with the picture area', () => {
     const hd = planExport({ videoDurationSeconds: 10, fps: 30, width: 1920, height: 1080 });
     const uhd = planExport({ videoDurationSeconds: 10, fps: 30, width: 3840, height: 2160 });
@@ -84,5 +91,16 @@ describe('export plan (AV-1006)', () => {
     expect(formatBytes(500)).toBe('1 KB');
     expect(formatBytes(64_000_000)).toBe('64 MB');
     expect(formatBytes(2_500_000_000)).toBe('2.5 GB');
+  });
+});
+
+describe('frame rates as an editor names them (TD-059)', () => {
+  it('writes whole rates as they are and the NTSC fractions by their names', async () => {
+    const { formatFrameRate, EXPORT_FRAME_RATES } = await import('./plan');
+    expect(formatFrameRate(30)).toBe('30');
+    expect(formatFrameRate(30000 / 1001)).toBe('29.97');
+    expect(formatFrameRate(60000 / 1001)).toBe('59.94');
+    expect(formatFrameRate(24000 / 1001)).toBe('23.976');
+    expect(EXPORT_FRAME_RATES).toContain(30000 / 1001);
   });
 });
