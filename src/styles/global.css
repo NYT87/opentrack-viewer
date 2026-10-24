@@ -1434,6 +1434,30 @@ summary { padding-block: 3px; }
   :root { --text-label: 12px; }
 }
 
+/* A title given focus on a route change shows the ring to a keyboard only. */
+main h2[tabindex='-1']:focus { outline: none; }
+main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+
+/* Pressed: the control answers the press itself, where a touch screen has no hover. */
+.button:active:not(:disabled),
+.tools__button:active,
+.icon-button:active,
+.section-nav__link:active,
+.axis-switch__option:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.button--primary:active:not(:disabled) { background: var(--accent); filter: brightness(0.92); }
+
+/* A label and its select wrap rather than push a long option past the screen. */
+.overlay-controls__field { flex-wrap: wrap; }
+
+/*
+ * A phone held sideways is too short for a sticky stage: the picture and its
+ * bar would cover the whole screen. There the stage scrolls with the page.
+ */
+@media (max-width: 1099px) and (max-height: 500px) {
+  .overlay-workspace__stage { position: static; }
+  .shell__scroll:has(.overlay-workspace) { scroll-padding-top: 12px; }
+}
+
 @media (pointer: coarse) {
   .button,
   .select,

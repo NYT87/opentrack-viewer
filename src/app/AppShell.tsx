@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { SettingsIconButton } from '../components/SettingsIconButton';
 import { ToolsMenu } from '../components/ToolsMenu';
@@ -28,6 +28,30 @@ export function AppShell() {
 
   const location = useLocation();
   const isHome = location.pathname === ROUTES.home;
+
+  /*
+   * A route change moves focus to the new page's title, so a screen reader
+   * hears where it is and Tab starts from the page, not the top of the shell.
+   * Only when the page left focus nowhere useful (the body, or the header that
+   * navigated): a page that puts focus somewhere itself keeps it. Not on the
+   * first load, where the browser's own start is right.
+   */
+  const firstRoute = useRef(true);
+  useEffect(() => {
+    if (firstRoute.current) {
+      firstRoute.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && !active.closest('.shell__header')) return;
+      const title = document.querySelector<HTMLElement>('main h2');
+      if (!title) return;
+      if (!title.hasAttribute('tabindex')) title.setAttribute('tabindex', '-1');
+      title.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [location.pathname]);
 
   const activity = useActivityStore((state) => state.activity);
   const clear = useActivityStore((state) => state.clear);

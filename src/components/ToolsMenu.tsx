@@ -82,7 +82,13 @@ export function ToolsMenu({ items }: ToolsMenuProps) {
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={(event) => {
+          const opening = !isOpen;
+          setIsOpen(opening);
+          // Opened by Enter or Space (a click with no pointer): into the menu,
+          // as the menu button pattern has it. A pointer leaves focus put.
+          if (opening && event.detail === 0) queueMicrotask(() => focusItem(0));
+        }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' && !isOpen) {
             event.preventDefault();

@@ -249,6 +249,32 @@ describe('Tools menu (AV-012)', () => {
     );
   });
 
+  it('opens with Enter into the menu, as the menu button pattern has it', async () => {
+    render(<App />);
+    toolsButton().focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'File viewer' })),
+    );
+  });
+
+  it('opens on a pointer press without moving focus into the menu', async () => {
+    render(<App />);
+    await userEvent.click(toolsButton());
+    expect(screen.getByRole('menu', { name: 'Tools' })).toBeInTheDocument();
+    expect(toolsButton()).toHaveFocus();
+  });
+
+  it('moves focus to the new page\'s title after navigating from the menu', async () => {
+    render(<App />);
+    toolsButton().focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Route Builder' })).toBeInTheDocument());
+    screen.getByRole('menuitem', { name: 'Route Builder' }).focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Route Builder' })).toHaveFocus());
+  });
+
   it('leaves loaded state alone when opened and closed', async () => {
     render(<App />);
     await goToViewer();
