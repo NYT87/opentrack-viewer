@@ -620,15 +620,26 @@ function PointEditor({
       <form className="editor__fields" onSubmit={submitAdd} aria-label="Add a point by coordinates">
         <label className="editor__field">
           <span className="summary__label">Latitude</span>
-          <input inputMode="decimal" value={addLat} onChange={(e) => setAddLat(e.target.value)} />
+          <input
+            className="input"
+            inputMode="decimal"
+            value={addLat}
+            onChange={(e) => setAddLat(e.target.value)}
+          />
         </label>
         <label className="editor__field">
           <span className="summary__label">Longitude</span>
-          <input inputMode="decimal" value={addLon} onChange={(e) => setAddLon(e.target.value)} />
+          <input
+            className="input"
+            inputMode="decimal"
+            value={addLon}
+            onChange={(e) => setAddLon(e.target.value)}
+          />
         </label>
         <label className="editor__field">
           <span className="summary__label">Elevation (m, optional)</span>
           <input
+            className="input"
             inputMode="decimal"
             value={addElevation}
             onChange={(e) => setAddElevation(e.target.value)}
@@ -793,11 +804,21 @@ function MoveForm({
     >
       <label className="editor__field">
         <span className="summary__label">Latitude</span>
-        <input inputMode="decimal" value={moveLat} onChange={(e) => setMoveLat(e.target.value)} />
+        <input
+          className="input"
+          inputMode="decimal"
+          value={moveLat}
+          onChange={(e) => setMoveLat(e.target.value)}
+        />
       </label>
       <label className="editor__field">
         <span className="summary__label">Longitude</span>
-        <input inputMode="decimal" value={moveLon} onChange={(e) => setMoveLon(e.target.value)} />
+        <input
+          className="input"
+          inputMode="decimal"
+          value={moveLon}
+          onChange={(e) => setMoveLon(e.target.value)}
+        />
       </label>
       <button type="submit" className="button">
         Move point

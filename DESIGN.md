@@ -333,6 +333,7 @@ The map fills its box edge to edge at `clamp(280px, 46vh, 560px)`. Night backgro
 - **Do** keep the map's night frame and route palette identical in both themes.
 - **Do** omit a section, chart or card when the data cannot support it, rather than rendering a placeholder.
 - **Do** cap prose at 66ch and help text at 60ch, in Ink Muted at line-height 1.6.
+- **Do** keep desktop density, and give a coarse pointer 44px targets (buttons, fields, selects, tabs, switches, choice rows, the map's zoom, standalone links) and 16px text in fields, so iOS does not zoom the page on focus. At every size, a standalone target is at least 24px. On screens of 520px and narrower, the caption (`--text-label`) is 12px.
 
 ### Don't:
 - **Don't** add hero photographs, illustrations or device mock-ups to the home page or any tool page. Copy and one primary button carry it.

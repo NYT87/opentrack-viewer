@@ -438,7 +438,7 @@ input[type='color']:focus-visible {
   border-radius: 4px;
   background: var(--bg-sunken);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
 }
 
 .warnings { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
@@ -472,7 +472,7 @@ input[type='color']:focus-visible {
 .summary__stat { display: flex; flex-direction: column; gap: 2px; }
 .summary__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -482,7 +482,7 @@ input[type='color']:focus-visible {
 .summary__grid--lead .summary__value { font-size: var(--text-display); line-height: 1.2; }
 .summary__grid--lead + .summary__grid { padding-top: 12px; border-top: 1px solid var(--border); }
 .summary__missing { color: var(--text-muted); }
-.summary__missing small { display: block; font-size: 11px; }
+.summary__missing small { display: block; font-size: var(--text-label); }
 
 /* Viewer (AV-004, AV-005, AV-011) */
 .viewer { flex: 1; min-width: 0; }
@@ -563,7 +563,7 @@ input[type='color']:focus-visible {
   top: 0;
   background: var(--bg-raised);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-bottom: 1px solid var(--border);
@@ -662,7 +662,7 @@ input[type='color']:focus-visible {
 .proof__title {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -677,7 +677,7 @@ input[type='color']:focus-visible {
 }
 .proof__caption {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   line-height: 1.4;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -777,7 +777,7 @@ input[type='color']:focus-visible {
 .format__access {
   justify-self: start;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -843,7 +843,7 @@ input[type='color']:focus-visible {
 .device__title {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -871,7 +871,7 @@ input[type='color']:focus-visible {
 .sensor-streams__title {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -956,7 +956,7 @@ input[type='color']:focus-visible {
 .axis-switch { display: flex; align-items: center; gap: 6px; }
 .axis-switch__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1175,6 +1175,7 @@ input[type='color']:focus-visible {
 .overlay-controls > .prose__title, .overlay-controls > p { grid-column: 1 / -1; }
 .overlay-controls__group { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
 .overlay-controls__choice { display: flex; align-items: flex-start; gap: 8px; min-height: 28px; }
+.overlay-controls__choice > input { flex-shrink: 0; }
 .overlay-controls__field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
 .overlay-controls__field input[type='range'] { flex: 1 1 120px; min-width: 0; }
 .overlay-controls__hint { color: var(--text-muted); font-size: 12px; }
@@ -1415,3 +1416,55 @@ input[type='color']:focus-visible {
 .overlay-controls__note { margin: 6px 0 0; color: var(--text); font-size: var(--text-reading); max-width: 60ch; text-wrap: pretty; }
 .overlay-controls__reset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .panel__code-line { margin: 0 0 8px; color: var(--text-muted); font-size: var(--text-label); }
+
+/*
+ * Touch and small screens. Desktop keeps the Instrument Panel's density; a
+ * coarse pointer gets 44px targets (Apple HIG, Material), 16px fields so iOS
+ * does not zoom the page on focus, and a phone gets 12px captions.
+ */
+/* At every size, standalone small targets keep WCAG 2.2's 24px. */
+/* The padding comes out of the list's gap, so the footer is no taller than before. */
+.footer__link { display: inline-block; vertical-align: top; padding-block: 4px; }
+.footer__list { gap: 2px; margin-block: -4px; }
+input[type='range'] { min-height: 24px; }
+/* Padding, not display: flex, so the disclosure triangle stays. */
+summary { padding-block: 3px; }
+
+@media (max-width: 520px) {
+  :root { --text-label: 12px; }
+}
+
+@media (pointer: coarse) {
+  .button,
+  .select,
+  .input,
+  .tools__button,
+  .section-nav__link,
+  .axis-switch__option,
+  .link--button { min-height: 44px; }
+  .icon-button { width: 44px; height: 44px; }
+  /* Fields at 16px: below it, iOS Safari zooms the page in on focus and does not zoom back. */
+  .select,
+  .input,
+  input[type='text'],
+  input[type='number'] { font-size: 16px; }
+  input[type='range'] { min-height: 44px; }
+  input[type='checkbox'],
+  input[type='radio'] { width: 22px; height: 22px; }
+  .choice,
+  .export__choice,
+  .editor__mode,
+  .overlay-controls__choice { min-height: 44px; align-items: center; }
+  .footer__link { padding-block: 12px; }
+  .footer__list { gap: 0; margin-block: -12px; }
+  /* Doubled class: MapLibre's own stylesheet sets these at the same specificity, later. */
+  .maplibregl-ctrl.maplibregl-ctrl-group button { width: 44px; height: 44px; }
+  /* Standalone links grow to a target; a link inside a sentence stays as text. */
+  .shell__brand,
+  .tool__name,
+  .proof__link { display: inline-flex; align-items: center; min-height: 44px; }
+  summary { padding-block: 13px; }
+  input[type='color'] { min-width: 44px; min-height: 44px; }
+  .overlay-sync__scale { padding-block: 4px; }
+  .maplibregl-ctrl-attrib a { display: inline-block; padding: 8px 2px; }
+}
