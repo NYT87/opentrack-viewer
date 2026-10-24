@@ -316,3 +316,17 @@ describe('parseGpx', () => {
     expect(activity.warnings.map((warning) => warning.code)).toContain('multiple_segments');
   });
 });
+
+describe('a distance carried in an extension (AV-1109)', () => {
+  it('reads GPXDATA’s distance from the start as the recorded distance, and ignores a negative one', () => {
+    const xml =
+      '<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxdata="http://www.cluetrust.com/XML/GPXDATA/1/0"><trk><trkseg>' +
+      '<trkpt lat="46" lon="7"><time>2026-09-24T08:00:00Z</time><extensions><gpxdata:distance>0</gpxdata:distance></extensions></trkpt>' +
+      '<trkpt lat="46.00001" lon="7"><time>2026-09-24T08:00:01Z</time><extensions><gpxdata:distance>9.5</gpxdata:distance></extensions></trkpt>' +
+      '<trkpt lat="46.00002" lon="7"><time>2026-09-24T08:00:02Z</time><extensions><gpxdata:distance>-4</gpxdata:distance></extensions></trkpt>' +
+      '</trkseg></trk></gpx>';
+    const activity = parseGpx(xml, { fileName: 'odometer.gpx' });
+    expect(activity.points.map((point) => point.distanceMeters)).toEqual([0, 9.5, undefined]);
+    expect(activity.derived!.distanceMeters).toBe(9.5);
+  });
+});

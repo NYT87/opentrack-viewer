@@ -4,6 +4,7 @@ import { FileDropZone } from '../components/FileDropZone';
 import { WarningList } from '../components/ErrorPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
 import { PlannedTrackExport } from '../components/PlannedTrackExport';
+import { TrackMerge } from '../components/TrackMerge';
 import type { EditPointProperties } from '../components/ActivityMap';
 import type { Activity } from '../domain/activity';
 import { toActivityError } from '../domain/errors';
@@ -466,6 +467,8 @@ export function RouteBuilderPage() {
             />
           </section>
         )}
+
+        <TrackMerge />
       </div>
     </main>
   );

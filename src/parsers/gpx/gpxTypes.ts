@@ -11,6 +11,8 @@ export interface RawGpxPoint {
   powerWatts?: number;
   temperatureCelsius?: number;
   speedMetersPerSecond?: number;
+  /** Distance from the start of the track, from a GPXDATA extension. */
+  distanceMeters?: number;
   /** Index of the <trkseg> the point came from. */
   segmentIndex: number;
 }

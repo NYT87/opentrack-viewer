@@ -1492,3 +1492,55 @@ main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline
   .overlay-sync__scale { padding-block: 4px; }
   .maplibregl-ctrl-attrib a { display: inline-block; padding: 8px 2px; }
 }
+
+/*
+ * AV-1109. Route Builder's merge: the files in the order they were recorded,
+ * each a row with what it covers and a way to take it out, then the merged
+ * activity with its pauses said in words and its route on a map.
+ */
+.merge__order,
+.merge__refused,
+.merge__pauses,
+.merge__notes { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.merge__order { counter-reset: merge; }
+.merge__file {
+  counter-increment: merge;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.merge__file::before {
+  content: counter(merge);
+  grid-row: span 2;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.merge__file .button { grid-row: span 2; grid-column: 3; }
+.merge__file.is-overlapping { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.merge__name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.merge__facts { grid-column: 2; min-width: 0; color: var(--text-muted); font-size: var(--text-reading); }
+.merge__refused li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; color: var(--text-muted); }
+.merge__problem {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.prose .merge__problem { color: var(--text); max-width: 66ch; }
+.merge__hint { margin-top: 12px; }
+.merge__result { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.merge__title { margin: 0; font-size: var(--text-title); overflow-wrap: anywhere; }
+.merge__pauses { margin: 0; font-size: var(--text-reading); color: var(--text-muted); }
+.merge__notes { margin: 0; font-size: var(--text-reading); }
+.merge__notes .is-warning { padding: 6px 10px; border-left: 3px solid var(--warn); }
+.merge__notes .is-info { color: var(--text-muted); }
+.merge__export { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 520px) {
+  .merge__file { grid-template-columns: auto minmax(0, 1fr); }
+  .merge__file .button { grid-row: auto; grid-column: 2; justify-self: start; }
+}

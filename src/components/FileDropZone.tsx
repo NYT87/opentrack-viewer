@@ -8,6 +8,12 @@ export interface FileDropZoneProps {
   disabled?: boolean;
   /** For a page with more than one drop zone, so tests can tell them apart. */
   testId?: string;
+  /**
+   * AV-1109. Take several files at once, from the picker or a drop: each
+   * accepted file is handed to `onFile` in turn, and the ones refused are
+   * named together.
+   */
+  multiple?: boolean;
 }
 
 /**
@@ -20,6 +26,7 @@ export function FileDropZone({
   acceptedExtensions = SUPPORTED_FORMATS,
   disabled = false,
   testId = 'file-input',
+  multiple = false,
 }: FileDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
@@ -28,18 +35,21 @@ export function FileDropZone({
 
   const accept = acceptedExtensions.map((extension) => `.${extension}`).join(',');
 
-  const handleFile = useCallback(
-    (file: File | undefined) => {
-      if (!file) return;
-      const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
-      if (!acceptedExtensions.includes(extension)) {
-        setRejection(`"${file.name}" is not supported. Choose ${describeFormats(acceptedExtensions)}.`);
-        return;
-      }
-      setRejection(undefined);
-      onFile(file);
+  const handleFiles = useCallback(
+    (list: FileList | null | undefined) => {
+      const files = Array.from(list ?? []).slice(0, multiple ? undefined : 1);
+      if (files.length === 0) return;
+      const accepted = (file: File) =>
+        acceptedExtensions.includes(file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase());
+      const refused = files.filter((file) => !accepted(file));
+      setRejection(
+        refused.length === 0
+          ? undefined
+          : `${refused.map((file) => `"${file.name}"`).join(', ')} ${refused.length === 1 ? 'is' : 'are'} not supported. Choose ${describeFormats(acceptedExtensions)}.`,
+      );
+      files.filter(accepted).forEach((file) => onFile(file));
     },
-    [acceptedExtensions, onFile],
+    [acceptedExtensions, onFile, multiple],
   );
 
   const onDrop = useCallback(
@@ -47,9 +57,9 @@ export function FileDropZone({
       event.preventDefault();
       setIsDragging(false);
       if (disabled) return;
-      handleFile(event.dataTransfer.files[0]);
+      handleFiles(event.dataTransfer.files);
     },
-    [disabled, handleFile],
+    [disabled, handleFiles],
   );
 
   return (
@@ -74,18 +84,25 @@ export function FileDropZone({
         aria-disabled={disabled}
         aria-describedby={`${inputId}-hint`}
       >
-        <span className="dropzone__title">Drop {describeFormats(acceptedExtensions)} here</span>
+        <span className="dropzone__title">
+          Drop{' '}
+          {multiple
+            ? describeFormats(acceptedExtensions).replace(/^an? /, '').replace(/ file$/, ' files')
+            : describeFormats(acceptedExtensions)}{' '}
+          here
+        </span>
         {/* "Choose", not "click": it is pressed, tapped or chosen with Enter. */}
-        <span className="dropzone__subtitle">or choose one</span>
+        <span className="dropzone__subtitle">{multiple ? 'or choose them' : 'or choose one'}</span>
         <input
           ref={inputRef}
           id={inputId}
           type="file"
           accept={accept}
+          multiple={multiple}
           className="dropzone__input"
           disabled={disabled}
           onChange={(event) => {
-            handleFile(event.target.files?.[0]);
+            handleFiles(event.target.files);
             // Reset so re-selecting the same file fires change again.
             event.target.value = '';
           }}

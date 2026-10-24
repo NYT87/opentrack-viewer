@@ -323,6 +323,11 @@ function readExtensions(extensions: Element, point: RawGpxPoint): void {
         case 'speed':
           point.speedMetersPerSecond = parseNumber(value);
           break;
+        // Cluetrust GPXDATA's distance from the start, in metres: an odometer
+        // a GPX file can carry where GPX itself has none (AV-1109).
+        case 'distance':
+          point.distanceMeters = parseNumber(value);
+          break;
         default:
           break;
       }
@@ -405,6 +410,9 @@ function normalizePoints(
       else if (!STROKE_CADENCE_SPORTS.has(sport)) point.runningCadenceSpm = item.cadence;
     }
     if (Number.isFinite(item.powerWatts)) point.powerWatts = item.powerWatts;
+    if (Number.isFinite(item.distanceMeters) && (item.distanceMeters as number) >= 0) {
+      point.distanceMeters = item.distanceMeters;
+    }
     if (Number.isFinite(item.temperatureCelsius)) {
       point.temperatureCelsius = item.temperatureCelsius;
     }

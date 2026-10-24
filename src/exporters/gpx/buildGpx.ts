@@ -13,6 +13,14 @@ export const EXPORT_CREATOR = 'OpenTrack Viewer';
 const GPX_NS = 'http://www.topografix.com/GPX/1/1';
 const TPX_NS = 'http://www.garmin.com/xmlschemas/TrackPointExtension/v1';
 const PWR_NS = 'http://www.garmin.com/xmlschemas/PowerExtension/v1';
+/**
+ * Cluetrust's GPXDATA schema, whose `distance` is the distance from the start
+ * of the track in metres. GPX has no distance of its own, so without it a
+ * device's odometer (a wheel sensor, a foot pod, a merge of several
+ * recordings) is lost, and the file reads back with distance measured from
+ * the positions instead (AV-1109).
+ */
+const GPXDATA_NS = 'http://www.cluetrust.com/XML/GPXDATA/1/0';
 
 /**
  * XML text escaping. Applied to every value that reaches the document, without
@@ -84,7 +92,7 @@ export function buildGpx(activity: Activity): { xml: string; warnings: ActivityW
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push(
     `<gpx version="1.1" creator="${escapeXml(activity.metadata.creator ?? EXPORT_CREATOR)}"` +
-      ` xmlns="${GPX_NS}" xmlns:gpxtpx="${TPX_NS}" xmlns:gpxpx="${PWR_NS}">`,
+      ` xmlns="${GPX_NS}" xmlns:gpxtpx="${TPX_NS}" xmlns:gpxpx="${PWR_NS}" xmlns:gpxdata="${GPXDATA_NS}">`,
   );
 
   lines.push('  <metadata>');
@@ -104,9 +112,12 @@ export function buildGpx(activity: Activity): { xml: string; warnings: ActivityW
 
   // One <trkseg> per recorded segment, so a pause stays a pause: joining them
   // would invent both distance and a straight line the athlete never took.
+  // Distance counts from the first point written, as the stats count it: a
+  // section keeps its odometer readings, which start well above zero.
+  const distanceOrigin = positioned.find((point) => isFinite(point.distanceMeters))?.distanceMeters ?? 0;
   for (const segment of groupBySegment(positioned)) {
     lines.push('    <trkseg>');
-    for (const point of segment) lines.push(...trackPoint(point));
+    for (const point of segment) lines.push(...trackPoint(point, distanceOrigin));
     lines.push('    </trkseg>');
   }
 
@@ -130,7 +141,7 @@ function groupBySegment(points: (ActivityPoint & { lat: number; lon: number })[]
   return segments;
 }
 
-function trackPoint(point: ActivityPoint & { lat: number; lon: number }): string[] {
+function trackPoint(point: ActivityPoint & { lat: number; lon: number }, distanceOrigin: number): string[] {
   const lines = [`      <trkpt lat="${coordinate(point.lat)}" lon="${coordinate(point.lon)}">`];
 
   if (isFinite(point.elevationMeters)) {
@@ -159,7 +170,10 @@ function trackPoint(point: ActivityPoint & { lat: number; lon: number }): string
   }
 
   const power = point.powerWatts;
-  if (tpx.length > 0 || isFinite(power)) {
+  const distance = isFinite(point.distanceMeters)
+    ? Math.max(0, point.distanceMeters - distanceOrigin)
+    : undefined;
+  if (tpx.length > 0 || isFinite(power) || distance !== undefined) {
     lines.push('        <extensions>');
     if (tpx.length > 0) {
       lines.push(`          <gpxtpx:TrackPointExtension>${tpx.join('')}</gpxtpx:TrackPointExtension>`);
@@ -169,6 +183,9 @@ function trackPoint(point: ActivityPoint & { lat: number; lon: number }): string
         `          <gpxpx:PowerExtension><gpxpx:PowerInWatts>${Math.round(power)}` +
           '</gpxpx:PowerInWatts></gpxpx:PowerExtension>',
       );
+    }
+    if (distance !== undefined) {
+      lines.push(`          <gpxdata:distance>${decimal(distance, 2)}</gpxdata:distance>`);
     }
     lines.push('        </extensions>');
   }
@@ -196,12 +213,17 @@ function collectLossWarnings(
     });
   }
 
-  if (activity.streams.hasPower || activity.streams.hasTemperature || activity.streams.hasSpeed) {
+  if (
+    activity.streams.hasPower ||
+    activity.streams.hasTemperature ||
+    activity.streams.hasSpeed ||
+    activity.streams.hasDistance
+  ) {
     warnings.push({
       code: 'export_extension_fields',
       message:
-        'Power, temperature and speed are written as Garmin extensions, which GPX does not ' +
-        'define. Some applications ignore them.',
+        'Power, temperature, speed and distance are written as extensions, which GPX does not ' +
+        'define. Some applications ignore them, and measure distance from the positions instead.',
       severity: 'info',
     });
   }

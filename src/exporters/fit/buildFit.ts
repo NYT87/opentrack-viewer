@@ -305,7 +305,14 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
   }
 
   const elapsedSeconds = activity.derived?.durationSeconds ?? (end.getTime() - start.getTime()) / 1000;
-  const movingSeconds = activity.derived?.movingDurationSeconds ?? elapsedSeconds;
+  // Timer time is the time the timer ran: each recorded stretch, start to end,
+  // and none of the gaps between them, where the events above stopped it. Not
+  // moving time, which is a different figure, and not elapsed, which would
+  // count a pause between stretches as time recorded (AV-1109).
+  const timerSeconds = groupBySegment(timed).reduce(
+    (total, segment) => total + (segment.at(-1)!.time.getTime() - segment[0]!.time.getTime()) / 1000,
+    0,
+  );
   encoder.writeMessage(
     MSG.session,
     [
@@ -315,7 +322,7 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
       u32(2, stamp(start)),
       enumField(5, SPORT_IDS[sport]),
       u32(7, round(elapsedSeconds * 1000)),
-      u32(8, round(movingSeconds * 1000)),
+      u32(8, round(timerSeconds * 1000)),
       u32(9, round((activity.derived?.distanceMeters ?? 0) * 100)),
     ],
     LOCAL.session,
@@ -325,7 +332,7 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
     MSG.activity,
     [
       u32(253, stamp(end)),
-      u32(0, round(movingSeconds * 1000)),
+      u32(0, round(timerSeconds * 1000)),
       u16(1, 1),
       enumField(2, ACTIVITY_TYPE_MANUAL),
       enumField(3, EVENT_ACTIVITY),

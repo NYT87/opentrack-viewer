@@ -436,3 +436,36 @@ describe('KML conversion (AV-762): KML → Activity → registered exporter', as
     expect((await roundTrip(result.blob)).points).toHaveLength(3);
   });
 });
+
+describe('GPX keeps a recorded distance (AV-1109)', () => {
+  it('writes each point’s distance from the start in a GPXDATA extension, and reads it back as the distance', async () => {
+    // An odometer that is well ahead of the positions, as a wheel sensor is,
+    // and that does not start at zero, as a section's readings do not.
+    const activity = makeActivity(
+      Array.from({ length: 5 }, (_, i) => ({
+        time: new Date(Date.UTC(2026, 8, 24, 8, 0, i)),
+        lat: 46 + (i * 0.5) / 111_320,
+        lon: 7,
+        distanceMeters: 1_000 + i * 8,
+      })),
+    );
+    const result = await exportActivity(activity, { format: 'gpx' });
+    const xml = await result.blob.text();
+    expect(xml).toContain('xmlns:gpxdata="http://www.cluetrust.com/XML/GPXDATA/1/0"');
+    expect(xml.match(/<gpxdata:distance>([\d.]+)<\/gpxdata:distance>/g)).toEqual([0, 8, 16, 24, 32].map((d) => `<gpxdata:distance>${d}</gpxdata:distance>`));
+    expect(result.warnings.find((warning) => warning.code === 'export_extension_fields')?.message).toMatch(/distance/);
+
+    const back = await roundTrip(result.blob);
+    expect(back.derived!.distanceMeters).toBe(32);
+    expect(back.streams.hasDistance).toBe(true);
+  });
+
+  it('writes no distance where the activity has none, so the GPS decides as before', async () => {
+    const activity = makeActivity([
+      { time: new Date(Date.UTC(2026, 8, 24, 8)), lat: 46, lon: 7 },
+      { time: new Date(Date.UTC(2026, 8, 24, 8, 0, 1)), lat: 46.0001, lon: 7 },
+    ]);
+    const xml = await (await exportActivity(activity, { format: 'gpx' })).blob.text();
+    expect(xml).not.toContain('<gpxdata:distance>');
+  });
+});
