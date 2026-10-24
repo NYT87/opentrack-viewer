@@ -11,6 +11,8 @@ export interface RawGpxPoint {
   powerWatts?: number;
   temperatureCelsius?: number;
   speedMetersPerSecond?: number;
+  /** The offset the point's time was written with, when it was not UTC (AV-1010). */
+  utcOffsetMinutes?: number;
   /** Distance from the start of the track, from a GPXDATA extension. */
   distanceMeters?: number;
   /** Index of the <trkseg> the point came from. */

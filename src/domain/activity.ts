@@ -78,6 +78,12 @@ export function hasDisplayableDevice(
 
 export interface ActivityMetadata {
   name?: string;
+  /**
+   * AV-1010. Minutes east of UTC that the file states it was recorded in (a
+   * FIT local time, an ISO time with an offset). Absent when the file does not
+   * say, which is common: GPX and TCX times are usually written in UTC.
+   */
+  utcOffsetMinutes?: number;
   description?: string;
   sport?: ActivitySport;
   startTime?: Date;

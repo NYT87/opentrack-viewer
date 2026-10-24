@@ -164,3 +164,79 @@ describe('resolving components against data (AV-1003)', () => {
     expect(warnings[0]?.message).toContain('Heart rate');
   });
 });
+
+describe('version 2: the still image’s components (AV-1010)', () => {
+  const still = {
+    version: 2,
+    name: 'Still',
+    style: {},
+    components: [
+      { id: 't', type: 'label', rect, content: 'Hello <b>', text: { align: 'center', weight: 'normal' } },
+      { id: 's', type: 'summary', rect, summary: { stat: 'moving' }, text: { caption: false } },
+      { id: 'd', type: 'date', rect, date: { format: 'long', withTime: true, timeZone: 'activity' } },
+      { id: 'r', type: 'routeInset', rect, route: { lineWidth: 0.01, padding: 0.08, markers: false } },
+      { id: 'bad-stat', type: 'summary', rect, summary: { stat: 'calories' } },
+      { id: 'bad-date', type: 'date', rect, date: { format: 'roman' } },
+      { id: 'no-text', type: 'label', rect },
+    ],
+  };
+
+  it('reads texts, figures, dates and a route’s setting, and skips what it cannot, with a warning each', () => {
+    const parsed = parseOverlayTemplate(JSON.stringify(still));
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.template.components.map((entry) => entry.id)).toEqual(['t', 's', 'd', 'r']);
+    expect(parsed.template.components[0]).toMatchObject({ content: 'Hello <b>', text: { align: 'center', weight: 'normal' } });
+    expect(parsed.template.components[1]).toMatchObject({ summary: { stat: 'moving' }, text: { align: 'left', weight: 'bold', caption: false } });
+    expect(parsed.template.components[2]).toMatchObject({ date: { format: 'long', withTime: true, timeZone: 'activity' } });
+    expect(parsed.template.components[3]).toMatchObject({ route: { lineWidth: 0.01, padding: 0.08, markers: false } });
+    expect(parsed.warnings).toEqual([
+      'Component 5 was skipped: unknown figure "calories".',
+      'Component 6 was skipped: unknown date format "roman".',
+      'Component 7 was skipped: a text with no content.',
+    ]);
+    // And back again, unchanged.
+    const again = parseOverlayTemplate(serializeOverlayTemplate(parsed.template));
+    expect(again.ok && again.template).toEqual(parsed.template);
+  });
+
+  it('still reads a version 1 template', () => {
+    expect(parseOverlayTemplate(JSON.stringify({ ...template, version: 1 }))).toMatchObject({ ok: true });
+  });
+
+  it('hides a text, figure or date in a video, where a frame shows a moment', () => {
+    const parsed = parseOverlayTemplate(JSON.stringify(still));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const timeline = buildOverlayTimeline(makeActivity([{ time: at(0), lat: 1, lon: 1 }, { time: at(1), lat: 1.001, lon: 1 }]), {
+      video: { durationSeconds: 1 },
+    });
+    const sample = timeline.sampleAt(0) as OverlaySample;
+    for (const entry of parsed.template.components.slice(0, 3)) {
+      expect(resolveOverlayComponent(parsed.template, entry, sample, timeline, 'metric')).toEqual({
+        status: 'hidden',
+        reason: 'still_image_only',
+        componentId: entry.id,
+      });
+    }
+  });
+});
+
+describe('rects at the frame’s edge (AV-1010, review R1-C2)', () => {
+  const at = (x: number, width: number) => ({
+    version: 2,
+    name: 'Edge',
+    style: {},
+    components: [{ id: 't', type: 'label', content: 'x', rect: { x, y: 0, width, height: 0.1 } }],
+  });
+
+  it('reads a rect a hair past the edge from rounding, kept inside, and still refuses one really outside', () => {
+    const hair = parseOverlayTemplate(JSON.stringify(at(0.9896844444444446, 0.010315555555555555)));
+    if (!hair.ok) throw new Error(hair.error);
+    expect(hair.warnings).toEqual([]);
+    const { rect: kept } = hair.template.components[0]!;
+    expect(kept.x + kept.width).toBeLessThanOrEqual(1);
+    expect(parseOverlayTemplate(JSON.stringify(at(0.95, 0.1)))).toMatchObject({
+      ok: true,
+      warnings: ['Component 1 was skipped: invalid rect (must lie within the frame, as fractions of 0..1).'],
+    });
+  });
+});

@@ -1544,3 +1544,63 @@ main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline
   .merge__file { grid-template-columns: auto minmax(0, 1fr); }
   .merge__file .button { grid-row: auto; grid-column: 2; justify-self: start; }
 }
+
+/*
+ * AV-1010. The still image's editor: the elements as a row of toggles, the
+ * selected one's settings, a 3 × 3 pad of snaps whose dot sits where the
+ * element will, and the preview, which takes a press, a drag and the arrows.
+ */
+.still-image__elements { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.still-image__elements .button[aria-pressed='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.still-image__unavailable,
+.still-image__hidden { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.still-image__hidden { color: var(--text-muted); font-size: var(--text-reading); }
+.still-image__editor { border-color: var(--accent); }
+.still-image__position { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; }
+.still-image__position .input { width: 8ch; }
+.still-image__nudges { display: flex; gap: 6px; }
+.still-image__nudges .button { min-width: 40px; font-variant-numeric: tabular-nums; }
+.still-image__snaps { display: grid; grid-template-columns: repeat(3, 36px); gap: 4px; }
+.still-image__snaps .button { position: relative; width: 36px; height: 36px; padding: 0; }
+.still-image__snap { position: absolute; width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
+.still-image__snap--top-left { top: 6px; left: 6px; }
+.still-image__snap--top { top: 6px; left: calc(50% - 4px); }
+.still-image__snap--top-right { top: 6px; right: 6px; }
+.still-image__snap--left { top: calc(50% - 4px); left: 6px; }
+.still-image__snap--center { top: calc(50% - 4px); left: calc(50% - 4px); }
+.still-image__snap--right { top: calc(50% - 4px); right: 6px; }
+.still-image__snap--bottom-left { bottom: 6px; left: 6px; }
+.still-image__snap--bottom { bottom: 6px; left: calc(50% - 4px); }
+.still-image__snap--bottom-right { bottom: 6px; right: 6px; }
+.still-image__text { align-items: flex-start; flex-wrap: wrap; }
+.still-image__text textarea { flex: 1 1 220px; min-width: 0; resize: vertical; font: inherit; font-size: var(--text-control); }
+.still-image__zones { margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 4px; }
+.still-image__zones legend { padding: 0; margin-bottom: 4px; }
+.still-image__preview { display: block; width: 100%; border-radius: var(--radius); }
+.still-image__preview:focus { outline: none; }
+.still-image__preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.still-image__preview .route-image__canvas { cursor: crosshair; touch-action: none; }
+.still-image__layout { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (pointer: coarse) {
+  .still-image__snaps { grid-template-columns: repeat(3, 44px); }
+  .still-image__snaps .button { width: 44px; height: 44px; }
+}
+/* The preview, the list of what is not drawn and the layout file span the panel; the preview comes first. */
+.still-image > .route-image__stage,
+.still-image > .still-image__hidden,
+.still-image > .still-image__layout,
+.still-image > .video__actions,
+.still-image > [role='status'],
+.still-image > [role='alert'] { grid-column: 1 / -1; }
+/*
+ * A dark well under the still image whatever the theme: it is made to sit over
+ * video, and white type, its default, vanishes on the light checkerboard the
+ * route image uses.
+ */
+.still-image .route-image__canvas {
+  max-width: none;
+  background-color: #30353b;
+  background-image:
+    linear-gradient(45deg, #262a2f 25%, transparent 25%, transparent 75%, #262a2f 75%),
+    linear-gradient(45deg, #262a2f 25%, transparent 25%, transparent 75%, #262a2f 75%);
+}

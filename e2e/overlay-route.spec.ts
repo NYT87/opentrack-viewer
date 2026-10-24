@@ -70,7 +70,7 @@ async function downloadPng(page: Page) {
 async function openOverlaysWith(page: Page, gpxPath: string) {
   await page.goto('./#/overlays');
   await page.getByTestId('overlay-activity-input').setInputFiles(gpxPath);
-  const panel = page.getByRole('region', { name: 'Route image' });
+  const panel = page.getByRole('region', { name: 'Overlay image' });
   await expect(panel).toBeVisible();
   return panel;
 }
@@ -206,7 +206,7 @@ test('draws a single place as a dot, and says so', async ({ page }, testInfo) =>
   const path = writeGpx(testInfo.outputDir, 'one.gpx', [{ lat: 10, lon: 20 }]);
   await page.goto('./#/overlays');
   await page.getByTestId('overlay-activity-input').setInputFiles(path);
-  const panel = page.getByRole('region', { name: 'Route image' });
+  const panel = page.getByRole('region', { name: 'Overlay image' });
   // A one-point file may be refused at intake; if it is read, it must be drawn as a dot.
   const refused = page.getByRole('region', { name: 'File not read' });
   await expect(panel.or(refused)).toBeVisible();
@@ -228,7 +228,7 @@ test('takes the activity from the viewer, whole by default and the focused secti
   await create.click();
 
   await expect(page).toHaveURL(/#\/overlays$/);
-  const panel = page.getByRole('region', { name: 'Route image' });
+  const panel = page.getByRole('region', { name: 'Overlay image' });
   await expect(panel).toContainText('whole activity');
   await expect(panel.getByTestId('route-image-preview')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Activity' })).toContainText('overlay-ride.gpx');

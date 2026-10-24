@@ -216,6 +216,34 @@ export const MARKER_RING = 1.2;
 /** Room left beyond the stroke for anti-aliasing. */
 const ANTI_ALIAS_PX = 1;
 
+/**
+ * Whether an image of this size can be made here: whole pixels, each side
+ * within the limits, and few enough pixels for a browser canvas. Shared by the
+ * route image and the still image (AV-1010), so both refuse the same sizes.
+ */
+export function checkImageSize(width: number, height: number): RouteImageError | undefined {
+  const { minSide, maxSide, maxPixels } = ROUTE_IMAGE_LIMITS;
+  if (!Number.isInteger(width) || !Number.isInteger(height)) {
+    return new RouteImageError('invalid_dimensions', 'Width and height must be whole numbers of pixels.');
+  }
+  if (width < minSide || height < minSide || width > maxSide || height > maxSide) {
+    return new RouteImageError(
+      'invalid_dimensions',
+      `Width and height must each be between ${minSide} and ${maxSide} pixels.`,
+    );
+  }
+  if (width * height > maxPixels) {
+    return new RouteImageError(
+      'invalid_dimensions',
+      `That is ${((width * height) / 1e6).toFixed(1)} million pixels; this browser-side export stops at ${(maxPixels / 1e6).toFixed(1)} million.`,
+    );
+  }
+  return undefined;
+}
+
+/** Whether a colour is one the image can be drawn in: `#rgb` or `#rrggbb`. */
+export const isHexColor = (color: string): boolean => HEX_COLOR.test(color);
+
 const fail = (code: RouteImageErrorCode, message: string): PlanRouteImageResult => ({
   ok: false,
   error: new RouteImageError(code, message),
@@ -230,20 +258,10 @@ const fail = (code: RouteImageErrorCode, message: string): PlanRouteImageResult 
  */
 export function planRouteImage(route: RouteGeometry, options: RouteImageOptions): PlanRouteImageResult {
   const { width, height, paddingFraction, color, lineWidth, markers } = options;
-  const { minSide, maxSide, maxPixels, minLineWidth, maxLineWidth, maxPaddingFraction } = ROUTE_IMAGE_LIMITS;
+  const { minLineWidth, maxLineWidth, maxPaddingFraction } = ROUTE_IMAGE_LIMITS;
 
-  if (!Number.isInteger(width) || !Number.isInteger(height)) {
-    return fail('invalid_dimensions', 'Width and height must be whole numbers of pixels.');
-  }
-  if (width < minSide || height < minSide || width > maxSide || height > maxSide) {
-    return fail('invalid_dimensions', `Width and height must each be between ${minSide} and ${maxSide} pixels.`);
-  }
-  if (width * height > maxPixels) {
-    return fail(
-      'invalid_dimensions',
-      `That is ${((width * height) / 1e6).toFixed(1)} million pixels; this browser-side export stops at ${(maxPixels / 1e6).toFixed(1)} million.`,
-    );
-  }
+  const sizeProblem = checkImageSize(width, height);
+  if (sizeProblem) return { ok: false, error: sizeProblem };
   if (!HEX_COLOR.test(color)) {
     return fail('invalid_style', 'The route colour must be a hex colour such as #ff6a00.');
   }

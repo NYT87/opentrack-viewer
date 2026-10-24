@@ -216,7 +216,7 @@ describe('choosing the files by hand (AV-1002)', () => {
     const activity = await screen.findByRole('region', { name: 'Activity' });
     expect(await within(activity).findByText('morning-run.gpx')).toBeInTheDocument();
     // Without a video, the activity becomes a standalone route image.
-    expect(screen.getByRole('region', { name: 'Route image' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Overlay image' })).toBeInTheDocument();
     // The video slot still waits for one.
     expect(screen.getByTestId('overlay-video-input')).toBeInTheDocument();
     expectNoViewerPanels();
@@ -536,11 +536,11 @@ describe('the route image without a video (AV-1009)', () => {
   it('offers a route image for an activity chosen by hand, with no video', async () => {
     window.location.hash = '#/overlays';
     render(<App />);
-    expect(screen.queryByRole('region', { name: 'Route image' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Overlay image' })).not.toBeInTheDocument();
 
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
 
-    const panel = await screen.findByRole('region', { name: 'Route image' });
+    const panel = await screen.findByRole('region', { name: 'Overlay image' });
     expect(within(panel).getByTestId('route-image-preview')).toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: 'Download PNG' })).toBeEnabled();
     expect(panel).toHaveTextContent(/whole activity/);
@@ -552,7 +552,7 @@ describe('the route image without a video (AV-1009)', () => {
     window.location.hash = '#/overlays';
     render(<App />);
     act(() => useOverlayStore.getState().setActivity(useActivityFixture(), 'hand'));
-    expect(await screen.findByRole('region', { name: 'Route image' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Overlay image' })).toBeInTheDocument();
 
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:clip', revokeObjectURL: () => {} }));
     try {
@@ -563,7 +563,7 @@ describe('the route image without a video (AV-1009)', () => {
         }),
       );
       expect(await screen.findByRole('region', { name: 'Preview' })).toBeInTheDocument();
-      expect(screen.queryByRole('region', { name: 'Route image' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Overlay image' })).not.toBeInTheDocument();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -574,7 +574,7 @@ describe('the route image without a video (AV-1009)', () => {
     render(<App />);
     const { makeActivity } = await import('../test/helpers/activity');
     act(() => useOverlayStore.getState().setActivity(makeActivity([{ elevationMeters: 1 }, { elevationMeters: 2 }]), 'hand'));
-    const panel = await screen.findByRole('region', { name: 'Route image' });
+    const panel = await screen.findByRole('region', { name: 'Overlay image' });
     expect(within(panel).getByRole('alert')).toHaveTextContent(/no locations/);
     expect(within(panel).getByRole('button', { name: 'Download PNG' })).toBeDisabled();
   });
@@ -596,7 +596,7 @@ describe('handed over from the viewer (AV-1009)', () => {
   it('takes the whole activity to the overlay page and previews its route', async () => {
     await userEvent.click(await openInViewer());
 
-    const panel = await screen.findByRole('region', { name: 'Route image' });
+    const panel = await screen.findByRole('region', { name: 'Overlay image' });
     expect(window.location.hash).toBe('#/overlays');
     expect(within(panel).getByTestId('route-image-preview')).toBeInTheDocument();
     expect(panel).toHaveTextContent(/whole activity/);
@@ -614,7 +614,7 @@ describe('handed over from the viewer (AV-1009)', () => {
     );
     await userEvent.click(await openInViewer());
 
-    const panel = await screen.findByRole('region', { name: 'Route image' });
+    const panel = await screen.findByRole('region', { name: 'Overlay image' });
     expect(within(panel).getByTestId('route-image-preview')).toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: 'Download PNG' })).toBeEnabled();
     expect(screen.queryByRole('region', { name: 'Preview' })).not.toBeInTheDocument();
@@ -630,7 +630,7 @@ describe('handed over from the viewer (AV-1009)', () => {
     await userEvent.click(await screen.findByRole('checkbox', { name: /Use only the selected section/ }));
     await userEvent.click(button);
 
-    const panel = await screen.findByRole('region', { name: 'Route image' });
+    const panel = await screen.findByRole('region', { name: 'Overlay image' });
     expect(panel).toHaveTextContent(/focused section/);
     const activity = screen.getByRole('region', { name: 'Activity' });
     expect(within(activity).getByText('Focused section only')).toBeInTheDocument();
@@ -645,7 +645,7 @@ describe('handed over from the viewer (AV-1009)', () => {
     expect(await screen.findByText('Focused section only')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Choose another activity' }));
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByRole('region', { name: 'Route image' });
+    await screen.findByRole('region', { name: 'Overlay image' });
     expect(screen.queryByText('Focused section only')).not.toBeInTheDocument();
   });
 });

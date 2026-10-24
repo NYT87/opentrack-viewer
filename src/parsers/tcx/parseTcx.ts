@@ -9,6 +9,7 @@ import {
   type ActivitySport,
   type ActivityWarning,
 } from '../../domain/activity';
+import { utcOffsetFromIsoTime } from '../timeZone';
 import { ActivityError } from '../../domain/errors';
 import { withDerivedStats } from '../../domain/stats';
 
@@ -79,6 +80,8 @@ export function parseTcx(xml: string, options: ParseTcxOptions = {}): Activity {
       deviceName: text(child(child(activityNode, 'Creator'), 'Name')),
       creator: text(child(child(activityNode, 'Creator'), 'Name')),
       sport,
+      // The activity's Id is its start time; an offset there is the file's own.
+      utcOffsetMinutes: utcOffsetFromIsoTime(text(child(activityNode, 'Id'))),
     },
     points,
     streams: computeStreams(points),

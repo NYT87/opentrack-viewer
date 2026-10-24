@@ -8,6 +8,7 @@ import {
   type ActivitySport,
   type ActivityWarning,
 } from '../../domain/activity';
+import { utcOffsetFromIsoTime } from '../timeZone';
 import { ActivityError } from '../../domain/errors';
 import { withDerivedStats } from '../../domain/stats';
 import type { RawGpxDocument, RawGpxPoint } from './gpxTypes';
@@ -68,6 +69,7 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
       deviceName: raw.creator,
       device: raw.device,
       sport,
+      utcOffsetMinutes: raw.points.find((point) => point.utcOffsetMinutes !== undefined)?.utcOffsetMinutes,
     },
     points,
     streams,
@@ -276,13 +278,16 @@ function readDeviceInfo(root: Element): ActivityDeviceInfo | undefined {
 }
 
 function readPoint(element: Element, segmentIndex: number): RawGpxPoint {
+  const timeText = textOf(element, 'time');
   const point: RawGpxPoint = {
     lat: parseNumber(element.getAttribute('lat')),
     lon: parseNumber(element.getAttribute('lon')),
     elevationMeters: parseNumber(textOf(element, 'ele')),
-    time: parseDate(textOf(element, 'time')),
+    time: parseDate(timeText),
     segmentIndex,
   };
+  const offset = utcOffsetFromIsoTime(timeText);
+  if (offset !== undefined) point.utcOffsetMinutes = offset;
 
   const extensions = firstNamed(element, 'extensions');
   if (extensions) readExtensions(extensions, point);

@@ -23,14 +23,23 @@ import {
  * preview and every export.
  */
 
-export const OVERLAY_TEMPLATE_VERSION = 1;
+/**
+ * Version 2 (AV-1010) adds the still image's components: free text, a figure
+ * from the activity's summary, and its date. Version 1 templates read as
+ * before; a version 1 reader refuses version 2 rather than half-reading it.
+ */
+export const OVERLAY_TEMPLATE_VERSION = 2;
+const READABLE_TEMPLATE_VERSIONS: readonly number[] = [1, 2];
 
 export type OverlayComponentType =
   | 'text'
   | 'gauge'
   | 'routeInset'
   | 'progress'
-  | 'sensorChart';
+  | 'sensorChart'
+  | 'label'
+  | 'summary'
+  | 'date';
 
 export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'text',
@@ -38,7 +47,69 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'routeInset',
   'progress',
   'sensorChart',
+  'label',
+  'summary',
+  'date',
 ];
+
+/**
+ * AV-1010. Components that describe the whole activity rather than a moment of
+ * it: drawn on the still image, and hidden in a video, where a frame shows a
+ * moment.
+ */
+export const STILL_IMAGE_COMPONENT_TYPES: readonly OverlayComponentType[] = ['label', 'summary', 'date'];
+
+/** A figure from the activity's summary, for the still image. */
+export type SummaryStatKey = 'speed' | 'pace' | 'distance' | 'elapsed' | 'moving';
+export const SUMMARY_STAT_KEYS: readonly SummaryStatKey[] = ['speed', 'pace', 'distance', 'elapsed', 'moving'];
+
+/** How a date is written: `2026-09-24`, `24 Sep 2026`, `24/09/2026`, `Thursday 24 September 2026`. */
+export type DateFormatId = 'iso' | 'medium' | 'numeric' | 'long';
+export const DATE_FORMAT_IDS: readonly DateFormatId[] = ['iso', 'medium', 'numeric', 'long'];
+
+/** In the time zone the file says it was recorded in, or the reader's own. */
+export type DateTimeZoneChoice = 'activity' | 'reader';
+
+export type TextAlign = 'left' | 'center' | 'right';
+export type FontWeight = 'normal' | 'bold';
+
+/** How a still-image text, figure or date is set. */
+export interface OverlayTextSetting {
+  align: TextAlign;
+  weight: FontWeight;
+  /** A figure's caption ("Distance") over its value. */
+  caption?: boolean;
+}
+
+/** The still image's route: its line and its markers, sized to the image. */
+export interface OverlayRouteSetting {
+  /** Stroke, as a fraction of the image's shorter side. */
+  lineWidth: number;
+  /** Margin inside the route's box, as a fraction of the image's shorter side. */
+  padding: number;
+  markers: boolean;
+}
+
+/** Longest free text kept, and most lines: a caption, not a document. */
+export const LABEL_MAX_LENGTH = 200;
+export const LABEL_MAX_LINES = 4;
+
+/**
+ * Free text as it may be drawn: control characters other than a line break
+ * taken out, at most `LABEL_MAX_LINES` lines and `LABEL_MAX_LENGTH`
+ * characters. It is only ever drawn as text (canvas `fillText`, React text),
+ * never parsed as markup, so nothing else needs escaping.
+ */
+export function sanitizeLabel(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, '\n')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, '')
+    .split('\n')
+    .slice(0, LABEL_MAX_LINES)
+    .join('\n')
+    .slice(0, LABEL_MAX_LENGTH);
+}
 
 /** Position and size as fractions of the frame, so one template fits any resolution. */
 export interface OverlayRect {
@@ -91,6 +162,16 @@ export interface OverlayComponent {
   range?: { min: number; max: number };
   /** Sensor chart window, in seconds of video time either side of now. */
   windowSeconds?: number;
+  /** `label`: the text itself. */
+  content?: string;
+  /** `summary`: which figure. */
+  summary?: { stat: SummaryStatKey };
+  /** `date`: how it is written, and in which time zone. */
+  date?: { format: DateFormatId; withTime: boolean; timeZone: DateTimeZoneChoice };
+  /** `label`, `summary`, `date`: alignment, weight and caption. */
+  text?: OverlayTextSetting;
+  /** `routeInset` on the still image: line, padding and markers. */
+  route?: OverlayRouteSetting;
 }
 
 export interface OverlayTemplate {
@@ -107,6 +188,28 @@ const isNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+/** How far past the frame's edge a rect may read before it is refused: floating-point error, not a placement. */
+const RECT_TOLERANCE = 1e-6;
+
+/**
+ * A rect kept inside the frame: sizes at most the whole frame, positions so
+ * that position plus size is at most 1, all to six decimals. Measured boxes
+ * (a text's) come out of division, and their sums can land a hair past 1;
+ * this is applied when a layout is saved and when it is read, so a layout
+ * always reopens with every element it was saved with (AV-1010).
+ */
+export function normalizeRect(rect: OverlayRect): OverlayRect {
+  const round = (value: number) => Math.round(value * 1e6) / 1e6;
+  const width = round(Math.min(1, Math.max(0, rect.width)));
+  const height = round(Math.min(1, Math.max(0, rect.height)));
+  return {
+    x: round(Math.min(Math.max(0, rect.x), 1 - width)),
+    y: round(Math.min(Math.max(0, rect.y), 1 - height)),
+    width,
+    height,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Serialization
@@ -157,24 +260,34 @@ function parseComponent(value: unknown): OverlayComponent | string {
     !isNumber(rect.height) ||
     rect.width <= 0 ||
     rect.height <= 0 ||
-    rect.x < 0 ||
-    rect.y < 0 ||
-    rect.x + rect.width > 1 ||
-    rect.y + rect.height > 1
+    rect.x < -RECT_TOLERANCE ||
+    rect.y < -RECT_TOLERANCE ||
+    rect.x + rect.width > 1 + RECT_TOLERANCE ||
+    rect.y + rect.height > 1 + RECT_TOLERANCE
   ) {
     return 'invalid rect (must lie within the frame, as fractions of 0..1)';
   }
   const componentType = type as OverlayComponentType;
-  const needsSource = componentType !== 'routeInset' && componentType !== 'progress';
+  const stillOnly = STILL_IMAGE_COMPONENT_TYPES.includes(componentType);
+  const needsSource = componentType !== 'routeInset' && componentType !== 'progress' && !stillOnly;
   const source = parseSource(value.source);
   if (needsSource && !source) return 'missing or invalid data source';
+  if (componentType === 'label' && typeof value.content !== 'string') return 'a text with no content';
+  if (componentType === 'summary') {
+    const stat = isRecord(value.summary) ? value.summary.stat : undefined;
+    if (!SUMMARY_STAT_KEYS.includes(stat as SummaryStatKey)) return `unknown figure "${String(stat)}"`;
+  }
+  if (componentType === 'date') {
+    const format = isRecord(value.date) ? value.date.format : undefined;
+    if (!DATE_FORMAT_IDS.includes(format as DateFormatId)) return `unknown date format "${String(format)}"`;
+  }
 
   const unitMode = value.unitMode;
   const component: OverlayComponent = {
     id,
     type: componentType,
     visible: value.visible !== false,
-    rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    rect: normalizeRect({ x: rect.x, y: rect.y, width: rect.width, height: rect.height }),
     unitMode: unitMode === 'metric' || unitMode === 'imperial' ? unitMode : 'auto',
     style: parseStyle(value.style),
   };
@@ -189,6 +302,35 @@ function parseComponent(value: unknown): OverlayComponent | string {
   }
   if (isNumber(value.windowSeconds) && value.windowSeconds > 0) {
     component.windowSeconds = value.windowSeconds;
+  }
+  if (componentType === 'label') component.content = sanitizeLabel(value.content as string);
+  if (componentType === 'summary' && isRecord(value.summary)) {
+    component.summary = { stat: value.summary.stat as SummaryStatKey };
+  }
+  if (componentType === 'date' && isRecord(value.date)) {
+    component.date = {
+      format: value.date.format as DateFormatId,
+      withTime: value.date.withTime === true,
+      timeZone: value.date.timeZone === 'activity' ? 'activity' : 'reader',
+    };
+  }
+  if (stillOnly) {
+    const text = isRecord(value.text) ? value.text : {};
+    component.text = {
+      align: text.align === 'center' || text.align === 'right' ? text.align : 'left',
+      weight: text.weight === 'normal' ? 'normal' : 'bold',
+      ...(componentType === 'summary' ? { caption: text.caption !== false } : {}),
+    };
+  }
+  if (componentType === 'routeInset' && isRecord(value.route)) {
+    const route = value.route;
+    if (isNumber(route.lineWidth) && route.lineWidth > 0 && isNumber(route.padding) && route.padding >= 0) {
+      component.route = {
+        lineWidth: Math.min(route.lineWidth, 0.5),
+        padding: Math.min(route.padding, 0.4),
+        markers: route.markers !== false,
+      };
+    }
   }
   return component;
 }
@@ -206,7 +348,7 @@ export function parseOverlayTemplate(json: string): ParseOverlayTemplateResult {
     return { ok: false, error: 'The template is not valid JSON.' };
   }
   if (!isRecord(raw)) return { ok: false, error: 'The template is not an object.' };
-  if (raw.version !== OVERLAY_TEMPLATE_VERSION) {
+  if (!READABLE_TEMPLATE_VERSIONS.includes(raw.version as number)) {
     return { ok: false, error: `Unsupported template version ${String(raw.version)}.` };
   }
   if (!Array.isArray(raw.components)) {
@@ -295,7 +437,12 @@ function describeSource(source: OverlayDataSource, timeline: OverlayTimeline): s
 
 /** What a renderer is told to draw for one component at one moment. */
 export type ResolvedOverlayComponent =
-  | { status: 'hidden'; reason: 'disabled' | 'no_data' | 'no_position'; componentId: string }
+  | {
+      status: 'hidden';
+      /** `still_image_only`: a text, figure or date, which a video frame does not show (AV-1010). */
+      reason: 'disabled' | 'no_data' | 'no_position' | 'still_image_only';
+      componentId: string;
+    }
   | {
       status: 'ready';
       componentId: string;
@@ -352,6 +499,9 @@ export function resolveOverlayComponent(
 ): ResolvedOverlayComponent {
   const componentId = component.id;
   if (!component.visible) return { status: 'hidden', reason: 'disabled', componentId };
+  if (STILL_IMAGE_COMPONENT_TYPES.includes(component.type)) {
+    return { status: 'hidden', reason: 'still_image_only', componentId };
+  }
   if (!sample) return { status: 'hidden', reason: 'no_data', componentId };
 
   const style: OverlayStyle = { ...template.style, ...component.style };

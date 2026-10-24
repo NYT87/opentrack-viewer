@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RouteOverlayPanel } from './RouteOverlayPanel';
 import { RouteImageError, type RouteImagePlan } from '../overlay/routeImage';
+import type { StillImagePlan } from '../overlay/staticImage';
 import { makeActivity } from '../test/helpers/activity';
 
 const ride = makeActivity(
@@ -30,13 +31,18 @@ afterEach(() => vi.restoreAllMocks());
 
 function setup(props: Partial<React.ComponentProps<typeof RouteOverlayPanel>> = {}) {
   const plans: RouteImagePlan[] = [];
-  const renderPng = vi.fn((plan: RouteImagePlan) => {
+  const stills: StillImagePlan[] = [];
+  // The route's own plan inside the still image's, where AV-1009's figures are.
+  const renderPng = vi.fn((still: StillImagePlan) => {
+    stills.push(still);
+    const route = still.items.find((item) => item.kind === 'route');
+    const plan = route?.kind === 'route' ? route.plan : (undefined as unknown as RouteImagePlan);
     plans.push(plan);
     return Promise.resolve(new Blob([new Uint8Array(2048)], { type: 'image/png' }));
   });
   const save = vi.fn();
   render(<RouteOverlayPanel activity={ride} renderPng={renderPng} save={save} {...props} />);
-  return { renderPng, save, plans };
+  return { renderPng, save, plans, stills };
 }
 
 const field = (name: RegExp | string) => screen.getByLabelText(name) as HTMLInputElement;
@@ -55,11 +61,11 @@ describe('RouteOverlayPanel (AV-1009)', () => {
 
   it('says whether it is the whole activity or a focused section, and that no map is drawn', () => {
     const { unmount } = render(<RouteOverlayPanel activity={ride} />);
-    expect(screen.getByRole('region', { name: 'Route image' })).toHaveTextContent(/whole activity/);
-    expect(screen.getByRole('region', { name: 'Route image' })).toHaveTextContent(/No map is drawn/);
+    expect(screen.getByRole('region', { name: 'Overlay image' })).toHaveTextContent(/whole activity/);
+    expect(screen.getByRole('region', { name: 'Overlay image' })).toHaveTextContent(/No map is drawn/);
     unmount();
     render(<RouteOverlayPanel activity={ride} focusedSection />);
-    expect(screen.getByRole('region', { name: 'Route image' })).toHaveTextContent(/focused section/);
+    expect(screen.getByRole('region', { name: 'Overlay image' })).toHaveTextContent(/focused section/);
   });
 
   it('exports at the size, colour, width, padding and markers chosen', async () => {
@@ -164,5 +170,141 @@ describe('RouteOverlayPanel (AV-1009)', () => {
     expect(busy).toBeDisabled();
     finish(new Blob([new Uint8Array(4)], { type: 'image/png' }));
     expect(await screen.findByRole('button', { name: 'Download PNG' })).toBeEnabled();
+  });
+});
+
+describe('placing figures, the date and text on the image (AV-1010)', () => {
+  const T0 = Date.parse('2026-09-23T23:55:51Z');
+  const timed = (offset?: number) => {
+    const activity = makeActivity(
+      Array.from({ length: 30 }, (_, i) => ({ time: new Date(T0 + i * 1000), lat: 10 + i * 0.001, lon: 20 + i * 0.002 })),
+    );
+    return offset === undefined ? activity : { ...activity, metadata: { ...activity.metadata, utcOffsetMinutes: offset } };
+  };
+  const add = async (label: string) => {
+    await userEvent.selectOptions(screen.getByLabelText('Add'), label);
+    await userEvent.click(screen.getByRole('button', { name: 'Add to the image' }));
+  };
+  const editor = () => screen.getByRole('group', { name: /^Selected:/ });
+  const lastPlan = (stills: StillImagePlan[]) => stills[stills.length - 1]!;
+
+  it('adds a text, edits it, and exports it beside the route, named as an overlay image', async () => {
+    const { stills, save } = setup({ activity: timed() });
+    await add('Text');
+    const content = screen.getByLabelText('Text') as HTMLTextAreaElement;
+    await userEvent.clear(content);
+    await userEvent.type(content, 'Day 1 & <b>');
+    expect(screen.getByRole('list', { name: 'Elements on the image' })).toHaveTextContent('Text: Day 1 & <b>');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    const item = lastPlan(stills).items.find((entry) => entry.kind === 'text');
+    expect(item?.kind === 'text' && item.lines[0]!.text).toBe('Day 1 & <b>');
+    expect(save).toHaveBeenCalledWith(expect.any(Blob), 'overlay-image-1920x1080.png');
+  });
+
+  it('places the selected element by snap, nudge and typed position, always inside the frame', async () => {
+    const { stills } = setup({ activity: timed() });
+    await add('Distance');
+    const x = () => screen.getByLabelText('From the left (%)') as HTMLInputElement;
+    const y = () => screen.getByLabelText('From the top (%)') as HTMLInputElement;
+
+    await userEvent.click(within(editor()).getByRole('button', { name: 'Snap to bottom right' }));
+    const snapped = [Number(x().value), Number(y().value)];
+    expect(snapped[0]).toBeGreaterThan(50);
+    expect(snapped[1]).toBeGreaterThan(50);
+
+    await userEvent.click(within(editor()).getByRole('button', { name: 'Move left' }));
+    expect(Number(x().value)).toBeCloseTo(snapped[0]! - 1, 1);
+
+    fireEvent.change(x(), { target: { value: '150' } });
+    fireEvent.blur(x());
+    // Kept inside: the box ends at the right edge, not past it.
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    const box = lastPlan(stills).items.find((entry) => entry.id.startsWith('distance'))!.box;
+    // To the pixel: positions are kept to a hundredth of a percent.
+    expect(box.x + box.w).toBeCloseTo(1920, 0);
+
+    fireEvent.change(x(), { target: { value: '25' } });
+    fireEvent.change(y(), { target: { value: '10' } });
+    fireEvent.blur(y());
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    const placed = lastPlan(stills).items.find((entry) => entry.id.startsWith('distance'))!.box;
+    expect([placed.x, placed.y]).toEqual([480, 108]);
+  });
+
+  it('moves the selected element with the arrow keys on the preview, further with Shift', async () => {
+    setup({ activity: timed() });
+    await add('Text');
+    const x = () => Number((screen.getByLabelText('From the left (%)') as HTMLInputElement).value);
+    const start = x();
+    const preview = screen.getByRole('group', { name: /^Image preview/ });
+    preview.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(x()).toBeCloseTo(start + 1, 1);
+    await userEvent.keyboard('{Shift>}{ArrowRight}{/Shift}');
+    expect(x()).toBeCloseTo(start + 11, 1);
+  });
+
+  it('writes the date in the format chosen, and offers the activity’s zone only when the file states it', async () => {
+    const { stills } = setup({ activity: timed(), readerTimeZone: 'Asia/Tokyo' });
+    await add('Date');
+    await userEvent.selectOptions(screen.getByLabelText('Date format'), '2026-09-24');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'With the time' }));
+    expect(screen.getByRole('radio', { name: /The activity’s/ })).toBeDisabled();
+    expect(editor()).toHaveTextContent(/does not say which time zone/);
+    expect(screen.getByRole('radio', { name: 'Your time zone, Asia/Tokyo' })).toBeChecked();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    const date = lastPlan(stills).items.find((entry) => entry.id.startsWith('date'));
+    expect(date?.kind === 'text' && date.lines.map((line) => line.text)).toEqual(['2026-09-24 08:55']);
+  });
+
+  it('uses the zone the file states when asked, and says which it is', async () => {
+    const { stills } = setup({ activity: timed(-180), readerTimeZone: 'Asia/Tokyo' });
+    await add('Date');
+    const own = screen.getByRole('radio', { name: 'The activity’s: UTC−03:00, as the file states' });
+    await userEvent.click(own);
+    await userEvent.selectOptions(screen.getByLabelText('Date format'), 'Thursday 24 September 2026');
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    const date = lastPlan(stills).items.find((entry) => entry.id.startsWith('date'));
+    expect(date?.kind === 'text' && date.lines[0]!.text).toBe('Wednesday 23 September 2026');
+  });
+
+  it('offers what the activity lacks as unavailable, with the reason', async () => {
+    setup(); // positions only: no times
+    const options = Array.from((screen.getByLabelText('Add') as HTMLSelectElement).options);
+    expect(options.find((option) => option.value === 'moving')).toMatchObject({ disabled: true });
+    expect(options.find((option) => option.value === 'date')).toMatchObject({ disabled: true });
+    expect(options.find((option) => option.value === 'distance')).toMatchObject({ disabled: false });
+    expect(screen.getByRole('list', { name: 'Not in this activity' })).toHaveTextContent(/Moving time: This activity has no moving time/);
+  });
+
+  it('saves the layout as JSON, and opens it again', async () => {
+    const { save } = setup({ activity: timed() });
+    await add('Text');
+    const content = screen.getByLabelText('Text') as HTMLTextAreaElement;
+    await userEvent.clear(content);
+    await userEvent.type(content, 'Shimanami');
+    await userEvent.click(within(editor()).getByRole('button', { name: 'Snap to top right' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save layout' }));
+    const [blob, name] = save.mock.calls.at(-1)! as [Blob, string];
+    expect(name).toBe('overlay-layout.json');
+    const json = await blob.text();
+    expect(json).toContain('"content": "Shimanami"');
+    expect(screen.getByRole('status', { name: 'Layout file result' })).toHaveTextContent(/nothing of the activity/);
+
+    await userEvent.click(within(editor()).getByRole('button', { name: 'Remove this element' }));
+    expect(screen.getByRole('list', { name: 'Elements on the image' })).not.toHaveTextContent('Shimanami');
+
+    await userEvent.upload(screen.getByTestId('still-layout-input'), new File([json], 'my-layout.json', { type: 'application/json' }));
+    expect(await screen.findByRole('status', { name: 'Layout file result' })).toHaveTextContent('Opened the layout in my-layout.json.');
+    expect(screen.getByRole('list', { name: 'Elements on the image' })).toHaveTextContent('Text: Shimanami');
+  });
+
+  it('refuses a file that is not a layout, saying why, and keeps the layout it has', async () => {
+    setup({ activity: timed() });
+    await userEvent.upload(screen.getByTestId('still-layout-input'), new File(['{"hello":1}'], 'other.json', { type: 'application/json' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('other.json was not opened. This file is not an OpenTrack overlay layout.');
+    expect(screen.getByRole('list', { name: 'Elements on the image' })).toHaveTextContent('Route');
   });
 });

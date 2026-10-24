@@ -364,6 +364,7 @@ export function mergeTracks(sources: MergeSource[]): MergeResult {
       description: `Merged from ${ordered.map((part) => part.source.fileName).join(', ')}.`,
       sport,
       creator: agreed(activities.map((activity) => activity.metadata.creator)),
+      utcOffsetMinutes: agreed(activities.map((activity) => activity.metadata.utcOffsetMinutes)),
       device,
       deviceName: device ? activities[0]!.metadata.deviceName : undefined,
     },

@@ -16,7 +16,15 @@ const MARKER_RING_COLOR = '#ffffff';
 
 export function drawRouteImage(ctx: OverlayContext2D, plan: RouteImagePlan): void {
   ctx.clearRect(0, 0, plan.width, plan.height);
+  drawRouteMarks(ctx, plan);
+}
 
+/**
+ * The route's line, dots and markers, over whatever is already on the canvas:
+ * the route image clears first, and the still image (AV-1010) draws its other
+ * elements around it.
+ */
+export function drawRouteMarks(ctx: OverlayContext2D, plan: RouteImagePlan): void {
   ctx.strokeStyle = plan.color;
   ctx.lineWidth = plan.lineWidth;
   ctx.lineJoin = 'round';
@@ -58,6 +66,8 @@ export function drawRouteImage(ctx: OverlayContext2D, plan: RouteImagePlan): voi
 export interface RouteImageCanvasDeps {
   /** For tests: a stand-in for the canvas the browser would make. */
   createCanvas?: (width: number, height: number) => RouteImageCanvas;
+  /** What to draw, when it is more than the route: the still image (AV-1010). */
+  draw?: (ctx: OverlayContext2D) => void;
 }
 
 /** The part of a canvas the encoder uses. */
@@ -96,7 +106,8 @@ export async function renderRouteImagePng(
     const canvas = (deps.createCanvas ?? defaultCanvas)(plan.width, plan.height);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new RouteImageError('render_failed', 'This browser cannot draw the image.');
-    drawRouteImage(ctx, plan);
+    if (deps.draw) deps.draw(ctx);
+    else drawRouteImage(ctx, plan);
     const blob = await canvas.toPng();
     if (!blob || blob.size === 0 || blob.type !== 'image/png') {
       throw new RouteImageError(
