@@ -1,0 +1,18 @@
+{
+  "roles": {
+    "reviewer": [
+      "code-reviewer",
+      "senior-qa"
+    ],
+    "coder": [
+      "senior-backend",
+      "senior-frontend",
+      "senior-security",
+      "tech-stack-evaluator",
+      "senior-fullstack",
+      "senior-architect",
+      "senior-devops",
+      "senior-secops"
+    ]
+  }
+}
