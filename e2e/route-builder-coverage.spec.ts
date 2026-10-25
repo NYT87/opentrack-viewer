@@ -145,6 +145,7 @@ test('the whole journey: viewer, custom track, edit, discard, append, export (AV
   const added = page.getByRole('status', { name: 'Last track added' });
   await expect(added).toContainText('ride-minimal.tcx');
   await expect(track).toContainText(/Stretches\s*2/);
+  await page.getByRole('button', { name: 'Edit this track' }).click();
   await added.getByRole('button', { name: 'Select the join' }).click();
   await editor.getByRole('button', { name: 'Join to the point before' }).click();
   await expect(track).toContainText(/Stretches\s*1/);
@@ -386,6 +387,7 @@ test('a long track stays quick to append, edit, discard and export (AV-1108)', a
     await expect(track).toContainText(/Points\s*14402/, { timeout: 30_000 });
   });
 
+  await page.getByRole('button', { name: 'Edit this track' }).click();
   const editor = page.getByRole('region', { name: 'Edit points' });
   const add = editor.getByRole('form', { name: 'Add a point by coordinates' });
   await add.getByLabel('Latitude').fill('51.6');

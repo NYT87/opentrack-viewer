@@ -885,6 +885,24 @@ describe('appending another track (AV-1106)', () => {
     return draft().points.length;
   }
 
+  it('keeps a joined track read-only until Edit this track is pressed', async () => {
+    await startWithGpx();
+    await upload(fixtureFile('route-with-elevation.gpx'));
+    await waitFor(() => expect(draft().sources).toHaveLength(2));
+    const map = await readyMap();
+    const before = draft().points.length;
+
+    expect(screen.queryByRole('region', { name: 'Edit points' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Draft map' })).toHaveTextContent('Map clicks do not change it.');
+    press(map, 47, 8);
+    expect(draft().points).toHaveLength(before);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Edit this track' }));
+    expect(editor()).toBeInTheDocument();
+    press(map, 47, 8);
+    expect(draft().points).toHaveLength(before + 1);
+  });
+
   it('appends a second GPX after the first, in order, and says how far it jumped', async () => {
     const before = await startWithGpx();
     const ids = draft().points.map((p) => p.id);
@@ -916,6 +934,7 @@ describe('appending another track (AV-1106)', () => {
     await upload(fixtureFile('ride-minimal.tcx', 'application/vnd.garmin.tcx+xml'));
     await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
 
+    await userEvent.click(screen.getByRole('button', { name: 'Edit this track' }));
     await userEvent.click(within(lastAdded()).getByRole('button', { name: 'Select the join' }));
 
     expect(editor()).toHaveTextContent(`Selected: point ${before + 1} of`);
@@ -927,10 +946,11 @@ describe('appending another track (AV-1106)', () => {
     const before = await startWithGpx();
     await upload(fixtureFile('ride-minimal.tcx', 'application/vnd.garmin.tcx+xml'));
     await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
-    const farText = lastAdded().textContent;
+    const farText = lastAdded().querySelector('.route-draft__appended')?.textContent;
     expect(farText).toMatch(/far apart/);
 
     // Joined: the notice says the jump is now drawn and counted.
+    await userEvent.click(screen.getByRole('button', { name: 'Edit this track' }));
     await userEvent.click(within(lastAdded()).getByRole('button', { name: 'Select the join' }));
     await userEvent.click(screen.getByRole('button', { name: 'Join to the point before' }));
     expect(lastAdded()).toHaveTextContent(/joined to the point before it: the .* between them is drawn and counted/);
@@ -938,7 +958,7 @@ describe('appending another track (AV-1106)', () => {
 
     // Undo the join: back to a break, with the same distance as before.
     await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
-    expect(lastAdded().textContent).toBe(farText);
+    expect(lastAdded().querySelector('.route-draft__appended')?.textContent).toBe(farText);
 
     // Move the first appended point next to the end of the first track: the
     // distance follows, and it is no longer far.
@@ -1000,6 +1020,7 @@ describe('appending another track (AV-1106)', () => {
     await waitFor(() => expect(draft().points.length).toBeGreaterThan(before));
     expect(draft().id).toBe(id);
 
+    await userEvent.click(screen.getByRole('button', { name: 'Edit this track' }));
     await userEvent.click(screen.getByRole('button', { name: 'Undo last edit' }));
     expect(draft().points).toHaveLength(before);
     // The notice goes with the points it described.

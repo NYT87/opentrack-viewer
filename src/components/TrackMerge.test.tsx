@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Route Builder mounts a map, and jsdom has no WebGL.
@@ -19,7 +19,7 @@ vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 const { App } = await import('../app/App');
 const { useActivityStore } = await import('../state/activityStore');
 const { useRouteDraftStore } = await import('../state/routeDraftStore');
-const { resetMapLibreMock } = await import('../test/helpers/maplibreMock');
+const { latestMap, resetMapLibreMock } = await import('../test/helpers/maplibreMock');
 
 const T0 = Date.parse('2026-09-24T08:00:00Z');
 
@@ -133,6 +133,24 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
     expect(activity?.points).toHaveLength(20);
     expect(activity?.metadata.name).toBe('Evening Ride (merged)');
     expect(window.localStorage.length).toBe(0);
+  });
+
+  it('keeps the merged map read-only and creates an editable route only on request', async () => {
+    render(<App />);
+    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+    const merged = await within(mergeRegion()).findByRole('group', { name: 'The merged activity' });
+    await waitFor(() => expect(latestMap()).toBeDefined());
+    const map = latestMap();
+    act(() => map.completeStyleLoad());
+
+    act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: 8, lat: 47 } }));
+    expect(useRouteDraftStore.getState().draft).toBeUndefined();
+    expect(within(merged).getByRole('button', { name: 'Download Evening-Ride-merged.gpx' })).toBeEnabled();
+
+    await userEvent.click(within(merged).getByRole('button', { name: 'Edit a route copy' }));
+    expect(useRouteDraftStore.getState().draft?.points).toHaveLength(20);
+    expect(screen.getByRole('region', { name: 'Edit points' })).toBeInTheDocument();
+    expect(within(merged).getByRole('button', { name: 'Download Evening-Ride-merged.gpx' })).toBeEnabled();
   });
 
   it('merges under StrictMode, as the app runs in development, where effects mount twice', async () => {

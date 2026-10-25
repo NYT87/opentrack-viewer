@@ -55,6 +55,13 @@ test('merges the morning ride and its continuation into one ride with a 74-minut
   const distance = await stat(merged, 'Distance').textContent();
   const moving = await stat(merged, 'Moving time').textContent();
 
+  // The merge is a preview until the reader explicitly asks for a route copy.
+  await merged.getByTestId('activity-map').locator('canvas').click();
+  await expect(page.getByRole('region', { name: 'Planned track' })).toHaveCount(0);
+  await merged.getByRole('button', { name: 'Edit a route copy' }).click();
+  await expect(page.getByRole('region', { name: 'Edit points' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Planned track' })).toContainText(/16,?282/);
+
   // Written as GPX: one track, a segment per ride, every point with its time.
   const exporter = merged.getByRole('group', { name: 'Export the merged activity' });
   const downloading = page.waitForEvent('download');

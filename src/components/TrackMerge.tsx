@@ -46,7 +46,7 @@ type Entry =
  * for as long as the page is open, and the merge is worked out again from
  * them on every change, so what is shown is never out of step with the list.
  */
-export function TrackMerge() {
+export function TrackMerge({ onEditActivity }: { onEditActivity: (activity: Activity) => string | undefined }) {
   const units = useInteractionStore((state) => state.unitSystem);
   const [entries, setEntries] = useState<Entry[]>([]);
   const nextKey = useRef(0);
@@ -155,7 +155,7 @@ export function TrackMerge() {
         <p className="merge__hint">Add at least one more recorded track with timestamps to merge.</p>
       )}
 
-      {result?.ok && <MergedActivity result={result} units={units} />}
+      {result?.ok && <MergedActivity result={result} units={units} onEditActivity={onEditActivity} />}
     </section>
   );
 }
@@ -199,7 +199,11 @@ function MergeOrder({
   );
 }
 
-function MergedActivity({ result, units }: { result: Extract<MergeResult, { ok: true }>; units: UnitSystem }) {
+function MergedActivity({ result, units, onEditActivity }: {
+  result: Extract<MergeResult, { ok: true }>;
+  units: UnitSystem;
+  onEditActivity: (activity: Activity) => string | undefined;
+}) {
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const setActivity = useActivityStore((state) => state.setActivity);
   const navigate = useNavigate();
@@ -207,6 +211,7 @@ function MergedActivity({ result, units }: { result: Extract<MergeResult, { ok: 
   const derived = activity.derived!;
   const paused = pauses.reduce((total, pause) => total + pause.seconds, 0);
   const route = useMemo(() => activityToRouteGeoJSON(activity), [activity]);
+  const [editError, setEditError] = useState<string | undefined>();
 
   return (
     <div className="merge__result" role="group" aria-label="The merged activity">
@@ -247,6 +252,8 @@ function MergedActivity({ result, units }: { result: Extract<MergeResult, { ok: 
         </Suspense>
       </div>
 
+      <p>The merged map is a preview. Clicking it does not add points. To change the route, edit a copy; the merged recording stays available for download. A route copy keeps places, elevation, times and pauses, but leaves out sensor readings, laps and device details.</p>
+
       <p className="video__actions">
         <button
           type="button"
@@ -259,7 +266,15 @@ function MergedActivity({ result, units }: { result: Extract<MergeResult, { ok: 
         >
           Open in the viewer
         </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => setEditError(onEditActivity(activity))}
+        >
+          Edit a route copy
+        </button>
       </p>
+      {editError && <p role="alert">{editError}</p>}
       <MergedExport activity={activity} />
     </div>
   );

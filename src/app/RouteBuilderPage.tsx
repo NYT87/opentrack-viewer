@@ -12,6 +12,7 @@ import { EMPTY_ROUTE_GEOMETRY, activityToRouteGeoJSON, pointToGeoJSON } from '..
 import {
   appendJump,
   beginsStretch,
+  draftFromActivity,
   draftToActivity,
   sectionBounds,
   stretchLengths,
@@ -88,6 +89,7 @@ export function RouteBuilderPage() {
   const canUndo = useRouteDraftStore((state) => state.history.length > 0);
   const startBlank = useRouteDraftStore((state) => state.startBlank);
   const importTrack = useRouteDraftStore((state) => state.importTrack);
+  const setDraft = useRouteDraftStore((state) => state.setDraft);
   const addPointToDraft = useRouteDraftStore((state) => state.addPoint);
   const removePointFromDraft = useRouteDraftStore((state) => state.removePoint);
   const movePointInDraft = useRouteDraftStore((state) => state.movePoint);
@@ -101,6 +103,11 @@ export function RouteBuilderPage() {
 
   const [intake, setIntake] = useState<Intake>({ status: 'idle' });
   const [appended, setAppended] = useState<Appended | undefined>(undefined);
+  // A joined track starts as a preview. Editing is an explicit choice, so a
+  // map press after an import cannot silently add a point to the route.
+  const [editingDraftId, setEditingDraftId] = useState<string | undefined>();
+  const joinedDraft = draft !== undefined && (draft.kind === 'appended' || draft.sources.length > 1);
+  const editing = !joinedDraft || editingDraftId === draft?.id;
   /*
    * What the reader picked out, what a press on the map does, and the marks
    * of a section. All belong to one draft: a selection outlives nothing — a
@@ -194,8 +201,8 @@ export function RouteBuilderPage() {
   // The handles carry the section too: the line above needs two points to
   // draw, and a one-point section would otherwise be "shown" by nothing.
   const editPoints = useMemo(
-    () => draftPointsToGeoJSON(draft, selectedId, section),
-    [draft, selectedId, section],
+    () => editing ? draftPointsToGeoJSON(draft, selectedId, section) : undefined,
+    [draft, selectedId, section, editing],
   );
 
   const report = (result: DraftResult<RouteDraft>): boolean => {
@@ -299,6 +306,10 @@ export function RouteBuilderPage() {
         setIntake({ status: 'error', message: result.error.message, code: result.error.code });
         return;
       }
+      if (before) {
+        setEditingDraftId(undefined);
+        setWanted({ draftId: result.value.id, mode: 'add' });
+      }
       setIntake({ status: 'idle' });
       const jump = before ? appendJump(before, result.value) : undefined;
       setAppended(
@@ -319,6 +330,17 @@ export function RouteBuilderPage() {
   };
 
   const busy = intake.status === 'reading';
+
+  const editMergedActivity = (activity: Activity): string | undefined => {
+    const result = draftFromActivity(activity);
+    if (!result.ok) return result.error.message;
+    setDraft(result.value);
+    setEditingDraftId(result.value.id);
+    setWanted({ draftId: result.value.id, mode: 'add' });
+    setNotice(undefined);
+    requestAnimationFrame(() => document.querySelector('[aria-label="Draft map"]')?.scrollIntoView?.());
+    return undefined;
+  };
 
   // The append notice, read from the current draft: the first appended point
   // and the point now before it, how far apart they are, and whether a line
@@ -394,6 +416,14 @@ export function RouteBuilderPage() {
             />
 
             <section className="box" aria-label="Draft map">
+              {!editing && (
+                <div className="prose">
+                  <p>This joined track is a preview. Map clicks do not change it.</p>
+                  <button type="button" className="button" onClick={() => setEditingDraftId(draft.id)}>
+                    Edit this track
+                  </button>
+                </div>
+              )}
               <Suspense fallback={<MapPlaceholder reason="loading" />}>
                 <ActivityMap
                   route={route}
@@ -401,15 +431,15 @@ export function RouteBuilderPage() {
                   marker={NO_MARKER}
                   basemapEnabled={basemapEnabled}
                   editPoints={editPoints}
-                  onPointClick={handlePointClick}
-                  onMapClick={handleMapClick}
-                  onRouteClick={thinned ? handleRouteClick : undefined}
+                  onPointClick={editing ? handlePointClick : undefined}
+                  onMapClick={editing ? handleMapClick : undefined}
+                  onRouteClick={editing && thinned ? handleRouteClick : undefined}
                   fitKey={draft.id}
                 />
               </Suspense>
             </section>
 
-            <PointEditor
+            {editing && <PointEditor
               draft={draft}
               selectedId={selectedId}
               mode={mode}
@@ -427,7 +457,7 @@ export function RouteBuilderPage() {
               onMark={setMarks}
               onDiscard={discard}
               onUndo={undoLast}
-            />
+            />}
 
             <PlannedTrackExport draft={draft} />
           </>
@@ -451,13 +481,13 @@ export function RouteBuilderPage() {
                       ? `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it — far apart, so it is a stretch of its own and nothing is drawn or counted across the jump. If it is one road, join them.`
                       : `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it, as a stretch of its own; nothing is drawn or counted across the jump until you join them.`}
                 </span>
-                <button
+                {editing && <button
                   type="button"
                   className="button"
                   onClick={() => setSelectedId(appendedNow.firstId)}
                 >
                   Select the join
-                </button>
+                </button>}
               </div>
             )}
             <FileDropZone
@@ -468,7 +498,7 @@ export function RouteBuilderPage() {
           </section>
         )}
 
-        <TrackMerge />
+        <TrackMerge onEditActivity={editMergedActivity} />
       </div>
     </main>
   );

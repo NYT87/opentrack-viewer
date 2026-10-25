@@ -251,7 +251,14 @@ test('appends a TCX after a GPX, warns of the far jump, and sends nothing anywhe
   await expect(added).toContainText('ride-minimal.tcx');
   await expect(added).toContainText(/far apart/);
 
+  // The joined map is a preview until editing is explicitly enabled.
+  const preview = await track.textContent();
+  await page.getByRole('region', { name: 'Draft map' }).locator('canvas').click();
+  await expect(track).toHaveText(preview!);
+  await expect(page.getByRole('region', { name: 'Edit points' })).toHaveCount(0);
+
   // Joined on request: one stretch.
+  await page.getByRole('button', { name: 'Edit this track' }).click();
   await added.getByRole('button', { name: 'Select the join' }).click();
   await page.getByRole('button', { name: 'Join to the point before' }).click();
   await expect(track).toContainText(/Stretches\s*1/);
