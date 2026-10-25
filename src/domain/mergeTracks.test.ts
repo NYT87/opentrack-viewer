@@ -199,6 +199,34 @@ describe('what a merge refuses (AV-1109)', () => {
 });
 
 describe('the edges of a merge (AV-1109)', () => {
+  it('makes each source activity a lap when the files contain no lap data', () => {
+    const result = mergeTracks([ride('second.gpx', 100, 5), ride('first.gpx', 0, 5)]);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.activity.laps).toMatchObject([
+      { index: 0, startTime: at(0), endTime: at(4), durationSeconds: 4 },
+      { index: 1, startTime: at(100), endTime: at(104), durationSeconds: 4 },
+    ]);
+    expect(result.activity.laps?.map((lap) => lap.distanceMeters)).toEqual(
+      result.parts.map((part) => part.distanceMeters),
+    );
+  });
+
+  it('keeps internal source laps while the final lap ends at that source’s final point', () => {
+    const first = ride('first.fit', 0, 10);
+    first.activity.laps = [
+      { index: 0, startTime: at(0), endTime: at(4), durationSeconds: 4, distanceMeters: 20 },
+      { index: 1, startTime: at(5), endTime: at(8), durationSeconds: 3, distanceMeters: 15 },
+    ];
+    const result = mergeTracks([first, ride('second.gpx', 100, 5)]);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.activity.laps).toMatchObject([
+      { index: 0, startTime: at(0), endTime: at(4), durationSeconds: 4 },
+      { index: 1, startTime: at(5), endTime: at(9), durationSeconds: 4 },
+      { index: 2, startTime: at(100), endTime: at(104), durationSeconds: 4 },
+    ]);
+    expect(first.activity.laps[1]!.endTime).toEqual(at(8));
+  });
+
   it('takes a file that starts the second the last one ends as a zero-length pause', () => {
     const result = mergeTracks([ride('a.gpx', 0, 11), ride('b.gpx', 10, 5)]);
     if (!result.ok) throw new Error(result.error.message);

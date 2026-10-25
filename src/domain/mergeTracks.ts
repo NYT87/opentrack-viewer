@@ -214,6 +214,36 @@ function firstLocated(points: ActivityPoint[]) {
   return points.find(hasValidLocation);
 }
 
+/** Keep a source's own laps, with its final point closing the final lap. */
+function appendPartLaps(part: Prepared, distanceMeters: number | undefined, mergedLaps: ActivityLap[]): void {
+  const sourceLaps = part.source.activity.laps ?? [];
+  if (sourceLaps.length === 0) {
+    mergedLaps.push({
+      index: mergedLaps.length,
+      startTime: new Date(part.start),
+      endTime: new Date(part.end),
+      durationSeconds: (part.end - part.start) / 1000,
+      ...(distanceMeters !== undefined ? { distanceMeters } : {}),
+    });
+    return;
+  }
+
+  const firstIndex = mergedLaps.length;
+  for (const lap of sourceLaps) mergedLaps.push({ ...lap, index: mergedLaps.length });
+  const last = mergedLaps.at(-1)!;
+  const previous = mergedLaps.length > firstIndex + 1 ? mergedLaps.at(-2) : undefined;
+  last.startTime ??= new Date(previous?.endTime?.getTime() ?? part.start);
+  if (last.endTime?.getTime() !== part.end) {
+    last.endTime = new Date(part.end);
+    last.durationSeconds = Math.max(0, (part.end - last.startTime.getTime()) / 1000);
+    const earlier = mergedLaps.slice(firstIndex, -1);
+    if (distanceMeters !== undefined && earlier.every((lap) => lap.distanceMeters !== undefined)) {
+      const remainder = distanceMeters - earlier.reduce((sum, lap) => sum + lap.distanceMeters!, 0);
+      if (remainder >= 0) last.distanceMeters = remainder;
+    }
+  }
+}
+
 /**
  * Merges the files. Files a reader chose that cannot be merged at all (no
  * timestamps) are expected to have been set aside with `assessMergeSource`;
@@ -285,7 +315,7 @@ export function mergeTracks(sources: MergeSource[]): MergeResult {
     segmentBase += segments.size;
     distanceBase += own.totalMeters ?? 0;
 
-    for (const lap of part.source.activity.laps ?? []) laps.push({ ...lap, index: laps.length });
+    appendPartLaps(part, own.totalMeters, laps);
     for (const event of part.source.activity.events ?? []) {
       // A source's point indices do not survive the merge; the time does.
       const carried: ActivityEvent = { ...event };

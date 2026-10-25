@@ -103,6 +103,7 @@ export function TrackMerge({ onEditActivity }: { onEditActivity: (activity: Acti
         Make one activity of a ride saved in parts: two or more recordings of the same outing. They
         are put in the order they were recorded, by their own clocks, and the time between them is
         kept as a pause: it counts in elapsed time, not in moving time, and adds no distance.
+        Each recording ends a lap in the merged activity.
         Unlike the planned track above, a merge keeps every time. It is worked out in this tab;
         nothing is uploaded.
       </p>
@@ -218,6 +219,7 @@ function MergedActivity({ result, units, onEditActivity }: {
       <h4 className="merge__title">{activity.metadata.name}</h4>
       <dl className="summary__grid">
         <Stat label="Points" value={activity.points.length.toLocaleString()} />
+        <Stat label="Laps" value={(activity.laps?.length ?? 0).toLocaleString()} />
         <Stat label="Distance" value={formatDistance(derived.distanceMeters, units)} />
         <Stat label="Elapsed" value={formatDuration(derived.durationSeconds)} />
         <Stat label="Moving time" value={formatDuration(derived.movingDurationSeconds)} />
@@ -291,7 +293,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function MergedExport({ activity }: { activity: Activity }) {
   const formats = useMemo(() => mergedTrackFormats(activity), [activity]);
-  const [format, setFormat] = useState<ExportFormat>('gpx');
+  const [format, setFormat] = useState<ExportFormat>('fit');
   const [outcome, setOutcome] = useState<{ fileName: string; warnings: ActivityWarning[] }>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -317,6 +319,7 @@ function MergedExport({ activity }: { activity: Activity }) {
 
   return (
     <div className="merge__export" role="group" aria-label="Export the merged activity">
+      <p>Each recording ends a lap. Choose FIT to keep lap boundaries in one activity; GPX keeps the separate track segments but has no laps.</p>
       <fieldset className="editor__modes">
         <legend className="summary__label">Format</legend>
         {formats.map((entry) => (

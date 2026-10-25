@@ -105,7 +105,12 @@ for (const touching of [false, true]) {
     await page.getByRole('button', { name: 'Open in the viewer', exact: true }).click();
     const format = page.getByLabel('Format', { exact: true });
     await expect(format.getByRole('option', { name: /^TCX/ })).toBeDisabled();
-    if (touching) await expect(format.getByRole('option', { name: /^FIT/ })).toBeDisabled();
-    else await expect(format.getByRole('option', { name: /^FIT/ })).toBeEnabled();
+    if (touching) {
+      await expect(format.getByRole('option', { name: /^FIT/ })).toBeDisabled();
+      await expect(format).toHaveValue('gpx');
+    } else {
+      await expect(format.getByRole('option', { name: /^FIT/ })).toBeEnabled();
+      await expect(format).toHaveValue('fit');
+    }
   });
 }

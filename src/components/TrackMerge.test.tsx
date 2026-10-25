@@ -76,9 +76,11 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
 
     expect(within(exporter).getByRole('radio', { name: /^GPX/ })).toBeEnabled();
     expect(within(exporter).getByRole('radio', { name: /^FIT/ })).toBeEnabled();
+    expect(within(exporter).getByRole('radio', { name: /^FIT/ })).toBeChecked();
     expect(within(exporter).getByRole('radio', { name: /^TCX/ })).toBeDisabled();
     expect(exporter).toHaveTextContent(/TCX is written as one lap .+ riding/);
 
+    await userEvent.click(within(exporter).getByRole('radio', { name: /^GPX/ }));
     await userEvent.click(within(exporter).getByRole('button', { name: 'Download Evening-Ride-merged.gpx' }));
     expect(await within(exporter).findByRole('status', { name: 'Merged activity written' })).toHaveTextContent(
       'Saved Evening-Ride-merged.gpx.',
@@ -145,12 +147,12 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
 
     act(() => map.emit('click', { point: { x: 0, y: 0 }, lngLat: { lng: 8, lat: 47 } }));
     expect(useRouteDraftStore.getState().draft).toBeUndefined();
-    expect(within(merged).getByRole('button', { name: 'Download Evening-Ride-merged.gpx' })).toBeEnabled();
+    expect(within(merged).getByRole('button', { name: 'Download Evening-Ride-merged.fit' })).toBeEnabled();
 
     await userEvent.click(within(merged).getByRole('button', { name: 'Edit a route copy' }));
     expect(useRouteDraftStore.getState().draft?.points).toHaveLength(20);
     expect(screen.getByRole('region', { name: 'Edit points' })).toBeInTheDocument();
-    expect(within(merged).getByRole('button', { name: 'Download Evening-Ride-merged.gpx' })).toBeEnabled();
+    expect(within(merged).getByRole('button', { name: 'Download Evening-Ride-merged.fit' })).toBeEnabled();
   });
 
   it('merges under StrictMode, as the app runs in development, where effects mount twice', async () => {

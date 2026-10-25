@@ -102,6 +102,9 @@ describe('a merged track written and read back (AV-1109)', () => {
     const bytes = new Uint8Array(await result.blob.arrayBuffer());
     const { activity: back } = await parseActivityFile(new File([bytes], result.fileName));
     expect(totals(back)).toEqual(totals(activity));
+    expect(back.laps?.map((lap) => [lap.startTime?.getTime(), lap.endTime?.getTime()])).toEqual(
+      activity.laps?.map((lap) => [lap.startTime?.getTime(), lap.endTime?.getTime()]),
+    );
     expect(back.derived!.distanceMeters).toBeCloseTo(activity.derived!.distanceMeters!, 0);
     expect(back.derived!.movingDurationSeconds).toBeCloseTo(activity.derived!.movingDurationSeconds!, 0);
     // The pause is in elapsed time, and not in moving time.

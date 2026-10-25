@@ -9,8 +9,9 @@ import { getExportAvailability, exportActivity, safeFileStem, type ExportFormat,
  *
  * - **GPX**: one track, one segment per recorded stretch. A pause is the gap
  *   between two segments, which is how GPX has always said it.
- * - **FIT**: the timer is stopped at the end of each stretch and started at
- *   the next, so the pause counts in elapsed time and not in timer time.
+ * - **FIT**: the source activities end laps, while the timer is stopped at
+ *   the end of each stretch and started at the next. The pause counts in
+ *   elapsed time and not in timer time.
  *   Unless two stretches meet within one second, which FIT cannot tell apart
  *   (`hasStretchesTouchingInFit`).
  * - **TCX**: the writer puts the whole activity in one lap, whose total time
@@ -57,7 +58,7 @@ export async function exportMergedTrack(activity: Activity, format: ExportFormat
     code: 'merged_pauses_kept',
     message:
       format === 'fit'
-        ? `Written as one activity. The timer stops at the end of each file and starts again at the next, so the ${pauses === 1 ? 'pause' : `${pauses} pauses`} count in elapsed time and not in timer time.`
+        ? `Written as one activity with ${activity.laps?.length ?? 0} laps. The timer stops at the end of each file and starts again at the next, so the ${pauses === 1 ? 'pause' : `${pauses} pauses`} count in elapsed time and not in timer time.`
         : `Written as one track with a segment per recorded stretch. The ${pauses === 1 ? 'pause' : `${pauses} pauses`} between the files ${pauses === 1 ? 'is' : 'are'} the gaps between segments: nothing is drawn or counted across ${pauses === 1 ? 'it' : 'them'}.`,
     severity: 'info',
   };

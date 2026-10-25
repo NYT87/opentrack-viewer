@@ -64,6 +64,7 @@ test('merges the morning ride and its continuation into one ride with a 74-minut
 
   // Written as GPX: one track, a segment per ride, every point with its time.
   const exporter = merged.getByRole('group', { name: 'Export the merged activity' });
+  await exporter.getByRole('radio', { name: 'GPX' }).check();
   const downloading = page.waitForEvent('download');
   await exporter.getByRole('button', { name: 'Download Imabari-City-Cycling-merged.gpx' }).click();
   const saved = await downloading;

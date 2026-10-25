@@ -29,10 +29,9 @@ interface Outcome {
 export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
   const formatId = useId();
   /*
-   * AV-555. Writing the file back out in the format it arrived in is the least
-   * surprising default, and is usually what a section export wants — so it is
-   * offered first, and named for what it is. A rewrite is not a conversion, and
-   * neither one is a copy: both are serialized from the parsed activity.
+   * AV-555. An ordinary file defaults to its source format. A merged activity
+   * prefers FIT so its lap boundaries survive. A rewrite is not a copy: every
+   * export is serialized from the parsed activity.
    */
   const sourceFormat = EXPORT_FORMATS.find(
     (entry) => entry.format === activity.source.format,
@@ -63,19 +62,24 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
     [activity, exportsSection, selectedRange],
   );
   /*
-   * The format offered: the reader's pick while it can be written, else the
-   * source format when that can, else the first format that can. A file with
+   * The format offered: the reader's pick while it can be written, then the
+   * preferred format, source format, or first writable format. A file with
    * no coordinates used to open on "GPX (same format) — unavailable" over a
    * disabled button; now it opens on something it can write. Only when nothing
    * can be written does an unavailable format stay selected, with its reason.
    */
   const writable = (candidate: ExportFormat | undefined) =>
     availability.find((entry) => entry.format === candidate)?.available === true;
+  // A merged activity has lap boundaries at its source files. FIT can carry
+  // them; GPX cannot, even when the files that made the merge were GPX.
+  const preferredFormat = activity.source.parserVersion === 'merge-1' ? 'fit' : sourceFormat;
   const format: ExportFormat = writable(picked)
     ? picked!
-    : writable(sourceFormat)
-      ? sourceFormat!
-      : (availability.find((entry) => entry.available)?.format ?? picked ?? sourceFormat ?? EXPORT_FORMATS[0]!.format);
+    : writable(preferredFormat)
+      ? preferredFormat!
+      : writable(sourceFormat)
+        ? sourceFormat!
+        : (availability.find((entry) => entry.available)?.format ?? picked ?? sourceFormat ?? EXPORT_FORMATS[0]!.format);
   const chosen = availability.find((entry) => entry.format === format);
   const isUnavailable = chosen?.available === false;
   const label = EXPORT_FORMATS.find((entry) => entry.format === format)?.label ?? format;
