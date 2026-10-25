@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Activity } from '../domain/activity';
 import { DEFAULT_OVERLAY_CONTROLS, type OverlayControls } from '../overlay/presets';
+import { EMPTY_CANVAS_DRAFT, type CanvasDraft } from '../overlay/customCanvas';
 
 /**
  * What the overlay page knows about a video's clock, as its container states
@@ -84,6 +85,15 @@ interface OverlayState {
    * rest: nothing but the theme is ever written to storage.
    */
   controls: OverlayControls;
+  /**
+   * AV-1011. Whether the reader is making a custom canvas, and the canvas
+   * itself with its undo. Kept for the session like the controls, so Sync,
+   * the other mode and Start over leave it as it was.
+   */
+  canvasMode: boolean;
+  setCanvasMode: (canvasMode: boolean) => void;
+  canvasDraft: CanvasDraft;
+  setCanvasDraft: (draft: CanvasDraft) => void;
   /** AV-1006. Reported by the preview; forgotten with the video. */
   media: OverlayMedia | undefined;
   setMedia: (media: OverlayMedia | undefined) => void;
@@ -135,6 +145,10 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
   source: {},
   offsetSeconds: 0,
   controls: DEFAULT_OVERLAY_CONTROLS,
+  canvasMode: false,
+  setCanvasMode: (canvasMode) => set({ canvasMode }),
+  canvasDraft: EMPTY_CANVAS_DRAFT,
+  setCanvasDraft: (canvasDraft) => set({ canvasDraft }),
   media: undefined,
 
   setMedia: (media) =>

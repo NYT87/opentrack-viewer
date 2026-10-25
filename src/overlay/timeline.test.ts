@@ -276,3 +276,22 @@ describe('how the video is laid against the activity (TD-059)', () => {
     expect(timeline.alignment?.overlaps).toBe(false);
   });
 });
+
+describe('moving time so far (AV-1011)', () => {
+  it('counts the time spent moving up to each moment, not the stops, as the stats count it', () => {
+    const T = Date.parse('2024-01-01T10:00:00Z');
+    // Moving 5 m/s for 10 s, standing for 10 s, moving again for 10 s.
+    let lat = 1;
+    const points = Array.from({ length: 31 }, (_, i) => {
+      if (i > 0 && (i <= 10 || i > 20)) lat += 5 / 111_320;
+      return { time: new Date(T + i * 1000), lat, lon: 1 };
+    });
+    const timeline = buildOverlayTimeline(makeActivity(points), { video: { durationSeconds: 30 } });
+    const moving = (t: number) => timeline.sampleAt(t)?.values['metric:moving'];
+    expect(moving(5)).toBe(5);
+    expect(moving(15)).toBe(10);
+    expect(moving(25)).toBe(15);
+    expect(moving(30)).toBe(20);
+    expect(timeline.available.has('metric:moving')).toBe(true);
+  });
+});

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -5,6 +6,7 @@ import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportError } from '../overlay/export/errors';
 import type { ExportJob, ExportOutput } from '../overlay/export/client';
 import type { ArchiveStorage, BurnSourceInfo } from '../overlay/export/protocol';
+import { DEFAULT_SHAPE, DEFAULT_OVERLAY_STYLE as DEFAULT_OVERLAY_TEMPLATE_STYLE } from '../overlay/template';
 import { DEFAULT_OVERLAY_CONTROLS } from '../overlay/presets';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { makeActivity } from '../test/helpers/activity';
@@ -73,6 +75,24 @@ function setup(props: Partial<React.ComponentProps<typeof BurnedInExportPanel>> 
   };
   const utils = render(<BurnedInExportPanel {...common} {...props} />);
   return { ...utils, start, inspect, jobs, progress, common };
+}
+
+/**
+ * A page that redraws on every report and hands the panel a new listener each
+ * time, as a page with an inline callback does: the reports must settle.
+ */
+function Reporting({ panel }: { panel: (onFinishedChange: (finished: boolean) => void) => React.ReactNode }) {
+  const [reports, setReports] = useState<boolean[]>([]);
+  const [shown, setShown] = useState(true);
+  return (
+    <>
+      {shown && panel((finished) => setReports((current) => [...current, finished]))}
+      <output data-testid="reports">{reports.join(',')}</output>
+      <button type="button" onClick={() => setShown(false)}>
+        Take the panel away
+      </button>
+    </>
+  );
 }
 
 const panel = () => screen.getByRole('region', { name: 'Export video with the overlay' });
@@ -360,5 +380,33 @@ describe('the burned-in export panel (AV-1007)', () => {
   it('draws nothing for an activity that cannot be lined up with the video', () => {
     const { container } = setup({ activity: makeActivity([{ lat: 1, lon: 1 }, { lat: 2, lon: 2 }]) });
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('exports where the activity does not reach when there are shapes or texts for the whole activity, and says what is drawn', () => {
+    setup({
+      video: { ...video, timing: { durationSeconds: 10, frameIntervalSeconds: 1 / 30, start: new Date('2001-01-01T00:00:00Z') } },
+      template: {
+      version: 2,
+      name: 'Card',
+      style: DEFAULT_OVERLAY_TEMPLATE_STYLE,
+      components: [{ id: 'card', type: 'shape', visible: true, rect: { x: 0.1, y: 0.1, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, shape: DEFAULT_SHAPE }],
+    },
+    });
+    expect(within(panel()).queryByText(/so nothing would be drawn/)).not.toBeInTheDocument();
+    expect(within(panel()).getByText(/only the shapes and texts for the whole activity are drawn/)).toBeInTheDocument();
+    expect(within(panel()).getByRole('button', { name: 'Render video with overlay' })).toBeEnabled();
+  });
+});
+
+describe('telling the page a file is finished (AV-1011)', () => {
+  it('reports a finished video once, to a page that redraws on every report, and that it is gone with the panel', async () => {
+    const { common, jobs, unmount } = setup();
+    unmount();
+    render(<Reporting panel={(onFinishedChange) => <BurnedInExportPanel {...common} onFinishedChange={onFinishedChange} />} />);
+    await userEvent.click(renderButton());
+    await act(async () => jobs[0]!.resolve({ file: new Blob(['mp4']), bytes: 1, frameCount: 1, dispose: async () => undefined }));
+    expect(screen.getByTestId('reports')).toHaveTextContent(/^false,true$/);
+    await userEvent.click(screen.getByRole('button', { name: 'Take the panel away' }));
+    expect(screen.getByTestId('reports')).toHaveTextContent(/^false,true,false$/);
   });
 });

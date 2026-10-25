@@ -66,7 +66,8 @@ const inSlot = (name: 'Video' | 'Activity', text: string | RegExp, timeout = 30_
 
 beforeEach(() => {
   useOverlayStore.getState().clear();
-  useOverlayStore.setState({ controls: useOverlayStore.getInitialState().controls });
+  const { controls, canvasMode, canvasDraft } = useOverlayStore.getInitialState();
+  useOverlayStore.setState({ controls, canvasMode, canvasDraft });
   useActivityStore.getState().clear();
   window.location.hash = '';
   vi.resetModules();
@@ -577,6 +578,35 @@ describe('the route image without a video (AV-1009)', () => {
     const panel = await screen.findByRole('region', { name: 'Overlay image' });
     expect(within(panel).getByRole('alert')).toHaveTextContent(/no locations/);
     expect(within(panel).getByRole('button', { name: 'Download PNG' })).toBeDisabled();
+  });
+});
+
+describe('a custom canvas (AV-1011)', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() =>
+      new Proxy({}, { get: (_target, key) => (key === 'measureText' ? () => ({ width: 40 }) : () => undefined), set: () => true })) as never);
+  });
+
+  it('is offered beside the still image, without a video, and gives the still image back', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    act(() => useOverlayStore.getState().setActivity(useActivityFixture(), 'hand'));
+    expect(await screen.findByRole('region', { name: 'Overlay image' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'A custom video overlay, with no video' }));
+    expect(screen.getByRole('region', { name: 'Custom canvas' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Overlay image' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'A still image' }));
+    expect(screen.queryByRole('region', { name: 'Custom canvas' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Overlay image' })).toBeInTheDocument();
+  });
+
+  it('is not offered before there is an activity', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    await screen.findByTestId('overlay-activity-input');
+    expect(screen.queryByRole('group', { name: 'What to make' })).not.toBeInTheDocument();
   });
 });
 

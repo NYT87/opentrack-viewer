@@ -2,6 +2,7 @@ import type { OverlayContext2D } from './drawOverlay';
 import { drawRouteMarks, renderRouteImagePng, type RouteImageCanvasDeps } from './drawRouteImage';
 import type { StillImagePlan } from '../staticImage';
 import type { RouteImagePlan } from '../routeImage';
+import { drawShape } from '../shapes';
 
 /**
  * AV-1010. Draws a still-image plan: the route, then each text in the order
@@ -15,6 +16,10 @@ export function drawStillImage(ctx: OverlayContext2D, plan: StillImagePlan): voi
   for (const item of plan.items) {
     if (item.kind === 'route') {
       drawRouteMarks(ctx, item.plan);
+      continue;
+    }
+    if (item.kind === 'shape') {
+      drawShape(ctx, item.box, item.shape, Math.min(plan.width, plan.height));
       continue;
     }
     ctx.save();

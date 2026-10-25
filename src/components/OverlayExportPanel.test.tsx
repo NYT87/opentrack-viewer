@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -6,6 +7,7 @@ import { OverlayExportError } from '../overlay/export/errors';
 import { highestFittingFrameRate } from '../overlay/export/plan';
 import type { ArchiveStorage } from '../overlay/export/protocol';
 import type { ExportJob, ExportOutput } from '../overlay/export/client';
+import { DEFAULT_SHAPE, DEFAULT_OVERLAY_STYLE as DEFAULT_OVERLAY_TEMPLATE_STYLE } from '../overlay/template';
 import { DEFAULT_OVERLAY_CONTROLS, type OverlayControls } from '../overlay/presets';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { makeActivity } from '../test/helpers/activity';
@@ -73,6 +75,24 @@ function setup(props: Partial<React.ComponentProps<typeof OverlayExportPanel>> =
     />,
   );
   return { ...utils, start, jobs, progress };
+}
+
+/**
+ * A page that redraws on every report and hands the panel a new listener each
+ * time, as a page with an inline callback does: the reports must settle.
+ */
+function Reporting({ panel }: { panel: (onFinishedChange: (finished: boolean) => void) => React.ReactNode }) {
+  const [reports, setReports] = useState<boolean[]>([]);
+  const [shown, setShown] = useState(true);
+  return (
+    <>
+      {shown && panel((finished) => setReports((current) => [...current, finished]))}
+      <output data-testid="reports">{reports.join(',')}</output>
+      <button type="button" onClick={() => setShown(false)}>
+        Take the panel away
+      </button>
+    </>
+  );
 }
 
 const panel = () => screen.getByRole('region', { name: 'Export overlay' });
@@ -418,5 +438,50 @@ describe('an export that would draw nothing (TD-059)', () => {
     setup({ video: { ...video, timing: { durationSeconds: 10, frameIntervalSeconds: 1 / 30, start: new Date('2001-01-01T00:00:00Z') } } });
     expect(within(panel()).getByText(/covers none of this video, so nothing would be drawn/)).toBeInTheDocument();
     expect(within(panel()).getByRole('button', { name: 'Export PNG sequence' })).toBeDisabled();
+  });
+
+  it('exports where the activity does not reach when there are shapes or texts for the whole activity, and says what is drawn', () => {
+    setup({
+      video: { ...video, timing: { durationSeconds: 10, frameIntervalSeconds: 1 / 30, start: new Date('2001-01-01T00:00:00Z') } },
+      template: {
+      version: 2,
+      name: 'Card',
+      style: DEFAULT_OVERLAY_TEMPLATE_STYLE,
+      components: [{ id: 'card', type: 'shape', visible: true, rect: { x: 0.1, y: 0.1, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, shape: DEFAULT_SHAPE }],
+    },
+    });
+    expect(within(panel()).queryByText(/so nothing would be drawn/)).not.toBeInTheDocument();
+    expect(within(panel()).getByText(/only the shapes and texts for the whole activity are drawn/)).toBeInTheDocument();
+    expect(within(panel()).getByRole('button', { name: 'Export PNG sequence' })).toBeEnabled();
+  });
+});
+
+describe('telling the page a file is finished (AV-1011)', () => {
+  it('reports a finished archive once, to a page that redraws on every report, and that it is gone with the panel', async () => {
+    const { start, jobs, unmount } = setup();
+    unmount();
+    render(
+      <Reporting
+        panel={(onFinishedChange) => (
+          <OverlayExportPanel
+            video={video}
+            activity={activity}
+            controls={DEFAULT_OVERLAY_CONTROLS}
+            offsetSeconds={0}
+            units="metric"
+            media={media}
+            start={start as never}
+            support={{ supported: true }}
+            probeStorage={syncProbe('opfs')}
+            onFinishedChange={onFinishedChange}
+          />
+        )}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await act(async () => jobs[0]!.resolve({ file: new Blob(['zip']), bytes: 1, frameCount: 1, dispose: async () => undefined }));
+    expect(screen.getByTestId('reports')).toHaveTextContent(/^false,true$/);
+    await userEvent.click(screen.getByRole('button', { name: 'Take the panel away' }));
+    expect(screen.getByTestId('reports')).toHaveTextContent(/^false,true,false$/);
   });
 });

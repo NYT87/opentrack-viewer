@@ -2,7 +2,12 @@ import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import { BASE_FONT_CQW } from '../presets';
 import { projectRoute, type ProjectedRoute } from '../routeProjection';
+import { drawShape } from '../shapes';
+import { extractRoute } from '../routeImage';
+import { layoutStillText, stillValue, type PlannedStillItem } from '../staticImage';
 import {
+  DEFAULT_OVERLAY_STYLE,
+  STILL_IMAGE_COMPONENT_TYPES,
   needsHalo,
   resolveOverlayComponent,
   type OverlayComponent,
@@ -36,6 +41,11 @@ export interface OverlayRendererInput {
   units: UnitSystem;
   width: number;
   height: number;
+  /**
+   * AV-1011. The reader's time zone, for a date on the canvas; the browser's
+   * own by default (a worker's is the same as its page's).
+   */
+  readerTimeZone?: string;
 }
 
 export interface OverlayRenderer {
@@ -164,14 +174,61 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     }
   }
 
+  /*
+   * AV-1011. A text, a figure from the summary or the date describes the whole
+   * activity, so it is the same in every frame: set once, by the still image's
+   * own layout (AV-1010), measured by the canvas it is drawn on, and kept.
+   */
+  let stillTexts: Map<string, Extract<PlannedStillItem, { kind: 'text' }>> | undefined;
+  const setStillTexts = (ctx: OverlayContext2D) => {
+    const texts = new Map<string, Extract<PlannedStillItem, { kind: 'text' }>>();
+    const anyStill = template.components.some((component) => STILL_IMAGE_COMPONENT_TYPES.includes(component.type));
+    if (activity && anyStill) {
+      const context = { activity, route: extractRoute(activity), units, readerTimeZone: input.readerTimeZone };
+      const measure = (text: string, font: string) => {
+        ctx.font = font;
+        return ctx.measureText(text).width;
+      };
+      for (const component of template.components) {
+        if (!component.visible || !STILL_IMAGE_COMPONENT_TYPES.includes(component.type)) continue;
+        const value = stillValue(component, context);
+        if (!value.ok) continue;
+        const color = component.style.textColor ?? DEFAULT_OVERLAY_STYLE.textColor;
+        texts.set(component.id, layoutStillText(component, value, color, { width, height }, measure));
+      }
+    }
+    return texts;
+  };
+
   return {
     drawFrame(ctx, videoTimeSeconds, options) {
       // Transparent by construction: nothing but the components is ever painted.
       if (options?.clear !== false) ctx.clearRect(0, 0, width, height);
+      // Where the activity does not reach, only what describes the whole of it is drawn.
       const sample = timeline.sampleAt(videoTimeSeconds);
-      if (!sample) return;
+      stillTexts ??= setStillTexts(ctx);
 
       for (const component of template.components) {
+        if (!component.visible) continue;
+        if (component.type === 'shape') {
+          if (component.shape) drawShape(ctx, boxOf(component), component.shape, Math.min(width, height));
+          continue;
+        }
+        const still = stillTexts.get(component.id);
+        if (still) {
+          ctx.save();
+          ctx.fillStyle = still.color;
+          ctx.textBaseline = 'top';
+          ctx.textAlign = still.align;
+          for (const line of still.lines) {
+            ctx.font = line.font;
+            ctx.globalAlpha = line.caption ? 0.8 : 1;
+            ctx.fillText(line.text, line.x, line.y);
+          }
+          ctx.restore();
+          continue;
+        }
+        if (!sample) continue;
         const ready = resolveOverlayComponent(template, component, sample, timeline, units);
         if (ready.status !== 'ready') continue;
 

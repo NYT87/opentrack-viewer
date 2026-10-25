@@ -240,3 +240,56 @@ describe('rects at the frame’s edge (AV-1010, review R1-C2)', () => {
     });
   });
 });
+
+describe('shapes, holding and a figure’s format (AV-1011)', () => {
+  const read = (components: object[]) => {
+    const parsed = parseOverlayTemplate(JSON.stringify({ version: 2, name: 'Canvas', style: {}, components }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed;
+  };
+
+  it('reads a shape, keeping its colours and transparencies in range, and refuses an unknown one', () => {
+    const parsed = read([
+      { id: 'card', type: 'shape', rect, shape: { kind: 'ellipse', fill: '#123456', fillOpacity: 2, stroke: 'red', strokeOpacity: 0.5, strokeWidth: 9, radius: -1 } },
+      { id: 'blob', type: 'shape', rect, shape: { kind: 'star' } },
+    ]);
+    expect(parsed.template.components).toHaveLength(1);
+    expect(parsed.template.components[0]!.shape).toEqual({
+      kind: 'ellipse',
+      fill: '#123456',
+      fillOpacity: 1,
+      stroke: '#ffffff',
+      strokeOpacity: 0.5,
+      strokeWidth: 0.1,
+      radius: 0.02,
+    });
+    expect(parsed.warnings).toEqual(['Component 2 was skipped: unknown shape "star".']);
+  });
+
+  it('keeps a component in a shape’s hold only when that shape is there', () => {
+    const parsed = read([
+      { id: 'card', type: 'shape', rect, shape: { kind: 'rect' } },
+      { id: 'a', type: 'text', rect, source: { kind: 'metric', metric: 'speed' }, parentId: 'card' },
+      { id: 'b', type: 'text', rect, source: { kind: 'metric', metric: 'speed' }, parentId: 'gone' },
+    ]);
+    expect(parsed.template.components.map((c) => c.parentId)).toEqual([undefined, 'card', undefined]);
+  });
+
+  it('writes a figure with its own label and decimal places, and times as clocks whatever is chosen', () => {
+    const parsed = read([
+      { id: 's', type: 'text', rect, source: { kind: 'metric', metric: 'speed' }, display: { label: 'Velocity', decimals: 2 } },
+      { id: 'm', type: 'text', rect, source: { kind: 'metric', metric: 'moving' }, display: { decimals: 0 } },
+    ]);
+    const timeline = buildOverlayTimeline(
+      makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: at(i), lat: 1 + (i * 5) / 111_320, lon: 1 }))),
+      { video: { durationSeconds: 10 } },
+    );
+    const sample = timeline.sampleAt(5) as OverlaySample;
+    const [speed, moving] = parsed.template.components.map((entry) => resolveOverlayComponent(parsed.template, entry, sample, timeline, 'metric'));
+    expect(speed).toMatchObject({ status: 'ready', label: 'Velocity', text: expect.stringMatching(/^1[78]\.\d\d km\/h$/) });
+    expect(moving).toMatchObject({ status: 'ready', label: 'Moving time', text: '0:05' });
+    expect(resolveOverlayComponent(parsed.template, parsed.template.components[0]!, sample, timeline, 'imperial')).toMatchObject({
+      text: expect.stringMatching(/^1[01]\.\d\d mph$/),
+    });
+  });
+});

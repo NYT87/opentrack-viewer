@@ -24,7 +24,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'chromium', testIgnore: /overlay-burn\.spec/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', testIgnore: /overlay-burn(-canvas)?\.spec/, use: { ...devices['Desktop Chrome'] } },
     /*
      * AV-1007. Burned-in video needs an H.264 encoder, and Playwright's default
      * Chromium is the headless *shell*, which has none (TD-039 flagged this).
@@ -34,7 +34,7 @@ export default defineConfig({
      */
     {
       name: 'chromium-codecs',
-      testMatch: /overlay-burn\.spec/,
+      testMatch: /overlay-burn(-canvas)?\.spec/,
       use: { ...devices['Desktop Chrome'], channel: 'chromium' },
     },
   ],

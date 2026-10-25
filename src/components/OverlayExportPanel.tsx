@@ -23,13 +23,22 @@ import { getExportSupport, type ExportSupport } from '../overlay/export/support'
 import type { ArchiveStorage } from '../overlay/export/protocol';
 import { ZIP_MAX_BYTES } from '../overlay/export/zip';
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
+import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
 import { buildOverlayTimeline } from '../overlay/timeline';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 
 interface OverlayExportPanelProps {
-  video: OverlayVideo;
+  /**
+   * The video the overlay is for. AV-1011: absent on a custom canvas with no
+   * video, where the frames run across the activity's own span.
+   */
+  video?: OverlayVideo;
   activity: Activity;
   controls: OverlayControls;
+  /** AV-1011. A layout made on the custom canvas, drawn as it is instead of one built from the controls. */
+  template?: OverlayTemplate;
+  /** AV-1011. The canvas's own resolution, which takes the place of the picture-size choice. */
+  size?: { width: number; height: number };
   offsetSeconds: number;
   units: UnitSystem;
   media: OverlayMedia | undefined;
@@ -59,7 +68,7 @@ type Phase =
       /** The rate it was drawn at, for the note on setting the editor to match. */
       fps: number;
       /** What it was made from, to tell when the page has since moved on. */
-      made: { signature: string; activity: Activity; file: File };
+      made: { signature: string; activity: Activity; file: File | undefined };
     }
   | { status: 'stopped' }
   | { status: 'error'; message: string };
@@ -92,6 +101,8 @@ export function OverlayExportPanel({
   video,
   activity,
   controls,
+  template: customTemplate,
+  size,
   offsetSeconds,
   units,
   media,
@@ -101,7 +112,7 @@ export function OverlayExportPanel({
   onFinishedChange,
 }: OverlayExportPanelProps) {
   const id = useId();
-  const [fps, setFps] = useState(() => nearestFrameRate(video.timing?.frameIntervalSeconds));
+  const [fps, setFps] = useState(() => nearestFrameRate(video?.timing?.frameIntervalSeconds));
   const [heightChoice, setHeightChoice] = useState<string>(NATIVE);
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const [storageState, setStorageState] = useState<StorageState>({ status: 'checking' });
@@ -129,22 +140,27 @@ export function OverlayExportPanel({
   const storageLimitBytesNow =
     storageState.status === 'ready' ? storageLimitBytes(storageState.storage) : ZIP_MAX_BYTES;
 
-  const durationSeconds = video.timing?.durationSeconds ?? media?.durationSeconds;
+  // Without a video the frames run across the activity's own span, from its first timed point.
+  const activitySpan = useMemo(
+    () => (video ? undefined : buildOverlayTimeline(activity, { video: { durationSeconds: 0 } }).alignment?.activitySpanSeconds),
+    [video, activity],
+  );
+  const durationSeconds = video ? (video.timing?.durationSeconds ?? media?.durationSeconds) : activitySpan;
+  const videoStart = video?.timing?.start;
+  const effectiveOffset = video ? offsetSeconds : 0;
   const timeline = useMemo(
     () =>
       buildOverlayTimeline(activity, {
-        video: { durationSeconds: durationSeconds ?? 0, start: video.timing?.start },
-        offsetSeconds,
+        video: { durationSeconds: durationSeconds ?? 0, start: videoStart },
+        offsetSeconds: effectiveOffset,
       }),
-    [activity, durationSeconds, video.timing?.start, offsetSeconds],
+    [activity, durationSeconds, videoStart, effectiveOffset],
   );
 
-  const ready = media !== undefined && durationSeconds !== undefined && durationSeconds > 0;
+  const ready = (size !== undefined || media !== undefined) && durationSeconds !== undefined && durationSeconds > 0;
   const height = heightChoice === NATIVE ? (media?.height ?? 1080) : Number(heightChoice);
-  const { width: exportWidth, height: exportHeight } = exportDimensions(
-    media ? media.width / media.height : 16 / 9,
-    height,
-  );
+  const { width: exportWidth, height: exportHeight } =
+    size ?? exportDimensions(media ? media.width / media.height : 16 / 9, height);
   const plan = planExport({
     videoDurationSeconds: durationSeconds ?? 0,
     fps,
@@ -153,11 +169,11 @@ export function OverlayExportPanel({
     limitBytes: storageLimitBytesNow,
   });
   const built = useMemo(
-    () => buildOverlay(controls, timeline, exportWidth / exportHeight),
-    [controls, timeline, exportWidth, exportHeight],
+    () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, exportWidth / exportHeight)),
+    [customTemplate, controls, timeline, exportWidth, exportHeight],
   );
   // Everything that changes the picture. A finished export is compared with it.
-  const signature = JSON.stringify([built.template, units, offsetSeconds, plan.fps, plan.width, plan.height]);
+  const signature = JSON.stringify([built.template, units, effectiveOffset, plan.fps, plan.width, plan.height]);
   const fallbackFps = plan.fitsArchive
     ? undefined
     : highestFittingFrameRate({
@@ -183,7 +199,17 @@ export function OverlayExportPanel({
   );
 
   const isFinished = phase.status === 'done';
-  useEffect(() => onFinishedChange?.(isFinished), [isFinished, onFinishedChange]);
+  // Told when the file is finished or let go, and, as the panel goes, that it
+  // is gone with it. Through the latest listener, so a listener that is new on
+  // every render is not told anything twice.
+  const finishedListener = useRef(onFinishedChange);
+  useEffect(() => {
+    finishedListener.current = onFinishedChange;
+  }, [onFinishedChange]);
+  useEffect(() => {
+    finishedListener.current?.(isFinished);
+  }, [isFinished]);
+  useEffect(() => () => finishedListener.current?.(false), []);
 
   if (timeline.unavailable) return null;
 
@@ -191,7 +217,10 @@ export function OverlayExportPanel({
    * TD-059. A video the activity covers none of would export an empty overlay:
    * blocked like "nothing switched on", with the way out named.
    */
-  const noOverlap = timeline.alignment?.overlaps === false;
+  const outsideActivity = timeline.alignment?.overlaps === false;
+  // AV-1011. Shapes and texts for the whole activity are drawn on every frame, covered or not.
+  const drawnAnyway = built.template.components.some((component) => component.visible && drawnWithoutTelemetry(component));
+  const noOverlap = outsideActivity && !drawnAnyway;
 
   const running = phase.status === 'running';
   const nothingOn = built.template.components.length === 0;
@@ -211,8 +240,8 @@ export function OverlayExportPanel({
           fps: plan.fps,
           frameCount: plan.frameCount,
           videoDurationSeconds: durationSeconds ?? 0,
-          videoStart: video.timing?.start,
-          offsetSeconds,
+          videoStart,
+          offsetSeconds: effectiveOffset,
           units,
           template: built.template,
           activity,
@@ -237,11 +266,11 @@ export function OverlayExportPanel({
         setPhase({
           status: 'done',
           url: URL.createObjectURL(result.file),
-          fileName: `${baseName(video.file.name)}-overlay-${plan.width}x${plan.height}-${formatFrameRate(plan.fps)}fps.zip`,
+          fileName: `${baseName(video?.file.name ?? activity.source.fileName ?? 'activity')}-overlay-${plan.width}x${plan.height}-${formatFrameRate(plan.fps)}fps.zip`,
           fps: plan.fps,
           bytes: result.bytes,
           frameCount: result.frameCount,
-          made: { signature, activity, file: video.file },
+          made: { signature, activity, file: video?.file },
         });
       },
       (error: unknown) => {
@@ -264,7 +293,7 @@ export function OverlayExportPanel({
   // and the export again once that file no longer matches the preview.
   const stale =
     phase.status === 'done' &&
-    (phase.made.signature !== signature || phase.made.activity !== activity || phase.made.file !== video.file);
+    (phase.made.signature !== signature || phase.made.activity !== activity || phase.made.file !== video?.file);
   const downloadFirst = phase.status === 'done' && !stale;
 
   return (
@@ -307,6 +336,12 @@ export function OverlayExportPanel({
                 ))}
               </select>
             </div>
+            {size ? (
+              // AV-1011. The canvas's own resolution: chosen on the canvas, not here.
+              <p className="overlay-controls__hint">
+                Picture size: {size.width} × {size.height}, the canvas’s.
+              </p>
+            ) : media ? (
             <div className="overlay-controls__field">
               <label htmlFor={`${id}-size`}>Picture size</label>
               <select
@@ -329,6 +364,7 @@ export function OverlayExportPanel({
                 ))}
               </select>
             </div>
+            ) : null}
           </div>
 
           <p data-testid="export-plan">
@@ -355,6 +391,12 @@ export function OverlayExportPanel({
             <p role="status">No component is switched on, so there is nothing to export.</p>
           )}
           {noOverlap && <p role="status">The activity covers none of this video, so nothing would be drawn. Change where the video starts, in Sync.</p>}
+          {outsideActivity && drawnAnyway && (
+            <p role="status">
+              The activity covers none of this video, so only the shapes and texts for the whole activity are drawn. Change
+              where the video starts, in Sync, for the rest.
+            </p>
+          )}
 
           <p className="video__actions">
             {running ? (

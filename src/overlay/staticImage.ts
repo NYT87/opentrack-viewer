@@ -22,6 +22,7 @@ import {
   type DateTimeZoneChoice,
   type OverlayComponent,
   type OverlayRect,
+  type OverlayShapeSetting,
   type OverlayTemplate,
   type SummaryStatKey,
   type TextAlign,
@@ -295,11 +296,20 @@ export function stillElementChoices(context: StillImageContext): StillElementCho
   ];
 }
 
+const SHAPE_LABELS: Record<OverlayShapeSetting['kind'], string> = {
+  roundedRect: 'Rounded rectangle',
+  rect: 'Rectangle',
+  ellipse: 'Ellipse',
+  line: 'Line',
+};
+
 /** How a component is named in the list of elements. */
 export function describeStillComponent(component: OverlayComponent): string {
   switch (component.type) {
     case 'routeInset':
       return 'Route';
+    case 'shape':
+      return component.shape ? SHAPE_LABELS[component.shape.kind] : 'Shape';
     case 'summary':
       return component.summary ? SUMMARY_CAPTIONS[component.summary.stat] : 'Figure';
     case 'date':
@@ -344,6 +354,8 @@ export interface PlannedLine {
 
 export type PlannedStillItem =
   | { kind: 'route'; id: string; box: Box; plan: RouteImagePlan }
+  /** AV-1011. A shape, drawn as the video overlay draws it. */
+  | { kind: 'shape'; id: string; box: Box; shape: OverlayShapeSetting }
   | {
       kind: 'text';
       id: string;
@@ -414,6 +426,16 @@ export function planStillImage(
       continue;
     }
 
+    if (component.type === 'shape' && component.shape) {
+      const r = normalizeRect(component.rect);
+      items.push({
+        kind: 'shape',
+        id: component.id,
+        box: { x: r.x * width, y: r.y * height, w: r.width * width, h: r.height * height },
+        shape: component.shape,
+      });
+      continue;
+    }
     if (!STILL_IMAGE_COMPONENT_TYPES.includes(component.type)) {
       hidden.push({ id: component.id, label, reason: 'It is drawn only on a video, where it has a moment to show.' });
       continue;
@@ -427,7 +449,7 @@ export function planStillImage(
     if (!isHexColor(color)) {
       return { ok: false, error: new RouteImageError('invalid_style', 'A text colour must be a hex colour such as #ffffff.') };
     }
-    const item = planTextItem(component, value, color, layout, measure);
+    const item = layoutStillText(component, value, color, layout, measure);
     if (item.shrunk) notes.push(`${label} was set smaller than chosen, to fit inside the image.`);
     items.push(item);
   }
@@ -502,11 +524,16 @@ function planRouteItem(
 const fontOf = (weight: 'normal' | 'bold' | number, size: number) =>
   `${weight === 'bold' ? 700 : weight === 'normal' ? 400 : weight} ${Math.round(size * 100) / 100}px ${STILL_FONT_FAMILY}`;
 
-function planTextItem(
+/**
+ * A still text, figure or date set in its box: measured, made smaller only if
+ * it is larger than the frame, and kept inside it. The video overlay's
+ * renderer sets these the same way (AV-1011), with the canvas's own measure.
+ */
+export function layoutStillText(
   component: OverlayComponent,
   value: Extract<StaticValue, { ok: true }>,
   color: string,
-  layout: StaticImageLayout,
+  layout: Pick<StaticImageLayout, 'width' | 'height'>,
   measure: MeasureText,
 ): Extract<PlannedStillItem, { kind: 'text' }> {
   const { width, height } = layout;
@@ -660,7 +687,11 @@ export type ParseStillLayoutResult =
   | { ok: true; layout: StaticImageLayout; warnings: string[] }
   | { ok: false; error: string };
 
-export function parseStillLayout(json: string): ParseStillLayoutResult {
+/**
+ * AV-1011. A layout file as it is, every component kept: what the custom
+ * canvas opens. The still image filters it further (`parseStillLayout`).
+ */
+export function parseOverlayLayout(json: string): ParseStillLayoutResult {
   if (json.length > LAYOUT_FILE_MAX_BYTES) return { ok: false, error: 'This file is too large to be a layout.' };
   let raw: unknown;
   try {
@@ -682,8 +713,20 @@ export function parseStillLayout(json: string): ParseStillLayoutResult {
 
   const parsed = parseOverlayTemplate(JSON.stringify(file.template ?? null));
   if (!parsed.ok) return { ok: false, error: `The layout’s template cannot be read. ${parsed.error}` };
+  return { ok: true, layout: { width, height, template: parsed.template }, warnings: parsed.warnings };
+}
 
-  const warnings = [...parsed.warnings];
+/**
+ * A layout file for the still image: a video's live components (a moving
+ * figure, a gauge, a progress bar) are left out with a warning each, and so is
+ * a second route; texts, figures, dates, shapes and the route are kept.
+ */
+export function parseStillLayout(json: string): ParseStillLayoutResult {
+  const read = parseOverlayLayout(json);
+  if (!read.ok) return read;
+  const parsed = { template: read.layout.template };
+  const { width, height } = read.layout;
+  const warnings = [...read.warnings];
   const components: OverlayComponent[] = [];
   let routes = 0;
   for (const component of parsed.template.components) {
@@ -696,12 +739,15 @@ export function parseStillLayout(json: string): ParseStillLayoutResult {
       components.push({ ...component, id: ROUTE_COMPONENT_ID });
       continue;
     }
-    if (!STILL_IMAGE_COMPONENT_TYPES.includes(component.type)) {
+    if (!STILL_IMAGE_COMPONENT_TYPES.includes(component.type) && component.type !== 'shape') {
       warnings.push(`${describeStillComponent(component)} was left out: it is drawn only on a video.`);
       continue;
     }
     components.push(component);
   }
+  // A component held by a shape that was left out is simply free.
+  const kept = new Set(components.map((component) => component.id));
+  for (const component of components) if (component.parentId && !kept.has(component.parentId)) delete component.parentId;
   return { ok: true, layout: { width, height, template: { ...parsed.template, components } }, warnings };
 }
 

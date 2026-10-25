@@ -13,6 +13,7 @@ import {
   moveRect,
   newStillComponent,
   nudgeRect,
+  parseOverlayLayout,
   parseStillLayout,
   placedRect,
   planStillImage,
@@ -449,5 +450,51 @@ describe('review round 1 (AV-1010)', () => {
     expect(box.y).toBeCloseTo(before.y, 2);
     expect(box.x + box.w).toBeCloseTo(211, 2);
     expect(box.y + box.h).toBeCloseTo(1080, 2);
+  });
+});
+
+describe('one layout for the still image and the custom canvas (AV-1011)', () => {
+  const card: OverlayComponent = {
+    id: 'shape-1',
+    type: 'shape',
+    visible: true,
+    rect: { x: 0.04, y: 0.04, width: 0.4, height: 0.3 },
+    unitMode: 'auto',
+    style: {},
+    shape: { kind: 'roundedRect', fill: '#000000', fillOpacity: 0.4, stroke: '#ffffff', strokeOpacity: 0, strokeWidth: 0.004, radius: 0.02 },
+  };
+  const speed: OverlayComponent = {
+    id: 'speed',
+    type: 'text',
+    visible: true,
+    rect: { x: 0.05, y: 0.05, width: 0.2, height: 0.1 },
+    unitMode: 'auto',
+    style: {},
+    source: { kind: 'metric', metric: 'speed' },
+    parentId: 'shape-1',
+  };
+  const held = { ...label('Day 1'), parentId: 'shape-1' };
+
+  it('opens a still-image layout on the canvas with everything in it, unchanged', () => {
+    const still = withComponents([defaultStaticLayout().template.components[0]!, card, held], 1080, 1080);
+    const opened = parseOverlayLayout(serializeStillLayout(still));
+    if (!opened.ok) throw new Error(opened.error);
+    expect(opened.warnings).toEqual([]);
+    expect(opened.layout).toEqual(still);
+  });
+
+  it('opens a canvas layout in the still image: shapes, texts and the route kept, a live figure left out with a warning', () => {
+    const canvas = withComponents([card, speed, held], 1920, 1080);
+    const opened = parseStillLayout(serializeStillLayout(canvas));
+    if (!opened.ok) throw new Error(opened.error);
+    expect(opened.layout.template.components.map((component) => component.id)).toEqual(['shape-1', 'text-1']);
+    expect(opened.layout.template.components[1]!.parentId).toBe('shape-1');
+    expect(opened.warnings).toEqual(['text was left out: it is drawn only on a video.']);
+  });
+
+  it('draws a shape on the still image where it was placed', () => {
+    const planned = planStillImage(withComponents([card, held]), contextOf(ride()), measure);
+    if (!planned.ok) throw planned.error;
+    expect(planned.plan.items[0]).toEqual({ kind: 'shape', id: 'shape-1', box: { x: 76.8, y: 43.2, w: 768, h: 324 }, shape: card.shape });
   });
 });

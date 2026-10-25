@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { OverlayControls } from '../components/OverlayControls';
 import { buildOverlayTimeline } from '../overlay/timeline';
 import { FileDropZone } from '../components/FileDropZone';
@@ -7,6 +7,7 @@ import { BurnedInExportPanel } from '../components/BurnedInExportPanel';
 import { OverlayExportPanel } from '../components/OverlayExportPanel';
 import { OverlayPreview } from '../components/OverlayPreview';
 import { RouteOverlayPanel } from '../components/RouteOverlayPanel';
+import { CustomCanvas } from '../components/CustomCanvas';
 import { VideoReadProgress } from '../components/VideoReadProgress';
 import type { Activity } from '../domain/activity';
 import { ActivityError, toActivityError } from '../domain/errors';
@@ -89,6 +90,19 @@ export function OverlayPage() {
   /** Whether either export holds a finished file Start over would throw away. */
   const [finished, setFinished] = useState({ png: false, video: false });
   const [confirmingStartOver, setConfirmingStartOver] = useState(false);
+  /** AV-1011. Making a custom canvas rather than a built-in template (or the still image, without a video). */
+  const canvasMode = useOverlayStore((state) => state.canvasMode);
+  const setCanvasMode = useOverlayStore((state) => state.setCanvasMode);
+  const canvasDraft = useOverlayStore((state) => state.canvasDraft);
+  const setCanvasDraft = useOverlayStore((state) => state.setCanvasDraft);
+  /** Records whether each export holds a finished file: the template's and the canvas's alike. */
+  const exportFinished = useCallback(
+    (kind: 'png' | 'video', done: boolean) =>
+      setFinished((current) => (current[kind] === done ? current : { ...current, [kind]: done })),
+    [],
+  );
+  const pngFinished = useCallback((done: boolean) => exportFinished('png', done), [exportFinished]);
+  const videoFinished = useCallback((done: boolean) => exportFinished('video', done), [exportFinished]);
   const { reading, read, cancel } = useVideoTelemetryRead();
   const videoSlot = useRef<HTMLElement>(null);
   const activitySlot = useRef<HTMLElement>(null);
@@ -228,7 +242,7 @@ export function OverlayPage() {
             className="button"
             data-start-over
             onClick={() =>
-              source.video && source.activity && (finished.png || finished.video)
+              source.activity && (finished.png || finished.video)
                 ? setConfirmingStartOver(true)
                 : startOver()
             }
@@ -284,8 +298,10 @@ export function OverlayPage() {
     </div>
   );
 
+  const canvas = canvasMode && source.activity !== undefined;
+
   return (
-    <main className={source.video ? 'page page--overlays is-workspace' : 'page page--overlays'}>
+    <main className={source.video || canvas ? 'page page--overlays is-workspace' : 'page page--overlays'}>
       <div className="page__inner">
         <header className="page__header">
           <h2 className="page__title">Overlays</h2>
@@ -312,9 +328,9 @@ export function OverlayPage() {
           lost to a slot drawn anew. With a video it is a workspace, the picture
           kept in view beside the files, the controls and the exports.
         */}
-        <div className={source.video ? 'overlay-workspace' : 'overlay-column'}>
+        <div className={source.video && !canvas ? 'overlay-workspace' : 'overlay-column'}>
           <div className="overlay-workspace__stage" ref={stage}>
-            {source.video ? (
+            {source.video && !canvas ? (
               <OverlayPreview
                 video={source.video}
                 activity={source.activity}
@@ -331,7 +347,7 @@ export function OverlayPage() {
           </div>
           <div className="overlay-workspace__side">
             {/* The way past the files, sync and overlay settings, for a keyboard. */}
-            {source.video && source.activity && (
+            {source.video && source.activity && !canvas && (
               <p className="overlay-skip">
                 <button
                   type="button"
@@ -355,15 +371,43 @@ export function OverlayPage() {
               dropped is never lost to a slot drawn anew.
             */}
             <div className="overlay-sync-slot" ref={setSyncTarget} />
+            {/* AV-1011. With an activity, the reader chooses what to make. */}
+            {source.activity && (
+              <fieldset className="overlay-mode" aria-label="What to make">
+                <legend className="summary__label">What to make</legend>
+                <label className="overlay-controls__choice">
+                  <input type="radio" name="overlay-mode" checked={!canvas} onChange={() => setCanvasMode(false)} />
+                  <span>{source.video ? 'An overlay from a template' : 'A still image'}</span>
+                </label>
+                <label className="overlay-controls__choice">
+                  <input type="radio" name="overlay-mode" checked={canvas} onChange={() => setCanvasMode(true)} />
+                  <span>{source.video ? 'A custom canvas over the video' : 'A custom video overlay, with no video'}</span>
+                </label>
+              </fieldset>
+            )}
             {files}
+            {canvas && source.activity && (
+              <CustomCanvas
+                activity={source.activity}
+                video={source.video}
+                media={media}
+                offsetSeconds={offsetSeconds}
+                units={unitSystem}
+                onOpenSync={source.video ? () => setCanvasMode(false) : undefined}
+                onMediaInfo={setMedia}
+                onFinishedChange={exportFinished}
+                initialDraft={canvasDraft}
+                onDraftChange={setCanvasDraft}
+              />
+            )}
             {/* Below the files, so the slots never move when a route image appears. */}
-            {!source.video && source.activity && (
+            {!source.video && source.activity && !canvas && (
               <RouteOverlayPanel
                 activity={source.activity}
                 focusedSection={source.focusedSection}
               />
             )}
-            {source.video && source.activity && !timeline.unavailable && (
+            {source.video && source.activity && !timeline.unavailable && !canvas && (
               <OverlayControls
                 controls={controls}
                 timeline={timeline}
@@ -371,7 +415,7 @@ export function OverlayPage() {
                 frameAspect={media && media.height > 0 ? media.width / media.height : undefined}
               />
             )}
-            {source.video && source.activity && (
+            {source.video && source.activity && !canvas && (
               <div className="overlay-exports" ref={exports}>
                 <OverlayExportPanel
                   video={source.video}
@@ -380,9 +424,7 @@ export function OverlayPage() {
                   offsetSeconds={offsetSeconds}
                   units={unitSystem}
                   media={media}
-                  onFinishedChange={(png) =>
-                    setFinished((current) => (current.png === png ? current : { ...current, png }))
-                  }
+                  onFinishedChange={pngFinished}
                 />
                 <BurnedInExportPanel
                   video={source.video}
@@ -391,11 +433,7 @@ export function OverlayPage() {
                   offsetSeconds={offsetSeconds}
                   units={unitSystem}
                   media={media}
-                  onFinishedChange={(video) =>
-                    setFinished((current) =>
-                      current.video === video ? current : { ...current, video },
-                    )
-                  }
+                  onFinishedChange={videoFinished}
                 />
               </div>
             )}

@@ -39,7 +39,9 @@ export type OverlayComponentType =
   | 'sensorChart'
   | 'label'
   | 'summary'
-  | 'date';
+  | 'date'
+  /** AV-1011. A card, a frame or a rule behind or in front of the figures. */
+  | 'shape';
 
 export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'text',
@@ -50,7 +52,37 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'label',
   'summary',
   'date',
+  'shape',
 ];
+
+/** AV-1011. What a shape is. */
+export type ShapeKind = 'roundedRect' | 'rect' | 'ellipse' | 'line';
+export const SHAPE_KINDS: readonly ShapeKind[] = ['roundedRect', 'rect', 'ellipse', 'line'];
+
+/**
+ * AV-1011. How a shape is drawn. Colours are hex, transparencies 0..1, and
+ * widths and radii shares of the frame's shorter side, so a shape scales with
+ * the picture as everything else in a template does. A line runs from its
+ * box's top-left corner to its bottom-right one, and has a border only.
+ */
+export interface OverlayShapeSetting {
+  kind: ShapeKind;
+  fill: string;
+  fillOpacity: number;
+  stroke: string;
+  strokeOpacity: number;
+  strokeWidth: number;
+  /** `roundedRect` only. */
+  radius: number;
+}
+
+/** AV-1011. How a data figure is labelled and written. */
+export interface OverlayDisplaySetting {
+  /** Replaces the figure's own name ("Speed"); empty keeps it. */
+  label?: string;
+  /** Decimal places for a plain number (speed, distance, elevation, power…); times and pace keep their own form. */
+  decimals?: 0 | 1 | 2;
+}
 
 /**
  * AV-1010. Components that describe the whole activity rather than a moment of
@@ -58,6 +90,15 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
  * moment.
  */
 export const STILL_IMAGE_COMPONENT_TYPES: readonly OverlayComponentType[] = ['label', 'summary', 'date'];
+
+/**
+ * AV-1011. Whether a component is drawn the same on every frame, whatever the
+ * telemetry says at that moment: a shape, or a text, figure or date for the
+ * whole activity. These are drawn even where the activity does not reach.
+ */
+export function drawnWithoutTelemetry(component: OverlayComponent): boolean {
+  return component.type === 'shape' || STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
+}
 
 /** A figure from the activity's summary, for the still image. */
 export type SummaryStatKey = 'speed' | 'pace' | 'distance' | 'elapsed' | 'moving';
@@ -172,6 +213,12 @@ export interface OverlayComponent {
   text?: OverlayTextSetting;
   /** `routeInset` on the still image: line, padding and markers. */
   route?: OverlayRouteSetting;
+  /** `shape`: what it is and how it is drawn. */
+  shape?: OverlayShapeSetting;
+  /** AV-1011. The shape this component is held by: moved with it, and kept inside the frame with it. */
+  parentId?: string;
+  /** AV-1011. A data figure's own label and number format. */
+  display?: OverlayDisplaySetting;
 }
 
 export interface OverlayTemplate {
@@ -269,7 +316,12 @@ function parseComponent(value: unknown): OverlayComponent | string {
   }
   const componentType = type as OverlayComponentType;
   const stillOnly = STILL_IMAGE_COMPONENT_TYPES.includes(componentType);
-  const needsSource = componentType !== 'routeInset' && componentType !== 'progress' && !stillOnly;
+  const needsSource =
+    componentType !== 'routeInset' && componentType !== 'progress' && componentType !== 'shape' && !stillOnly;
+  if (componentType === 'shape') {
+    const kind = isRecord(value.shape) ? value.shape.kind : undefined;
+    if (!SHAPE_KINDS.includes(kind as ShapeKind)) return `unknown shape "${String(kind)}"`;
+  }
   const source = parseSource(value.source);
   if (needsSource && !source) return 'missing or invalid data source';
   if (componentType === 'label' && typeof value.content !== 'string') return 'a text with no content';
@@ -322,6 +374,18 @@ function parseComponent(value: unknown): OverlayComponent | string {
       ...(componentType === 'summary' ? { caption: text.caption !== false } : {}),
     };
   }
+  if (componentType === 'shape' && isRecord(value.shape)) component.shape = parseShape(value.shape);
+  if (typeof value.parentId === 'string' && value.parentId.length > 0 && value.parentId !== id) {
+    component.parentId = value.parentId;
+  }
+  if (isRecord(value.display)) {
+    const display: OverlayDisplaySetting = {};
+    if (typeof value.display.label === 'string') display.label = sanitizeLabel(value.display.label).split('\n')[0]!.slice(0, 40);
+    if (value.display.decimals === 0 || value.display.decimals === 1 || value.display.decimals === 2) {
+      display.decimals = value.display.decimals;
+    }
+    if (display.label !== undefined || display.decimals !== undefined) component.display = display;
+  }
   if (componentType === 'routeInset' && isRecord(value.route)) {
     const route = value.route;
     if (isNumber(route.lineWidth) && route.lineWidth > 0 && isNumber(route.padding) && route.padding >= 0) {
@@ -333,6 +397,33 @@ function parseComponent(value: unknown): OverlayComponent | string {
     }
   }
   return component;
+}
+
+const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/** The default shape: a dark rounded card, as a figure's tile is. */
+export const DEFAULT_SHAPE: OverlayShapeSetting = {
+  kind: 'roundedRect',
+  fill: '#000000',
+  fillOpacity: 0.35,
+  stroke: '#ffffff',
+  strokeOpacity: 0,
+  strokeWidth: 0.004,
+  radius: 0.02,
+};
+
+function parseShape(raw: Record<string, unknown>): OverlayShapeSetting {
+  const share = (value: unknown, max: number, fallback: number) =>
+    isNumber(value) && value >= 0 ? Math.min(value, max) : fallback;
+  return {
+    kind: raw.kind as ShapeKind,
+    fill: typeof raw.fill === 'string' && HEX.test(raw.fill) ? raw.fill : DEFAULT_SHAPE.fill,
+    fillOpacity: isNumber(raw.fillOpacity) ? clamp01(raw.fillOpacity) : DEFAULT_SHAPE.fillOpacity,
+    stroke: typeof raw.stroke === 'string' && HEX.test(raw.stroke) ? raw.stroke : DEFAULT_SHAPE.stroke,
+    strokeOpacity: isNumber(raw.strokeOpacity) ? clamp01(raw.strokeOpacity) : DEFAULT_SHAPE.strokeOpacity,
+    strokeWidth: share(raw.strokeWidth, 0.1, DEFAULT_SHAPE.strokeWidth),
+    radius: share(raw.radius, 0.5, DEFAULT_SHAPE.radius),
+  };
 }
 
 /**
@@ -369,6 +460,10 @@ export function parseOverlayTemplate(json: string): ParseOverlayTemplateResult {
       components.push(parsed);
     }
   });
+
+  // A component held by a shape that is not there is simply free.
+  const shapes = new Set(components.filter((entry) => entry.type === 'shape').map((entry) => entry.id));
+  for (const entry of components) if (entry.parentId && !shapes.has(entry.parentId)) delete entry.parentId;
 
   return {
     ok: true,
@@ -427,6 +522,7 @@ const METRIC_LABELS: Record<OverlayMetricKey, string> = {
   temperature: 'Temperature',
   grade: 'Grade',
   elapsed: 'Time',
+  moving: 'Moving time',
 };
 
 function describeSource(source: OverlayDataSource, timeline: OverlayTimeline): string {
@@ -472,6 +568,7 @@ function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem
     case 'temperature':
       return formatTemperature(value, units);
     case 'elapsed':
+    case 'moving':
       return formatDuration(value);
     case 'heartRate':
       return `${Math.round(value)} bpm`;
@@ -483,6 +580,39 @@ function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem
       return `${Math.round(value)} W`;
     case 'grade':
       return `${value.toFixed(1)} %`;
+  }
+}
+
+/**
+ * AV-1011. A metric with the decimal places the reader chose. Times and pace
+ * are written as clocks, whatever the choice; a plain number takes it.
+ */
+export function formatMetricWith(metric: OverlayMetricKey, value: number, units: UnitSystem, decimals: 0 | 1 | 2): string {
+  const imperial = units === 'imperial';
+  const fixed = (n: number, unit: string) => `${n.toFixed(decimals)} ${unit}`;
+  switch (metric) {
+    case 'speed':
+      return imperial ? fixed((value * 3600) / 1609.344, 'mph') : fixed((value * 3600) / 1000, 'km/h');
+    case 'distance':
+      return imperial ? fixed(value / 1609.344, 'mi') : fixed(value / 1000, 'km');
+    case 'elevation':
+      return imperial ? fixed(value * 3.28084, 'ft') : fixed(value, 'm');
+    case 'temperature':
+      return imperial ? fixed((value * 9) / 5 + 32, '°F') : fixed(value, '°C');
+    case 'heartRate':
+      return fixed(value, 'bpm');
+    case 'runningCadence':
+      return fixed(value, 'spm');
+    case 'cyclingCadence':
+      return fixed(value, 'rpm');
+    case 'power':
+      return fixed(value, 'W');
+    case 'grade':
+      return fixed(value, '%');
+    case 'pace':
+    case 'elapsed':
+    case 'moving':
+      return formatMetric(metric, value, units);
   }
 }
 
@@ -522,9 +652,14 @@ export function resolveOverlayComponent(
   const value = source ? sample.values[dataSourceId(source)] : undefined;
   if (!source || value === undefined) return { status: 'hidden', reason: 'no_data', componentId };
 
-  const label = describeSource(source, timeline);
+  const label = component.display?.label?.trim() || describeSource(source, timeline);
   let text: string;
-  if (source.kind === 'metric') text = formatMetric(source.metric, value, unitSystem);
+  if (source.kind === 'metric') {
+    text =
+      component.display?.decimals !== undefined
+        ? formatMetricWith(source.metric, value, unitSystem, component.display.decimals)
+        : formatMetric(source.metric, value, unitSystem);
+  }
   else {
     const unit = timeline.sensorLabels.get(dataSourceId(source))?.unit;
     text = `${Number(value.toFixed(2))}${unit ? ` ${unit}` : ''}`;

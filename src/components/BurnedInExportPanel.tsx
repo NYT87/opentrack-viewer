@@ -14,6 +14,7 @@ import { describeBurnReadiness, getBurnSupport, type BurnSupport } from '../over
 import { EXPORT_HEIGHT_PRESETS, exportDimensions, formatBytes } from '../overlay/export/plan';
 import type { ArchiveStorage, BurnSourceInfo } from '../overlay/export/protocol';
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
+import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
 import { buildOverlayTimeline } from '../overlay/timeline';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 
@@ -21,6 +22,13 @@ interface BurnedInExportPanelProps {
   video: OverlayVideo;
   activity: Activity;
   controls: OverlayControls;
+  /** AV-1011. A layout made on the custom canvas, drawn as it is instead of one built from the controls. */
+  template?: OverlayTemplate;
+  /**
+   * AV-1011. The canvas's resolution. The video is rendered at it, so the
+   * canvas must have the video's shape: a picture is never stretched.
+   */
+  size?: { width: number; height: number };
   offsetSeconds: number;
   units: UnitSystem;
   media: OverlayMedia | undefined;
@@ -80,6 +88,8 @@ export function BurnedInExportPanel({
   video,
   activity,
   controls,
+  template: customTemplate,
+  size,
   offsetSeconds,
   units,
   media,
@@ -111,18 +121,19 @@ export function BurnedInExportPanel({
 
   const ready = media !== undefined && durationSeconds !== undefined && durationSeconds > 0;
   const height = heightChoice === NATIVE ? (media?.height ?? 1080) : Number(heightChoice);
-  const { width: outWidth, height: outHeight } = exportDimensions(
-    media ? media.width / media.height : 16 / 9,
-    height,
-  );
+  const { width: outWidth, height: outHeight } =
+    size ?? exportDimensions(media ? media.width / media.height : 16 / 9, height);
+  // A canvas of another shape than the video would stretch the picture: refused, with the reason.
+  const shapeMismatch =
+    size !== undefined && media !== undefined && Math.abs(size.width / size.height - media.width / media.height) > 0.01;
   const frameRate =
     video.timing && video.timing.frameIntervalSeconds > 0
       ? Math.round(10 / video.timing.frameIntervalSeconds) / 10
       : undefined;
 
   const built = useMemo(
-    () => buildOverlay(controls, timeline, outWidth / outHeight),
-    [controls, timeline, outWidth, outHeight],
+    () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, outWidth / outHeight)),
+    [customTemplate, controls, timeline, outWidth, outHeight],
   );
   // The answer belongs to the file and size it was asked for: any other is a question not yet answered.
   const inspectKey = `${video.file.name}:${video.file.size}:${video.file.lastModified}:${outWidth}x${outHeight}:${frameRate}`;
@@ -186,7 +197,17 @@ export function BurnedInExportPanel({
   );
 
   const isFinished = phase.status === 'done';
-  useEffect(() => onFinishedChange?.(isFinished), [isFinished, onFinishedChange]);
+  // Told when the file is finished or let go, and, as the panel goes, that it
+  // is gone with it. Through the latest listener, so a listener that is new on
+  // every render is not told anything twice.
+  const finishedListener = useRef(onFinishedChange);
+  useEffect(() => {
+    finishedListener.current = onFinishedChange;
+  }, [onFinishedChange]);
+  useEffect(() => {
+    finishedListener.current?.(isFinished);
+  }, [isFinished]);
+  useEffect(() => () => finishedListener.current?.(false), []);
 
   if (timeline.unavailable) return null;
 
@@ -194,7 +215,10 @@ export function BurnedInExportPanel({
    * TD-059. A video the activity covers none of would export an empty overlay:
    * blocked like "nothing switched on", with the way out named.
    */
-  const noOverlap = timeline.alignment?.overlaps === false;
+  const outsideActivity = timeline.alignment?.overlaps === false;
+  // AV-1011. Shapes and texts for the whole activity are drawn on every frame, covered or not.
+  const drawnAnyway = built.template.components.some((component) => component.visible && drawnWithoutTelemetry(component));
+  const noOverlap = outsideActivity && !drawnAnyway;
 
   const signature = JSON.stringify([built.template, units, offsetSeconds, outWidth, outHeight]);
   const running = phase.status === 'running';
@@ -209,7 +233,7 @@ export function BurnedInExportPanel({
           fileStorage: storage === 'opfs',
         })
       : undefined;
-  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn || noOverlap;
+  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn || noOverlap || shapeMismatch;
 
   const begin = () => {
     if (!ready || running || blocked) return;
@@ -300,6 +324,11 @@ export function BurnedInExportPanel({
       {support.supported && ready && media && source.status === 'ready' && (
         <>
           <div className="overlay-export__settings">
+            {size ? (
+              <p className="overlay-controls__hint">
+                Picture size: {size.width} × {size.height}, the canvas’s.
+              </p>
+            ) : (
             <div className="overlay-controls__field">
               <label htmlFor={`${id}-size`}>Picture size</label>
               <select
@@ -321,7 +350,15 @@ export function BurnedInExportPanel({
                 ))}
               </select>
             </div>
+            )}
           </div>
+          {shapeMismatch && size && (
+            <p role="status">
+              The canvas is {size.width} × {size.height}, which is not the video’s shape ({media.width} × {media.height}),
+              so the video cannot be rendered at it without stretching the picture. Choose a resolution of the video’s
+              shape on the canvas, or export the overlay as a PNG sequence.
+            </p>
+          )}
 
           {readiness && readiness.errors.length > 0 && (
             <div role="alert">
@@ -357,6 +394,12 @@ export function BurnedInExportPanel({
             <p role="status">No component is switched on, so there is nothing to draw.</p>
           )}
           {noOverlap && <p role="status">The activity covers none of this video, so nothing would be drawn. Change where the video starts, in Sync.</p>}
+          {outsideActivity && drawnAnyway && (
+            <p role="status">
+              The activity covers none of this video, so only the shapes and texts for the whole activity are drawn. Change
+              where the video starts, in Sync, for the rest.
+            </p>
+          )}
 
           <p className="video__actions">
             {running ? (

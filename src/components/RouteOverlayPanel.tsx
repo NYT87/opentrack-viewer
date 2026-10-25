@@ -28,7 +28,6 @@ import {
   snapRect,
   stillElementChoices,
   stillFontPx,
-  type MeasureText,
   type StaticImageLayout,
   type StillElementChoice,
   type StillImageContext,
@@ -46,6 +45,7 @@ import {
   type TextAlign,
 } from '../overlay/template';
 import { useInteractionStore } from '../state/interactionStore';
+import { measureText } from '../overlay/measureText';
 
 /** The long side of the preview, in pixels: the image drawn at this scale. */
 const PREVIEW_LONG_SIDE = 640;
@@ -734,7 +734,7 @@ function ElementEditor({
   );
 }
 
-function DateSettings({
+export function DateSettings({
   id,
   component,
   context,
@@ -803,7 +803,7 @@ function DateSettings({
  * half-typed or empty field is left as typed until it reads as one, then the
  * value is kept inside the frame and the field shows where it really went.
  */
-function PercentField({
+export function PercentField({
   id,
   label,
   value,
@@ -955,30 +955,6 @@ function StillPreview({
     </div>
   );
 }
-
-let measuring: CanvasRenderingContext2D | null | undefined;
-
-/**
- * Text width as the browser will draw it: a canvas's own `measureText`, in
- * the same font. Without a canvas (a test's jsdom), a fixed estimate stands in,
- * so the layout logic still runs.
- */
-const measureText: MeasureText = (text, font) => {
-  if (measuring === undefined) {
-    try {
-      measuring = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
-    } catch {
-      measuring = null;
-    }
-  }
-  if (measuring) {
-    measuring.font = font;
-    const width = measuring.measureText?.(text)?.width;
-    if (typeof width === 'number' && Number.isFinite(width)) return width;
-  }
-  const size = Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 16);
-  return text.length * size * 0.56;
-};
 
 /** An empty or half-typed field is not a number: it is refused, not read as zero. */
 function parseNumber(text: string): number {

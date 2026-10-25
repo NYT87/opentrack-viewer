@@ -27,7 +27,9 @@ export type OverlayMetricKey =
   | 'power'
   | 'temperature'
   | 'grade'
-  | 'elapsed';
+  | 'elapsed'
+  /** AV-1011. Time spent moving so far, by the viewer's own rule (TD-058). */
+  | 'moving';
 
 export const OVERLAY_METRIC_KEYS: readonly OverlayMetricKey[] = [
   'speed',
@@ -41,6 +43,7 @@ export const OVERLAY_METRIC_KEYS: readonly OverlayMetricKey[] = [
   'temperature',
   'grade',
   'elapsed',
+  'moving',
 ];
 
 /** Where a value comes from: a built-in metric, or a named camera stream. */
@@ -172,9 +175,42 @@ const finite = (value: number | undefined): number | undefined =>
 interface DerivedStreams {
   distance: (number | undefined)[];
   speed: (number | undefined)[];
+  /** Seconds spent moving up to each point, by point index; see `movingSoFar`. */
+  moving: (number | undefined)[];
 }
 
-function metricReaders({ distance, speed }: DerivedStreams): Record<OverlayMetricKey, Reader> {
+/** A step is moving at or above this, as the stats count moving time (TD-058). */
+const MOVING_SPEED_THRESHOLD_MPS = 0.5;
+
+/**
+ * AV-1011. Moving time so far at each point, counted the way the stats count
+ * the activity's moving time: a step between two points with a distance is
+ * moving when it covers at least 0.5 m a second, and a recording gap (a new
+ * segment) is never moving. Points with no distance have none.
+ */
+function movingSoFar(
+  points: { index: number; seconds: number; point: ActivityPoint }[],
+  distance: (number | undefined)[],
+  size: number,
+): (number | undefined)[] {
+  const moving: (number | undefined)[] = new Array(size).fill(undefined);
+  let total = 0;
+  let previous: { seconds: number; meters: number; segment: number } | undefined;
+  for (const { index, seconds, point } of points) {
+    const meters = distance[index];
+    if (typeof meters !== 'number' || !Number.isFinite(meters)) continue;
+    const segment = point.segmentIndex ?? 0;
+    if (previous && previous.segment === segment) {
+      const step = seconds - previous.seconds;
+      if (step > 0 && (meters - previous.meters) / step >= MOVING_SPEED_THRESHOLD_MPS) total += step;
+    }
+    previous = { seconds, meters, segment };
+    moving[index] = total;
+  }
+  return moving;
+}
+
+function metricReaders({ distance, speed, moving }: DerivedStreams): Record<OverlayMetricKey, Reader> {
   return {
     speed: ({ index }) => finite(speed[index]),
     // Pace is derived from the interpolated speed, not stored per point.
@@ -188,6 +224,7 @@ function metricReaders({ distance, speed }: DerivedStreams): Record<OverlayMetri
     temperature: ({ point }) => finite(point.temperatureCelsius),
     grade: ({ point }) => finite(point.gradePercent),
     elapsed: ({ seconds }) => seconds,
+    moving: ({ index }) => finite(moving[index]),
   };
 }
 
@@ -261,9 +298,11 @@ export function buildOverlayTimeline(
     typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? (anchorMs - firstMs) / 1000 : 0;
   const toActivitySeconds = (videoTime: number) => anchorSeconds + videoTime - offsetSeconds;
 
+  const distance = computeDistance(activity.points).cumulativeMeters;
   const derived: DerivedStreams = {
-    distance: computeDistance(activity.points).cumulativeMeters,
+    distance,
     speed: deriveSpeed(activity),
+    moving: movingSoFar(points, distance, activity.points.length),
   };
   const readers = metricReaders(derived);
   const sources: { id: string; read: Reader }[] = OVERLAY_METRIC_KEYS.map((metric) => ({
