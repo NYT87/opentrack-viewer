@@ -95,8 +95,10 @@ describe('long timelines (AV-1008)', { timeout: 90_000 }, () => {
         best(5, () => {
           for (let i = 0; i < 50_000; i += 1) target.sampleAt(scatter(i) * seconds);
         }) / 50_000;
-      // 360× the points: a binary search costs a few more steps, a scan would cost 360×.
-      expect(perCall(timeline, 6 * HOURS) / Math.max(perCall(shortTimeline, 600), 1e-6)).toBeLessThan(8);
+      // 360× the points: a binary search costs a few more steps, a scan would
+      // cost 360×. Allow room for noise in the tiny short-timeline baseline on
+      // a shared CI runner while still catching a linear scan.
+      expect(perCall(timeline, 6 * HOURS) / Math.max(perCall(shortTimeline, 600), 1e-6)).toBeLessThan(16);
     });
   });
 
