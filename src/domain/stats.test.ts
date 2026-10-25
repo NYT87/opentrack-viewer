@@ -17,6 +17,18 @@ const point = (partial: Partial<ActivityPoint>, index = 0): ActivityPoint => ({
 const points = (list: Partial<ActivityPoint>[]): ActivityPoint[] =>
   list.map((item, index) => point(item, index));
 
+it('does not count an odometer increase across a segment gap as moving time', () => {
+  const samples = points([0, 10, 110, 120].map((seconds, index) => ({
+    time: new Date(seconds * 1000), distanceMeters: index * 100, segmentIndex: index < 2 ? 0 : 1,
+  })));
+  const { stats } = computeStats(samples);
+  expect(stats.durationSeconds).toBe(120);
+  expect(stats.movingDurationSeconds).toBe(20);
+  // The source odometer remains authoritative for total distance.
+  expect(stats.distanceMeters).toBe(300);
+  expect(stats.averageMovingSpeedMetersPerSecond).toBe(15);
+});
+
 describe('haversineMeters', () => {
   it('matches a known one-degree-of-latitude distance', () => {
     // One degree of latitude is ~111.19 km on a sphere of radius 6371008.8 m.

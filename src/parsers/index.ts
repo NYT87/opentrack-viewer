@@ -5,6 +5,7 @@ import { detectSupportedFormat, type FormatDetection } from './detectFormat';
 import { parseGpx } from './gpx/parseGpx';
 import { parseTcx } from './tcx/parseTcx';
 import { parseKml } from './kml/parseKml';
+import { assertFileSize } from './limits';
 
 export { detectFormat, detectSupportedFormat, SUPPORTED_FORMATS } from './detectFormat';
 export type { FormatDetection } from './detectFormat';
@@ -81,6 +82,7 @@ export async function parseActivityFile(
   file: File,
   options: ParseActivityFileOptions = {},
 ): Promise<ParseFileResult> {
+  assertFileSize(file.size);
   options.onPhase?.('reading');
   const detection = await detectSupportedFormat(file);
   const parser = REGISTRY[detection.format];

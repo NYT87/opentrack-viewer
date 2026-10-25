@@ -1,3 +1,4 @@
+import { exportPreservationProblem } from '../preservation';
 import { FitBaseType, FitEncoder, type FitEncoderField } from 'fit-file-parser';
 import {
   hasValidLocation,
@@ -218,6 +219,8 @@ const hasTime = (point: ActivityPoint): point is ActivityPoint & { time: Date } 
  * the device that made the original recording.
  */
 export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: ActivityWarning[] } {
+  const preservationProblem = exportPreservationProblem(activity, 'fit');
+  if (preservationProblem) throw new ActivityError('unsupported_format', preservationProblem);
   const warnings: ActivityWarning[] = [];
   const timed = activity.points.filter(hasTime);
 

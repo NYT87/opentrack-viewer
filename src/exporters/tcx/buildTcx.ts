@@ -1,3 +1,4 @@
+import { exportPreservationProblem } from '../preservation';
 import {
   hasValidLocation,
   isPlausibleSpeed,
@@ -44,6 +45,8 @@ const hasTime = (point: ActivityPoint): point is ActivityPoint & { time: Date } 
  * the device serial, so an exported file is not where it starts appearing.
  */
 export function buildTcx(activity: Activity): { xml: string; warnings: ActivityWarning[] } {
+  const preservationProblem = exportPreservationProblem(activity, 'tcx');
+  if (preservationProblem) throw new ActivityError('unsupported_format', preservationProblem);
   const warnings: ActivityWarning[] = [];
   const timed = activity.points.filter(hasTime);
 

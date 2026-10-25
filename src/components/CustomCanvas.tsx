@@ -1,3 +1,4 @@
+import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
@@ -213,6 +214,10 @@ export function CustomCanvas({
   };
 
   const loadLayout = async (file: File) => {
+    if (file.size > LAYOUT_FILE_MAX_BYTES) {
+      setNotice({ kind: 'alert', message: `${file.name} is too large to be a layout.` });
+      return;
+    }
     const parsed = parseOverlayLayout(await file.text());
     if (!parsed.ok) {
       setNotice({ kind: 'alert', message: `${file.name} was not opened. ${parsed.error}` });

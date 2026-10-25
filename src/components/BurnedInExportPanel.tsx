@@ -60,6 +60,7 @@ type Phase =
       made: { signature: string; activity: Activity; file: File };
     }
   | { status: 'stopped' }
+  | { status: 'discarded' }
   | { status: 'error'; message: string };
 
 const NATIVE = 'native';
@@ -185,6 +186,7 @@ export function BurnedInExportPanel({
   useEffect(
     () => () => {
       job.current?.cancel();
+      job.current = undefined;
       void output.current?.dispose();
     },
     [],
@@ -270,7 +272,7 @@ export function BurnedInExportPanel({
 
     active.done.then(
       (result) => {
-        if (job.current !== active) return;
+        if (job.current !== active) { void result.dispose(); return; }
         job.current = undefined;
         output.current = result;
         setPhase({
@@ -450,7 +452,14 @@ export function BurnedInExportPanel({
           {/* A stale file is still offered, but not as the thing to do next. */}
           <a className={stale ? 'button' : 'button button--primary'} href={phase.url} download={phase.fileName}>
             Download {phase.fileName}
-          </a>
+          </a>{' '}
+          <button type="button" className="button" onClick={() => {
+            void output.current?.dispose();
+            output.current = undefined;
+            setPhase({ status: 'discarded' });
+          }}>
+            Discard export
+          </button>
         </p>
       )}
       {phase.status === 'done' &&
@@ -459,6 +468,7 @@ export function BurnedInExportPanel({
             {note}
           </p>
         ))}
+      {phase.status === 'discarded' && <p role="status">Temporary export discarded. Copies already downloaded are kept.</p>}
       {phase.status === 'stopped' && <p role="status">Render stopped. Nothing was saved.</p>}
       {phase.status === 'error' && <p role="alert">{phase.message}</p>}
     </section>

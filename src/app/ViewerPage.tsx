@@ -138,6 +138,10 @@ export function ViewerPage() {
     | { kind: 'failed'; fileName: string; error: ActivityError }
     | undefined
   >();
+  const dropGeneration = useRef(0);
+  useEffect(() => {
+    if (status !== 'ready') dropGeneration.current += 1;
+  }, [status]);
   const dropHandlers = {
     onDragOver: (event: React.DragEvent<HTMLElement>) => {
       if (!event.dataTransfer.types.includes('Files')) return;
@@ -161,8 +165,10 @@ export function ViewerPage() {
       }
       // Parsed aside: the open activity stays until the new one has parsed,
       // and stays for good if it fails.
+      const generation = ++dropGeneration.current;
       setDropNotice({ kind: 'reading', fileName: file.name });
       void replaceFile(file).then((error) => {
+        if (generation !== dropGeneration.current) return;
         if (!error) {
           setDropNotice(undefined);
           return;

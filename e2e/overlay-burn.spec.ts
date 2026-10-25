@@ -85,7 +85,14 @@ test('renders the video with the overlay burned in, keeps the sound, and uploads
     join(process.cwd(), 'node_modules/mediabunny/dist/bundles/mediabunny.min.mjs'),
     'utf8',
   );
-  const compared = await page.evaluate(
+  // The app CSP deliberately blocks blob scripts. Decode the synthetic test
+  // output in a separate, locally fulfilled inspection document instead.
+  const inspection = await page.context().newPage();
+  await inspection.route('**/__review_decoder__', (route) => route.fulfill({
+    contentType: 'text/html', body: '<!doctype html><title>Local video inspection</title>',
+  }));
+  await inspection.goto(new URL('/__review_decoder__', page.url()).href);
+  const compared = await inspection.evaluate(
     async ({ madeB64, sourceB64, library }) => {
       const mb = await import(URL.createObjectURL(new Blob([library], { type: 'text/javascript' })));
       const frameAt = async (b64: string, time: number) => {
@@ -121,6 +128,7 @@ test('renders the video with the overlay burned in, keeps the sound, and uploads
     },
     { madeB64: base64, sourceB64: source.toString('base64'), library: mediabunny },
   );
+  await inspection.close();
   expect(compared.bottom).toBeGreaterThan(compared.top * 3);
   expect(compared.bottom).toBeGreaterThan(8);
 

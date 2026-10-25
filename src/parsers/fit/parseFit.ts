@@ -1,3 +1,4 @@
+import { assertFileSize, assertPointCount } from '../limits';
 import FitParser from 'fit-file-parser';
 
 import {
@@ -46,10 +47,12 @@ export async function parseFit(
   buffer: ArrayBuffer,
   options: ParseFitOptions = {},
 ): Promise<Activity> {
+  assertFileSize(buffer.byteLength);
   const warnings: ActivityWarning[] = [];
   const parsed = await decode(buffer);
 
   const records = parsed.records ?? [];
+  assertPointCount(records.length);
   if (records.length === 0) {
     throw new ActivityError(
       'no_route_points',
@@ -93,6 +96,7 @@ export async function parseFit(
 
 /** Convenience wrapper matching the async parser contract used by intake. */
 export async function parseFitFile(file: File): Promise<Activity> {
+  assertFileSize(file.size);
   const buffer = await file.arrayBuffer();
   return parseFit(buffer, { fileName: file.name, fileSizeBytes: file.size });
 }

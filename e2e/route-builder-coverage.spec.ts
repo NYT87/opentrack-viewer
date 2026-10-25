@@ -38,7 +38,7 @@ async function expectNothingSent(page: Page, requests: Request[], fileStems: str
   expect(await page.title()).not.toMatch(pattern);
   expect(
     await page.evaluate(() => [
-      ...Object.keys(localStorage).filter((key) => key !== 'opentrack-viewer:theme'),
+      ...Object.keys(localStorage).filter((key) => !['opentrack-viewer:theme', 'opentrack-viewer:basemap'].includes(key)),
       ...Object.keys(sessionStorage),
     ]),
   ).toEqual([]);

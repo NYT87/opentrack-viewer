@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useRef } from 'react';
+import { removeStaleArchives } from '../overlay/export/archiveSink';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { THEME_MODES, THEME_MODE_LABELS, type ThemeMode } from '../domain/theme';
 import type { UnitSystem } from '../domain/units';
 import { useInteractionStore } from '../state/interactionStore';
@@ -19,6 +20,8 @@ export interface SettingsModalProps {
  * is explicit and testable in jsdom.
  */
 export function SettingsModal({ onClose }: SettingsModalProps) {
+  const [cleanup, setCleanup] = useState<string>();
+  const [cleaning, setCleaning] = useState(false);
   const titleId = useId();
   /** Where the press that may become a backdrop click started. */
   const pressOriginRef = useRef<EventTarget | null>(null);
@@ -107,8 +110,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         </header>
 
         <p className="modal__intro">
-          Your theme is remembered on this device, so you need not choose it again. Everything
-          else here applies to this session only, and no activity data is ever stored.
+          Your theme and basemap choice are remembered on this device. Other settings apply to
+          this session. Opened activities stay in memory; generated exports may use temporary local storage.
         </p>
 
         {/*
@@ -169,8 +172,33 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           <p className="setting__help">
             With the basemap on, the map requests tiles from the tile provider, which reveals the
             approximate area you are viewing. Turn it off to draw the route on a plain background
-            and make no external request at all. Your activity file is never uploaded either way.
+            and make no external request at all. This choice is remembered when browser storage is
+            available. Your activity file is never uploaded either way.
           </p>
+        </section>
+        <section className="setting">
+          <h3 className="setting__label">Temporary exports</h3>
+          <p className="setting__help">
+            Video renders and image sequences may be written to browser storage on this device.
+            Abandoned exports are removed on your next visit where supported. Downloads still
+            offered in an open tab are kept; use Discard export beside a download to delete it.
+          </p>
+          <button type="button" className="button" disabled={cleaning} onClick={async () => {
+            setCleaning(true);
+            try {
+              if (!navigator.locks || !navigator.storage?.getDirectory) {
+                setCleanup('This browser cannot safely clean abandoned exports. You can clear this site’s data in your browser settings.');
+                return;
+              }
+              const count = await removeStaleArchives();
+              setCleanup(`Removed ${count} abandoned export${count === 1 ? '' : 's'}. Exports in open tabs are kept.`);
+            } finally {
+              setCleaning(false);
+            }
+          }}>
+            Delete abandoned exports
+          </button>
+          {cleanup && <p className="setting__help" role="status">{cleanup}</p>}
         </section>
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
 } from '../domain/activity';
 import { sliceActivity } from '../domain/activitySlice';
 import { ActivityError, type ActivityErrorCode } from '../domain/errors';
+import { exportPreservationProblem } from './preservation';
 import { buildGpx } from './gpx/buildGpx';
 import { buildTcx } from './tcx/buildTcx';
 
@@ -98,14 +99,14 @@ export function getExportAvailability(
   const source = sliced?.ok ? sliced.activity : activity;
 
   return EXPORT_FORMATS.map((entry) =>
-    entry.requires(source)
+    entry.requires(source) && !exportPreservationProblem(source, entry.format)
       ? { format: entry.format, label: entry.label, available: true }
       : {
           format: entry.format,
           label: entry.label,
           available: false,
-          reason: entry.unavailableReason,
-          code: entry.unavailableCode,
+          reason: exportPreservationProblem(source, entry.format) ?? entry.unavailableReason,
+          code: exportPreservationProblem(source, entry.format) ? 'unsupported_format' : entry.unavailableCode,
         },
   );
 }
@@ -182,6 +183,8 @@ export async function exportActivity(
   }
 
   const source = resolveSource(activity, options.range);
+  const problem = exportPreservationProblem(source.activity, options.format);
+  if (problem) throw new ActivityError('unsupported_format', problem);
   const { body, warnings } = await serialize(source.activity);
   // A charset applies to the text formats only; FIT is bytes.
   const type =

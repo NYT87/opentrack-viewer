@@ -24,8 +24,13 @@ export function TermsPage() {
           <p>
             Activity files you open are read, parsed and analysed entirely in your browser. They
             are not uploaded to a server, and this app has no backend, no account system and no
-            database. Nothing about your activity is stored between sessions: closing the tab
-            discards it.
+            database. Opened activities are held in memory and closing the tab discards that
+            in-memory activity. Generated video and overlay exports may be written to temporary
+            browser storage. They are deleted when discarded or when you leave their export panel;
+            after a closed tab or crash, abandoned exports are reclaimed on your next visit where
+            the browser supports safe cleanup. Settings also offers deletion of abandoned exports.
+            Downloads still offered in another open tab are preserved. Copies you download are
+            yours to manage separately.
           </p>
         </section>
 

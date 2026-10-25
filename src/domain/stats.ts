@@ -289,7 +289,8 @@ function computeMovingDuration(
     const time = points[i]!.time;
     const distance = cumulative[i];
     if (!(time instanceof Date) || Number.isNaN(time.getTime()) || distance === undefined) continue;
-    if (previousIndex !== undefined) {
+    if (previousIndex !== undefined &&
+        (points[previousIndex]!.segmentIndex ?? 0) === (points[i]!.segmentIndex ?? 0)) {
       const previousTime = points[previousIndex]!.time as Date;
       const seconds = (time.getTime() - previousTime.getTime()) / 1000;
       const meters = distance - (cumulative[previousIndex] as number);

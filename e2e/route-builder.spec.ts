@@ -122,7 +122,7 @@ test('copies the viewed route into Route Builder, and the viewer keeps its activ
 
   // The handoff is memory only: nothing left the origin, and nothing was stored.
   expect(requests.map((r) => r.url()).filter((url) => !url.startsWith(new URL(page.url()).origin))).toEqual([]);
-  expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k !== 'opentrack-viewer:theme'))).toEqual([]);
+  expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => !['opentrack-viewer:theme', 'opentrack-viewer:basemap'].includes(k)))).toEqual([]);
 });
 
 test('fits a phone screen without a sideways scroll', async ({ page }) => {
@@ -274,7 +274,7 @@ test('appends a TCX after a GPX, warns of the far jump, and sends nothing anywhe
   expect(requests.some((r) => /simple-route|ride-minimal|treadmill/.test(r.url()))).toBe(false);
   expect(await page.title()).not.toMatch(/simple-route|ride-minimal/);
   expect(
-    await page.evaluate(() => Object.keys(localStorage).filter((k) => k !== 'opentrack-viewer:theme')),
+    await page.evaluate(() => Object.keys(localStorage).filter((k) => !['opentrack-viewer:theme', 'opentrack-viewer:basemap'].includes(k))),
   ).toEqual([]);
 });
 

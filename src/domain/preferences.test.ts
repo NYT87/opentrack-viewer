@@ -4,6 +4,9 @@ import {
   localeUnitSystem,
   readStoredTheme,
   storeTheme,
+  BASEMAP_STORAGE_KEY,
+  readStoredBasemap,
+  storeBasemap,
 } from './preferences';
 
 afterEach(() => {
@@ -13,6 +16,26 @@ afterEach(() => {
   } catch {
     // Nothing to clear where storage is unavailable.
   }
+});
+
+describe('the basemap privacy preference', () => {
+  it('remembers the boolean choice without any activity data', () => {
+    storeBasemap(false);
+    expect(readStoredBasemap()).toBe(false);
+    expect(Object.entries(localStorage)).toEqual([[BASEMAP_STORAGE_KEY, 'false']]);
+    storeBasemap(true);
+    expect(readStoredBasemap()).toBe(true);
+  });
+
+  it('uses the enabled default for absent, invalid, or inaccessible storage', () => {
+    expect(readStoredBasemap()).toBe(true);
+    localStorage.setItem(BASEMAP_STORAGE_KEY, 'invalid');
+    expect(readStoredBasemap()).toBe(true);
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });
+    expect(readStoredBasemap()).toBe(true);
+    expect(() => storeBasemap(false)).not.toThrow();
+  });
 });
 
 describe('units follow the browser locale', () => {

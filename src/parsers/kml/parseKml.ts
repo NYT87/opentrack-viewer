@@ -1,3 +1,4 @@
+import { assertXmlInput, assertXmlStructure, assertPointCount, assertFileSize } from '../limits';
 import {
   computeStreams,
   isPlausibleSpeed,
@@ -103,6 +104,7 @@ export function parseKml(xml: string, options: ParseKmlOptions = {}): Activity {
 
 /** Convenience wrapper matching the async parser contract used by intake. */
 export async function parseKmlFile(file: File): Promise<Activity> {
+  assertFileSize(file.size);
   const text = await file.text();
   return parseKml(text, { fileName: file.name, fileSizeBytes: file.size });
 }
@@ -116,23 +118,10 @@ function parseDocument(xml: string, warnings: ActivityWarning[], injected?: DOMP
     throw new ActivityError('invalid_kml_xml', 'The file is empty.');
   }
 
-  /*
-   * A DTD is refused before the parser sees it. KML never needs one, and an
-   * internal subset is where entity expansion lives: `DOMParser` honours
-   * `<!ENTITY>` declarations, so a document could inflate itself by orders of
-   * magnitude, or substitute text into a name, before a single element is
-   * read. Checked on the text rather than on `document.doctype` because the
-   * expansion has already happened by the time there is a document to ask.
-   */
-  if (/<!DOCTYPE/i.test(xml) || /<!ENTITY/i.test(xml)) {
-    throw new ActivityError(
-      'invalid_kml_xml',
-      'The file declares a DTD or entities, which a KML document never needs, so it was not read.',
-    );
-  }
-
+  assertXmlInput(xml, 'invalid_kml_xml');
   const parser = injected ?? new DOMParser();
   const document = parser.parseFromString(xml, 'application/xml');
+  assertXmlStructure(document);
 
   // DOMParser reports XML errors as a <parsererror> element rather than throwing.
   if (document.getElementsByTagName('parsererror').length > 0 || document.doctype) {
@@ -547,6 +536,7 @@ function normalizePoints(segments: RawKmlSegment[], warnings: ActivityWarning[])
       if (isPlausibleSpeed(item.speedMetersPerSecond)) {
         point.speedMetersPerSecond = item.speedMetersPerSecond;
       }
+      assertPointCount(points.length + 1);
       points.push(point);
     }
   });

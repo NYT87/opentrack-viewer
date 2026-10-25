@@ -4,6 +4,7 @@
  */
 export type ActivityErrorCode =
   | 'unsupported_format'
+  | 'import_limit_exceeded'
   | 'invalid_gpx_xml'
   | 'no_route_points'
   | 'no_location_stream'
@@ -20,6 +21,7 @@ export type ActivityErrorCode =
   | 'file_read_failed';
 
 const HINTS: Record<ActivityErrorCode, string> = {
+  import_limit_exceeded: 'Split or simplify the file and try again.',
   unsupported_format: 'Try a .gpx, .fit, .tcx or .kml file.',
   invalid_gpx_xml: 'The file could not be read as GPX XML. It may be truncated or corrupted.',
   no_route_points: 'The file parsed, but contained no track points to display.',

@@ -1,4 +1,5 @@
 import { removeArchive, removeStaleArchives } from './archiveSink';
+import { ownArchive } from './archiveOwnership';
 import { OverlayExportError } from './errors';
 import {
   ARCHIVE_NAME_PREFIX,
@@ -230,6 +231,14 @@ function startWorkerJob(
   let started = false;
   let cancelRequested = false;
   let rejectJob: (error: OverlayExportError) => void = () => undefined;
+  let releaseOwnership = () => undefined as void;
+  const discard = async () => {
+    try {
+      await removeArchive(archiveName);
+    } finally {
+      releaseOwnership();
+    }
+  };
 
   const done = new Promise<ExportOutput>((resolve, reject) => {
     rejectJob = reject;
@@ -249,7 +258,7 @@ function startWorkerJob(
         if (cancelRequested) {
           // The stop lost the race with the last frame. The reader asked to stop,
           // so they get a stop: the finished archive is discarded, not offered.
-          void removeArchive(archiveName);
+          void discard();
           reject(new OverlayExportError('cancelled', 'The export was stopped.'));
           return;
         }
@@ -258,17 +267,18 @@ function startWorkerJob(
           bytes: message.bytes,
           frameCount: message.frameCount,
           notes: message.notes ?? [],
-          dispose: () => (message.storage === 'opfs' ? removeArchive(archiveName) : Promise.resolve()),
+          dispose: discard,
         });
+        if (message.storage !== 'opfs') releaseOwnership();
       } else if (message.type === 'error') {
         finish();
-        void removeArchive(archiveName);
+        void discard();
         reject(new OverlayExportError(message.code, message.message));
       }
     };
     worker.onerror = (event) => {
       finish();
-      void removeArchive(archiveName);
+      void discard();
       reject(
         new OverlayExportError('render_failed', event.message || 'The export stopped unexpectedly.'),
       );
@@ -276,12 +286,16 @@ function startWorkerJob(
   });
 
   // Housekeeping first, then the work: leftovers from an interrupted export go.
-  void removeStaleArchives(archiveName).then(() => {
-    if (settled) return;
+  void ownArchive(archiveName).then(async (release) => {
+    releaseOwnership = release;
+    if (settled) { release(); return; }
+    await removeStaleArchives(archiveName);
+    if (settled) { release(); return; }
     if (cancelRequested) {
       // Stopped before it began: nothing was written, so there is nothing to undo.
       settled = true;
       worker.terminate();
+      releaseOwnership();
       rejectJob(new OverlayExportError('cancelled', 'The export was stopped.'));
       return;
     }
@@ -293,8 +307,14 @@ function startWorkerJob(
       // leave the job waiting for a worker that never heard of it.
       settled = true;
       worker.terminate();
+      void discard();
       rejectJob(startupError(error));
     }
+  }).catch((error: unknown) => {
+    settled = true;
+    worker.terminate();
+    void discard();
+    rejectJob(startupError(error));
   });
 
   return {
@@ -310,7 +330,7 @@ function startWorkerJob(
         if (settled) return;
         settled = true;
         worker.terminate();
-        void removeArchive(archiveName);
+        void discard();
         rejectJob(new OverlayExportError('cancelled', 'The export was stopped.'));
       }, CANCEL_GRACE_MS);
     },

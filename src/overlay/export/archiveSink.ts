@@ -1,6 +1,7 @@
 import { OverlayExportError } from './errors';
 import { ARCHIVE_NAME_PREFIX, type ArchiveStorage } from './protocol';
 import { ZIP_MAX_BYTES, type ZipSink } from './zip';
+import { archiveLockName } from './archiveOwnership';
 
 /**
  * AV-1006 (TD-039). Where the archive goes while it is being written.
@@ -151,7 +152,7 @@ function createMemorySink(): ArchiveSink {
 }
 
 export async function createArchiveSink(archiveName: string): Promise<ArchiveSink> {
-  if (opfsAvailable()) {
+  if (opfsAvailable() && navigator.locks) {
     try {
       return await createOpfsSink(archiveName);
     } catch {
@@ -174,9 +175,12 @@ export async function probeArchiveStorage(archiveName: string): Promise<ArchiveS
 }
 
 /** Removes leftovers from an export that was interrupted by a crash or a closed tab. */
-export async function removeStaleArchives(except?: string): Promise<void> {
-  if (typeof navigator === 'undefined' || typeof navigator.storage?.getDirectory !== 'function') {
-    return;
+export async function removeStaleArchives(except?: string): Promise<number> {
+  // Without cross-tab coordination we cannot distinguish an abandoned file
+  // from a download in another page. Preserve it rather than guess.
+  if (typeof navigator === 'undefined' || !navigator.locks ||
+      typeof navigator.storage?.getDirectory !== 'function') {
+    return 0;
   }
   try {
     const root = await navigator.storage.getDirectory();
@@ -184,10 +188,22 @@ export async function removeStaleArchives(except?: string): Promise<void> {
     for await (const name of (root as unknown as { keys(): AsyncIterable<string> }).keys()) {
       if (name.startsWith(ARCHIVE_NAME_PREFIX) && name !== except) names.push(name);
     }
-    // A file another tab is writing is locked and refuses removal: leave it.
-    await Promise.all(names.map((name) => root.removeEntry(name).catch(() => undefined)));
+    let removed = 0;
+    await Promise.all(names.map((name) => navigator.locks.request(
+      archiveLockName(name), { ifAvailable: true }, async (lock) => {
+        if (!lock) return;
+        try {
+          await root.removeEntry(name);
+          removed += 1;
+        } catch {
+          // A legacy writer may still hold the file's access handle.
+        }
+      },
+    )));
+    return removed;
   } catch {
     // Housekeeping only.
+    return 0;
   }
 }
 

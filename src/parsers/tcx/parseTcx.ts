@@ -1,3 +1,4 @@
+import { assertXmlInput, assertXmlStructure, assertPointCount, assertFileSize } from '../limits';
 import {
   computeStreams,
   isPlausibleSpeed,
@@ -97,6 +98,7 @@ export function parseTcx(xml: string, options: ParseTcxOptions = {}): Activity {
 
 /** Convenience wrapper matching the async parser contract used by intake. */
 export async function parseTcxFile(file: File): Promise<Activity> {
+  assertFileSize(file.size);
   const text = await file.text();
   return parseTcx(text, { fileName: file.name, fileSizeBytes: file.size });
 }
@@ -109,8 +111,10 @@ function parseDocument(xml: string, injected?: DOMParser): Document {
   if (typeof xml !== 'string' || xml.trim() === '') {
     throw new ActivityError('invalid_tcx_xml', 'The file is empty.');
   }
+  assertXmlInput(xml, 'invalid_tcx_xml');
   const parser = injected ?? new DOMParser();
   const document = parser.parseFromString(xml, 'application/xml');
+  assertXmlStructure(document);
 
   // DOMParser reports XML errors as a <parsererror> element rather than throwing.
   if (document.getElementsByTagName('parsererror').length > 0) {
@@ -183,6 +187,7 @@ function readLaps(
           continue;
         }
         if (point.lat === undefined) missingCoordinates += 1;
+        assertPointCount(points.length + 1);
         points.push(point);
       }
     }

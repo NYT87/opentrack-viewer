@@ -141,10 +141,20 @@ Enforced, not just documented:
 - The map is not constructed until an activity with a route is open, so simply
   loading the app makes no external request at all — a tile provider is not told
   that anyone is using it until there is something to show.
-- The **theme preference** is the one thing written to `localStorage`, under
-  `opentrack-viewer:theme`. Nothing else is stored: no `sessionStorage`, no
-  IndexedDB, and nothing whatsoever about an activity. Closing
-  the tab discards the activity.
+- The **theme** and **basemap** preferences are written to `localStorage` under
+  `opentrack-viewer:theme` and `opentrack-viewer:basemap`. The basemap choice is
+  remembered so disabling external tiles remains effective on later visits.
+  Opened activities and editing state stay in memory; closing the tab discards them.
+- Generated video and PNG-sequence exports may use temporary browser disk storage
+  (OPFS). Each export is owned for as long as its tab offers the download. Other
+  tabs cannot clean it up while that ownership remains. Discarding the export or
+  leaving its export panel deletes the temporary output; downloaded copies remain
+  yours to manage. Closing the tab or a crash can leave output behind, so the next
+  visit and each new export reclaim abandoned files. Settings also offers
+  **Delete abandoned exports**. Cleanup uses Web Locks; browsers without this
+  coordination use bounded memory for new exports, and legacy leftovers may need
+  to be removed through the browser’s site-data controls. No age-based deletion
+  can invalidate an output still owned by an open tab.
 - Raw file contents are never logged; error messages carry a code and a hint,
   not file data.
 - `e2e/viewer.spec.ts` asserts that loading a file issues **no** POST/PUT/PATCH,
@@ -162,7 +172,7 @@ must be opt-in and scrubbed of activity data.
 | --- | --- | --- |
 | Tile provider | OpenStreetMap raster tiles, declared inline, with a route-only mode | No API key and real street detail at route zooms. Swap `DEFAULT_BASEMAP_STYLE` in `src/components/ActivityMap.tsx` for your own provider before deploying, and honour that provider's usage policy. |
 | Units | Defaulted from the browser locale, switchable per session | §17 asked whether to follow the locale. It does, through `Intl.Locale`'s `measurementSystem` where the browser exposes it and a small region list where it does not. The UK is deliberately metric here: it measures road distance in miles but runs and rides in kilometres. It is only a default — the settings control overrides it, and that override lasts the session without reaching disk. |
-| Theme persistence | Remembered on the device; every other setting is session-only | §17 asked whether the theme should persist. It does, and it is the **only** thing this app writes to `localStorage`. A theme is a display choice rather than activity data, and re-picking dark mode on every visit is a poor trade for a purity the reader never asked for. The pre-paint script in `index.html` reads the stored value first, so a remembered dark theme does not flash light on load. |
+| Preference persistence | Theme and basemap remembered; other settings session-only | Theme and the basemap privacy choice are remembered in namespaced localStorage keys. Both are preferences rather than activity data. The pre-paint theme script keeps a remembered dark theme from flashing light. AR-012 extends persistence to the basemap so a return visit does not silently re-enable external tiles. |
 | Chart x-axis | `distance` \| `time`, persisted for the session | §17 asked whether the preference persists or resets per activity. It persists, like units. A preference an activity cannot support is *not* discarded: that chart falls back and explains why, and the preference applies again to the next file. |
 | Point-index x-axis | Internal fallback only, never user-selectable | The plan's `ChartXAxisMode` is `distance \| time`. An activity with neither still needs *some* axis, so `index` remains as a rendering fallback — but it is not offered in the switch, because it is not a meaningful thing to choose. |
 | Pace derivation | Distance and time over a rolling 15 s window | §17 asked whether to use instantaneous speed or derive from intervals. Derived: `speedMetersPerSecond` is often absent from GPX and already device-smoothed when present, so deriving keeps GPX, FIT and TCX consistent (TD-002). Point-to-point pace is unusable — a metre of GPS jitter between 1 s samples swings it by minutes per km — hence the window. Stationary and implausibly fast (>10 m/s) intervals are dropped rather than plotted. |
@@ -345,3 +355,35 @@ external requests, asserted in `e2e/viewer.spec.ts`.
   draw the long way round.
 - Map hover uses a linear nearest-coordinate scan. Fine for typical tracks;
   a very dense track would benefit from spatial indexing.
+
+## Import limits and security hardening
+
+Activity intake refuses files above **32 MiB** before reading them and limits a
+recording to **250,000 points**. XML documents are limited to **64 levels** and
+**2,000,000 elements**, and GPX, TCX and KML all reject DTD/entity declarations
+before DOM parsing. Oversized layout JSON is refused before reading as well.
+Split or simplify a recording that exceeds these limits; there is no override
+that bypasses the budgets. These limits do not apply to the separate streaming
+video intake, which has container and telemetry budgets of its own.
+
+Parsing still runs on the main thread, so a permitted large XML file can briefly
+block interaction. Superseded reads cannot publish state; this is result
+invalidation, not interruption of synchronous parsing. Moving XML parsing to a
+cancellable worker requires a worker-compatible XML parser and remains a future
+performance improvement. The byte, structural and point budgets bound the
+current import path.
+
+Production HTML includes a Content Security Policy that permits bundled scripts,
+hashes the inline theme bootstrap, allows local media and workers, and restricts
+external connections and images to the OpenStreetMap tile host. The GoPro
+`binary-parser` dependency compiles trusted schemas at runtime, so the policy
+currently permits `unsafe-eval`; removing that exception requires replacing or
+isolating that parser. Arbitrary inline scripts remain blocked. Inline styles
+remain allowed for React and map positioning. Development keeps Vite’s normal
+HMR behavior. Static meta policies cannot set frame-ancestors; deployments that
+can configure HTTP headers may add that protection separately. See the
+[worker-src documentation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/worker-src).
+
+CI grants read permissions to verification, Pages read access to the build, and
+Pages/OIDC write access only to deployment, following the
+[Pages deployment requirements](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).

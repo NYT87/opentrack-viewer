@@ -88,6 +88,7 @@ function fakeOpfs(options: { accessFails?: boolean; shortWrite?: boolean } = {})
     configurable: true,
     value: { getDirectory: async () => root },
   });
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: {} });
   return { root, handle, access, writes, events, file };
 }
 
@@ -95,6 +96,7 @@ describe('the archive sink on the origin-private file system (AV-1006)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     Reflect.deleteProperty(navigator, 'storage');
+    Reflect.deleteProperty(navigator, 'locks');
   });
 
   it('writes through a sync access handle at running offsets, and returns the stored file', async () => {

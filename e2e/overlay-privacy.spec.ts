@@ -264,7 +264,8 @@ test.describe('the privacy checks catch a leak', () => {
     const requests: Request[] = [];
     context.on('request', (request) => requests.push(request));
     await context.route(/attacker\.example|:41730/, (route) => route.abort());
-    await page.goto('./');
+    // Keep this probe on its initial blank page: the app CSP now blocks
+    // the connection before the network-audit detector sees it.
     await page.evaluate(async (urls) => {
       for (const url of urls) await fetch(url).catch(() => undefined);
     }, lookalikes);

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { CustomCanvas } from './CustomCanvas';
 import { makeActivity } from '../test/helpers/activity';
 import type { Activity } from '../domain/activity';
+import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
 
 const T0 = Date.parse('2026-09-24T08:00:00Z');
 const ride = (extra: (i: number) => object = () => ({})): Activity =>
@@ -57,6 +58,15 @@ const layoutJson = async () => {
 };
 
 describe('the custom canvas (AV-1011)', () => {
+  it('refuses an oversized layout without reading its contents', async () => {
+    setup();
+    const file = new File(['{}'], 'large.json', { type: 'application/json' });
+    Object.defineProperty(file, 'size', { value: LAYOUT_FILE_MAX_BYTES + 1 });
+    const read = vi.spyOn(file, 'text');
+    fireEvent.change(screen.getByTestId('canvas-layout-input'), { target: { files: [file] } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('too large to be a layout');
+    expect(read).not.toHaveBeenCalled();
+  });
   it('starts empty, adds a live figure and selects it', async () => {
     setup();
     expect(region()).toHaveTextContent('The canvas is empty');

@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import type { Plugin } from 'vite';
 import { resolveBasePath, resolveSiteUrl } from './base-path.ts';
+import { createHash } from 'node:crypto';
 
 /**
  * Deployed under a repository sub-path on GitHub Pages, so every emitted asset
@@ -11,6 +12,43 @@ import { resolveBasePath, resolveSiteUrl } from './base-path.ts';
  */
 const base = resolveBasePath();
 const siteUrl = resolveSiteUrl();
+
+/** A meta policy works on static Pages hosting. Hash the final inline bootstrap. */
+function contentSecurityPolicy(): Plugin {
+  return {
+    name: 'opentrack-content-security-policy',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        const hashes = Array.from(html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi))
+          .filter((match) => !/\bsrc\s*=/i.test(match[1] ?? ''))
+          .map((match) => `'sha256-${createHash('sha256').update(match[2] ?? '').digest('base64')}'`);
+        const policy = [
+          "default-src 'none'",
+          // binary-parser compiles trusted schemas for GoPro telemetry at runtime.
+          // Inline scripts still require a hash; arbitrary remote scripts stay blocked.
+          `script-src 'self' 'unsafe-eval' ${hashes.join(' ')}`,
+          // React and MapLibre position elements using inline style attributes.
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' blob: data: https://tile.openstreetmap.org",
+          "connect-src 'self' blob: https://tile.openstreetmap.org",
+          "media-src 'self' blob:",
+          "worker-src 'self' blob:",
+          "font-src 'self'",
+          "manifest-src 'self'",
+          "base-uri 'none'",
+          "form-action 'none'",
+          "object-src 'none'",
+          "frame-src 'none'",
+        ].join('; ');
+        // Must precede resources and scripts to govern the whole document.
+        return html.replace(/(<meta charset="UTF-8"\s*\/?>)/i,
+          `$1\n    <meta http-equiv="Content-Security-Policy" content="${policy}" />`);
+      },
+    },
+  };
+}
 
 /**
  * AV-013. Emits `robots.txt` and `sitemap.xml` from the same site URL the app
@@ -65,6 +103,7 @@ export default defineConfig({
   plugins: [
     react(),
     seoFiles(),
+    contentSecurityPolicy(),
     /**
      * AV-802. Precaches the app shell so a return visit works offline.
      *

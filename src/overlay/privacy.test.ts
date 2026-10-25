@@ -12,8 +12,8 @@ import { describe, expect, it } from 'vitest';
  *
  * Reading from the origin-private file system is deliberately not forbidden: the
  * export writes its archive there and deletes it. What is forbidden is
- * everything that sends bytes off the device or keeps them across a reload
- * (TD-040: nothing but the theme is stored).
+ * network transmission and application persistence of source activity data.
+ * Temporary export files are reclaimed according to the documented ownership policy.
  */
 const SRC = join(process.cwd(), 'src');
 

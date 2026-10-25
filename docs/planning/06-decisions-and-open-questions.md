@@ -938,3 +938,25 @@ question deleted, so the reasoning stays findable.
 - How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
 - What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
 - What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
+
+
+### App review follow-up — 25 October 2026
+
+- Remember the theme and basemap boolean in localStorage. Other interaction state
+  and opened activities remain in memory. This supersedes session-only basemap
+  behavior and any earlier statement that only the theme preference is persisted.
+- Generated exports may use OPFS while a document owns their download. Web Locks
+  preserve ownership across tabs and are released by tab closure. Startup,
+  explicit cleanup, and new exports reclaim abandoned outputs. A crash or tab
+  close can leave local files until the next visit; deletion on unload is not
+  promised. Browsers without Web Locks use bounded memory for new exports.
+- Import limits are 32 MiB, 250,000 activity points, 64 XML levels and 2,000,000
+  XML elements. XML DTD/entity declarations are refused before parsing.
+- Source odometers remain authoritative for distance, including monotonic jumps
+  across segments. Moving time is counted only inside recorded segments, so a
+  source distance increase never turns a segment gap into movement.
+- Export preservation checks live with the serializers and shared availability
+  logic; opening a merged activity in the viewer does not weaken them. A section
+  wholly inside one stretch may be writable where the whole merge is not.
+
+Implementation and verification are tracked in [App Review Tasks](07-app-review-tasks.md).

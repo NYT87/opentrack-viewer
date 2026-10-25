@@ -10,6 +10,7 @@ This is the index for the OpenTrack Viewer engineering plan. The detailed plan h
 - [Engineering Tasks](04-engineering-tasks.md): epics, task IDs, dependencies, and acceptance criteria.
 - [Testing, Performance, and Error Handling](05-testing-performance-errors.md): test strategy, privacy regressions, performance risks, and error categories.
 - [Decisions and Open Questions](06-decisions-and-open-questions.md): technical decisions and unresolved product/engineering questions.
+- [App Review Tasks](07-app-review-tasks.md): prioritized fixes, descriptions, dependencies, and acceptance criteria from the 25 October 2026 app review.
 
 ## How To Use This Plan
 
