@@ -41,9 +41,10 @@ test('renders the video with the overlay burned in, keeps the sound, and uploads
   const panel = await openWithFiles(page, testInfo.outputDir);
 
   const render = panel.getByRole('button', { name: 'Render video with overlay' });
-  await expect(panel.getByTestId('burn-plan')).toBeVisible({ timeout: 30_000 });
+  await expect(panel.getByTestId('burn-plan').or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
   const refusal = await panel.getByRole('alert').allTextContents();
   test.skip(refusal.length > 0, `This machine cannot render here: ${refusal.join(' ')}`);
+  await expect(panel.getByTestId('burn-plan')).toBeVisible();
   await expect(panel.getByRole('list', { name: 'About this render' })).toContainText(
     'The sound is copied from your video unchanged.',
   );
@@ -149,8 +150,10 @@ test('renders the video with the overlay burned in, keeps the sound, and uploads
 test('stops on request, keeps nothing, and can be started again', async ({ page }, testInfo) => {
   const panel = await openWithFiles(page, testInfo.outputDir);
   const render = panel.getByRole('button', { name: 'Render video with overlay' });
-  await expect(panel.getByTestId('burn-plan')).toBeVisible({ timeout: 30_000 });
-  test.skip((await panel.getByRole('alert').count()) > 0, 'This machine cannot render here.');
+  await expect(panel.getByTestId('burn-plan').or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot render here: ${refusal.join(' ')}`);
+  await expect(panel.getByTestId('burn-plan')).toBeVisible();
 
   // The slowest size offered, so the stop lands in the middle of the render.
   await panel.getByLabel('Picture size').selectOption('2160');
