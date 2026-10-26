@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildXTicks, endpointFits, thinTicks } from '../domain/axis';
 import type { ChartSeries, SeriesSample } from '../domain/series';
-import { downsampleSeries, findNearestSample } from '../domain/series';
+import { downsampleSeries, findNearestSample, seriesRuns } from '../domain/series';
 import { type UnitSystem } from '../domain/units';
 import {
   X_AXIS_LABEL,
@@ -184,23 +184,46 @@ export function ActivityChart({
     };
   }, [rendered, plot, units, domain]);
 
-  const path = useMemo(() => {
-    if (!scale || rendered.samples.length === 0) return '';
-    return rendered.samples
-      .map((sample, index) => {
-        const command = index === 0 ? 'M' : 'L';
-        return `${command}${scale.x(sample.x).toFixed(2)} ${scale.y(sample.y).toFixed(2)}`;
-      })
-      .join(' ');
-  }, [rendered, scale]);
+  /*
+   * One line per recorded segment: where the recording was stopped — a pause,
+   * or the gap between two merged files — nothing is drawn across, so a stop
+   * never reads as a stretch of steady riding (TD-060).
+   */
+  const runs = useMemo(() => seriesRuns(rendered.samples), [rendered]);
+  const runPath = useCallback(
+    (run: SeriesSample[]) =>
+      scale
+        ? run
+            .map((sample, index) => `${index === 0 ? 'M' : 'L'}${scale.x(sample.x).toFixed(2)} ${scale.y(sample.y).toFixed(2)}`)
+            .join(' ')
+        : '',
+    [scale],
+  );
+  const path = useMemo(() => runs.map(runPath).join(' '), [runs, runPath]);
 
   const areaPath = useMemo(() => {
-    if (!path || !scale) return '';
-    const first = rendered.samples[0]!;
-    const last = rendered.samples[rendered.samples.length - 1]!;
+    if (!scale) return '';
     const baseline = plot.bottom;
-    return `${path} L${scale.x(last.x).toFixed(2)} ${baseline} L${scale.x(first.x).toFixed(2)} ${baseline} Z`;
-  }, [path, rendered.samples, scale, plot]);
+    return runs
+      .map((run) => {
+        const first = run[0]!;
+        const last = run[run.length - 1]!;
+        return `${runPath(run)} L${scale.x(last.x).toFixed(2)} ${baseline} L${scale.x(first.x).toFixed(2)} ${baseline} Z`;
+      })
+      .join(' ');
+  }, [runs, runPath, scale, plot]);
+
+  // Against time, a stop takes up room on the axis: it is shaded and named rather than left blank.
+  const pauses = useMemo(() => {
+    if (!scale || rendered.xAxis !== 'time') return [];
+    return runs.slice(1).flatMap((run, index) => {
+      const from = scale.x(runs[index]!.at(-1)!.x);
+      const to = scale.x(run[0]!.x);
+      const left = Math.max(plot.left, from);
+      const right = Math.min(plot.right, to);
+      return right - left >= 1 ? [{ key: run[0]!.pointIndex, left, right }] : [];
+    });
+  }, [runs, scale, rendered.xAxis, plot]);
 
   const activeSample = useMemo(() => {
     if (activePointIndex === undefined) return undefined;
@@ -458,6 +481,17 @@ export function ActivityChart({
                 </text>
               </g>
             ))}
+
+          {pauses.map((pause) => (
+            <g key={`pause-${pause.key}`} className="chart__pause" data-testid="chart-pause">
+              <rect x={pause.left} y={plot.top} width={pause.right - pause.left} height={plot.bottom - plot.top} />
+              {pause.right - pause.left >= 48 && (
+                <text x={(pause.left + pause.right) / 2} y={plot.top + 12} textAnchor="middle">
+                  Paused
+                </text>
+              )}
+            </g>
+          ))}
 
           {/* A flat series is a level line: filled to the baseline it read as a block. */}
           {!isEffectivelyFlat(series) && <path className="chart__area" d={areaPath} />}

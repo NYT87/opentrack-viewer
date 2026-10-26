@@ -7,6 +7,7 @@ import {
   getXAxisAvailability,
   resolveXAxis,
   restrictSeries,
+  seriesRuns,
 } from './series';
 import { makeActivity } from '../test/helpers/activity';
 import type { ActivitySensorStream } from './activity';
@@ -546,5 +547,39 @@ describe('the rolling window and a recording gap (AV-505, AV-513)', () => {
     // cumulative distance is identical — a speed of exactly zero, invented.
     expect(sampleAt('speed', 2)).toBeUndefined();
     expect(sampleAt('pace', 2)).toBeUndefined();
+  });
+});
+
+describe('a recording stopped and started again (TD-060)', () => {
+  const at = (minute: number) => new Date(Date.UTC(2024, 0, 1, 10, minute));
+  // Two recordings an hour apart, as a merge makes them.
+  const merged = makeActivity([
+    ...Array.from({ length: 3000 }, (_, i) => ({ elevationMeters: 100 + (i % 7), segmentIndex: 0, time: at(i / 100) })),
+    ...Array.from({ length: 3000 }, (_, i) => ({ elevationMeters: 120 + (i % 5), segmentIndex: 1, time: at(90 + i / 100) })),
+  ]);
+
+  it('marks the first sample after the stop, and only that one', () => {
+    const series = buildSeries(merged, 'elevation', 'time');
+    const breaks = series.samples.filter((sample) => sample.breakBefore);
+    expect(breaks.map((sample) => sample.pointIndex)).toEqual([3000]);
+    expect(seriesRuns(series.samples).map((run) => run.length)).toEqual([3000, 3000]);
+  });
+
+  it('thins each recorded stretch on its own, keeping where each starts and ends', () => {
+    const series = buildSeries(merged, 'elevation', 'time');
+    const reduced = downsampleSeries(series, 200);
+    expect(reduced.samples.length).toBeLessThanOrEqual(204);
+    const runs = seriesRuns(reduced.samples);
+    expect(runs).toHaveLength(2);
+    expect(runs.map((run) => [run[0]!.pointIndex, run.at(-1)!.pointIndex])).toEqual([
+      [0, 2999],
+      [3000, 5999],
+    ]);
+  });
+
+  it('is one stretch when nothing was stopped', () => {
+    const series = buildSeries(makeActivity([{ elevationMeters: 1 }, { elevationMeters: 2 }]), 'elevation', 'index');
+    expect(series.samples.some((sample) => sample.breakBefore)).toBe(false);
+    expect(seriesRuns(series.samples)).toHaveLength(1);
   });
 });

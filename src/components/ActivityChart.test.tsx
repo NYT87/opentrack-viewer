@@ -594,3 +594,35 @@ describe('a flat series (TD-056)', () => {
     expect(svg.querySelector('.chart__area')).toBeNull();
   });
 });
+
+describe('a recording stopped and started again (TD-060)', () => {
+  const at = (minute: number) => new Date(Date.UTC(2024, 0, 1, 10, minute));
+  const merged = makeActivity([
+    { lat: 0, lon: 0.0001, elevationMeters: 100, segmentIndex: 0, time: at(0) },
+    { lat: 0.001, lon: 0.0001, elevationMeters: 110, segmentIndex: 0, time: at(10) },
+    // An hour stopped, then on again.
+    { lat: 0.0011, lon: 0.0001, elevationMeters: 140, segmentIndex: 1, time: at(70) },
+    { lat: 0.002, lon: 0.0001, elevationMeters: 130, segmentIndex: 1, time: at(80) },
+  ]);
+  const moves = (d: string | null | undefined) => (d ?? '').match(/M/g)?.length ?? 0;
+
+  it('draws no line across the stop, and shades and names it against time', () => {
+    render(<ActivityChart series={buildSeries(merged, 'elevation', 'time')} />);
+    const svg = screen.getByTestId('elevation-chart-svg');
+
+    expect(moves(svg.querySelector('.chart__line')?.getAttribute('d'))).toBe(2);
+    // Each stretch is filled to the baseline on its own.
+    expect((svg.querySelector('.chart__area')?.getAttribute('d') ?? '').match(/Z/g)).toHaveLength(2);
+    const pauses = screen.getAllByTestId('chart-pause');
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0]).toHaveTextContent('Paused');
+  });
+
+  it('breaks the line against distance too, where a stop takes up no room to shade', () => {
+    render(<ActivityChart series={buildSeries(merged, 'elevation', 'distance')} />);
+    const svg = screen.getByTestId('elevation-chart-svg');
+
+    expect(moves(svg.querySelector('.chart__line')?.getAttribute('d'))).toBe(2);
+    expect(screen.queryByTestId('chart-pause')).toBeNull();
+  });
+});

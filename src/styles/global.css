@@ -1010,6 +1010,9 @@ input[type='color']:focus-visible {
 .chart__tick { stroke: var(--border); stroke-width: 1; }
 .chart__area { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
 .chart__line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+/* TD-060. Where the recording was stopped: shaded and named, not drawn across. */
+.chart__pause rect { fill: color-mix(in srgb, var(--text-muted) 10%, transparent); }
+.chart__pause text { fill: var(--text-muted); font-size: 11px; }
 .chart__selection {
   fill: color-mix(in srgb, var(--accent) 18%, transparent);
   stroke: var(--accent);
@@ -1541,6 +1544,22 @@ main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline
 .merge__result { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .merge__title { margin: 0; font-size: var(--text-title); overflow-wrap: anywhere; }
 .merge__pauses { margin: 0; font-size: var(--text-reading); color: var(--text-muted); }
+/* The GPX loses the pauses once it leaves this app: said where it is chosen. */
+.merge__gpx-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  font-size: var(--text-body);
+}
+.merge__gpx-warning p { margin: 0; flex: 1 1 280px; }
+.merge__gpx-warning strong { color: var(--warn); }
 .merge__notes { margin: 0; font-size: var(--text-reading); }
 .merge__notes .is-warning { padding: 6px 10px; border-left: 3px solid var(--warn); }
 .merge__notes .is-info { color: var(--text-muted); }

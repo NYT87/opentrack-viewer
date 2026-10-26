@@ -36,6 +36,12 @@ export interface SeriesSample {
   y: number;
   /** Index into `activity.points`, for map/chart synchronization (AV-601). */
   pointIndex: number;
+  /**
+   * The first sample of a new recorded segment: the recording was stopped
+   * between it and the sample before, so no line joins the two. A merged
+   * activity's pause between files is one of these (TD-060).
+   */
+  breakBefore?: true;
 }
 
 export interface ChartSeries {
@@ -397,13 +403,17 @@ function assembleSeries(
   let xMin = Infinity;
   let xMax = -Infinity;
 
+  let segment: number | undefined;
   for (let i = 0; i < activity.points.length; i += 1) {
     const y = values[i];
     const x = xs[i];
     if (!Number.isFinite(y) || x === undefined) continue;
 
     const value = y as number;
-    samples.push({ x, y: value, pointIndex: activity.points[i]!.index });
+    const pointSegment = activity.points[i]!.segmentIndex ?? 0;
+    const breakBefore = segment !== undefined && pointSegment !== segment;
+    segment = pointSegment;
+    samples.push({ x, y: value, pointIndex: activity.points[i]!.index, ...(breakBefore ? { breakBefore: true as const } : {}) });
     if (value < yMin) yMin = value;
     if (value > yMax) yMax = value;
     if (x < xMin) xMin = x;
@@ -432,18 +442,40 @@ function assembleSeries(
 export function downsampleSeries(series: ChartSeries, maxSamples: number): ChartSeries {
   if (series.samples.length <= maxSamples || maxSamples < 3) return series;
 
-  const bucketSize = series.samples.length / maxSamples;
-  const output: SeriesSample[] = [series.samples[0]!];
+  // Each recorded segment is thinned on its own, so a bucket never spans a
+  // break and every segment keeps its first sample, the one that starts it.
+  const runs = seriesRuns(series.samples);
+  const mid = (series.yMin + series.yMax) / 2;
+  const output = runs.flatMap((run) =>
+    downsampleRun(run, Math.max(3, Math.round((maxSamples * run.length) / series.samples.length)), mid),
+  );
+  return { ...series, samples: output };
+}
+
+/** The samples split where the recording was stopped: one array per recorded segment. */
+export function seriesRuns(samples: SeriesSample[]): SeriesSample[][] {
+  const runs: SeriesSample[][] = [];
+  for (const sample of samples) {
+    if (runs.length === 0 || sample.breakBefore) runs.push([]);
+    runs[runs.length - 1]!.push(sample);
+  }
+  return runs;
+}
+
+function downsampleRun(samples: SeriesSample[], maxSamples: number, mid: number): SeriesSample[] {
+  if (samples.length <= maxSamples) return samples;
+
+  const bucketSize = samples.length / maxSamples;
+  const output: SeriesSample[] = [samples[0]!];
 
   for (let bucket = 0; bucket < maxSamples; bucket += 1) {
     const start = Math.floor(bucket * bucketSize);
-    const end = Math.min(series.samples.length, Math.floor((bucket + 1) * bucketSize));
+    const end = Math.min(samples.length, Math.floor((bucket + 1) * bucketSize));
     let extreme: SeriesSample | undefined;
     let bestDeviation = -Infinity;
-    const mid = (series.yMin + series.yMax) / 2;
 
     for (let i = start; i < end; i += 1) {
-      const sample = series.samples[i]!;
+      const sample = samples[i]!;
       const deviation = Math.abs(sample.y - mid);
       if (deviation > bestDeviation) {
         bestDeviation = deviation;
@@ -453,10 +485,10 @@ export function downsampleSeries(series: ChartSeries, maxSamples: number): Chart
     if (extreme && extreme !== output[output.length - 1]) output.push(extreme);
   }
 
-  const last = series.samples[series.samples.length - 1]!;
+  const last = samples[samples.length - 1]!;
   if (output[output.length - 1] !== last) output.push(last);
 
-  return { ...series, samples: output };
+  return output;
 }
 
 /**
