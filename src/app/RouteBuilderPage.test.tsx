@@ -109,8 +109,7 @@ describe('arriving with nothing: direct entry and reload (AV-1102)', () => {
     window.location.hash = '#/route-builder';
     render(<App />);
 
-    const empty = await screen.findByRole('region', { name: 'Nothing planned yet' });
-    expect(empty).toHaveTextContent(/does not survive a reload/i);
+    const empty = await screen.findByRole('region', { name: 'Start a track' });
     expect(within(empty).getByRole('button', { name: 'Start a blank track' })).toBeInTheDocument();
     expect(screen.getByTestId('route-builder-input')).toHaveAttribute(
       'accept',
@@ -130,7 +129,7 @@ describe('arriving with nothing: direct entry and reload (AV-1102)', () => {
     expect(track).toHaveTextContent('A new planned track');
     expect(track).toHaveTextContent(/no points yet/i);
     expect(within(track).getByText('Points').nextSibling).toHaveTextContent('0');
-    expect(screen.queryByRole('region', { name: 'Nothing planned yet' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Start a track' })).not.toBeInTheDocument();
     expect(useRouteDraftStore.getState().draft?.kind).toBe('blank');
   });
 
@@ -140,7 +139,7 @@ describe('arriving with nothing: direct entry and reload (AV-1102)', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
     await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
 
-    expect(await screen.findByRole('region', { name: 'Nothing planned yet' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Start a track' })).toBeInTheDocument();
     expect(useRouteDraftStore.getState().draft).toBeUndefined();
   });
 
@@ -149,7 +148,7 @@ describe('arriving with nothing: direct entry and reload (AV-1102)', () => {
     useRouteDraftStore.getState().clear(); // what a reload does: nothing is persisted
     window.location.hash = '#/route-builder';
     render(<App />);
-    expect(await screen.findByRole('region', { name: 'Nothing planned yet' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Start a track' })).toBeInTheDocument();
   });
 });
 
@@ -171,7 +170,7 @@ describe('a draft handed over (AV-1102)', () => {
     expect(track).toHaveTextContent('ride.gpx: 3 of 3 points used');
     expect(within(track).getByText('Points').nextSibling).toHaveTextContent('3');
     expect(within(track).getByText('Distance').nextSibling).toHaveTextContent(/0\.22 km|222 m/);
-    expect(screen.queryByRole('region', { name: 'Nothing planned yet' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Start a track' })).not.toBeInTheDocument();
     // The viewer's activity was never involved.
     expect(useActivityStore.getState().activity).toBeUndefined();
   });
@@ -287,7 +286,7 @@ describe('importing a track (AV-1102)', () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
       });
       expect(freshStore.getState().draft).toBeUndefined();
-      expect(await screen.findByRole('region', { name: 'Nothing planned yet' })).toBeInTheDocument();
+      expect(await screen.findByRole('region', { name: 'Start a track' })).toBeInTheDocument();
 
       // Nor may it land in a draft started afterwards: a second stale parse,
       // left behind the same way, finds a new blank track and leaves it blank.

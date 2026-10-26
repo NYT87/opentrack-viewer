@@ -377,13 +377,7 @@ export function RouteBuilderPage() {
         </header>
 
         {!draft && !busy && (
-          <section className="prose" aria-label="Nothing planned yet">
-            <h3 className="prose__title">Nothing planned yet</h3>
-            <p>
-              Start a blank track, or import a route to begin from. A track handed over from the
-              viewer lives in memory only and does not survive a reload — if you came back here
-              after one, start again below.
-            </p>
+          <section className="prose" aria-label="Start a track">
             <p className="video__actions">
               <button type="button" className="button button--primary" onClick={() => {
                   retireRead();

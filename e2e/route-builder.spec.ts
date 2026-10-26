@@ -15,7 +15,7 @@ test('opens from the Tools menu, on a page of its own with nothing of the viewer
 
   await expect(page.getByRole('heading', { name: 'Route Builder' })).toBeVisible();
   expect(new URL(page.url()).hash).toBe('#/route-builder');
-  await expect(page.getByRole('region', { name: 'Nothing planned yet' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Start a track' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Activity charts' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Export activity' })).toHaveCount(0);
@@ -29,10 +29,9 @@ test('starts a blank track, and a reload leaves the empty state rather than a cr
   await expect(track).toContainText('A new planned track');
   await expect(track).toContainText(/no points yet/i);
 
-  // The draft lives in memory only: a reload loses it and says how to begin again.
+  // The draft lives in memory only: a reload loses it, and the page offers a new start.
   await page.reload();
-  const empty = page.getByRole('region', { name: 'Nothing planned yet' });
-  await expect(empty).toContainText(/does not survive a reload/i);
+  const empty = page.getByRole('region', { name: 'Start a track' });
   await expect(empty.getByRole('button', { name: 'Start a blank track' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Planned track' })).toHaveCount(0);
 });
