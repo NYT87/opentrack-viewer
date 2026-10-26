@@ -708,11 +708,10 @@ test('offers overlays in the Tools menu, and takes files by hand after a reload 
   await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Activity charts' })).toHaveCount(0);
 
-  // A reload loses the memory-only handoff; the page says so and asks again.
+  // A reload loses the memory-only handoff: the page opens on its two empty file slots.
   await page.reload();
-  await expect(page.getByRole('region', { name: 'Nothing to overlay yet' })).toContainText(
-    /choose the files again/i,
-  );
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start over' })).toHaveCount(0);
   await page.getByTestId('overlay-activity-input').setInputFiles('src/test/fixtures/simple-route.gpx');
   // An activity alone makes the still image, which takes the file slots' place.
   await expect(page.getByText(/Made from simple-route\.gpx/)).toBeVisible();

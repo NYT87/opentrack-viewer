@@ -360,16 +360,6 @@ export function OverlayPage() {
           </p>
         </header>
 
-        {!hasOverlaySource(source) && (
-          <section className="prose" aria-label="Nothing to overlay yet">
-            <h3 className="prose__title">Nothing to overlay yet</h3>
-            <p>
-              Choose a GoPro video, an activity file, or both. A handoff from Video telemetry lives
-              in memory only and does not survive a reload: choose the files again below.
-            </p>
-          </section>
-        )}
-
         {/*
           TD-059. One layout for every state, so the file slots never move in
           the page: a file being dropped while a video finishes reading is not

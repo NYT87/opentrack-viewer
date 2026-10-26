@@ -113,16 +113,15 @@ describe('reaching the tool (AV-1002)', () => {
 });
 
 describe('arriving with nothing (AV-1002)', () => {
-  it('shows an empty state that asks for the files again', async () => {
-    // Opened directly, or after a reload: the store starts empty.
+  it('opens on the two file slots, empty', async () => {
+    // Opened directly, or after a reload: the store starts empty, and the
+    // slots are the whole page below the introduction.
     window.location.hash = '#/overlays';
     render(<App />);
 
-    const empty = await screen.findByRole('region', { name: 'Nothing to overlay yet' });
-    expect(empty).toHaveTextContent(/does not survive a reload/i);
-    expect(empty).toHaveTextContent(/choose the files again/i);
-
-    // Both intakes are there to do so.
+    expect(await screen.findByRole('region', { name: 'Video' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Activity' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start over' })).not.toBeInTheDocument();
     expect(screen.getByTestId('overlay-video-input')).toHaveAttribute('accept', '.mp4,.mov');
     expect(screen.getByTestId('overlay-activity-input')).toHaveAttribute(
       'accept',
@@ -422,7 +421,8 @@ describe('choosing the files by hand (AV-1002)', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
 
-    expect(await screen.findByRole('region', { name: 'Nothing to overlay yet' })).toBeInTheDocument();
+    expect(await screen.findByTestId('overlay-activity-input')).toBeInTheDocument();
+    expect(screen.queryByText(/Made from/)).not.toBeInTheDocument();
     expect(useOverlayStore.getState().source).toEqual({});
 
     // And it can be taken back (TD-059).
@@ -534,7 +534,7 @@ describe('a file still being read when the reader lets it go', () => {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       });
       expect(freshStore.getState().source).toEqual({});
-      expect(await screen.findByRole('region', { name: 'Nothing to overlay yet' })).toBeInTheDocument();
+      expect(within(screen.getByRole('region', { name: 'Video' })).queryByText('GH010043.mp4')).not.toBeInTheDocument();
     } finally {
       vi.doUnmock('../parsers/gopro/extractGpmf');
       vi.resetModules();
