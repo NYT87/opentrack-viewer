@@ -901,7 +901,7 @@ question deleted, so the reasoning stays findable.
 | Selected-range map behaviour: hide, dim, or section only? | The full route is dimmed and the section drawn over it, so the selection is legible without losing where it sits (`AV-604`). |
 | Minimum drag before a range is accepted? | 8 pixels. Below that the gesture is treated as a click, so a click never becomes an accidental one-point selection. |
 | Pace from instantaneous speed or derived? | Derived, over a rolling window — see the pace decision above. |
-| Average pace/speed over moving or elapsed time? | Elapsed, so the figure agrees with the `Duration` beside it. Moving time is reported separately. |
+| Average pace/speed over moving or elapsed time? | Moving, labelled "(moving)", with the elapsed average beside it, also labelled. It was elapsed at first, to agree with the `Duration` beside it, and read as a contradiction of the pace chart under it (TD-058). |
 | What pace smoothing window? | 15 seconds, enough that GPS jitter between samples does not dominate. |
 | `strides/min`, `spm`, or the full phrase for cadence? | `spm` on the axis, with the chart stating "Strides per minute: one foot, as watches and foot pods report it." |
 | Cycling speed: recorded, derived, or hybrid? | Recorded when plausible, derived otherwise — a wheel sensor knows better than GPS, but a faulty reading is worse than none. |
@@ -923,7 +923,7 @@ question deleted, so the reasoning stays findable.
 | App-shell offline only, or route-only mode too? | Both shipped (`AV-802`, `AV-803`). |
 | Do standalone KML `Point` placemarks become waypoints? | No, not yet. They are counted and reported in one warning; a waypoint model invented for KML alone would be a format-specific branch. See TD-037. |
 | Which KML features are lost on conversion, and how is the reader told? | Polygons, overlays, models, tours and network links in one `warning`; styles and external links in `info` notes; points in a warning of their own. Each exporter's own requirement decides what can be written (TD-037). |
-| Which overlay-only export format ships first? | A PNG sequence everywhere, and a transparent VP9 WebM where a probe shows `MediaRecorder` keeps alpha — the Chromium family does, WebKit does not, and WebCodecs never does. No chroma-key video (TD-039). |
+| Which overlay-only export format ships first? | A PNG sequence everywhere, and a transparent VP9 WebM where a probe shows `MediaRecorder` keeps alpha — the Chromium family does, WebKit does not, and WebCodecs never does. No chroma-key video (TD-039). Both are built: the PNG sequence by `AV-1006` (TD-044), the WebM by `AV-1012` (TD-063). |
 | Is burned-in browser-side video export viable? | Yes, measured: WebCodecs decodes the HERO8 clip at over 700 fps and the decode-composite-encode chain runs at 7–11× real time with hardware H.264, in Chromium, Brave and WebKit alike. Second phase, desktop only, audio copied through, 10-bit HEVC still to be checked (TD-039). |
 | Should overlay configuration be exported as project JSON? | Yes — it is the serialisation `AV-1003` needs for its own tests, so it ships with the template model rather than as an export mode (TD-039). |
 | Which label for the viewer action that opens Route Builder? | **Create custom track**, the task's own phrase in the app's sentence case. Not *Plan route from activity*: a planner promises routing, which this does not do (TD-050). |
@@ -931,6 +931,11 @@ question deleted, so the reasoning stays findable.
 | Undo/redo in the first milestone, or only confirmation for a section discard? | Undo, for every edit, fifty deep; no confirmation dialogs and no redo. A dialog interrupts every discard to catch the rare slip and is answered by reflex; an undo costs nothing until it is needed, and a redo stack buys little for what it costs to explain (TD-052). |
 | Timestamps in planned-track exports: keep, synthesize, or omit? | Omit. A plan says where to go, not when; kept times would make a device read it as a ride already done, and synthesized ones would be invented. FIT and TCX, which need times, are listed as unavailable with that reason (TD-054). |
 | Far-apart appended tracks: a visible straight join, separate segments, or a confirmed join? | Separate stretches, joined on request: an appended track starts its own, the map draws no line nobody drew, and the selected point offers *Join to the point before* or *Start a new stretch here* (TD-052). |
+| For GoPro telemetry: a WebAssembly build of `gpmf-parser`, a JavaScript stack, or an internal minimal reader? | A JavaScript stack: `gopro-telemetry` interprets the payload, with GoPro's `gpmf-parser` kept as the specification reference, not compiled (TD-025). The container was first read by `gpmf-extract`, which streamed the whole file; it was replaced by reading the `gpmd` sample table from the index with `mp4box`, so an eight-gigabyte video costs under 200 KB of reads (TD-038). |
+| Which GoPro models and telemetry streams are in the first supported scope? | HERO5 onward, MP4 or MOV with a `gpmd` track: `GPS5` (HERO5–HERO10) and `GPS9` (HERO11 on) into position, elevation, time and speed, dropping points without a fix (`AV-904`). Of the other streams, acceleration, rotation rate and camera temperature are charted; the rest are named and not carried (TD-025, TD-034). |
+| How are high-frequency IMU streams represented without bloating `ActivityPoint`? | As `ActivitySensorStream`s beside the points: a key, label, unit and rate, and one value per point, the mean magnitude over each point's interval, aligned by the camera clock. Past twenty minutes of video they are declared and not read (TD-034). |
+| What small redistributable GoPro/GPMF fixtures can be committed? | GoPro's own HERO8 sample clip (Apache-2.0 or MIT), and the HERO7 and HERO11 payloads from `gopro-telemetry`'s samples (MIT); the HERO7 payload is also wrapped in a generated container, `hero7-synthetic.mp4`, the one video with a satellite fix. Licences and sources are in `src/test/fixtures/README.md`. |
+| Which first overlay templates? | Compact HUD, Route inset and Metric strip, each a placement rule rather than a stored layout (TD-043); then the still image (TD-061) and a free custom canvas with shapes (TD-062) for anything they do not cover. |
 | Overlapping recordings in a merge: interleave, trim, or refuse? | Refuse, naming both files and the overlap. Two recordings cannot both be the ride at the same moment; interleaving draws a zigzag between devices and trimming drops a stretch silently. A file starting the second the last one ends is a zero-length pause (TD-060). |
 
 ### Answered, needing no work
@@ -948,11 +953,6 @@ question deleted, so the reasoning stays findable.
 ### Still open
 
 - What image should be used for Open Graph and Twitter/X previews? The 512×512 app icon stands in; a purpose-made 1200×630 image would render properly in link previews.
-- For GoPro video telemetry, should the first implementation use a WebAssembly build of GoPro's `gpmf-parser`, a JavaScript stack such as `gopro-telemetry` plus raw GPMF extraction, or an internal minimal MP4/GPMF reader?
-- What GoPro models and telemetry streams are in the first supported scope: GPS only, GPS plus speed/altitude, or GPS plus IMU/camera streams?
-- How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
-- What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
-- What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
 
 
 ### App review follow-up — 25 October 2026
