@@ -772,6 +772,10 @@ Decision (`AV-1109`): Route Builder has a *Merge recorded tracks* section that m
 
 Formats. GPX and FIT carry a pause correctly. GPX writes one segment per recorded stretch, and the pause is the gap between two segments, but GPX has no lap structure. FIT carries the source lap boundaries, stops the timer at the end of each stretch and starts it at the next. FIT is the default merge export when available. TCX is listed but disabled, with the reason.
 
+**Outside this app, a GPX loses the pause.** Garmin Connect, given the merged GPX, ignored the segment break: it counted the 74 minutes as time stood still, averaged the speed over them and charted them flat. GPX states no timer, so nothing in the file can fix that, and the FIT, whose timer stops at the pause, reads correctly there. The merge page therefore says so where GPX is chosen: the option carries "not for Garmin Connect or Strava", and choosing it shows a note beside the download, with *Use FIT instead*; the note after a GPX download says the same. FIT stays the default.
+
+**The viewer's charts break at a pause too.** A series marks the first sample of each recorded segment, the downsampler thins each segment on its own so no bucket spans a break, and the chart starts a new line there and fills each stretch to the baseline separately. Against time, where a stop takes up room on the axis, the gap is shaded and labelled *Paused*; against distance it takes none and is only a break. Before this, a straight line was drawn across the pause, which read as an hour of steady riding: the misreading Garmin made, made here.
+
 Two writer changes came out of the review, and both apply to every export, not only merges:
 
 - **GPX now carries a recorded distance.** Each point's distance from the start goes in Cluetrust's GPXDATA extension (`<gpxdata:distance>`), and the GPX parser reads it back as the distance stream. GPX has no field for distance, so before this, a merge of two wheel-sensor recordings read back with distance measured from the positions, which is a different figure.

@@ -300,6 +300,9 @@ function MergedExport({ activity }: { activity: Activity }) {
   const chosen = formats.find((entry) => entry.format === format);
   const effective = chosen?.available ? format : formats.find((entry) => entry.available)?.format;
   const stem = mergedTrackFileStem(activity);
+  const fitAvailable = formats.some((entry) => entry.format === 'fit' && entry.available);
+  const pauseCount = (activity.events ?? []).filter((event) => event.type === 'pause').length;
+  const thePauses = pauseCount === 1 ? 'the pause' : 'the pauses';
 
   const write = async () => {
     if (!effective) return;
@@ -319,7 +322,7 @@ function MergedExport({ activity }: { activity: Activity }) {
 
   return (
     <div className="merge__export" role="group" aria-label="Export the merged activity">
-      <p>Each recording ends a lap. Choose FIT to keep lap boundaries in one activity, and to upload to Garmin Connect or Strava: its timer stops at each pause. GPX keeps the separate track segments but has no laps or timer, so those apps read a pause in it as standing still and average the speed over it.</p>
+      <p>Each recording ends a lap. FIT keeps the laps, and its timer stops at each pause: it is the file to upload to Garmin Connect or Strava. GPX keeps each recording as a track segment, with no laps and no timer.</p>
       <fieldset className="editor__modes">
         <legend className="summary__label">Format</legend>
         {formats.map((entry) => (
@@ -334,9 +337,31 @@ function MergedExport({ activity }: { activity: Activity }) {
             />
             {entry.label}
             {!entry.available && <span className="export__note"> — {entry.reason}</span>}
+            {entry.available && entry.format === 'gpx' && pauseCount > 0 && (
+              <span className="export__note"> — not for Garmin Connect or Strava</span>
+            )}
           </label>
         ))}
       </fieldset>
+      {/*
+        A GPX has no timer, so an app that counts time from it counts the pause
+        as time stood still: the average speed falls and the chart goes flat.
+        Said beside the download, where it is chosen, not only above it.
+      */}
+      {effective === 'gpx' && pauseCount > 0 && (
+        <div className="merge__gpx-warning" role="note" aria-label="Before uploading this GPX">
+          <p>
+            <strong>Not for Garmin Connect or Strava.</strong> They read a GPX without its pauses: {thePauses} between
+            the files would count as time standing still, lowering the average speed and flattening the chart. Use this
+            GPX for maps and planners{fitAvailable ? ', and upload the FIT' : ''}.
+          </p>
+          {fitAvailable && (
+            <button type="button" className="button" onClick={() => setFormat('fit')}>
+              Use FIT instead
+            </button>
+          )}
+        </div>
+      )}
       <p className="video__actions">
         <button type="button" className="button button--primary" onClick={() => void write()} disabled={!effective || busy}>
           {busy ? 'Writing…' : `Download ${stem}.${effective ?? 'gpx'}`}

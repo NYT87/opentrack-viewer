@@ -89,6 +89,26 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
     expect(within(exporter).getByRole('button', { name: 'Download Evening-Ride-merged.fit' })).toBeInTheDocument();
   });
 
+  it('warns, where GPX is chosen, that Garmin Connect and Strava would count the pause as standing still', async () => {
+    render(<App />);
+    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+    const exporter = await within(mergeRegion()).findByRole('group', { name: 'Export the merged activity' });
+
+    // FIT, the default, needs no warning; GPX says so on the choice itself.
+    expect(within(exporter).queryByRole('note', { name: 'Before uploading this GPX' })).not.toBeInTheDocument();
+    expect(within(exporter).getByRole('radio', { name: /^GPX\s*— not for Garmin Connect or Strava/ })).toBeEnabled();
+
+    await userEvent.click(within(exporter).getByRole('radio', { name: /^GPX/ }));
+    const note = within(exporter).getByRole('note', { name: 'Before uploading this GPX' });
+    expect(note).toHaveTextContent(/Not for Garmin Connect or Strava\. .+the pause between the files would count as time standing still/);
+    expect(note).toHaveTextContent(/upload the FIT/);
+
+    await userEvent.click(within(note).getByRole('button', { name: 'Use FIT instead' }));
+    expect(within(exporter).getByRole('radio', { name: /^FIT/ })).toBeChecked();
+    expect(within(exporter).queryByRole('note', { name: 'Before uploading this GPX' })).not.toBeInTheDocument();
+    expect(within(exporter).getByRole('button', { name: 'Download Evening-Ride-merged.fit' })).toBeInTheDocument();
+  });
+
   it('refuses a file with no timestamps, with the reason, and leaves it out of the order', async () => {
     render(<App />);
     await userEvent.upload(screen.getByTestId('merge-input'), [
