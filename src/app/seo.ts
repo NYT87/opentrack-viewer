@@ -19,10 +19,15 @@ export const SITE_URL: string =
   'https://nyt87.github.io/opentrack-viewer/';
 
 /**
- * A square app icon, because there is no purpose-made preview image yet. A
- * 1200×630 image would render better in link previews; §17 still asks which.
+ * The link-preview image: 1200×630, the size Open Graph and X draw large,
+ * made by `scripts/preview-image/make-preview-image.mjs`. Its route and
+ * elevation are made-up curves, so a shared link shows no one's ride.
  */
-export const PREVIEW_IMAGE = `${SITE_URL}icons/icon-512.png`;
+export const PREVIEW_IMAGE = `${SITE_URL}social/preview-1200x630.png`;
+export const PREVIEW_IMAGE_WIDTH = 1200;
+export const PREVIEW_IMAGE_HEIGHT = 630;
+export const PREVIEW_IMAGE_ALT =
+  'OpenTrack Viewer: your activity files, read in your browser. A route and its elevation profile, with GPX, FIT, TCX and KML.';
 
 export interface RouteMetadata {
   /** The full `<title>`, not a fragment: it is what a browser tab shows. */

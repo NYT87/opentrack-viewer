@@ -14,7 +14,17 @@ vi.mock('maplibre-gl', async () => {
 });
 
 const { App } = await import('./App');
-const { CANONICAL_URL, DEFAULT_METADATA, SITE_NAME, SITE_URL, metadataForRoute } =
+const {
+  CANONICAL_URL,
+  DEFAULT_METADATA,
+  PREVIEW_IMAGE,
+  PREVIEW_IMAGE_ALT,
+  PREVIEW_IMAGE_HEIGHT,
+  PREVIEW_IMAGE_WIDTH,
+  SITE_NAME,
+  SITE_URL,
+  metadataForRoute,
+} =
   await import('./seo');
 const { ROUTES } = await import('./routes');
 const { useActivityStore } = await import('../state/activityStore');
@@ -85,12 +95,17 @@ describe('route metadata (AV-013)', () => {
     expect(metaContent('meta[property="og:site_name"]')).toBe(SITE_NAME);
     expect(metaContent('meta[property="og:type"]')).toBe('website');
     expect(metaContent('meta[property="og:url"]')).toBe(CANONICAL_URL);
-    expect(metaContent('meta[property="og:image"]')).toMatch(/icon-512\.png$/);
+    expect(metaContent('meta[property="og:image"]')).toBe(PREVIEW_IMAGE);
+    expect(PREVIEW_IMAGE).toMatch(/social\/preview-1200x630\.png$/);
+    expect(metaContent('meta[property="og:image:width"]')).toBe('1200');
+    expect(metaContent('meta[property="og:image:height"]')).toBe('630');
+    expect(metaContent('meta[property="og:image:alt"]')).toBe(PREVIEW_IMAGE_ALT);
     expect(metaContent('meta[property="og:description"]')).toBe(DEFAULT_METADATA.description);
 
-    expect(metaContent('meta[name="twitter:card"]')).toBe('summary');
+    expect(metaContent('meta[name="twitter:card"]')).toBe('summary_large_image');
     expect(metaContent('meta[name="twitter:title"]')).toBe(DEFAULT_METADATA.title);
-    expect(metaContent('meta[name="twitter:image"]')).toMatch(/icon-512\.png$/);
+    expect(metaContent('meta[name="twitter:image"]')).toBe(PREVIEW_IMAGE);
+    expect(metaContent('meta[name="twitter:image:alt"]')).toBe(PREVIEW_IMAGE_ALT);
   });
 
   it('updates on navigation, without a reload', async () => {
@@ -168,6 +183,25 @@ describe('project metadata', () => {
     expect(html).toContain('__SITE_URL__');
     expect(html).not.toContain('https://nyt87.github.io');
     expect(html).not.toMatch(/(?:canonical|og:url|og:image|twitter:image)[^>]*https?:\/\//);
+  });
+
+  it('ships the preview image it names, at the size it states, and says the same before the app runs', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const png = readFileSync(join(process.cwd(), 'public', PREVIEW_IMAGE.slice(SITE_URL.length)));
+    // A PNG's width and height are the first two fields of its IHDR chunk.
+    expect(png.readUInt32BE(0)).toBe(0x89504e47);
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT]);
+    // Small enough for a chat app to fetch it: X refuses images over 5 MB.
+    expect(png.length).toBeLessThan(300_000);
+
+    // A crawler reads index.html without running the app, so it must say what the app says.
+    const html = readFileSync(join(process.cwd(), 'index.html'), 'utf-8');
+    expect(html).toContain(`content="__SITE_URL__${PREVIEW_IMAGE.slice(SITE_URL.length)}"`);
+    expect(html).toContain(`<meta property="og:image:width" content="${PREVIEW_IMAGE_WIDTH}" />`);
+    expect(html).toContain(`<meta property="og:image:height" content="${PREVIEW_IMAGE_HEIGHT}" />`);
+    expect(html.split(`content="${PREVIEW_IMAGE_ALT}"`)).toHaveLength(3);
+    expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
   });
 
   it('points package.json at the same repository the footer links to', async () => {

@@ -127,6 +127,9 @@ export default defineConfig({
         // lazily loaded map chunk and its worker — so route-only mode keeps
         // working offline (AV-803).
         globPatterns: ['**/*.{js,css,html,webmanifest,png,svg,mjs}'],
+        // The link-preview image is for crawlers and chat apps, never drawn by
+        // the app: precaching it would make every visitor download it.
+        globIgnores: ['social/**'],
         // The map chunk is around a megabyte; the default 2 MiB cap would
         // silently drop it from the precache.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

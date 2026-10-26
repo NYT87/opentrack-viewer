@@ -1650,8 +1650,13 @@ test('serves SEO metadata a crawler can read without running the app (AV-013)', 
   expect(html).toMatch(/<meta\s+name="description"/);
   expect(html).toMatch(/property="og:title"/);
   expect(html).toMatch(/property="og:image"/);
-  expect(html).toMatch(/name="twitter:card"/);
+  expect(html).toMatch(/name="twitter:card" content="summary_large_image"/);
   expect(html).toMatch(/rel="canonical"/);
+
+  // The preview image it names is served, as a PNG.
+  const image = await page.request.get(`${ORIGIN}${BASE_PATH}social/preview-1200x630.png`);
+  expect(image.status()).toBe(200);
+  expect(image.headers()['content-type']).toBe('image/png');
 });
 
 test('publishes robots.txt and a sitemap that agree on the site URL (AV-013)', async ({
