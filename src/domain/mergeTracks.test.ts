@@ -164,13 +164,20 @@ describe('what a merge refuses (AV-1109)', () => {
 
     // Even if one slips through, it is left out, never placed.
     const result = mergeTracks([ride('a.gpx', 0, 3), { fileName: 'b.gpx', activity: untimed }]);
-    expect(result).toMatchObject({ ok: false, error: { code: 'merge_needs_two' } });
+    expect(result.ok).toBe(true);
     expect(result.parts.map((part) => part.fileName)).toEqual(['a.gpx']);
   });
 
-  it('needs at least two timed files', () => {
+  it('needs one timed file, and takes one alone as a recording of its own', () => {
     expect(mergeTracks([])).toMatchObject({ ok: false, error: { code: 'merge_needs_two' } });
-    expect(mergeTracks([ride('a.gpx', 0, 10)])).toMatchObject({ ok: false, error: { code: 'merge_needs_two' } });
+    const single = mergeTracks([ride('a.gpx', 0, 10)]);
+    expect(single.ok).toBe(true);
+    if (!single.ok) return;
+    expect(single.pauses).toEqual([]);
+    expect(single.activity.points).toHaveLength(10);
+    // Not "merged": nothing was joined.
+    expect(single.activity.metadata.name).not.toMatch(/merged/);
+    expect(single.activity.events?.some((event) => event.type === 'pause')).toBe(false);
   });
 
   it('refuses overlapping files, naming them and the overlap, rather than interleaving them', () => {

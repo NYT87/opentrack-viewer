@@ -1510,6 +1510,8 @@ main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline
  */
 .merge__order,
 .merge__refused,
+/* Device file names run long with nothing to break at: they wrap anywhere rather than widen the page. */
+.merge { overflow-wrap: anywhere; }
 .merge__pauses,
 .merge__notes { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .merge__order { counter-reset: merge; }

@@ -33,10 +33,14 @@ export function mergedTrackFormats(activity: Activity): MergedFormatAvailability
   return getExportAvailability(activity);
 }
 
-/** `merged` is in every name, so the download is never taken for one of the originals. */
+/**
+ * `merged` is in the name of a file made of several, so the download is never
+ * taken for one of the originals. One recording on its own keeps its name.
+ */
 export function mergedTrackFileStem(activity: Activity): string {
   const name = (activity.metadata.name ?? '').replace(/\s*\(merged\)\s*$/, '').trim();
-  return `${safeFileStem(name, 'activity')}-merged`;
+  const joined = (activity.events ?? []).some((event) => event.type === 'pause');
+  return joined ? `${safeFileStem(name, 'activity')}-merged` : safeFileStem(name, 'activity');
 }
 
 /**

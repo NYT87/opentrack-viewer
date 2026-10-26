@@ -2,7 +2,9 @@ import { useCallback, useId, useRef, useState } from 'react';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 
 export interface FileDropZoneProps {
-  onFile: (file: File) => void;
+  onFile?: (file: File) => void;
+  /** Takes the accepted files of one pick or drop together, in place of `onFile` for each. */
+  onFiles?: (files: File[]) => void;
   /** Lowercase extensions accepted by the current build. */
   acceptedExtensions?: string[];
   disabled?: boolean;
@@ -23,6 +25,7 @@ export interface FileDropZoneProps {
  */
 export function FileDropZone({
   onFile,
+  onFiles,
   acceptedExtensions = SUPPORTED_FORMATS,
   disabled = false,
   testId = 'file-input',
@@ -47,9 +50,12 @@ export function FileDropZone({
           ? undefined
           : `${refused.map((file) => `"${file.name}"`).join(', ')} ${refused.length === 1 ? 'is' : 'are'} not supported. Choose ${describeFormats(acceptedExtensions)}.`,
       );
-      files.filter(accepted).forEach((file) => onFile(file));
+      const taken = files.filter(accepted);
+      if (taken.length === 0) return;
+      if (onFiles) onFiles(taken);
+      else taken.forEach((file) => onFile?.(file));
     },
-    [acceptedExtensions, onFile, multiple],
+    [acceptedExtensions, onFile, onFiles, multiple],
   );
 
   const onDrop = useCallback(

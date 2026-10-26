@@ -27,6 +27,22 @@ type RouteDraft = import('../domain/routeDraft').RouteDraft;
 const { fixtureFile, binaryFixtureFile } = await import('../test/helpers/fixtures');
 const { makeActivity } = await import('../test/helpers/activity');
 
+/**
+ * The first track of a test, into the planned track. A track with timestamps
+ * on its own is a recording first, and its route copy is the planned track; a
+ * track without goes straight in (TD-060).
+ */
+async function firstTrack(file: File) {
+  await userEvent.upload(await screen.findByTestId('track-input'), file);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('region', { name: 'Planned track' }) ?? screen.queryByRole('button', { name: 'Edit a route copy' }),
+    ).not.toBeNull(),
+  );
+  const copy = screen.queryByRole('button', { name: 'Edit a route copy' });
+  if (copy && !screen.queryByRole('region', { name: 'Planned track' })) await userEvent.click(copy);
+}
+
 beforeEach(() => {
   useRouteDraftStore.getState().clear();
   useActivityStore.getState().clear();
@@ -111,7 +127,7 @@ describe('arriving with nothing: direct entry and reload (AV-1102)', () => {
 
     const empty = await screen.findByRole('region', { name: 'Start a track' });
     expect(within(empty).getByRole('button', { name: 'Start a blank track' })).toBeInTheDocument();
-    expect(screen.getByTestId('route-builder-input')).toHaveAttribute(
+    expect(screen.getByTestId('track-input')).toHaveAttribute(
       'accept',
       '.gpx,.fit,.tcx,.kml',
     );
@@ -194,7 +210,7 @@ describe('importing a track (AV-1102)', () => {
   it('begins a draft from a GPX file, naming the file and what was used', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
 
     const track = await screen.findByRole('region', { name: 'Planned track' });
     expect(track).toHaveTextContent('Copied from a track');
@@ -206,12 +222,12 @@ describe('importing a track (AV-1102)', () => {
   it('adds a second track after the first as a separate stretch', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
     await screen.findByRole('region', { name: 'Planned track' });
     const first = useRouteDraftStore.getState().draft!.points.length;
 
-    expect(screen.getByRole('heading', { name: 'Add another track' })).toBeInTheDocument();
-    await userEvent.upload(screen.getByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    expect(screen.getByRole('heading', { name: 'Add tracks to the planned track' })).toBeInTheDocument();
+    await userEvent.upload(screen.getByTestId('track-input'), fixtureFile('simple-route.gpx'));
 
     await waitFor(() => expect(useRouteDraftStore.getState().draft!.points.length).toBe(first * 2));
     const track = screen.getByRole('region', { name: 'Planned track' });
@@ -223,7 +239,7 @@ describe('importing a track (AV-1102)', () => {
     window.location.hash = '#/route-builder';
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
-    await userEvent.upload(screen.getByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await userEvent.upload(screen.getByTestId('track-input'), fixtureFile('simple-route.gpx'));
     await waitFor(() => expect(useRouteDraftStore.getState().draft!.points.length).toBeGreaterThan(0));
     expect(useRouteDraftStore.getState().draft!.kind).toBe('appended');
     expect(screen.getByRole('region', { name: 'Planned track' })).toHaveTextContent('Built from imported tracks');
@@ -234,16 +250,18 @@ describe('importing a track (AV-1102)', () => {
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
     await userEvent.upload(
-      screen.getByTestId('route-builder-input'),
+      screen.getByTestId('track-input'),
       new File(['<gpx><not closed'], 'broken.gpx', { type: 'application/gpx+xml' }),
     );
 
-    const failure = await screen.findByRole('region', { name: 'Track not imported' });
-    expect(within(failure).getByRole('alert')).toHaveTextContent(/./);
+    // Said beside the drop zone, with a way to clear it; the draft is untouched.
+    const unused = await screen.findByRole('list', { name: 'Not used' });
+    expect(unused).toHaveTextContent(/broken\.gpx is not used\. ./);
     expect(useRouteDraftStore.getState().draft?.points).toEqual([]);
 
-    await userEvent.click(within(failure).getByRole('button', { name: 'Try another file' }));
-    expect(await screen.findByTestId('route-builder-input')).toBeInTheDocument();
+    await userEvent.click(within(unused).getByRole('button', { name: 'Remove broken.gpx' }));
+    expect(screen.queryByRole('list', { name: 'Not used' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('track-input')).toBeInTheDocument();
   });
 
   it('ignores a parse that finishes after the page was left', async () => {
@@ -268,8 +286,8 @@ describe('importing a track (AV-1102)', () => {
       window.location.hash = '#/route-builder';
       render(<Fresh />);
       await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
-      await userEvent.upload(screen.getByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
-      await screen.findByRole('region', { name: 'Reading the track' });
+      await userEvent.upload(screen.getByTestId('track-input'), fixtureFile('simple-route.gpx'));
+      await screen.findByText(/Reading 1 file/);
 
       // Leave mid-parse, come back, and discard the draft.
       await userEvent.click(screen.getByRole('button', { name: 'Tools' }));
@@ -290,8 +308,8 @@ describe('importing a track (AV-1102)', () => {
 
       // Nor may it land in a draft started afterwards: a second stale parse,
       // left behind the same way, finds a new blank track and leaves it blank.
-      await userEvent.upload(screen.getByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
-      await screen.findByRole('region', { name: 'Reading the track' });
+      await userEvent.upload(screen.getByTestId('track-input'), fixtureFile('simple-route.gpx'));
+      await screen.findByText(/Reading 1 file/);
       await userEvent.click(screen.getByRole('button', { name: 'Tools' }));
       await userEvent.click(screen.getByRole('menuitem', { name: 'File viewer' }));
       await userEvent.click(screen.getByRole('button', { name: 'Tools' }));
@@ -345,17 +363,20 @@ describe('importing a track (AV-1102)', () => {
       window.location.hash = '#/route-builder';
       render(<Fresh />);
 
-      // While an import is read the draft's own controls are hidden, but the
-      // merge below is not: a merge taken into editing gets nothing appended.
-      await userEvent.upload(await screen.findByTestId('route-builder-input'), await held());
-      await screen.findByRole('region', { name: 'Reading the track' });
-      await userEvent.upload(screen.getByTestId('merge-input'), [ride('a.gpx', 0), ride('b.gpx', 100)]);
-      await userEvent.click(await screen.findByRole('button', { name: 'Edit a route copy' }));
-      expect(screen.queryByRole('region', { name: 'Reading the track' })).not.toBeInTheDocument();
+      // A recording first, then a blank planned track, and a file picked for it.
+      await userEvent.upload(await screen.findByTestId('track-input'), [ride('a.gpx', 0), ride('b.gpx', 100)]);
+      await screen.findByRole('button', { name: 'Edit a route copy' });
+      await userEvent.click(screen.getByRole('button', { name: 'Start a blank track' }));
+      await userEvent.upload(screen.getByTestId('track-input'), await held());
+      await screen.findByText(/Reading 1 file/);
+
+      // The recording's route copy takes the blank track's place while the file is read.
+      await userEvent.click(screen.getByRole('button', { name: 'Edit a route copy' }));
       const merged = freshStore.getState().draft!;
       expect(merged.points).toHaveLength(20);
       await finishHeld();
       expect(freshStore.getState().draft).toBe(merged);
+      expect(await screen.findByText(/held\.gpx was not added: the planned track changed while it was read/)).toBeInTheDocument();
     } finally {
       vi.doUnmock('../parsers');
       vi.resetModules();
@@ -404,7 +425,7 @@ describe('the page uses the app’s shell (AV-1102)', () => {
   it('sets its own title and description, constants that never name a track', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
     await screen.findByRole('region', { name: 'Planned track' });
 
     expect(document.title).toBe(metadataForRoute(ROUTES.routeBuilder).title);
@@ -417,7 +438,7 @@ describe('the page uses the app’s shell (AV-1102)', () => {
   it('keeps nothing on the device', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
     await screen.findByRole('region', { name: 'Planned track' });
     expect(Object.keys(localStorage).filter((key) => key !== 'opentrack-viewer:theme')).toEqual([]);
     expect(Object.keys(sessionStorage)).toEqual([]);
@@ -608,7 +629,7 @@ describe('editing points on the map (AV-1104)', () => {
   it('does not pull the camera back while editing, but fits a new draft', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
     const map = await readyMap();
     expect(map.fitBoundsCalls).toHaveLength(1);
 
@@ -927,12 +948,12 @@ describe('undo and the live selection; one-point sections (AV-1105, review)', ()
 
 describe('appending another track (AV-1106)', () => {
   const lastAdded = () => screen.getByRole('status', { name: 'Last track added' });
-  const upload = async (file: File) => userEvent.upload(screen.getByTestId('route-builder-input'), file);
+  const upload = async (file: File) => userEvent.upload(screen.getByTestId('track-input'), file);
 
   async function startWithGpx() {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
     await screen.findByRole('region', { name: 'Planned track' });
     return draft().points.length;
   }
@@ -1042,7 +1063,7 @@ describe('appending another track (AV-1106)', () => {
     const alert = within(failure).getByRole('alert');
     expect(alert).toHaveAttribute('data-error-code', 'no_route_points');
     expect(alert).toHaveTextContent(/^It has no route to add/);
-    expect(failure).toHaveTextContent('The planned track is as it was.');
+    expect(failure).toHaveTextContent('Nothing of it was added to the planned track.');
     expect(draft()).toBe(held);
   });
 
@@ -1051,8 +1072,7 @@ describe('appending another track (AV-1106)', () => {
     const held = draft();
     await upload(new File(['not a track at all'], 'notes.gpx', { type: 'application/gpx+xml' }));
 
-    const alert = within(await screen.findByRole('region', { name: 'Track not imported' })).getByRole('alert');
-    expect(alert.getAttribute('data-error-code')).not.toBe('no_route_points');
+    expect(await screen.findByRole('list', { name: 'Not used' })).toHaveTextContent(/notes\.gpx is not used\. ./);
     expect(draft()).toBe(held);
   });
 
@@ -1060,7 +1080,7 @@ describe('appending another track (AV-1106)', () => {
     await startWithGpx();
     const held = draft();
     // The picker's accept list would hide it; a drop does not, so the page's own check is what is tested.
-    await userEvent.setup({ applyAccept: false }).upload(screen.getByTestId('route-builder-input'), new File(['a,b'], 'route.csv', { type: 'text/csv' }));
+    await userEvent.setup({ applyAccept: false }).upload(screen.getByTestId('track-input'), new File(['a,b'], 'route.csv', { type: 'text/csv' }));
     expect(await screen.findByText(/"route\.csv" is not supported/)).toBeInTheDocument();
     expect(draft()).toBe(held);
   });
@@ -1119,7 +1139,7 @@ describe('exporting the planned track (AV-1107)', () => {
   it('downloads a GPX named as a planned track, and says what it left out', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('route-with-elevation.gpx'));
+    await firstTrack(fixtureFile('route-with-elevation.gpx'));
     await screen.findByRole('region', { name: 'Planned track' });
 
     await userEvent.click(within(exportRegion()).getByRole('button', { name: /Download .*-planned-track\.gpx/ }));
@@ -1138,7 +1158,7 @@ describe('exporting the planned track (AV-1107)', () => {
   it('lists FIT and TCX as disabled, with the reason, and GPX as the choice', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
     await screen.findByRole('region', { name: 'Planned track' });
 
     expect(within(exportRegion()).getByRole('radio', { name: /^GPX/ })).toBeChecked();
@@ -1153,9 +1173,9 @@ describe('exporting the planned track (AV-1107)', () => {
   it('warns about separate stretches when there are several', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);
-    await userEvent.upload(await screen.findByTestId('route-builder-input'), fixtureFile('simple-route.gpx'));
+    await firstTrack(fixtureFile('simple-route.gpx'));
     await screen.findByRole('region', { name: 'Planned track' });
-    await userEvent.upload(screen.getByTestId('route-builder-input'), fixtureFile('route-with-elevation.gpx'));
+    await userEvent.upload(screen.getByTestId('track-input'), fixtureFile('route-with-elevation.gpx'));
     await waitFor(() => expect(new Set(draft().points.map((p) => p.segmentIndex)).size).toBe(2));
 
     await userEvent.click(within(exportRegion()).getByRole('button', { name: /Download/ }));

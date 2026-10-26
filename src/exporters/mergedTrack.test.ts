@@ -70,6 +70,8 @@ describe('which formats a merged track can be written to (AV-1109, TD-060)', () 
     expect(mergedTrackFileStem(merged())).toBe('Lunch-Ride-merged');
     const unnamed = { ...merged(), metadata: { name: undefined } };
     expect(mergedTrackFileStem(unnamed)).toBe('activity-merged');
+    // One recording on its own was not merged with anything, and keeps its name.
+    expect(mergedTrackFileStem({ ...merged(), events: [] })).toBe('Lunch-Ride');
   });
 });
 

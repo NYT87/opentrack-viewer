@@ -1,14 +1,13 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useMemo, useState } from 'react';
 import type { FeatureCollection, Point } from 'geojson';
-import { FileDropZone } from '../components/FileDropZone';
 import { WarningList } from '../components/ErrorPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
 import { PlannedTrackExport } from '../components/PlannedTrackExport';
 import { TrackMerge } from '../components/TrackMerge';
 import type { EditPointProperties } from '../components/ActivityMap';
 import type { Activity } from '../domain/activity';
-import { toActivityError } from '../domain/errors';
 import { EMPTY_ROUTE_GEOMETRY, activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
+import type { MergeSource } from '../domain/mergeTracks';
 import {
   appendJump,
   beginsStretch,
@@ -22,8 +21,6 @@ import {
   type RouteDraft,
 } from '../domain/routeDraft';
 import { formatDistance, type UnitSystem } from '../domain/units';
-import { parseActivityFile } from '../parsers';
-import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { useInteractionStore } from '../state/interactionStore';
 import { useRouteDraftStore } from '../state/routeDraftStore';
 
@@ -33,10 +30,8 @@ const ActivityMap = lazy(() =>
   import('../components/ActivityMap').then((module) => ({ default: module.ActivityMap })),
 );
 
-type Intake =
-  | { status: 'idle' }
-  | { status: 'reading'; fileName: string }
-  | { status: 'error'; message: string; code: string };
+/** Whether the last files sent to the planned track could all be taken. */
+type Intake = { status: 'idle' } | { status: 'error'; fileName: string; message: string; code: string };
 
 /**
  * AV-1106. What the last append was: which file, how many points, and the
@@ -166,29 +161,6 @@ export function RouteBuilderPage() {
   const setMarks = (fromId: string | undefined, toId: string | undefined) =>
     setWanted((current) => ({ ...forThisDraft(current), draftId: draft?.id, fromId, toId }));
 
-  /*
-   * The parse cannot be stopped, but its result can be refused. Each read
-   * takes a token; leaving the page retires every token, so a parse that
-   * finishes after the reader has gone — and perhaps come back and started
-   * over — writes nothing into the draft they now have.
-   */
-  const readToken = useRef(0);
-  useEffect(
-    () => () => {
-      readToken.current = -1;
-    },
-    [],
-  );
-  /**
-   * The draft is being replaced by the reader's own choice: an import still
-   * being read was meant for the draft that is going, and must not append to
-   * the one that takes its place.
-   */
-  const retireRead = () => {
-    readToken.current += 1;
-    setIntake((current) => (current.status === 'reading' ? { status: 'idle' } : current));
-  };
-
   const track = useMemo(() => (draft ? draftToActivity(draft) : undefined), [draft]);
   const route = useMemo(
     () => (track?.ok ? activityToRouteGeoJSON(track.value) : EMPTY_ROUTE_GEOMETRY),
@@ -302,48 +274,45 @@ export function RouteBuilderPage() {
     });
   };
 
-  const handleFile = async (file: File) => {
-    const token = ++readToken.current;
-    setIntake({ status: 'reading', fileName: file.name });
-    try {
-      // The viewer's own intake: GPX, FIT, TCX and KML, read in this tab.
-      const { activity } = await parseActivityFile(file);
-      if (readToken.current !== token) return;
+  /**
+   * Files for the planned track, already read by Add tracks, in the order they
+   * were added. They were picked for the planned track open then (or for none):
+   * if it has been replaced since — a route copy of a recording, a blank track,
+   * Start over — they were meant for a track that is gone, and are not added.
+   */
+  const addToPlannedTrack = (sources: MergeSource[], forDraftId: string | undefined): boolean => {
+    if (useRouteDraftStore.getState().draft?.id !== forDraftId) return false;
+    let failure: Intake | undefined;
+    let last: Appended | undefined;
+    let appendedAny = false;
+    for (const { fileName, activity } of sources) {
       const before = useRouteDraftStore.getState().draft;
       const result = importTrack(activity);
       if (!result.ok) {
-        setIntake({ status: 'error', message: result.error.message, code: result.error.code });
-        return;
+        failure = { status: 'error', fileName, message: result.error.message, code: result.error.code };
+        continue;
       }
-      if (before) {
-        setEditingDraftId(undefined);
-        setWanted({ draftId: result.value.id, mode: 'add' });
-      }
-      setIntake({ status: 'idle' });
-      const jump = before ? appendJump(before, result.value) : undefined;
-      setAppended(
-        jump && before
-          ? {
-              draftId: result.value.id,
-              fileName: file.name,
-              firstId: jump.firstId,
-              added: result.value.points.length - before.points.length,
-            }
-          : undefined,
-      );
-    } catch (error) {
-      if (readToken.current !== token) return;
-      const failure = toActivityError(error, 'unsupported_format');
-      setIntake({ status: 'error', message: failure.message, code: failure.code });
+      if (!before) continue;
+      appendedAny = true;
+      const jump = appendJump(before, result.value);
+      last = jump
+        ? { draftId: result.value.id, fileName, firstId: jump.firstId, added: result.value.points.length - before.points.length }
+        : undefined;
     }
+    const now = useRouteDraftStore.getState().draft;
+    if (appendedAny && now) {
+      // A joined track starts as a preview again: editing it is a choice.
+      setEditingDraftId(undefined);
+      setWanted({ draftId: now.id, mode: 'add' });
+    }
+    setAppended(last);
+    setIntake(failure ?? { status: 'idle' });
+    return true;
   };
-
-  const busy = intake.status === 'reading';
 
   const editMergedActivity = (activity: Activity): string | undefined => {
     const result = draftFromActivity(activity);
     if (!result.ok) return result.error.message;
-    retireRead();
     setDraft(result.value);
     setEditingDraftId(result.value.id);
     setWanted({ draftId: result.value.id, mode: 'add' });
@@ -376,35 +345,25 @@ export function RouteBuilderPage() {
           </p>
         </header>
 
-        {!draft && !busy && (
+        {!draft && (
           <section className="prose" aria-label="Start a track">
             <p className="video__actions">
-              <button type="button" className="button button--primary" onClick={() => {
-                  retireRead();
-                  startBlank();
-                }}>
+              <button type="button" className="button button--primary" onClick={() => startBlank()}>
                 Start a blank track
               </button>
             </p>
           </section>
         )}
 
-        {busy && (
-          <section className="prose" aria-label="Reading the track">
-            <h3 className="prose__title">Reading {intake.fileName}</h3>
-            <p>Parsing happens in this tab.</p>
-          </section>
-        )}
-
         {intake.status === 'error' && (
           <section className="prose" aria-label="Track not imported">
-            <h3 className="prose__title">That track could not be imported</h3>
+            <h3 className="prose__title">{intake.fileName} could not be imported</h3>
             <p role="alert" data-error-code={intake.code}>
               {intake.code === 'no_route_points'
                 ? `It has no route to add: ${intake.message}`
                 : intake.message}
             </p>
-            {draft && <p>The planned track is as it was.</p>}
+            {draft && <p>Nothing of it was added to the planned track.</p>}
             <p>
               <button type="button" className="button" onClick={() => setIntake({ status: 'idle' })}>
                 Try another file
@@ -413,16 +372,13 @@ export function RouteBuilderPage() {
           </section>
         )}
 
-        {draft && !busy && (
+        {draft && (
           <>
             <DraftSummary
               draft={draft}
               track={track?.ok ? track.value : undefined}
               units={unitSystem}
-              onClear={() => {
-                retireRead();
-                clear();
-              }}
+              onClear={clear}
             />
 
             <section className="box" aria-label="Draft map">
@@ -473,42 +429,27 @@ export function RouteBuilderPage() {
           </>
         )}
 
-        {!busy && intake.status !== 'error' && (
-          <section className="prose" aria-label="Import a track">
-            <h3 className="prose__title">{draft ? 'Add another track' : 'Import a track'}</h3>
-            <p>
-              {draft
-                ? 'It is added after the points already here, as a separate stretch: the end of one and the start of the next are not joined until you join them.'
-                : 'The route becomes the first points of a new planned track. Only its places are kept, not heart rate, power or the device that recorded it.'}
-            </p>
-            {appendedNow && (
-              <div className="editor__selected" role="status" aria-label="Last track added">
-                <span className="route-draft__appended">
-                  {`Added ${appendedNow.added} point${appendedNow.added === 1 ? '' : 's'} from ${appendedNow.fileName}. `}
-                  {appendedNow.joined
-                    ? `It is joined to the point before it: the ${formatDistance(appendedNow.meters, unitSystem)} between them is drawn and counted.`
-                    : appendedNow.far
-                      ? `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it — far apart, so it is a stretch of its own and nothing is drawn or counted across the jump. If it is one road, join them.`
-                      : `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it, as a stretch of its own; nothing is drawn or counted across the jump until you join them.`}
-                </span>
-                {editing && <button
-                  type="button"
-                  className="button"
-                  onClick={() => setSelectedId(appendedNow.firstId)}
-                >
-                  Select the join
-                </button>}
-              </div>
-            )}
-            <FileDropZone
-              acceptedExtensions={SUPPORTED_FORMATS}
-              onFile={(file) => void handleFile(file)}
-              testId="route-builder-input"
-            />
-          </section>
+        {appendedNow && (
+          <div className="editor__selected" role="status" aria-label="Last track added">
+            <span className="route-draft__appended">
+              {`Added ${appendedNow.added} point${appendedNow.added === 1 ? '' : 's'} from ${appendedNow.fileName}. `}
+              {appendedNow.joined
+                ? `It is joined to the point before it: the ${formatDistance(appendedNow.meters, unitSystem)} between them is drawn and counted.`
+                : appendedNow.far
+                  ? `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it — far apart, so it is a stretch of its own and nothing is drawn or counted across the jump. If it is one road, join them.`
+                  : `It starts ${formatDistance(appendedNow.meters, unitSystem)} from the point before it, as a stretch of its own; nothing is drawn or counted across the jump until you join them.`}
+            </span>
+            {editing && <button
+              type="button"
+              className="button"
+              onClick={() => setSelectedId(appendedNow.firstId)}
+            >
+              Select the join
+            </button>}
+          </div>
         )}
 
-        <TrackMerge onEditActivity={editMergedActivity} />
+        <TrackMerge onEditActivity={editMergedActivity} draftId={draft?.id} onPlannedTrack={addToPlannedTrack} />
       </div>
     </main>
   );

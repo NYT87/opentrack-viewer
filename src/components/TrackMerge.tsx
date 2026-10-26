@@ -4,7 +4,7 @@ import { ROUTES } from '../app/routes';
 import type { Activity, ActivityWarning } from '../domain/activity';
 import { ActivityError, toActivityError } from '../domain/errors';
 import { activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
-import { assessMergeSource, mergeTracks, type MergePart, type MergeResult } from '../domain/mergeTracks';
+import { assessMergeSource, mergeTracks, type MergePart, type MergeResult, type MergeSource } from '../domain/mergeTracks';
 import {
   formatDateTime,
   formatDistance,
@@ -37,18 +37,40 @@ type Entry =
   | { key: number; fileName: string; status: 'refused'; message: string };
 
 /**
- * AV-1109 (TD-060). Route Builder's merge: two or more recorded track files
- * made into one timed activity, the gaps between them kept as pauses.
+ * Route Builder's one way in for track files (AV-1102, AV-1109, TD-060): one
+ * file or several, and what they become is decided by the files.
  *
- * It sits beside the planned track rather than inside it, because it is the
- * other thing: a planned track is places with no times, and a merge is a
- * recording, times and all. The files are read in this tab, held in memory
- * for as long as the page is open, and the merge is worked out again from
- * them on every change, so what is shown is never out of step with the list.
+ * - **All recorded, with timestamps:** one recording, in the order they were
+ *   recorded, by their own clocks. Two or more are merged, the time between
+ *   them kept as a pause; one is itself. Its figures, its map, its download,
+ *   the viewer, or a route copy to edit.
+ * - **Any without timestamps** (a planned route, a KML): there is no clock to
+ *   order them by, so the files picked together go into the planned track as
+ *   places, in the order they were added.
+ * - **A planned track already open:** files are added to it.
+ *
+ * The files are read in this tab and held in memory for as long as the page
+ * is open; the recording is worked out again from them on every change.
  */
-export function TrackMerge({ onEditActivity }: { onEditActivity: (activity: Activity) => string | undefined }) {
+export function TrackMerge({
+  onEditActivity,
+  draftId,
+  onPlannedTrack,
+}: {
+  onEditActivity: (activity: Activity) => string | undefined;
+  /** The planned track open now, if any: files picked while it is open go into it. */
+  draftId: string | undefined;
+  /**
+   * Files for the planned track, read, in the order added, and the planned
+   * track they were picked for. Returns false when that track has since been
+   * replaced, so nothing was added.
+   */
+  onPlannedTrack: (sources: MergeSource[], forDraftId: string | undefined) => boolean;
+}) {
   const units = useInteractionStore((state) => state.unitSystem);
   const [entries, setEntries] = useState<Entry[]>([]);
+  /** What happened to the last files sent to the planned track, said once. */
+  const [planned, setPlanned] = useState<string | undefined>();
   const nextKey = useRef(0);
   /**
    * Parses that finish after the page has gone write nothing. Set on every
@@ -63,22 +85,51 @@ export function TrackMerge({ onEditActivity }: { onEditActivity: (activity: Acti
     };
   }, []);
 
-  const addFile = async (file: File) => {
-    const key = nextKey.current++;
-    setEntries((current) => [...current, { key, fileName: file.name, status: 'reading' }]);
-    let settled: Entry;
-    try {
-      const { activity } = await parseActivityFile(file);
-      const refusal = assessMergeSource(activity);
-      settled = refusal
-        ? { key, fileName: file.name, status: 'refused', message: refusal.message }
-        : { key, fileName: file.name, status: 'ready', activity };
-    } catch (error) {
-      settled = { key, fileName: file.name, status: 'refused', message: toActivityError(error, 'unsupported_format').message };
-    }
+  const addFiles = async (files: File[]) => {
+    const forDraftId = draftId;
+    const batch = files.map((file) => ({ key: nextKey.current++, fileName: file.name }));
+    setPlanned(undefined);
+    setEntries((current) => [...current, ...batch.map((entry) => ({ ...entry, status: 'reading' as const }))]);
+    const read = await Promise.all(
+      files.map(async (file, index): Promise<Entry> => {
+        const { key } = batch[index]!;
+        try {
+          const { activity } = await parseActivityFile(file);
+          return { key, fileName: file.name, status: 'ready', activity };
+        } catch (error) {
+          return { key, fileName: file.name, status: 'refused', message: toActivityError(error, 'unsupported_format').message };
+        }
+      }),
+    );
     if (!live.current) return;
+    const readable = read.filter((entry): entry is Extract<Entry, { status: 'ready' }> => entry.status === 'ready');
+    const untimed = readable.filter((entry) => assessMergeSource(entry.activity) !== undefined);
+    const toPlannedTrack = readable.length > 0 && (forDraftId !== undefined || untimed.length > 0);
     // A file removed while it was being read stays removed.
-    setEntries((current) => current.map((entry) => (entry.key === key ? settled : entry)));
+    const settle = (keep: (entry: Entry) => boolean) =>
+      setEntries((current) =>
+        current.flatMap((entry) => {
+          const done = read.find((settled) => settled.key === entry.key);
+          if (!done) return [entry];
+          return keep(done) ? [done] : [];
+        }),
+      );
+    if (!toPlannedTrack) {
+      settle(() => true);
+      return;
+    }
+    // The planned track takes the readable ones; a file that could not be read is still said.
+    settle((entry) => entry.status === 'refused');
+    const sources = readable.map((entry) => ({ fileName: entry.fileName, activity: entry.activity }));
+    const added = onPlannedTrack(sources, forDraftId);
+    const names = sources.map((source) => source.fileName).join(', ');
+    setPlanned(
+      !added
+        ? `${names} ${sources.length === 1 ? 'was' : 'were'} not added: the planned track changed while ${sources.length === 1 ? 'it was' : 'they were'} read.`
+        : forDraftId !== undefined
+          ? `${names} ${sources.length === 1 ? 'was' : 'were'} added to the planned track above.`
+          : `${untimed.map((entry) => entry.fileName).join(', ')} ${untimed.length === 1 ? 'has' : 'have'} no timestamps, so ${sources.length === 1 ? 'it went' : 'the files went'} into the planned track above as places to edit, in the order added.`,
+    );
   };
 
   const remove = (key: number) => setEntries((current) => current.filter((entry) => entry.key !== key));
@@ -97,22 +148,28 @@ export function TrackMerge({ onEditActivity }: { onEditActivity: (activity: Acti
   const keyOf = (part: MergePart) => ready[part.sourceIndex]?.key;
 
   return (
-    <section className="prose merge" aria-label="Merge recorded tracks">
-      <h3 className="prose__title">Merge recorded tracks</h3>
-      <p>
-        Make one activity of a ride saved in parts: two or more recordings of the same outing. They
-        are put in the order they were recorded, by their own clocks, and the time between them is
-        kept as a pause: it counts in elapsed time, not in moving time, and adds no distance.
-        Each recording ends a lap in the merged activity.
-        Unlike the planned track above, a merge keeps every time. It is worked out in this tab;
-        nothing is uploaded.
-      </p>
+    <section className="prose merge" aria-label="Add tracks">
+      <h3 className="prose__title">{draftId ? 'Add tracks to the planned track' : 'Add tracks'}</h3>
+      {draftId ? (
+        <p>
+          Each file is added after the points already here, as a stretch of its own: the end of one and the start of the
+          next are not joined until you join them. Only places are kept, not heart rate, power or the device.
+        </p>
+      ) : (
+        <p>
+          One file or several. Recordings with timestamps become one activity, in the order they were recorded: two or
+          more are joined, and the time between them is kept as a pause, counted in elapsed time but not in moving time,
+          with each recording ending a lap. A file without timestamps, such as a planned route, goes into a planned
+          track instead, as places to edit. Everything is read in this tab; nothing is uploaded.
+        </p>
+      )}
       <FileDropZone
         acceptedExtensions={SUPPORTED_FORMATS}
-        onFile={(file) => void addFile(file)}
-        testId="merge-input"
+        onFiles={(files) => void addFiles(files)}
+        testId="track-input"
         multiple
       />
+      {planned && <p role="status">{planned}</p>}
       {reading > 0 && (
         <p role="status">
           Reading {reading} file{reading === 1 ? '' : 's'} in this tab…
@@ -132,11 +189,11 @@ export function TrackMerge({ onEditActivity }: { onEditActivity: (activity: Acti
       )}
 
       {refused.length > 0 && (
-        <ul className="merge__refused" aria-label="Not in the merge">
+        <ul className="merge__refused" aria-label="Not used">
           {refused.map((entry) => (
             <li key={entry.key}>
               <span>
-                <strong>{entry.fileName}</strong> is not in the merge. {entry.message}
+                <strong>{entry.fileName}</strong> is not used. {entry.message}
               </span>
               <button type="button" className="button" aria-label={`Remove ${entry.fileName}`} onClick={() => remove(entry.key)}>
                 Remove
@@ -151,11 +208,6 @@ export function TrackMerge({ onEditActivity }: { onEditActivity: (activity: Acti
           {overlapSentence(result.parts, result.error.between, result.error.overlapSeconds)}
         </p>
       )}
-      {((result && !result.ok && result.error.code === 'merge_needs_two') ||
-        (!result && entries.length > 0 && reading === 0)) && (
-        <p className="merge__hint">Add at least one more recorded track with timestamps to merge.</p>
-      )}
-
       {result?.ok && <MergedActivity result={result} units={units} onEditActivity={onEditActivity} />}
     </section>
   );
@@ -213,9 +265,11 @@ function MergedActivity({ result, units, onEditActivity }: {
   const paused = pauses.reduce((total, pause) => total + pause.seconds, 0);
   const route = useMemo(() => activityToRouteGeoJSON(activity), [activity]);
   const [editError, setEditError] = useState<string | undefined>();
+  // One file on its own is a recording, not a merge: no pauses between files, nothing joined.
+  const joined = parts.length > 1;
 
   return (
-    <div className="merge__result" role="group" aria-label="The merged activity">
+    <div className="merge__result" role="group" aria-label={joined ? 'The merged activity' : 'The recording'}>
       <h4 className="merge__title">{activity.metadata.name}</h4>
       <dl className="summary__grid">
         <Stat label="Points" value={activity.points.length.toLocaleString()} />
@@ -223,12 +277,14 @@ function MergedActivity({ result, units, onEditActivity }: {
         <Stat label="Distance" value={formatDistance(derived.distanceMeters, units)} />
         <Stat label="Elapsed" value={formatDuration(derived.durationSeconds)} />
         <Stat label="Moving time" value={formatDuration(derived.movingDurationSeconds)} />
-        <Stat label={pauses.length === 1 ? 'Pause' : `Pauses (${pauses.length})`} value={formatDuration(paused)} />
+        {joined && (
+          <Stat label={pauses.length === 1 ? 'Pause' : `Pauses (${pauses.length})`} value={formatDuration(paused)} />
+        )}
         <Stat label="Avg speed (moving)" value={formatSpeed(derived.averageMovingSpeedMetersPerSecond, units)} />
         <Stat label="Elevation gain" value={formatElevation(derived.elevationGainMeters, units)} />
         <Stat label="Elevation loss" value={formatElevation(derived.elevationLossMeters, units)} />
       </dl>
-      <ul className="merge__pauses" aria-label="Pauses between the files">
+      {joined && <ul className="merge__pauses" aria-label="Pauses between the files">
         {pauses.map((pause) => (
           <li key={pause.after}>
             Paused {formatDuration(pause.seconds)} between {parts[pause.after]!.fileName} and{' '}
@@ -237,7 +293,7 @@ function MergedActivity({ result, units, onEditActivity }: {
             {pause.jumpMeters !== undefined && `; the next starts ${formatDistance(pause.jumpMeters, units)} away`}.
           </li>
         ))}
-      </ul>
+      </ul>}
       {result.warnings.length > 0 && (
         <ul className="merge__notes" aria-label="About this merge">
           {result.warnings.map((warning) => (
@@ -254,7 +310,11 @@ function MergedActivity({ result, units, onEditActivity }: {
         </Suspense>
       </div>
 
-      <p>The merged map is a preview. Clicking it does not add points. To change the route, edit a copy; the merged recording stays available for download. A route copy keeps places, elevation, times and pauses, but leaves out sensor readings, laps and device details.</p>
+      <p>
+        The map is a preview. Clicking it does not add points. To change the route, edit a copy; the recording stays
+        available for download. A route copy keeps places, elevation, times{joined ? ' and pauses' : ''}, but leaves out
+        sensor readings, laps and device details.
+      </p>
 
       <p className="video__actions">
         <button
@@ -321,8 +381,12 @@ function MergedExport({ activity }: { activity: Activity }) {
   };
 
   return (
-    <div className="merge__export" role="group" aria-label="Export the merged activity">
-      <p>Each recording ends a lap. FIT keeps the laps, and its timer stops at each pause: it is the file to upload to Garmin Connect or Strava. GPX keeps each recording as a track segment, with no laps and no timer.</p>
+    <div className="merge__export" role="group" aria-label={pauseCount > 0 ? 'Export the merged activity' : 'Export the recording'}>
+      {pauseCount > 0 ? (
+        <p>Each recording ends a lap. FIT keeps the laps, and its timer stops at each pause: it is the file to upload to Garmin Connect or Strava. GPX keeps each recording as a track segment, with no laps and no timer.</p>
+      ) : (
+        <p>FIT keeps the laps and the timer, for Garmin Connect or Strava; GPX keeps the track and its times.</p>
+      )}
       <fieldset className="editor__modes">
         <legend className="summary__label">Format</legend>
         {formats.map((entry) => (

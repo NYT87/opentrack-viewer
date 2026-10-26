@@ -35,9 +35,9 @@ test('merges the morning ride and its continuation into one ride with a 74-minut
 
   const { morning, afternoon } = rides();
   // Chosen afternoon first: the order on the page is the clocks', not the choice's.
-  await page.getByTestId('merge-input').setInputFiles([afternoon, morning]);
+  await page.getByTestId('track-input').setInputFiles([afternoon, morning]);
 
-  const region = page.getByRole('region', { name: 'Merge recorded tracks' });
+  const region = page.getByRole('region', { name: 'Add tracks' });
   const merged = region.getByRole('group', { name: 'The merged activity', exact: true });
   await expect(merged).toBeVisible({ timeout: 60_000 });
   const order = region.getByRole('list', { name: 'Files in the order they were recorded' }).getByRole('listitem');
@@ -101,9 +101,9 @@ test('refuses overlapping rides by name, and merges once one is removed', async 
   test.setTimeout(120_000);
   await page.goto('./#/route-builder');
   const { morning, afternoon } = rides();
-  await page.getByTestId('merge-input').setInputFiles([morning, { ...morning, name: 'copy-of-morning.gpx' }, afternoon]);
+  await page.getByTestId('track-input').setInputFiles([morning, { ...morning, name: 'copy-of-morning.gpx' }, afternoon]);
 
-  const region = page.getByRole('region', { name: 'Merge recorded tracks' });
+  const region = page.getByRole('region', { name: 'Add tracks' });
   await expect(region.getByRole('alert')).toContainText(/cover exactly the same time: they look like the same recording/, {
     timeout: 60_000,
   });

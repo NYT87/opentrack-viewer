@@ -36,7 +36,7 @@ function gpxFile(fileName: string, fromSecond: number, count: number, { lat0 = 4
   return new File([xml], fileName, { type: 'application/gpx+xml' });
 }
 
-const mergeRegion = () => screen.getByRole('region', { name: 'Merge recorded tracks' });
+const mergeRegion = () => screen.getByRole('region', { name: 'Add tracks' });
 const order = () => within(mergeRegion()).getByRole('list', { name: 'Files in the order they were recorded' });
 
 beforeEach(() => {
@@ -49,7 +49,7 @@ beforeEach(() => {
 describe('merging recorded tracks from Route Builder (AV-1109)', () => {
   it('orders the files by their own clocks, whatever order they were chosen in, and merges them', async () => {
     render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [
+    await userEvent.upload(screen.getByTestId('track-input'), [
       gpxFile('later.gpx', 3600, 20),
       gpxFile('earlier.gpx', 0, 30),
     ]);
@@ -71,7 +71,7 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
 
   it('offers GPX and FIT, keeps TCX with its reason, and writes a file named as merged', async () => {
     render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
     const exporter = await within(mergeRegion()).findByRole('group', { name: 'Export the merged activity' });
 
     expect(within(exporter).getByRole('radio', { name: /^GPX/ })).toBeEnabled();
@@ -91,7 +91,7 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
 
   it('warns, where GPX is chosen, that Garmin Connect and Strava would count the pause as standing still', async () => {
     render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
     const exporter = await within(mergeRegion()).findByRole('group', { name: 'Export the merged activity' });
 
     // FIT, the default, needs no warning; GPX says so on the choice itself.
@@ -109,26 +109,56 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
     expect(within(exporter).getByRole('button', { name: 'Download Evening-Ride-merged.fit' })).toBeInTheDocument();
   });
 
-  it('refuses a file with no timestamps, with the reason, and leaves it out of the order', async () => {
+  it('sends files picked with one that has no timestamps to the planned track, in the order added', async () => {
     render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [
+    await userEvent.upload(screen.getByTestId('track-input'), [
       gpxFile('timed.gpx', 0, 10),
-      gpxFile('untimed.gpx', 0, 10, { timed: false }),
+      gpxFile('untimed.gpx', 0, 10, { timed: false, lat0: 47 }),
     ]);
 
-    const refused = await within(mergeRegion()).findByRole('list', { name: 'Not in the merge' });
-    expect(refused).toHaveTextContent(/untimed\.gpx is not in the merge\. It has no timestamps/);
-    expect(within(order()).getAllByRole('listitem')).toHaveLength(1);
-    expect(mergeRegion()).toHaveTextContent('Add at least one more recorded track with timestamps to merge.');
-    expect(within(mergeRegion()).queryByRole('group', { name: 'The merged activity' })).not.toBeInTheDocument();
+    // There is no clock to order them by, so they are places to edit, not a recording.
+    expect(await within(mergeRegion()).findByRole('status')).toHaveTextContent(
+      'untimed.gpx has no timestamps, so the files went into the planned track above as places to edit, in the order added.',
+    );
+    expect(within(mergeRegion()).queryByRole('list', { name: 'Files in the order they were recorded' })).not.toBeInTheDocument();
+    expect(within(mergeRegion()).queryByRole('group', { name: /The (merged activity|recording)/ })).not.toBeInTheDocument();
+    const track = useRouteDraftStore.getState().draft!;
+    expect(track.points).toHaveLength(20);
+    // In the order added: the timed file first, then the other as a stretch of its own.
+    expect(track.points[0]!.lat).toBeCloseTo(46, 4);
+    expect(track.points[10]!.lat).toBeCloseTo(47, 4);
+    expect(screen.getByRole('heading', { name: 'Add tracks to the planned track' })).toBeInTheDocument();
+  });
 
-    await userEvent.click(within(refused).getByRole('button', { name: 'Remove untimed.gpx' }));
-    expect(within(mergeRegion()).queryByRole('list', { name: 'Not in the merge' })).not.toBeInTheDocument();
+  it('takes one recorded file as a recording of its own: nothing merged, nothing paused', async () => {
+    render(<App />);
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('solo.gpx', 0, 30)]);
+
+    const recording = await within(mergeRegion()).findByRole('group', { name: 'The recording' });
+    expect(within(recording).getByRole('heading', { name: 'Evening Ride' })).toBeInTheDocument();
+    expect(recording).not.toHaveTextContent(/Pause/);
+    expect(within(recording).queryByRole('list', { name: 'Pauses between the files' })).not.toBeInTheDocument();
+    const exporter = within(recording).getByRole('group', { name: 'Export the recording' });
+    expect(within(exporter).getByRole('button', { name: 'Download Evening-Ride.fit' })).toBeInTheDocument();
+    // No pause, so no reason to warn off GPX.
+    await userEvent.click(within(exporter).getByRole('radio', { name: /^GPX/ }));
+    expect(within(exporter).queryByRole('note')).not.toBeInTheDocument();
+    expect(useRouteDraftStore.getState().draft).toBeUndefined();
+  });
+
+  it('adds files to the planned track while one is open, recorded or not', async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a blank track' }));
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+
+    expect(await within(mergeRegion()).findByRole('status')).toHaveTextContent('a.gpx, b.gpx were added to the planned track above.');
+    expect(useRouteDraftStore.getState().draft!.points).toHaveLength(20);
+    expect(within(mergeRegion()).queryByRole('group', { name: /The (merged activity|recording)/ })).not.toBeInTheDocument();
   });
 
   it('refuses overlapping files, says which and by how much, and merges once one is removed', async () => {
     render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [
+    await userEvent.upload(screen.getByTestId('track-input'), [
       gpxFile('first.gpx', 0, 60),
       gpxFile('second.gpx', 30, 60),
       gpxFile('third.gpx', 600, 10),
@@ -146,7 +176,7 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
 
   it('opens the merge in the viewer, in memory, as one activity', async () => {
     render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
     const merged = await within(mergeRegion()).findByRole('group', { name: 'The merged activity' });
 
     await userEvent.click(within(merged).getByRole('button', { name: 'Open in the viewer' }));
@@ -159,7 +189,7 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
 
   it('keeps the merged map read-only and creates an editable route only on request', async () => {
     render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
     const merged = await within(mergeRegion()).findByRole('group', { name: 'The merged activity' });
     await waitFor(() => expect(latestMap()).toBeDefined());
     const map = latestMap();
@@ -181,14 +211,14 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
         <App />
       </StrictMode>,
     );
-    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('a.gpx', 0, 10), gpxFile('b.gpx', 100, 10)]);
     expect(await within(mergeRegion()).findByRole('group', { name: 'The merged activity' })).toBeInTheDocument();
     expect(within(mergeRegion()).queryByText(/Reading \d+ file/)).not.toBeInTheDocument();
   });
 
   it('writes nothing when a file finishes reading after the page has gone', async () => {
     const { unmount } = render(<App />);
-    await userEvent.upload(screen.getByTestId('merge-input'), [gpxFile('a.gpx', 0, 10)]);
+    await userEvent.upload(screen.getByTestId('track-input'), [gpxFile('a.gpx', 0, 10)]);
     unmount();
     // Rendering again starts empty: nothing of the unmounted page's files came back.
     render(<App />);
@@ -198,7 +228,7 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
   it('takes several files from one drop, and names the ones it does not read', async () => {
     render(<App />);
     await userEvent.upload(
-      screen.getByTestId('merge-input'),
+      screen.getByTestId('track-input'),
       [gpxFile('a.gpx', 0, 10), new File(['x'], 'notes.txt', { type: 'text/plain' })],
       { applyAccept: false },
     );

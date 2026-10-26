@@ -1,6 +1,7 @@
 import { expect, test, type Request } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { RIDE_PATH } from './helpers/overlayFixtures';
+import { addFirstTrack } from './helpers/routeBuilder';
 
 /**
  * AV-1102. The Route Builder page in a real browser: reached from Tools, an
@@ -40,14 +41,18 @@ test('imports a GPX route into a planned track, in this tab, and adds another af
   const requests: Request[] = [];
   page.on('request', (request) => requests.push(request));
   await page.goto('./#/route-builder');
+  // The recording a timed file first becomes is drawn on a map; without tiles, every request is the page's own.
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Basemap tiles').uncheck();
+  await page.getByRole('button', { name: 'Close settings' }).click();
 
-  await page.getByTestId('route-builder-input').setInputFiles(RIDE_PATH);
+  await addFirstTrack(page, RIDE_PATH);
   const track = page.getByRole('region', { name: 'Planned track' });
   await expect(track).toContainText('Copied from a track');
   await expect(track).toContainText(/overlay-ride\.gpx: \d+ of \d+ points used/);
   await expect(track).toContainText('Distance');
 
-  await page.getByTestId('route-builder-input').setInputFiles(RIDE_PATH);
+  await page.getByTestId('track-input').setInputFiles(RIDE_PATH);
   await expect(track.getByText('Stretches').locator('xpath=following-sibling::dd')).toHaveText('2');
 
   // Nothing about the track left the page, and none of it is in the metadata.
@@ -65,13 +70,15 @@ test('imports a GPX route into a planned track, in this tab, and adds another af
 test('explains a file it cannot read, and keeps the track it has', async ({ page }) => {
   await page.goto('./#/route-builder');
   await page.getByRole('button', { name: 'Start a blank track' }).click();
-  await page.getByTestId('route-builder-input').setInputFiles({
+  await page.getByTestId('track-input').setInputFiles({
     name: 'broken.gpx',
     mimeType: 'application/gpx+xml',
     buffer: Buffer.from('<gpx><not closed'),
   });
-  await expect(page.getByRole('region', { name: 'Track not imported' }).getByRole('alert')).toBeVisible();
-  await page.getByRole('button', { name: 'Try another file' }).click();
+  const unused = page.getByRole('list', { name: 'Not used' });
+  await expect(unused).toContainText('broken.gpx is not used.');
+  await unused.getByRole('button', { name: 'Remove broken.gpx' }).click();
+  await expect(unused).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Planned track' })).toBeVisible();
 });
 
@@ -129,7 +136,7 @@ test('fits a phone screen without a sideways scroll', async ({ page }) => {
   await page.goto('./#/route-builder');
   // A file named the way a device names them: long, and with nothing a line
   // can break at. Its name is listed beside the draft, where it has to wrap.
-  await page.getByTestId('route-builder-input').setInputFiles({
+  await addFirstTrack(page, {
     name: 'Morning_Ride_2026_10_19_Export_From_Watch_Full_Resolution_Track_Final_v2.gpx',
     mimeType: 'application/gpx+xml',
     buffer: readFileSync(RIDE_PATH),
@@ -139,7 +146,7 @@ test('fits a phone screen without a sideways scroll', async ({ page }) => {
   await expect(track).toContainText('Morning_Ride_2026');
 
   // Appended under the same kind of name, the notice names it too, and must wrap as well.
-  await page.getByTestId('route-builder-input').setInputFiles({
+  await page.getByTestId('track-input').setInputFiles({
     name: 'Evening_Ride_2026_10_19_Export_From_Watch_Full_Resolution_Track_Final_v2.gpx',
     mimeType: 'application/gpx+xml',
     buffer: readFileSync(RIDE_PATH),
@@ -240,11 +247,11 @@ test('appends a TCX after a GPX, warns of the far jump, and sends nothing anywhe
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
 
-  await page.getByTestId('route-builder-input').setInputFiles('src/test/fixtures/simple-route.gpx');
+  await addFirstTrack(page, 'src/test/fixtures/simple-route.gpx');
   const track = page.getByRole('region', { name: 'Planned track' });
   await expect(track).toContainText(/Stretches\s*1/);
 
-  await page.getByTestId('route-builder-input').setInputFiles('src/test/fixtures/ride-minimal.tcx');
+  await page.getByTestId('track-input').setInputFiles('src/test/fixtures/ride-minimal.tcx');
   await expect(track).toContainText(/Stretches\s*2/);
   const added = page.getByRole('status', { name: 'Last track added' });
   await expect(added).toContainText('ride-minimal.tcx');
@@ -263,7 +270,7 @@ test('appends a TCX after a GPX, warns of the far jump, and sends nothing anywhe
   await expect(track).toContainText(/Stretches\s*1/);
 
   // A file with no route is refused and the track kept.
-  await page.getByTestId('route-builder-input').setInputFiles('src/test/fixtures/treadmill-run.fit');
+  await page.getByTestId('track-input').setInputFiles('src/test/fixtures/treadmill-run.fit');
   await expect(page.getByRole('region', { name: 'Track not imported' }).getByRole('alert')).toContainText(
     /no route to add/,
   );
@@ -291,8 +298,7 @@ test('exports the planned track as a GPX that the viewer reads back as the same 
   await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Basemap tiles').uncheck();
   await page.getByRole('button', { name: 'Close settings' }).click();
-  await page.getByTestId('route-builder-input').setInputFiles(RIDE_PATH);
-  await expect(page.getByRole('region', { name: 'Planned track' })).toBeVisible();
+  await addFirstTrack(page, RIDE_PATH);
   const planned = await page.getByRole('region', { name: 'Planned track' }).textContent();
   const pointCount = Number(/Points\s*(\d+)/.exec(planned ?? '')![1]);
 

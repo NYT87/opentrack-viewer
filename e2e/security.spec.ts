@@ -98,7 +98,7 @@ for (const touching of [false, true]) {
     await page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByLabel('Basemap tiles').uncheck();
     await page.getByRole('button', { name: 'Close settings' }).click();
-    await page.getByTestId('merge-input').setInputFiles([
+    await page.getByTestId('track-input').setInputFiles([
       { name: 'first.gpx', mimeType: 'application/gpx+xml', buffer: Buffer.from(gpx([0, 10])) },
       { name: 'second.gpx', mimeType: 'application/gpx+xml', buffer: Buffer.from(gpx([touching ? 10 : 100, 110])) },
     ]);

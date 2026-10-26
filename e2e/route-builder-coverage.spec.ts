@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { RIDE_PATH, longRideGpx } from './helpers/overlayFixtures';
 import { decodePng, type DecodedPng } from './helpers/png';
+import { addFirstTrack } from './helpers/routeBuilder';
 
 /** The route line colour from `src/styles`, as drawn by ActivityMap. */
 const ROUTE_RGB: [number, number, number] = [0x4a, 0xa3, 0xff];
@@ -141,7 +142,7 @@ test('the whole journey: viewer, custom track, edit, discard, append, export (AV
   expect(await pointsIn(page)).toBe(copied + 1 - 3);
 
   // Another track appended, far away, joined on request.
-  await page.getByTestId('route-builder-input').setInputFiles(TCX_PATH);
+  await page.getByTestId('track-input').setInputFiles(TCX_PATH);
   const added = page.getByRole('status', { name: 'Last track added' });
   await expect(added).toContainText('ride-minimal.tcx');
   await expect(track).toContainText(/Stretches\s*2/);
@@ -331,8 +332,7 @@ for (const { name, viewport } of [
   test(`lays out on ${name}: no sidebar, no sideways scroll, controls within reach (AV-1108)`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto('./#/route-builder');
-    await page.getByTestId('route-builder-input').setInputFiles(RIDE_PATH);
-    await expect(page.getByRole('region', { name: 'Planned track' })).toBeVisible();
+    await addFirstTrack(page, RIDE_PATH);
 
     // The viewer's section sidebar belongs to the viewer; this page has none at any width.
     await expect(page.locator('.section-nav')).toHaveCount(0);
@@ -379,11 +379,11 @@ test('a long track stays quick to append, edit, discard and export (AV-1108)', a
   const track = page.getByRole('region', { name: 'Planned track' });
 
   const first = await timed(async () => {
-    await page.getByTestId('route-builder-input').setInputFiles(path);
+    await addFirstTrack(page, path);
     await expect(track).toContainText(/Points\s*7201/, { timeout: 30_000 });
   });
   const append = await timed(async () => {
-    await page.getByTestId('route-builder-input').setInputFiles(path);
+    await page.getByTestId('track-input').setInputFiles(path);
     await expect(track).toContainText(/Points\s*14402/, { timeout: 30_000 });
   });
 

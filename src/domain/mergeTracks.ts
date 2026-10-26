@@ -256,13 +256,14 @@ export function mergeTracks(sources: MergeSource[]): MergeResult {
     .sort(byClock);
   const parts = ordered.map(describePart);
 
-  if (ordered.length < 2) {
+  // One file is a recording of its own: the same activity, with nothing to join.
+  if (ordered.length < 1) {
     return {
       ok: false,
       parts,
       error: {
         code: 'merge_needs_two',
-        message: 'A merge needs at least two recorded tracks with timestamps.',
+        message: 'Add a recorded track with timestamps.',
       },
     };
   }
@@ -388,10 +389,18 @@ export function mergeTracks(sources: MergeSource[]): MergeResult {
 
   const merged = withDerivedStats({
     id: `merged:${activities.map((activity) => activity.id).join('+')}`,
-    source: { format: format ?? 'unknown', parserVersion: 'merge-1' },
+    // One file keeps its own name, so what is made from it (a route copy) still says where it came from.
+    source: {
+      format: format ?? 'unknown',
+      parserVersion: 'merge-1',
+      ...(ordered.length === 1 ? { fileName: ordered[0]!.source.fileName } : {}),
+    },
     metadata: {
-      name: `${name} (merged)`,
-      description: `Merged from ${ordered.map((part) => part.source.fileName).join(', ')}.`,
+      name: ordered.length > 1 ? `${name} (merged)` : name,
+      description:
+        ordered.length > 1
+          ? `Merged from ${ordered.map((part) => part.source.fileName).join(', ')}.`
+          : activities[0]!.metadata.description,
       sport,
       creator: agreed(activities.map((activity) => activity.metadata.creator)),
       utcOffsetMinutes: agreed(activities.map((activity) => activity.metadata.utcOffsetMinutes)),
