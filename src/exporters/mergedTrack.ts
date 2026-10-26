@@ -59,7 +59,7 @@ export async function exportMergedTrack(activity: Activity, format: ExportFormat
     message:
       format === 'fit'
         ? `Written as one activity with ${activity.laps?.length ?? 0} laps. The timer stops at the end of each file and starts again at the next, so the ${pauses === 1 ? 'pause' : `${pauses} pauses`} count in elapsed time and not in timer time.`
-        : `Written as one track with a segment per recorded stretch. The ${pauses === 1 ? 'pause' : `${pauses} pauses`} between the files ${pauses === 1 ? 'is' : 'are'} the gaps between segments: nothing is drawn or counted across ${pauses === 1 ? 'it' : 'them'}.`,
+        : `Written as one track with a segment per recorded stretch. The ${pauses === 1 ? 'pause' : `${pauses} pauses`} between the files ${pauses === 1 ? 'is' : 'are'} the gaps between segments: nothing is drawn or counted across ${pauses === 1 ? 'it' : 'them'} here, but GPX has no timer, so Garmin Connect and Strava read ${pauses === 1 ? 'it' : 'them'} as standing still and average the speed over ${pauses === 1 ? 'it' : 'them'}. Upload the FIT instead.`,
     severity: 'info',
   };
   return { ...result, warnings: [written, ...result.warnings] };

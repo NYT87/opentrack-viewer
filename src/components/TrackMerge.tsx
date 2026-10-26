@@ -319,7 +319,7 @@ function MergedExport({ activity }: { activity: Activity }) {
 
   return (
     <div className="merge__export" role="group" aria-label="Export the merged activity">
-      <p>Each recording ends a lap. Choose FIT to keep lap boundaries in one activity; GPX keeps the separate track segments but has no laps.</p>
+      <p>Each recording ends a lap. Choose FIT to keep lap boundaries in one activity, and to upload to Garmin Connect or Strava: its timer stops at each pause. GPX keeps the separate track segments but has no laps or timer, so those apps read a pause in it as standing still and average the speed over it.</p>
       <fieldset className="editor__modes">
         <legend className="summary__label">Format</legend>
         {formats.map((entry) => (
