@@ -1,5 +1,6 @@
 import type { Activity, ActivityWarning } from '../domain/activity';
 import { ActivityError } from '../domain/errors';
+import { isJoinedRecording } from '../domain/mergeTracks';
 import { getExportAvailability, exportActivity, safeFileStem, type ExportFormat, type ExportResult } from './index';
 
 /**
@@ -39,8 +40,7 @@ export function mergedTrackFormats(activity: Activity): MergedFormatAvailability
  */
 export function mergedTrackFileStem(activity: Activity): string {
   const name = (activity.metadata.name ?? '').replace(/\s*\(merged\)\s*$/, '').trim();
-  const joined = (activity.events ?? []).some((event) => event.type === 'pause');
-  return joined ? `${safeFileStem(name, 'activity')}-merged` : safeFileStem(name, 'activity');
+  return isJoinedRecording(activity) ? `${safeFileStem(name, 'activity')}-merged` : safeFileStem(name, 'activity');
 }
 
 /**
@@ -57,6 +57,8 @@ export async function exportMergedTrack(activity: Activity, format: ExportFormat
     );
   }
   const result = await exportActivity(activity, { format, baseName: mergedTrackFileStem(activity) });
+  // A note about the pauses between files, for a recording that has them; one file on its own has none.
+  if (!isJoinedRecording(activity)) return result;
   const pauses = (activity.events ?? []).filter((event) => event.type === 'pause').length;
   const written: ActivityWarning = {
     code: 'merged_pauses_kept',

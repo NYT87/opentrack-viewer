@@ -7,6 +7,7 @@ import {
   getExportAvailability,
   type ExportFormat,
 } from '../exporters';
+import { isJoinedRecording } from '../domain/mergeTracks';
 
 export interface ExportPanelProps {
   activity: Activity;
@@ -72,7 +73,7 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
     availability.find((entry) => entry.format === candidate)?.available === true;
   // A merged activity has lap boundaries at its source files. FIT can carry
   // them; GPX cannot, even when the files that made the merge were GPX.
-  const preferredFormat = activity.source.parserVersion === 'merge-1' ? 'fit' : sourceFormat;
+  const preferredFormat = isJoinedRecording(activity) ? 'fit' : sourceFormat;
   const format: ExportFormat = writable(picked)
     ? picked!
     : writable(preferredFormat)

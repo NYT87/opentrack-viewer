@@ -1,4 +1,5 @@
 import type { Activity } from '../domain/activity';
+import { isJoinedRecording } from '../domain/mergeTracks';
 
 export function hasStretchesTouchingInFit(activity: Activity): boolean {
   let previous: { second: number; segment: number } | undefined;
@@ -17,7 +18,7 @@ export function exportPreservationProblem(activity: Activity, format: 'gpx' | 'f
   if (format === 'fit' && hasStretchesTouchingInFit(activity)) {
     return 'FIT keeps time to the whole second, and here one recording ends in the same second the next begins: the file could not keep those stretches apart. GPX keeps the two apart.';
   }
-  if (format === 'tcx' && activity.source.parserVersion === 'merge-1' &&
+  if (format === 'tcx' && isJoinedRecording(activity) &&
       new Set(activity.points.map((point) => point.segmentIndex ?? 0)).size > 1) {
     return 'TCX is written as one lap whose time is the elapsed time, so the pause between the files would count as time spent riding.';
   }

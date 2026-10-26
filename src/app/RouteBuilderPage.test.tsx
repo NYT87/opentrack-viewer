@@ -1067,6 +1067,26 @@ describe('appending another track (AV-1106)', () => {
     expect(draft()).toBe(held);
   });
 
+  it('says which files were added and which were not, when only some of them can be', async () => {
+    await startWithGpx();
+    const before = draft().points.length;
+    await userEvent.upload(screen.getByTestId('track-input'), [
+      fixtureFile('route-with-elevation.gpx'),
+      binaryFixtureFile('treadmill-run.fit'),
+    ]);
+
+    expect(
+      await within(screen.getByRole('region', { name: 'Add tracks' })).findByText(
+        'route-with-elevation.gpx was added to the planned track above. treadmill-run.fit was not added; the reason is above.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Track not imported' })).getByRole('alert')).toHaveAttribute(
+      'data-error-code',
+      'no_route_points',
+    );
+    expect(draft().points.length).toBeGreaterThan(before);
+  });
+
   it('refuses a file that is not a track it can read, with its own reason, and keeps the draft', async () => {
     await startWithGpx();
     const held = draft();

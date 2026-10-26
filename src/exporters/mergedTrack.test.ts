@@ -70,8 +70,17 @@ describe('which formats a merged track can be written to (AV-1109, TD-060)', () 
     expect(mergedTrackFileStem(merged())).toBe('Lunch-Ride-merged');
     const unnamed = { ...merged(), metadata: { name: undefined } };
     expect(mergedTrackFileStem(unnamed)).toBe('activity-merged');
-    // One recording on its own was not merged with anything, and keeps its name.
-    expect(mergedTrackFileStem({ ...merged(), events: [] })).toBe('Lunch-Ride');
+  });
+
+  it('names one recording by its own name, and says nothing of files, even with pauses of its own', async () => {
+    const single = mergeTracks([ride('solo.gpx', 0, 46)]);
+    if (!single.ok) throw new Error(single.error.message);
+    const paused = { ...single.activity, events: [{ type: 'pause' as const, time: new Date(T0 + 2000) }, { type: 'resume' as const, time: new Date(T0 + 3000) }] };
+    expect(mergedTrackFileStem(paused)).not.toMatch(/merged/);
+
+    const result = await exportMergedTrack(paused, 'gpx');
+    expect(result.fileName).not.toMatch(/merged/);
+    expect(result.warnings.some((warning) => warning.code === 'merged_pauses_kept')).toBe(false);
   });
 });
 

@@ -3,7 +3,7 @@ import type { FeatureCollection, Point } from 'geojson';
 import { WarningList } from '../components/ErrorPanel';
 import { MapPlaceholder } from '../components/MapPlaceholder';
 import { PlannedTrackExport } from '../components/PlannedTrackExport';
-import { TrackMerge } from '../components/TrackMerge';
+import { TrackMerge, type PlannedTrackOutcome } from '../components/TrackMerge';
 import type { EditPointProperties } from '../components/ActivityMap';
 import type { Activity } from '../domain/activity';
 import { EMPTY_ROUTE_GEOMETRY, activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
@@ -280,8 +280,9 @@ export function RouteBuilderPage() {
    * if it has been replaced since — a route copy of a recording, a blank track,
    * Start over — they were meant for a track that is gone, and are not added.
    */
-  const addToPlannedTrack = (sources: MergeSource[], forDraftId: string | undefined): boolean => {
-    if (useRouteDraftStore.getState().draft?.id !== forDraftId) return false;
+  const addToPlannedTrack = (sources: MergeSource[], forDraftId: string | undefined): PlannedTrackOutcome | undefined => {
+    if (useRouteDraftStore.getState().draft?.id !== forDraftId) return undefined;
+    const outcome: PlannedTrackOutcome = { added: [], notAdded: [] };
     let failure: Intake | undefined;
     let last: Appended | undefined;
     let appendedAny = false;
@@ -290,8 +291,10 @@ export function RouteBuilderPage() {
       const result = importTrack(activity);
       if (!result.ok) {
         failure = { status: 'error', fileName, message: result.error.message, code: result.error.code };
+        outcome.notAdded.push(fileName);
         continue;
       }
+      outcome.added.push(fileName);
       if (!before) continue;
       appendedAny = true;
       const jump = appendJump(before, result.value);
@@ -307,7 +310,7 @@ export function RouteBuilderPage() {
     }
     setAppended(last);
     setIntake(failure ?? { status: 'idle' });
-    return true;
+    return outcome;
   };
 
   const editMergedActivity = (activity: Activity): string | undefined => {

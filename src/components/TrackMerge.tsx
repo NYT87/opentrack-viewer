@@ -62,10 +62,10 @@ export function TrackMerge({
   draftId: string | undefined;
   /**
    * Files for the planned track, read, in the order added, and the planned
-   * track they were picked for. Returns false when that track has since been
-   * replaced, so nothing was added.
+   * track they were picked for. Says which were added and which were not, or
+   * nothing when that track has since been replaced, so none was added.
    */
-  onPlannedTrack: (sources: MergeSource[], forDraftId: string | undefined) => boolean;
+  onPlannedTrack: (sources: MergeSource[], forDraftId: string | undefined) => PlannedTrackOutcome | undefined;
 }) {
   const units = useInteractionStore((state) => state.unitSystem);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -121,15 +121,8 @@ export function TrackMerge({
     // The planned track takes the readable ones; a file that could not be read is still said.
     settle((entry) => entry.status === 'refused');
     const sources = readable.map((entry) => ({ fileName: entry.fileName, activity: entry.activity }));
-    const added = onPlannedTrack(sources, forDraftId);
-    const names = sources.map((source) => source.fileName).join(', ');
-    setPlanned(
-      !added
-        ? `${names} ${sources.length === 1 ? 'was' : 'were'} not added: the planned track changed while ${sources.length === 1 ? 'it was' : 'they were'} read.`
-        : forDraftId !== undefined
-          ? `${names} ${sources.length === 1 ? 'was' : 'were'} added to the planned track above.`
-          : `${untimed.map((entry) => entry.fileName).join(', ')} ${untimed.length === 1 ? 'has' : 'have'} no timestamps, so ${sources.length === 1 ? 'it went' : 'the files went'} into the planned track above as places to edit, in the order added.`,
-    );
+    const outcome = onPlannedTrack(sources, forDraftId);
+    setPlanned(describePlanned(sources, outcome, forDraftId !== undefined, untimed));
   };
 
   const remove = (key: number) => setEntries((current) => current.filter((entry) => entry.key !== key));
@@ -211,6 +204,36 @@ export function TrackMerge({
       {result?.ok && <MergedActivity result={result} units={units} onEditActivity={onEditActivity} />}
     </section>
   );
+}
+
+/** What the planned track took, from the page: the files added, and those it could not use. */
+export interface PlannedTrackOutcome {
+  added: string[];
+  notAdded: string[];
+}
+
+const list = (names: string[]) => names.join(', ');
+const were = (names: string[]) => (names.length === 1 ? 'was' : 'were');
+
+/** One line on what became of files sent to the planned track, partial results said as such. */
+function describePlanned(
+  sources: MergeSource[],
+  outcome: PlannedTrackOutcome | undefined,
+  draftWasOpen: boolean,
+  untimed: Extract<Entry, { status: 'ready' }>[],
+): string {
+  const names = sources.map((source) => source.fileName);
+  if (!outcome) {
+    return `${list(names)} ${were(names)} not added: the planned track changed while ${names.length === 1 ? 'it was' : 'they were'} read.`;
+  }
+  const { added, notAdded } = outcome;
+  const refused = notAdded.length > 0 ? ` ${list(notAdded)} ${were(notAdded)} not added; the reason is above.` : '';
+  if (added.length === 0) return `None of the files could be added.${refused}`;
+  if (draftWasOpen) return `${list(added)} ${were(added)} added to the planned track above.${refused}`;
+  const why = `${list(untimed.map((entry) => entry.fileName))} ${untimed.length === 1 ? 'has' : 'have'} no timestamps, so`;
+  return added.length === 1
+    ? `${why} ${added[0]} went into the planned track above as places to edit.${refused}`
+    : `${why} ${list(added)} went into the planned track above as places to edit, in the order added.${refused}`;
 }
 
 function overlapSentence(parts: MergePart[], [a, b]: [number, number], seconds: number): string {
@@ -337,7 +360,7 @@ function MergedActivity({ result, units, onEditActivity }: {
         </button>
       </p>
       {editError && <p role="alert">{editError}</p>}
-      <MergedExport activity={activity} />
+      <MergedExport activity={activity} joined={joined} />
     </div>
   );
 }
@@ -351,7 +374,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MergedExport({ activity }: { activity: Activity }) {
+function MergedExport({ activity, joined }: { activity: Activity; joined: boolean }) {
   const formats = useMemo(() => mergedTrackFormats(activity), [activity]);
   const [format, setFormat] = useState<ExportFormat>('fit');
   const [outcome, setOutcome] = useState<{ fileName: string; warnings: ActivityWarning[] }>();
@@ -361,7 +384,8 @@ function MergedExport({ activity }: { activity: Activity }) {
   const effective = chosen?.available ? format : formats.find((entry) => entry.available)?.format;
   const stem = mergedTrackFileStem(activity);
   const fitAvailable = formats.some((entry) => entry.format === 'fit' && entry.available);
-  const pauseCount = (activity.events ?? []).filter((event) => event.type === 'pause').length;
+  // The pauses between files; a single recording's own pauses are its device's, not this page's to explain.
+  const pauseCount = joined ? (activity.events ?? []).filter((event) => event.type === 'pause').length : 0;
   const thePauses = pauseCount === 1 ? 'the pause' : 'the pauses';
 
   const write = async () => {

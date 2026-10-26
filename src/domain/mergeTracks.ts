@@ -249,6 +249,14 @@ function appendPartLaps(part: Prepared, distanceMeters: number | undefined, merg
  * timestamps) are expected to have been set aside with `assessMergeSource`;
  * any that slip through are left out here too, never placed by guess.
  */
+/** Marks an activity made by joining files, as opposed to one file read on its own. */
+export const MERGED_PARSER_VERSION = 'merge-1';
+
+/** Whether this activity was made by joining two or more files. Its own pauses do not make it one. */
+export function isJoinedRecording(activity: Activity): boolean {
+  return activity.source.parserVersion === MERGED_PARSER_VERSION;
+}
+
 export function mergeTracks(sources: MergeSource[]): MergeResult {
   const ordered = sources
     .map((source, index) => prepare(source, index))
@@ -284,6 +292,20 @@ export function mergeTracks(sources: MergeSource[]): MergeResult {
         },
       };
     }
+  }
+
+  // One file is a recording of its own: the activity as it was read, every
+  // point kept, untimed ones included, with its own laps, events and name.
+  // Only joining files needs their points put in one clock's order.
+  if (ordered.length === 1) {
+    const { source } = ordered[0]!;
+    return {
+      ok: true,
+      activity: { ...source.activity, source: { ...source.activity.source, fileName: source.activity.source.fileName ?? source.fileName } },
+      parts,
+      pauses: [],
+      warnings: [],
+    };
   }
 
   const points: ActivityPoint[] = [];
@@ -389,18 +411,10 @@ export function mergeTracks(sources: MergeSource[]): MergeResult {
 
   const merged = withDerivedStats({
     id: `merged:${activities.map((activity) => activity.id).join('+')}`,
-    // One file keeps its own name, so what is made from it (a route copy) still says where it came from.
-    source: {
-      format: format ?? 'unknown',
-      parserVersion: 'merge-1',
-      ...(ordered.length === 1 ? { fileName: ordered[0]!.source.fileName } : {}),
-    },
+    source: { format: format ?? 'unknown', parserVersion: MERGED_PARSER_VERSION },
     metadata: {
-      name: ordered.length > 1 ? `${name} (merged)` : name,
-      description:
-        ordered.length > 1
-          ? `Merged from ${ordered.map((part) => part.source.fileName).join(', ')}.`
-          : activities[0]!.metadata.description,
+      name: `${name} (merged)`,
+      description: `Merged from ${ordered.map((part) => part.source.fileName).join(', ')}.`,
       sport,
       creator: agreed(activities.map((activity) => activity.metadata.creator)),
       utcOffsetMinutes: agreed(activities.map((activity) => activity.metadata.utcOffsetMinutes)),

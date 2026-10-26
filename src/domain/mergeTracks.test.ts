@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessMergeSource, FAR_PAUSE_JUMP_METERS, mergeTracks, type MergeSource } from './mergeTracks';
+import { assessMergeSource, FAR_PAUSE_JUMP_METERS, isJoinedRecording, mergeTracks, type MergeSource } from './mergeTracks';
 import { computeStats } from './stats';
 import type { ActivityPoint } from './activity';
 import { parseGpx } from '../parsers/gpx/parseGpx';
@@ -177,7 +177,28 @@ describe('what a merge refuses (AV-1109)', () => {
     expect(single.activity.points).toHaveLength(10);
     // Not "merged": nothing was joined.
     expect(single.activity.metadata.name).not.toMatch(/merged/);
-    expect(single.activity.events?.some((event) => event.type === 'pause')).toBe(false);
+    expect((single.activity.events ?? []).some((event) => event.type === 'pause')).toBe(false);
+  });
+
+  it('keeps a single file as it was read: its untimed points, its events, and not a joined recording', () => {
+    const source = ride('a.gpx', 0, 10);
+    const withGap = {
+      ...source.activity,
+      // A point the device wrote without a time, and a pause of the device's own.
+      points: source.activity.points.map((point, i) => (i === 4 ? { ...point, time: undefined } : point)),
+      events: [{ type: 'pause' as const, time: at(3) }, { type: 'resume' as const, time: at(5) }],
+    };
+    const single = mergeTracks([{ fileName: 'a.gpx', activity: withGap }]);
+    expect(single.ok).toBe(true);
+    if (!single.ok) return;
+    expect(single.activity.points).toBe(withGap.points);
+    expect(single.activity.points).toHaveLength(10);
+    expect(single.activity.events).toBe(withGap.events);
+    expect(single.activity.source.fileName).toBe('a.gpx');
+    expect(isJoinedRecording(single.activity)).toBe(false);
+
+    const joined = mergeTracks([ride('a.gpx', 0, 10), ride('b.gpx', 100, 10)]);
+    expect(joined.ok && isJoinedRecording(joined.activity)).toBe(true);
   });
 
   it('refuses overlapping files, naming them and the overlap, rather than interleaving them', () => {

@@ -118,7 +118,7 @@ describe('merging recorded tracks from Route Builder (AV-1109)', () => {
 
     // There is no clock to order them by, so they are places to edit, not a recording.
     expect(await within(mergeRegion()).findByRole('status')).toHaveTextContent(
-      'untimed.gpx has no timestamps, so the files went into the planned track above as places to edit, in the order added.',
+      'untimed.gpx has no timestamps, so timed.gpx, untimed.gpx went into the planned track above as places to edit, in the order added.',
     );
     expect(within(mergeRegion()).queryByRole('list', { name: 'Files in the order they were recorded' })).not.toBeInTheDocument();
     expect(within(mergeRegion()).queryByRole('group', { name: /The (merged activity|recording)/ })).not.toBeInTheDocument();
