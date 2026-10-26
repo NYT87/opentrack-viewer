@@ -89,6 +89,12 @@ export function probeExportStorage(deps: ExportClientDeps = {}): Promise<Archive
       reject(new OverlayExportError('render_failed', 'The export engine did not start.'));
     }, PROBE_TIMEOUT_MS);
     worker.onmessage = (event) => {
+      // The worker says when it could not look, rather than leaving the page to its timeout.
+      if (event.data.type === 'error') {
+        finish();
+        reject(new OverlayExportError(event.data.code, event.data.message));
+        return;
+      }
       if (event.data.type !== 'probed') return;
       finish();
       resolve(event.data.storage);

@@ -179,6 +179,15 @@ export function RouteBuilderPage() {
     },
     [],
   );
+  /**
+   * The draft is being replaced by the reader's own choice: an import still
+   * being read was meant for the draft that is going, and must not append to
+   * the one that takes its place.
+   */
+  const retireRead = () => {
+    readToken.current += 1;
+    setIntake((current) => (current.status === 'reading' ? { status: 'idle' } : current));
+  };
 
   const track = useMemo(() => (draft ? draftToActivity(draft) : undefined), [draft]);
   const route = useMemo(
@@ -334,6 +343,7 @@ export function RouteBuilderPage() {
   const editMergedActivity = (activity: Activity): string | undefined => {
     const result = draftFromActivity(activity);
     if (!result.ok) return result.error.message;
+    retireRead();
     setDraft(result.value);
     setEditingDraftId(result.value.id);
     setWanted({ draftId: result.value.id, mode: 'add' });
@@ -375,7 +385,10 @@ export function RouteBuilderPage() {
               after one, start again below.
             </p>
             <p className="video__actions">
-              <button type="button" className="button button--primary" onClick={() => startBlank()}>
+              <button type="button" className="button button--primary" onClick={() => {
+                  retireRead();
+                  startBlank();
+                }}>
                 Start a blank track
               </button>
             </p>
@@ -412,7 +425,10 @@ export function RouteBuilderPage() {
               draft={draft}
               track={track?.ok ? track.value : undefined}
               units={unitSystem}
-              onClear={clear}
+              onClear={() => {
+                retireRead();
+                clear();
+              }}
             />
 
             <section className="box" aria-label="Draft map">

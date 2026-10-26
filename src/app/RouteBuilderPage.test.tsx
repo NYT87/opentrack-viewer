@@ -310,6 +310,59 @@ describe('importing a track (AV-1102)', () => {
     }
   });
 
+  it('lets an import still being read go when the reader replaces the draft themselves', async () => {
+    // As above, but only a file named "held…" waits to be told: the merge's own reads go through.
+    vi.resetModules();
+    const pending: (() => void)[] = [];
+    vi.doMock('../parsers', async () => {
+      const actual = await vi.importActual<typeof import('../parsers')>('../parsers');
+      return {
+        ...actual,
+        parseActivityFile: (file: File) =>
+          file.name.startsWith('held')
+            ? new Promise((resolve) => pending.push(() => resolve(actual.parseActivityFile(file))))
+            : actual.parseActivityFile(file),
+      };
+    });
+    const held = async () => new File([await fixtureFile('simple-route.gpx').text()], 'held.gpx', { type: 'application/gpx+xml' });
+    const finishHeld = () =>
+      act(async () => {
+        pending.splice(0).forEach((finish) => finish());
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+    const ride = (fileName: string, fromSecond: number) => {
+      const points = Array.from({ length: 10 }, (_, i) =>
+        `<trkpt lat="${(46 + i * 0.0001).toFixed(4)}" lon="7"><time>${new Date(Date.UTC(2024, 0, 1, 10, 0, fromSecond + i)).toISOString()}</time></trkpt>`,
+      ).join('');
+      return new File(
+        [`<?xml version="1.0"?><gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Ride</name><trkseg>${points}</trkseg></trk></gpx>`],
+        fileName,
+        { type: 'application/gpx+xml' },
+      );
+    };
+    try {
+      const { App: Fresh } = await import('./App');
+      const { useRouteDraftStore: freshStore } = await import('../state/routeDraftStore');
+      window.location.hash = '#/route-builder';
+      render(<Fresh />);
+
+      // While an import is read the draft's own controls are hidden, but the
+      // merge below is not: a merge taken into editing gets nothing appended.
+      await userEvent.upload(await screen.findByTestId('route-builder-input'), await held());
+      await screen.findByRole('region', { name: 'Reading the track' });
+      await userEvent.upload(screen.getByTestId('merge-input'), [ride('a.gpx', 0), ride('b.gpx', 100)]);
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit a route copy' }));
+      expect(screen.queryByRole('region', { name: 'Reading the track' })).not.toBeInTheDocument();
+      const merged = freshStore.getState().draft!;
+      expect(merged.points).toHaveLength(20);
+      await finishHeld();
+      expect(freshStore.getState().draft).toBe(merged);
+    } finally {
+      vi.doUnmock('../parsers');
+      vi.resetModules();
+    }
+  });
+
   it('refuses a track with no location, says why, and keeps the draft as it was', async () => {
     window.location.hash = '#/route-builder';
     render(<App />);

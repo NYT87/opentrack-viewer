@@ -450,6 +450,98 @@ describe('choosing the files by hand (AV-1002)', () => {
   });
 });
 
+describe('a file still being read when the reader lets it go', () => {
+  /** A parser that holds each read after the first until told, in a fresh module graph. */
+  const holdingParser = () => {
+    vi.resetModules();
+    const pending: (() => void)[] = [];
+    let calls = 0;
+    vi.doMock('../parsers', async () => {
+      const actual = await vi.importActual<typeof import('../parsers')>('../parsers');
+      return {
+        ...actual,
+        parseActivityFile: (file: File) =>
+          (calls += 1) === 1
+            ? actual.parseActivityFile(file)
+            : new Promise((resolve) => pending.push(() => resolve(actual.parseActivityFile(file)))),
+      };
+    });
+    return () =>
+      act(async () => {
+        pending.splice(0).forEach((finish) => finish());
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+  };
+
+  it('does not bring an activity back after Start over', async () => {
+    const finish = holdingParser();
+    try {
+      const { App: Fresh } = await import('./App');
+      const { useOverlayStore: freshStore } = await import('../state/overlayStore');
+      freshStore.setState({ canvasMode: true });
+      window.location.hash = '#/overlays';
+      render(<Fresh />);
+      await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
+      await inSlot('Activity', 'morning-run.gpx');
+
+      // A replacement is being read when the reader lets the activity go.
+      await userEvent.upload(screen.getByTestId('overlay-activity-input'), gpxFile());
+      // Remove waits for the read; Start over does not.
+      expect(within(screen.getByRole('region', { name: 'Activity' })).getByRole('button', { name: 'Remove' })).toBeDisabled();
+      await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+      expect(freshStore.getState().source.activity).toBeUndefined();
+
+      await finish();
+      expect(freshStore.getState().source.activity).toBeUndefined();
+    } finally {
+      vi.doUnmock('../parsers');
+      vi.resetModules();
+    }
+  });
+
+  it('does not bring a video back after Start over', async () => {
+    vi.resetModules();
+    const pending: (() => void)[] = [];
+    let calls = 0;
+    vi.doMock('../parsers/gopro/extractGpmf', () => ({
+      extractGpmf: () => {
+        const result = {
+          rawData: new Uint8Array(readBinaryFixture('hero7.raw')),
+          timing: { videoDurationSeconds: 17, frameIntervalSeconds: 1 / 30, start: new Date('2024-05-04T10:00:00Z'), samples: [] },
+        };
+        // The first read answers; a later one finishes only when told, and ignores the stop.
+        return (calls += 1) === 1 ? Promise.resolve(result) : new Promise((resolve) => pending.push(() => resolve(result)));
+      },
+    }));
+    try {
+      const { App: Fresh } = await import('./App');
+      const { useOverlayStore: freshStore } = await import('../state/overlayStore');
+      window.location.hash = '#/overlays';
+      render(<Fresh />);
+      await userEvent.upload(await screen.findByTestId('overlay-video-input'), heroVideo());
+      await inSlot('Video', 'GH010042.mp4');
+
+      // A replacement video is being read when the reader starts over.
+      await userEvent.upload(screen.getByTestId('overlay-video-input'), new File([readBinaryFixture('hero8.mp4')], 'GH010043.mp4', { type: 'video/mp4' }));
+      // The reader is loaded on demand: wait until the read is really held.
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+      expect(freshStore.getState().source).toEqual({});
+
+      await act(async () => {
+        pending.splice(0).forEach((finish) => finish());
+        // Long enough for the telemetry to be parsed and a stale result to land, were it let.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      });
+      expect(freshStore.getState().source).toEqual({});
+      expect(await screen.findByRole('region', { name: 'Nothing to overlay yet' })).toBeInTheDocument();
+    } finally {
+      vi.doUnmock('../parsers/gopro/extractGpmf');
+      vi.resetModules();
+    }
+  }, 60_000);
+});
+
 describe('the handoff is memory only (AV-1002)', () => {
   it('stores nothing on the device', async () => {
     window.location.hash = '#/overlays';

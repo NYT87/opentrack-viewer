@@ -134,11 +134,28 @@ export function OverlayPage() {
     if (confirmingStartOver) keepIt.current?.focus();
   }, [confirmingStartOver]);
 
+  /*
+   * A read that finishes after the reader has let its slot go — Start over,
+   * Remove, or a newer file — must write nothing: each read takes a
+   * generation, and letting go moves it on, as the viewer's store does.
+   */
+  const videoRead = useRef(0);
+  const activityRead = useRef(0);
+  const letGoOfVideoRead = () => {
+    videoRead.current += 1;
+    cancel();
+  };
+  const letGoOfActivityRead = () => {
+    activityRead.current += 1;
+  };
+
   const handleVideo = async (file: File) => {
+    const generation = ++videoRead.current;
     setCleared(undefined);
     setVideoState(IDLE);
     try {
       const { activity, timing, activityError } = await read(file);
+      if (generation !== videoRead.current) return;
       // Whatever the reader returned is a video to draw over — it decides
       // which outcomes still are — and what the video could not supply is
       // noted beside it. The store decides whether its telemetry becomes the
@@ -148,6 +165,7 @@ export function OverlayPage() {
       setAddingVideo(false);
       if (activity) offerVideoActivity(activity);
     } catch (error) {
+      if (generation !== videoRead.current) return;
       const failure = toActivityError(error, 'gopro_extract_failed');
       if (failure.code === 'extraction_cancelled') return;
       // What the reader throws is a file nothing could be drawn over; the
@@ -158,15 +176,18 @@ export function OverlayPage() {
   };
 
   const handleActivity = async (file: File) => {
+    const generation = ++activityRead.current;
     setCleared(undefined);
     setActivityState({ status: 'reading', fileName: file.name });
     try {
       // The same intake the viewer uses: GPX, FIT, TCX and KML, read here.
       // Set only once read, so the activity being replaced stays until then.
       const { activity } = await parseActivityFile(file);
+      if (generation !== activityRead.current) return;
       setActivity(activity, 'hand');
       setActivityState(IDLE);
     } catch (error) {
+      if (generation !== activityRead.current) return;
       setActivityState({
         status: 'error',
         error: toActivityError(error, 'unsupported_format'),
@@ -180,6 +201,8 @@ export function OverlayPage() {
     setTimeout(() => document.querySelector<HTMLElement>('[data-start-over]')?.focus(), 0);
 
   const startOver = () => {
+    letGoOfVideoRead();
+    letGoOfActivityRead();
     setConfirmingStartOver(false);
     setFinished({ png: false, video: false });
     setCleared(clear());
@@ -217,6 +240,7 @@ export function OverlayPage() {
           focusSlot(videoSlot);
         }}
         onRemove={() => {
+          letGoOfVideoRead();
           setVideo(undefined);
           focusSlot(videoSlot);
         }}
@@ -239,6 +263,8 @@ export function OverlayPage() {
           focusSlot(activitySlot);
         }}
         onRemove={() => {
+          letGoOfActivityRead();
+          setActivityState(IDLE);
           clearActivity();
           focusSlot(activitySlot);
         }}
@@ -446,7 +472,7 @@ export function OverlayPage() {
                       className="button"
                       onClick={() => {
                         // Lets go of a video being read or refused, too: the slot goes with it.
-                        cancel();
+                        letGoOfVideoRead();
                         setVideoState(IDLE);
                         setAddingVideo(false);
                       }}

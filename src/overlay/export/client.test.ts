@@ -221,6 +221,21 @@ describe('probing the worker\'s storage (AV-1006)', () => {
     expect(worker.terminated).toBe(true);
   });
 
+  it('rejects at once with what the worker says when it could not look, not after the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const { worker } = fakeWorker();
+      const answer = probeExportStorage({ createWorker: () => worker });
+      const settled = answer.catch((error: unknown) => error);
+      worker.emit({ type: 'error', code: 'storage_failed', message: 'The file system refused a file.' });
+      // No time passes: the answer is the worker's, not the timer's.
+      expect(await settled).toMatchObject({ code: 'storage_failed', message: 'The file system refused a file.' });
+      expect(worker.terminated).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('gives up on a worker that never answers', async () => {
     vi.useFakeTimers();
     try {
