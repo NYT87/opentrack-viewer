@@ -55,8 +55,7 @@ test('places a text by snap, by nudge and by dragging on the preview, and draws 
   const panel = await open(page);
 
   // The text alone, so every drawn pixel is the text's.
-  await panel.getByRole('list', { name: 'Elements on the image' }).getByRole('button', { name: 'Route' }).click();
-  await panel.getByRole('button', { name: 'Remove the route' }).click();
+  await panel.getByRole('button', { name: 'Remove Route' }).click();
   await panel.getByLabel('Add', { exact: true }).selectOption('label');
   await panel.getByRole('button', { name: 'Add to the image' }).click();
   await panel.getByLabel('Text', { exact: true }).fill('OpenTrack');
@@ -111,8 +110,7 @@ test('places a text by snap, by nudge and by dragging on the preview, and draws 
 
 test('adds the date, and draws it in the format chosen', async ({ page }) => {
   const panel = await open(page);
-  await panel.getByRole('list', { name: 'Elements on the image' }).getByRole('button', { name: 'Route' }).click();
-  await panel.getByRole('button', { name: 'Remove the route' }).click();
+  await panel.getByRole('button', { name: 'Remove Route' }).click();
   await panel.getByLabel('Add', { exact: true }).selectOption('date');
   await panel.getByRole('button', { name: 'Add to the image' }).click();
 
@@ -144,10 +142,12 @@ test('saves the layout and opens it again on a fresh page', async ({ page }, tes
   expect(json).toContain('"kind": "opentrack-overlay-layout"');
   expect(json).not.toMatch(/overlay-ride|"lat"|"lon"/);
 
+  // A fresh page: the files live in memory only, and the still image hides the slots.
+  await page.reload();
   const fresh = await open(page);
   await fresh.getByTestId('still-layout-input').setInputFiles(path);
   await expect(fresh.getByRole('status', { name: 'Layout file result' })).toContainText('Opened the layout');
-  await fresh.getByRole('list', { name: 'Elements on the image' }).getByRole('button', { name: 'Distance' }).click();
+  await fresh.getByRole('list', { name: 'Elements on the image' }).getByRole('button', { name: 'Distance', exact: true }).click();
   const reopened = await position(fresh);
   expect(reopened.x).toBeCloseTo(placed.x, 1);
   expect(reopened.y).toBeCloseTo(placed.y, 1);

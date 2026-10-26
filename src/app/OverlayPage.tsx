@@ -90,6 +90,8 @@ export function OverlayPage() {
   /** Whether either export holds a finished file Start over would throw away. */
   const [finished, setFinished] = useState({ png: false, video: false });
   const [confirmingStartOver, setConfirmingStartOver] = useState(false);
+  /** With the still image showing, whether the reader asked for the video slot back. */
+  const [addingVideo, setAddingVideo] = useState(false);
   /** AV-1011. Making a custom canvas rather than a built-in template (or the still image, without a video). */
   const canvasMode = useOverlayStore((state) => state.canvasMode);
   const setCanvasMode = useOverlayStore((state) => state.setCanvasMode);
@@ -142,6 +144,8 @@ export function OverlayPage() {
       // noted beside it. The store decides whether its telemetry becomes the
       // activity: not over one the reader chose by hand (TD-040).
       setVideo({ file, timing, telemetryNote: activityError?.message });
+      // The still image gives way to the video workspace; a later still image starts without the slot.
+      setAddingVideo(false);
       if (activity) offerVideoActivity(activity);
     } catch (error) {
       const failure = toActivityError(error, 'gopro_extract_failed');
@@ -181,6 +185,7 @@ export function OverlayPage() {
     setCleared(clear());
     setVideoState(IDLE);
     setActivityState(IDLE);
+    setAddingVideo(false);
     focusSlot(videoSlot);
   };
 
@@ -196,9 +201,8 @@ export function OverlayPage() {
     [source.activity, durationSeconds, source.video?.timing?.start, offsetSeconds],
   );
 
-  const files = (
-    <>
-      <VideoSlot
+  const videoSlotElement = (
+    <VideoSlot
         slotRef={videoSlot}
         video={source.video}
         activity={source.activity}
@@ -217,6 +221,11 @@ export function OverlayPage() {
           focusSlot(videoSlot);
         }}
       />
+  );
+
+  const files = (
+    <>
+      {videoSlotElement}
       <ActivitySlot
         slotRef={activitySlot}
         activity={source.activity}
@@ -234,8 +243,15 @@ export function OverlayPage() {
           focusSlot(activitySlot);
         }}
       />
+    </>
+  );
+
+  /** Start over, and its confirm; `beside` is another action on the same row. */
+  const startOverControls = (beside?: ReactNode) => (
+    <>
       {hasOverlaySource(source) && !confirmingStartOver && (
         <p className="overlay-files__actions">
+          {beside}
           {/* Lets go of the files only: the overlay settings are the reader's (TD-043). */}
           <button
             type="button"
@@ -299,6 +315,12 @@ export function OverlayPage() {
   );
 
   const canvas = canvasMode && source.activity !== undefined;
+  /*
+   * The still image is made from the activity alone: once it is chosen, the
+   * file slots give way to it, and Start over, below it, is the way to another
+   * activity or to a video.
+   */
+  const stillImage = !source.video && source.activity !== undefined && !canvas;
 
   return (
     <main className={source.video || canvas ? 'page page--overlays is-workspace' : 'page page--overlays'}>
@@ -385,7 +407,8 @@ export function OverlayPage() {
                 </label>
               </fieldset>
             )}
-            {files}
+            {!stillImage && files}
+            {!stillImage && startOverControls()}
             {canvas && source.activity && (
               <CustomCanvas
                 activity={source.activity}
@@ -406,6 +429,44 @@ export function OverlayPage() {
                 activity={source.activity}
                 focusedSection={source.focusedSection}
               />
+            )}
+            {stillImage && (
+              <div className="overlay-still__start-over">
+                <p className="overlay-controls__hint">
+                  Made from {source.activity?.source.fileName ?? source.activity?.metadata.name ?? 'this activity'}
+                  {source.focusedSection && ', the focused section only'}. Add a video to draw over it, keeping this
+                  activity; start over to use another.
+                </p>
+                {/* Only the video slot comes back: the activity stays as it is. */}
+                {(addingVideo || reading || videoState.status !== 'idle') && videoSlotElement}
+                {startOverControls(
+                  addingVideo ? (
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => {
+                        // Lets go of a video being read or refused, too: the slot goes with it.
+                        cancel();
+                        setVideoState(IDLE);
+                        setAddingVideo(false);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => {
+                        setAddingVideo(true);
+                        focusSlot(videoSlot);
+                      }}
+                    >
+                      Add a video
+                    </button>
+                  ),
+                )}
+              </div>
             )}
             {source.video && source.activity && !timeline.unavailable && !canvas && (
               <OverlayControls

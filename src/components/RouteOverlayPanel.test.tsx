@@ -202,6 +202,25 @@ describe('placing figures, the date and text on the image (AV-1010)', () => {
     expect(save).toHaveBeenCalledWith(expect.any(Blob), 'overlay-image-1920x1080.png');
   });
 
+  it('lists the elements one to a row, each with its own Remove, without selecting it first', async () => {
+    setup({ activity: timed() });
+    await add('Text');
+    const list = screen.getByRole('list', { name: 'Elements on the image' });
+    expect(within(list).getAllByRole('listitem').map((row) => row.textContent)).toEqual(['RouteRemove', 'Text: TextRemove']);
+    // The new text is selected; removing the route leaves it selected.
+    expect(within(list).getByRole('button', { name: 'Text: Text' })).toHaveAttribute('aria-pressed', 'true');
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Remove Route' }));
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    expect(editor()).toHaveAccessibleName('Selected: Text: Text');
+
+    // Removing the selected one lets the editor go with it.
+    await userEvent.click(within(list).getByRole('button', { name: 'Remove Text: Text' }));
+    expect(screen.queryByRole('list', { name: 'Elements on the image' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /^Selected:/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Nothing is on the image yet.')).toBeInTheDocument();
+  });
+
   it('places the selected element by snap, nudge and typed position, always inside the frame', async () => {
     const { stills } = setup({ activity: timed() });
     await add('Distance');

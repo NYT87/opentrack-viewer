@@ -61,6 +61,11 @@ function mockExtractionFrom(fixture: string | 'none') {
  * Waits for a text in a slot, finding the slot afresh each time: once a video
  * is held, the files move into the workspace's column and are drawn anew.
  */
+/** With an activity alone the still image takes the files' place: the line under it names the file. */
+const madeFrom = (fileName: string) => screen.findByText(new RegExp(`Made from ${fileName.replace(/\./g, '\\.')}`));
+/** The custom canvas keeps the file slots, for the tests that work in them. */
+const showFileSlots = () => userEvent.click(screen.getByRole('radio', { name: 'A custom video overlay, with no video' }));
+
 const inSlot = (name: 'Video' | 'Activity', text: string | RegExp, timeout = 30_000) =>
   waitFor(() => expect(within(screen.getByRole('region', { name })).getByText(text)).toBeInTheDocument(), { timeout });
 
@@ -175,7 +180,7 @@ describe('handed over from Video telemetry (AV-1002)', () => {
     window.location.hash = '#/overlays';
     render(<Fresh />);
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByText('morning-run.gpx');
+    await madeFrom('morning-run.gpx');
 
     await goToTool('Video telemetry');
     await userEvent.upload(await screen.findByTestId('file-input'), heroVideo());
@@ -214,11 +219,18 @@ describe('choosing the files by hand (AV-1002)', () => {
 
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
 
-    const activity = await screen.findByRole('region', { name: 'Activity' });
-    expect(await within(activity).findByText('morning-run.gpx')).toBeInTheDocument();
-    // Without a video, the activity becomes a standalone route image.
-    expect(screen.getByRole('region', { name: 'Overlay image' })).toBeInTheDocument();
-    // The video slot still waits for one.
+    expect(await madeFrom('morning-run.gpx')).toBeInTheDocument();
+    // Without a video, the activity becomes a standalone route image, and the
+    // file slots give way to it: Start over, below it, is the way to other files.
+    const image = screen.getByRole('region', { name: 'Overlay image' });
+    expect(screen.queryByRole('region', { name: 'Activity' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Video' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('overlay-video-input')).not.toBeInTheDocument();
+    const startOver = screen.getByRole('button', { name: 'Start over' });
+    expect(image.compareDocumentPosition(startOver) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The custom canvas works with the files, so it shows them again.
+    await showFileSlots();
+    expect(await screen.findByRole('region', { name: 'Activity' })).toHaveTextContent('morning-run.gpx');
     expect(screen.getByTestId('overlay-video-input')).toBeInTheDocument();
     expectNoViewerPanels();
   });
@@ -243,7 +255,10 @@ describe('choosing the files by hand (AV-1002)', () => {
     window.location.hash = '#/overlays';
     render(<Fresh />);
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByText('morning-run.gpx');
+    await madeFrom('morning-run.gpx');
+    // From the still image, only the video slot comes back.
+    await userEvent.click(screen.getByRole('button', { name: 'Add a video' }));
+    expect(screen.queryByRole('region', { name: 'Activity' })).not.toBeInTheDocument();
 
     await userEvent.upload(await screen.findByTestId('overlay-video-input'), heroVideo());
 
@@ -276,7 +291,7 @@ describe('choosing the files by hand (AV-1002)', () => {
     // A hand-picked file, though, survives a video swap. "Choose another"
     // replaces in place: the file held stays until the new one is read.
     await userEvent.upload(screen.getByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByText('morning-run.gpx');
+    await inSlot('Activity', 'morning-run.gpx');
     await userEvent.upload(screen.getByTestId('overlay-video-input'), heroVideo());
     await waitFor(() => expect(freshStore.getState().source.video?.file.name).toBe('GH010042.mp4'), { timeout: 30_000 });
     expect(screen.getByText('morning-run.gpx')).toBeInTheDocument();
@@ -379,11 +394,31 @@ describe('choosing the files by hand (AV-1002)', () => {
     await waitFor(() => expect(within(slot).getByRole('button', { name: /^Drop a GPX/ })).toHaveFocus());
   });
 
+  it('brings back only the video slot from the still image, and lets it go again on Cancel', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
+    await madeFrom('morning-run.gpx');
+    expect(screen.queryByTestId('overlay-video-input')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add a video' }));
+    const slot = await screen.findByRole('region', { name: 'Video' });
+    // Focus goes to where the video is dropped, and Start over stays beside the way back.
+    await waitFor(() => expect(within(slot).getByRole('button', { name: /^Drop/ })).toHaveFocus());
+    expect(screen.getByRole('button', { name: 'Start over' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Overlay image' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('region', { name: 'Video' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a video' })).toBeInTheDocument();
+    expect(useOverlayStore.getState().source.activity).toBeDefined();
+  });
+
   it('starts over, and forgets both files', async () => {
     window.location.hash = '#/overlays';
     render(<App />);
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByText('morning-run.gpx');
+    await madeFrom('morning-run.gpx');
 
     await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
 
@@ -392,7 +427,7 @@ describe('choosing the files by hand (AV-1002)', () => {
 
     // And it can be taken back (TD-059).
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
-    expect(await screen.findByText('morning-run.gpx')).toBeInTheDocument();
+    expect(await madeFrom('morning-run.gpx')).toBeInTheDocument();
     expect(useOverlayStore.getState().source.activity).toBeDefined();
   });
 
@@ -400,7 +435,8 @@ describe('choosing the files by hand (AV-1002)', () => {
     window.location.hash = '#/overlays';
     render(<App />);
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByText('morning-run.gpx');
+    await madeFrom('morning-run.gpx');
+    await showFileSlots();
     const before = useOverlayStore.getState().source.activity;
 
     await userEvent.upload(
@@ -419,7 +455,7 @@ describe('the handoff is memory only (AV-1002)', () => {
     window.location.hash = '#/overlays';
     render(<App />);
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByText('morning-run.gpx');
+    await madeFrom('morning-run.gpx');
 
     // The theme is the one thing this app persists (§17); nothing about a
     // video, an activity or their names joins it.
@@ -630,9 +666,7 @@ describe('handed over from the viewer (AV-1009)', () => {
     expect(window.location.hash).toBe('#/overlays');
     expect(within(panel).getByTestId('route-image-preview')).toBeInTheDocument();
     expect(panel).toHaveTextContent(/whole activity/);
-    const activity = screen.getByRole('region', { name: 'Activity' });
-    expect(within(activity).getByText('morning-run.gpx')).toBeInTheDocument();
-    expect(within(activity).queryByText('Focused section only')).not.toBeInTheDocument();
+    expect(await madeFrom('morning-run.gpx')).not.toHaveTextContent(/focused section/);
   });
 
   it('opens the route image even when a video was held here before', async () => {
@@ -662,8 +696,7 @@ describe('handed over from the viewer (AV-1009)', () => {
 
     const panel = await screen.findByRole('region', { name: 'Overlay image' });
     expect(panel).toHaveTextContent(/focused section/);
-    const activity = screen.getByRole('region', { name: 'Activity' });
-    expect(within(activity).getByText('Focused section only')).toBeInTheDocument();
+    expect(await madeFrom('morning-run.gpx')).toHaveTextContent('the focused section only');
     expect(useOverlayStore.getState().source.activity!.points.map((point) => point.index)).toEqual([1, 2]);
     // The viewer's own activity is untouched.
     expect(useActivityStore.getState().activity!.points).toHaveLength(total);
@@ -672,10 +705,12 @@ describe('handed over from the viewer (AV-1009)', () => {
   it('forgets that it was a section when another activity is chosen', async () => {
     await userEvent.click(await openInViewer());
     act(() => useOverlayStore.getState().setActivity(useActivityFixture(), 'hand', { focusedSection: true }));
+    expect(await screen.findByText(/the focused section only/)).toBeInTheDocument();
+    await showFileSlots();
     expect(await screen.findByText('Focused section only')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Choose another activity' }));
     await userEvent.upload(await screen.findByTestId('overlay-activity-input'), gpxFile());
-    await screen.findByRole('region', { name: 'Overlay image' });
+    await waitFor(() => expect(useOverlayStore.getState().source.focusedSection).toBeFalsy());
     expect(screen.queryByText('Focused section only')).not.toBeInTheDocument();
   });
 });

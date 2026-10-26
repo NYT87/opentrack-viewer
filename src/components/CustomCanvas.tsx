@@ -63,6 +63,7 @@ import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { DateSettings, PercentField } from './RouteOverlayPanel';
+import { ElementRows } from './ElementRows';
 
 /** The long side of the preview, in pixels: the overlay is drawn at this size by the export's renderer. */
 const PREVIEW_LONG_SIDE = 720;
@@ -329,20 +330,15 @@ export function CustomCanvas({
         <fieldset className="overlay-controls__group">
           <legend>Elements</legend>
           {components.length > 0 ? (
-            <ul className="still-image__elements" aria-label="Elements on the canvas">
-              {components.map((component) => (
-                <li key={component.id}>
-                  <button
-                    type="button"
-                    className="button"
-                    aria-pressed={component.id === selectedId}
-                    onClick={() => select(component.id === selectedId ? undefined : component.id)}
-                  >
-                    {describeCanvasComponent(component)}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ElementRows
+              label="Elements on the canvas"
+              rows={components.map((component) => ({ id: component.id, name: describeCanvasComponent(component) }))}
+              selectedId={selectedId}
+              onSelect={select}
+              onRemove={(removed) =>
+                change(removeComponent(components, removed), removed === selectedId ? undefined : selectedId)
+              }
+            />
           ) : (
             <p className="overlay-controls__hint">The canvas is empty. Add an element, or start from a template.</p>
           )}

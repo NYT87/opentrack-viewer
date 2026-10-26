@@ -231,7 +231,9 @@ test('takes the activity from the viewer, whole by default and the focused secti
   const panel = page.getByRole('region', { name: 'Overlay image' });
   await expect(panel).toContainText('whole activity');
   await expect(panel.getByTestId('route-image-preview')).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('overlay-ride.gpx');
+  // The still image takes the file slots' place, and names the file below it.
+  await expect(page.getByText(/Made from overlay-ride\.gpx/)).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Activity' })).toHaveCount(0);
 
   const { png, name } = await downloadPng(page);
   expect(name).toBe('route-overlay-1920x1080.png');

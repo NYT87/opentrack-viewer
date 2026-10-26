@@ -45,7 +45,9 @@ const setup = (activity: Activity = ride()) =>
   render(<CustomCanvas activity={activity} offsetSeconds={0} units="metric" readerTimeZone="UTC" />);
 const region = () => screen.getByRole('region', { name: 'Custom canvas' });
 const elements = () => within(region()).queryByRole('list', { name: 'Elements on the canvas' });
-const names = () => (elements() ? within(elements()!).getAllByRole('button').map((button) => button.textContent) : []);
+// The names, not the Remove beside each.
+const names = () =>
+  elements() ? within(elements()!).getAllByRole('button').filter((button) => button.hasAttribute('aria-pressed')).map((button) => button.textContent) : [];
 const add = async (label: string) => {
   await userEvent.selectOptions(within(region()).getByLabelText('Add'), within(region()).getByRole('option', { name: label }));
   await userEvent.click(within(region()).getByRole('button', { name: 'Add to the canvas' }));
@@ -123,6 +125,21 @@ describe('the custom canvas (AV-1011)', () => {
 
     await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
     expect((await layoutJson()).template.components[0]).toMatchObject({ style: { fontScale: before.style.fontScale }, rect: before.rect });
+  });
+
+  it('removes an element from its row in the list, keeping the selection on another', async () => {
+    setup();
+    await add('Speed');
+    await add('Rounded rectangle');
+    expect(names()).toEqual(['Speed', 'Rounded rectangle']);
+
+    await userEvent.click(within(elements()!).getByRole('button', { name: 'Remove Speed' }));
+    expect(names()).toEqual(['Rounded rectangle']);
+    expect(within(elements()!).getByRole('button', { name: 'Rounded rectangle' })).toHaveAttribute('aria-pressed', 'true');
+
+    // One step, so one Undo puts it back.
+    await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+    expect(names()).toEqual(['Speed', 'Rounded rectangle']);
   });
 
   it('orders layers, duplicates and deletes', async () => {

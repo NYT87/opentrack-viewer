@@ -804,6 +804,10 @@ Reason: the criteria ask for placement that does not depend on dragging, figures
 
 Since AV-1011 (TD-062), the video renderer draws these elements too: on a custom canvas they are drawn on every frame, set once, as the still image sets them. A video built from a template still hides them, as above.
 
+**On the page, the still image takes the files' place.** With an activity and no video, choosing the still image hides the video and activity slots: the image is made from the activity alone, and the slots above it only pushed it down. A line below the image names the file (and says when it is only the focused section). Under it, **Add a video** brings back the video slot alone, the activity kept, and once a video is read the page becomes the video workspace with both; **Cancel** lets the slot go again, with any read in progress. **Start over**, beside them, is the way to another activity; it can be undone, as before. This departs from TD-059's "the slots never move" for this one mode, where nothing is being read into them. The custom canvas keeps the slots, since it can take a video.
+
+**Elements are a list.** The elements on the image (and on a custom canvas) are one row each: the name selects the element for editing, and **Remove** beside it takes it off without selecting it first. On the canvas that is one undoable step, like the editor's Delete.
+
 ### TD-062: The Custom Canvas Is the Same Template, With Shapes, Drawn by the Export's Renderer
 
 Decision (`AV-1011`): the overlay page offers a custom canvas beside the template overlays and the still image, with or without a video. It is not a second editor model. A canvas is an overlay template (version 2, TD-061), a list of components with rects in fractions of the frame, and its layout file is the still image's `overlay-layout.json` (`src/overlay/customCanvas.ts`, `src/components/CustomCanvas.tsx`).

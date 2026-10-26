@@ -46,6 +46,7 @@ import {
 } from '../overlay/template';
 import { useInteractionStore } from '../state/interactionStore';
 import { measureText } from '../overlay/measureText';
+import { ElementRows } from './ElementRows';
 
 /** The long side of the preview, in pixels: the image drawn at this scale. */
 const PREVIEW_LONG_SIDE = 640;
@@ -324,6 +325,10 @@ export function RouteOverlayPanel({
         choices={stillElementChoices(context).filter((choice) => choice.key !== 'route' || !hasRoute)}
         onSelect={setSelectedId}
         onAdd={add}
+        onRemove={(removed) => {
+          setComponents((current) => current.filter((component) => component.id !== removed));
+          if (removed === selectedId) setSelectedId(undefined);
+        }}
       />
 
       {selected && (
@@ -447,6 +452,7 @@ function ElementList({
   choices,
   onSelect,
   onAdd,
+  onRemove,
 }: {
   components: OverlayComponent[];
   plan: StillImagePlan | undefined;
@@ -454,6 +460,7 @@ function ElementList({
   choices: StillElementChoice[];
   onSelect: (id: string | undefined) => void;
   onAdd: (key: StillElementChoice['key']) => void;
+  onRemove: (id: string) => void;
 }) {
   const id = useId();
   const firstAvailable = choices.find((choice) => choice.available)?.key;
@@ -465,24 +472,17 @@ function ElementList({
     <fieldset className="overlay-controls__group">
       <legend>Elements</legend>
       {components.length > 0 ? (
-        <ul className="still-image__elements" aria-label="Elements on the image">
-          {components.map((component) => {
-            const hiddenEntry = plan?.hidden.find((entry) => entry.id === component.id);
-            return (
-              <li key={component.id}>
-                <button
-                  type="button"
-                  className="button"
-                  aria-pressed={component.id === selectedId}
-                  onClick={() => onSelect(component.id === selectedId ? undefined : component.id)}
-                >
-                  {describeStillComponent(component)}
-                  {hiddenEntry && <span className="overlay-controls__hint"> — not drawn</span>}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <ElementRows
+          label="Elements on the image"
+          rows={components.map((component) => ({
+            id: component.id,
+            name: describeStillComponent(component),
+            note: plan?.hidden.some((entry) => entry.id === component.id) ? 'not drawn' : undefined,
+          }))}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onRemove={onRemove}
+        />
       ) : (
         <p className="overlay-controls__hint">Nothing is on the image yet.</p>
       )}
