@@ -30,7 +30,7 @@ export function AppShell() {
   const isHome = location.pathname === ROUTES.home;
 
   /*
-   * A route change moves focus to the new page's title, so a screen reader
+   * A route change scrolls to the top and moves focus to the new page's title, so a screen reader
    * hears where it is and Tab starts from the page, not the top of the shell.
    * Only when the page left focus nowhere useful (the body, or the header that
    * navigated): a page that puts focus somewhere itself keeps it. Not on the
@@ -42,6 +42,8 @@ export function AppShell() {
       firstRoute.current = false;
       return;
     }
+    // A new page starts at its top, not wherever the last one was scrolled to.
+    window.scrollTo(0, 0);
     const timer = setTimeout(() => {
       const active = document.activeElement;
       if (active && active !== document.body && !active.closest('.shell__header')) return;

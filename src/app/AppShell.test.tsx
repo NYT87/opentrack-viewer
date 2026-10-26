@@ -110,6 +110,18 @@ describe('routing (AV-006)', () => {
     expect(toolsItem('File viewer')).toHaveAttribute('aria-current', 'page');
   });
 
+  it('starts each new page at its top', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    render(<App />);
+    // Not on the first load, where the browser's own start is right.
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    await goToViewer();
+
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    scrollTo.mockRestore();
+  });
+
   it('falls back to the homepage for an unknown route', async () => {
     window.location.hash = '#/nowhere';
     render(<App />);
