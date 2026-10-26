@@ -1170,6 +1170,20 @@ Acceptance criteria:
 - Everything stays in the browser: no activity data, video, layout or output leaves it.
 - Unit tests cover placement and resize clamping, resolution change keeping the layout proportional, shape styling and transparency, binding each data component to the timeline, a missing-data component, layout round-trip, and the shared model with AV-1010; golden renders cover each shape and each data component; browser tests cover choosing a resolution, placing and moving components, styling a shape, previewing with and without a video, and exporting, including a pixel check that components land where placed.
 
+#### AV-1012: Export the Overlay as a Transparent VP9 WebM Where the Browser Keeps Alpha
+
+Dependencies: AV-1001, AV-1006, AV-1011
+
+Acceptance criteria:
+- The overlay export panel offers a transparent VP9 WebM beside the PNG sequence, for the template overlays and the custom canvas alike, with or without a video.
+- It is offered only where a probe at export time shows `MediaRecorder` keeps the canvas's alpha (TD-039): a short transparent clip is recorded, played back over magenta and read. Elsewhere the choice is shown disabled with the reason, and the PNG sequence stays.
+- The overlay is drawn by the export's renderer on a page canvas, one frame every 1/fps seconds on the clock, so the recording takes as long as the overlay; the panel says so before it starts and asks for the tab to stay in front.
+- A recording that cannot stay in step — the tab hidden, or more than a second behind — stops with the reason and keeps nothing. A stop keeps nothing.
+- The finished file states its duration: the recorder leaves it out, and it is written into the segment's Info without reading the file into memory whole, moving the segment size, SeekHead and cue positions it shifts. A file that cannot be patched is still offered, with a note.
+- The size is bounded by a bitrate ceiling scaled with the picture, and a recording larger than a tab can hold is refused before it starts.
+- Everything stays in the browser.
+- Unit tests cover the duration patch on recorder-shaped files (unknown-size clusters, block groups, a known-size segment with SeekHead and Cues, an existing Duration), the real-time loop (pacing, the last frame's length, a hidden tab, falling behind, a short hitch, a stop, a frame that fails), the plan, the capability check and the panel; a browser test records the overlay of the committed clip, checks the file's length is finite and as planned, and plays it over magenta to check what is clear stayed clear.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

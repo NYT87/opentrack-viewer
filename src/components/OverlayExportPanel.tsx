@@ -18,8 +18,11 @@ import {
   formatFrameRate,
   highestFittingFrameRate,
   planExport,
+  planWebmExport,
 } from '../overlay/export/plan';
+import { startWebmExport } from '../overlay/export/recordWebm';
 import { getExportSupport, type ExportSupport } from '../overlay/export/support';
+import { probeWebmSupport, type WebmSupport } from '../overlay/export/webmSupport';
 import type { ArchiveStorage } from '../overlay/export/protocol';
 import { ZIP_MAX_BYTES } from '../overlay/export/zip';
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
@@ -47,6 +50,10 @@ interface OverlayExportPanelProps {
   support?: ExportSupport;
   /** Asks the worker where an archive can really be stored; injected by tests. */
   probeStorage?: () => Promise<ArchiveStorage>;
+  /** AV-1012. Records a transparent WebM; injected by tests. */
+  startWebm?: typeof startWebmExport;
+  /** AV-1012. Whether this browser keeps a recording's transparency; injected by tests. */
+  probeWebm?: () => Promise<WebmSupport>;
   /** Told whether a finished file is waiting to be downloaded, so Start over can ask first. */
   onFinishedChange?: (finished: boolean) => void;
 }
@@ -56,17 +63,25 @@ type StorageState =
   | { status: 'ready'; storage: ArchiveStorage }
   | { status: 'failed'; message: string };
 
+/** AV-1012. What the overlay is saved as. */
+type ExportFormat = 'png' | 'webm';
+
+type WebmState = { status: 'checking' } | { status: 'ready' } | { status: 'unavailable'; reason: string };
+
 type Phase =
   | { status: 'idle' }
   | { status: 'running'; done: number; total: number }
   | {
       status: 'done';
+      format: ExportFormat;
       url: string;
       fileName: string;
       bytes: number;
       frameCount: number;
       /** The rate it was drawn at, for the note on setting the editor to match. */
       fps: number;
+      /** Things the reader should know about the file. */
+      notes?: string[];
       /** What it was made from, to tell when the page has since moved on. */
       made: { signature: string; activity: Activity; file: File | undefined };
     }
@@ -110,6 +125,8 @@ export function OverlayExportPanel({
   start = startOverlayExport,
   support = getExportSupport(),
   probeStorage = probeExportStorage,
+  startWebm = startWebmExport,
+  probeWebm = probeWebmSupport,
   onFinishedChange,
 }: OverlayExportPanelProps) {
   const id = useId();
@@ -117,6 +134,8 @@ export function OverlayExportPanel({
   const [heightChoice, setHeightChoice] = useState<string>(NATIVE);
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const [storageState, setStorageState] = useState<StorageState>({ status: 'checking' });
+  const [format, setFormat] = useState<ExportFormat>('png');
+  const [webmState, setWebmState] = useState<WebmState>({ status: 'checking' });
   const job = useRef<ExportJob | undefined>(undefined);
   const output = useRef<ExportOutput | undefined>(undefined);
 
@@ -138,6 +157,25 @@ export function OverlayExportPanel({
       current = false;
     };
   }, [probeStorage, support.supported]);
+  // AV-1012. Whether a recording keeps its transparency is the browser's own answer, asked once.
+  useEffect(() => {
+    let current = true;
+    probeWebm().then(
+      (answer) =>
+        current &&
+        setWebmState(
+          answer.supported
+            ? { status: 'ready' }
+            : { status: 'unavailable', reason: answer.reason ?? 'This browser cannot record a transparent video.' },
+        ),
+      () => current && setWebmState({ status: 'unavailable', reason: 'This browser cannot record a transparent video.' }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [probeWebm]);
+  const asWebm = format === 'webm' && webmState.status === 'ready';
+
   const storageLimitBytesNow =
     storageState.status === 'ready' ? storageLimitBytes(storageState.storage) : ZIP_MAX_BYTES;
 
@@ -169,13 +207,20 @@ export function OverlayExportPanel({
     height: exportHeight,
     limitBytes: storageLimitBytesNow,
   });
+  const webmPlan = planWebmExport({
+    videoDurationSeconds: durationSeconds ?? 0,
+    fps,
+    width: exportWidth,
+    height: exportHeight,
+  });
+  const fits = asWebm ? webmPlan.fits : plan.fitsArchive;
   const built = useMemo(
     () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, exportWidth / exportHeight)),
     [customTemplate, controls, timeline, exportWidth, exportHeight],
   );
   // Everything that changes the picture. A finished export is compared with it.
-  const signature = JSON.stringify([built.template, units, effectiveOffset, plan.fps, plan.width, plan.height]);
-  const fallbackFps = plan.fitsArchive
+  const signature = JSON.stringify([built.template, units, effectiveOffset, plan.fps, plan.width, plan.height, asWebm]);
+  const fallbackFps = plan.fitsArchive || asWebm
     ? undefined
     : highestFittingFrameRate({
         videoDurationSeconds: durationSeconds ?? 0,
@@ -232,10 +277,11 @@ export function OverlayExportPanel({
     void output.current?.dispose();
     output.current = undefined;
     setPhase({ status: 'running', done: 0, total: plan.frameCount });
+    const madeAs: ExportFormat = asWebm ? 'webm' : 'png';
 
     let active: ExportJob;
     try {
-      active = start(
+      active = (madeAs === 'webm' ? startWebm : start)(
         {
           width: plan.width,
           height: plan.height,
@@ -267,9 +313,11 @@ export function OverlayExportPanel({
         output.current = result;
         setPhase({
           status: 'done',
+          format: madeAs,
           url: URL.createObjectURL(result.file),
-          fileName: `${baseName(video?.file.name ?? activity.source.fileName ?? 'activity')}-overlay-${plan.width}x${plan.height}-${formatFrameRate(plan.fps)}fps.zip`,
+          fileName: `${baseName(video?.file.name ?? activity.source.fileName ?? 'activity')}-overlay-${plan.width}x${plan.height}-${formatFrameRate(plan.fps)}fps.${madeAs === 'webm' ? 'webm' : 'zip'}`,
           fps: plan.fps,
+          notes: result.notes,
           bytes: result.bytes,
           frameCount: result.frameCount,
           made: { signature, activity, file: video?.file },
@@ -304,8 +352,9 @@ export function OverlayExportPanel({
         Export overlay
       </h3>
       <p>
-        Saves the overlay by itself, one transparent PNG per frame in a ZIP, to place over your video
-        in an editor. Your video is not changed, and nothing is uploaded.
+        Saves the overlay by itself, transparent where nothing is drawn, to place over your video in an
+        editor: one PNG per frame in a ZIP, or a WebM video where this browser can record one. Your video
+        is not changed, and nothing is uploaded.
       </p>
 
       {!support.supported && <p role="alert">{support.reason}</p>}
@@ -321,6 +370,32 @@ export function OverlayExportPanel({
 
       {support.supported && storageState.status === 'ready' && ready && (
         <>
+          <fieldset className="editor__modes" disabled={running}>
+            <legend className="summary__label">Format</legend>
+            <label className="editor__mode">
+              <input
+                type="radio"
+                name={`${id}-format`}
+                value="png"
+                checked={!asWebm}
+                onChange={() => setFormat('png')}
+              />
+              PNG sequence (ZIP)
+            </label>
+            <label className="editor__mode">
+              <input
+                type="radio"
+                name={`${id}-format`}
+                value="webm"
+                checked={asWebm}
+                disabled={webmState.status !== 'ready'}
+                onChange={() => setFormat('webm')}
+              />
+              Transparent video (WebM)
+              {webmState.status === 'checking' && <span className="export__note"> — checking this browser…</span>}
+              {webmState.status === 'unavailable' && <span className="export__note"> — {webmState.reason}</span>}
+            </label>
+          </fieldset>
           <div className="overlay-export__settings">
             <div className="overlay-controls__field">
               <label htmlFor={`${id}-fps`}>Frame rate</label>
@@ -369,13 +444,28 @@ export function OverlayExportPanel({
             ) : null}
           </div>
 
-          <p data-testid="export-plan">
-            {plan.frameCount} frames, {plan.width} × {plan.height}, {formatDuration(plan.durationSeconds)}{' '}
-            long. About {formatBytes(plan.estimatedBytes)}; roughly{' '}
-            {formatDuration(Math.max(1, plan.estimatedSeconds))} to draw.
-          </p>
+          {asWebm ? (
+            <p data-testid="export-plan">
+              {webmPlan.frameCount} frames, {webmPlan.width} × {webmPlan.height},{' '}
+              {formatDuration(webmPlan.durationSeconds)} long. At most about {formatBytes(webmPlan.estimatedBytes)}.
+              Recorded in real time, so it takes {formatDuration(Math.max(1, webmPlan.estimatedSeconds))}: keep this
+              tab open and in front until it finishes.
+            </p>
+          ) : (
+            <p data-testid="export-plan">
+              {plan.frameCount} frames, {plan.width} × {plan.height}, {formatDuration(plan.durationSeconds)}{' '}
+              long. About {formatBytes(plan.estimatedBytes)}; roughly{' '}
+              {formatDuration(Math.max(1, plan.estimatedSeconds))} to draw.
+            </p>
+          )}
 
-          {!plan.fitsArchive && (
+          {asWebm && !webmPlan.fits && (
+            <p role="alert">
+              This recording could be more than the {formatBytes(webmPlan.limitBytes)} a tab can hold. Choose a
+              smaller picture size, or use the PNG sequence.
+            </p>
+          )}
+          {!asWebm && !plan.fitsArchive && (
             <p role="alert">
               {storageLimitBytesNow < ZIP_MAX_BYTES
                 ? `This browser can store about ${formatBytes(storageLimitBytesNow)} of export, and this is more than that.`
@@ -410,9 +500,9 @@ export function OverlayExportPanel({
                 type="button"
                 className={downloadFirst ? 'button' : 'button button--primary'}
                 onClick={begin}
-                disabled={!plan.fitsArchive || nothingOn || noOverlap}
+                disabled={!fits || nothingOn || noOverlap}
               >
-                {stale ? 'Export again' : 'Export PNG sequence'}
+                {stale ? 'Export again' : asWebm ? 'Export transparent video' : 'Export PNG sequence'}
               </button>
             )}
           </p>
@@ -457,12 +547,20 @@ export function OverlayExportPanel({
           </button>
         </p>
       )}
-      {phase.status === 'done' && (
+      {phase.status === 'done' && phase.format === 'png' && (
         <p className="overlay-export__import">
           In your editor, set the sequence to {formatFrameRate(phase.fps)} fps and place the first
           frame at the start of the clip; the frames are numbered from there.
         </p>
       )}
+      {phase.status === 'done' && phase.format === 'webm' && (
+        <p className="overlay-export__import">
+          In your editor, put the video on a track above the clip and start it where the clip starts. It is
+          VP9 with an alpha channel, at {formatFrameRate(phase.fps)} fps. An editor that does not read VP9
+          transparency shows it opaque; the PNG sequence works in every editor.
+        </p>
+      )}
+      {phase.status === 'done' && phase.notes?.map((note) => <p key={note} role="status">{note}</p>)}
       {phase.status === 'discarded' && <p role="status">Temporary export discarded. Copies already downloaded are kept.</p>}
       {phase.status === 'stopped' && <p role="status">Export stopped. Nothing was saved.</p>}
       {phase.status === 'error' && <p role="alert">{phase.message}</p>}

@@ -236,6 +236,7 @@ describe('the custom canvas (AV-1011)', () => {
     await add('Speed');
     expect(within(region()).getByRole('region', { name: 'Export overlay' })).toBeInTheDocument();
     expect(region()).toHaveTextContent('A video with the overlay burned in needs a source video');
-    expect(region()).toHaveTextContent(/Transparent WebM is not made by this app yet/);
+    // AV-1012. The export panel offers the transparent video itself, where the browser can record one.
+    expect(region()).not.toHaveTextContent(/Transparent WebM is not made by this app yet/);
   });
 });

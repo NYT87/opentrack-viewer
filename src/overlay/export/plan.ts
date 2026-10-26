@@ -123,3 +123,57 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1_000_000_000) return `${Math.round(bytes / 1_000_000)} MB`;
   return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 }
+
+/**
+ * AV-1012. The transparent WebM is recorded from a canvas held in memory, so it
+ * is limited by what a tab can hold rather than by a file format.
+ */
+export const WEBM_MAX_BYTES = 2_000_000_000;
+
+/**
+ * The bitrate the recorder is asked for: 8 Mbit/s at 1080p, scaled with the
+ * picture's area and held between 1 and 24 Mbit/s. It is a ceiling: an overlay
+ * is mostly clear, and VP9 spends little on what does not change.
+ */
+export function webmBitsPerSecond(width: number, height: number): number {
+  const scaled = Math.round((8_000_000 * width * height) / PIXELS_1080P);
+  return Math.min(24_000_000, Math.max(1_000_000, scaled));
+}
+
+export interface WebmExportPlan extends ExportDimensions {
+  fps: number;
+  frameCount: number;
+  durationSeconds: number;
+  bitsPerSecond: number;
+  /** At most this: the bitrate over the whole length. */
+  estimatedBytes: number;
+  /** Recorded in real time, so as long as the overlay itself. */
+  estimatedSeconds: number;
+  /** Whether the recording can be held in memory. */
+  fits: boolean;
+  limitBytes: number;
+}
+
+export function planWebmExport({
+  videoDurationSeconds,
+  fps,
+  width,
+  height,
+  limitBytes = WEBM_MAX_BYTES,
+}: ExportPlanInput): WebmExportPlan {
+  const frames = planExport({ videoDurationSeconds, fps, width, height });
+  const bitsPerSecond = webmBitsPerSecond(width, height);
+  const estimatedBytes = Math.round((bitsPerSecond * frames.durationSeconds) / 8);
+  return {
+    width,
+    height,
+    fps: frames.fps,
+    frameCount: frames.frameCount,
+    durationSeconds: frames.durationSeconds,
+    bitsPerSecond,
+    estimatedBytes,
+    estimatedSeconds: frames.durationSeconds,
+    fits: estimatedBytes < limitBytes,
+    limitBytes,
+  };
+}

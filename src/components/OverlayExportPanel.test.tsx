@@ -108,7 +108,8 @@ afterEach(() => vi.unstubAllGlobals());
 describe('the export panel (AV-1006)', () => {
   it('says what will be made, and that nothing is uploaded', () => {
     setup();
-    expect(panel()).toHaveTextContent(/transparent PNG per frame/);
+    expect(panel()).toHaveTextContent(/transparent where nothing is drawn/);
+    expect(panel()).toHaveTextContent(/one PNG per frame in a ZIP/);
     expect(panel()).toHaveTextContent(/Your video is not changed/);
     expect(panel()).toHaveTextContent(/nothing is uploaded/i);
   });
@@ -483,5 +484,76 @@ describe('telling the page a file is finished (AV-1011)', () => {
     expect(screen.getByTestId('reports')).toHaveTextContent(/^false,true$/);
     await userEvent.click(screen.getByRole('button', { name: 'Take the panel away' }));
     expect(screen.getByTestId('reports')).toHaveTextContent(/^false,true,false$/);
+  });
+});
+
+describe('a transparent WebM (AV-1012)', () => {
+  /** A WebM probe that has already answered, like `syncProbe`. */
+  const webmProbe = (supported: boolean) => () =>
+    ({
+      then: (ok: (value: { supported: boolean; reason?: string }) => void) =>
+        ok(supported ? { supported } : { supported, reason: 'This browser cannot record a transparent video.' }),
+    }) as unknown as Promise<{ supported: boolean }>;
+
+  const webmSetup = (supported: boolean) => {
+    const recordings: ReturnType<typeof controlledJob>[] = [];
+    const startWebm = vi.fn(() => {
+      const next = controlledJob();
+      recordings.push(next);
+      return next.job;
+    });
+    return { ...setup({ startWebm: startWebm as never, probeWebm: webmProbe(supported) }), startWebm, recordings };
+  };
+
+  it('is offered, with the reason, only where the browser keeps the transparency', () => {
+    webmSetup(false);
+    const choice = within(panel()).getByRole('radio', { name: /Transparent video \(WebM\)/ });
+    expect(choice).toBeDisabled();
+    expect(panel()).toHaveTextContent(/cannot record a transparent video/);
+    expect(within(panel()).getByRole('radio', { name: 'PNG sequence (ZIP)' })).toBeChecked();
+  });
+
+  it('says it is recorded in real time, and records it rather than drawing frames', async () => {
+    const { start, startWebm } = webmSetup(true);
+    await userEvent.click(within(panel()).getByRole('radio', { name: /Transparent video \(WebM\)/ }));
+
+    expect(screen.getByTestId('export-plan')).toHaveTextContent(/300 frames, 1920 × 1080, 0:10 long/);
+    expect(screen.getByTestId('export-plan')).toHaveTextContent(/real time, so it takes 0:10: keep this tab open/);
+    await userEvent.click(screen.getByRole('button', { name: 'Export transparent video' }));
+
+    expect(start).not.toHaveBeenCalled();
+    expect(startWebm).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 1920, height: 1080, fps: 30, frameCount: 300 }),
+      expect.any(Function),
+    );
+    // The format cannot change under a recording.
+    expect(within(panel()).getByRole('radio', { name: 'PNG sequence (ZIP)' })).toBeDisabled();
+  });
+
+  it('offers the finished video as a .webm, with how to place it and anything the reader should know', async () => {
+    const { recordings } = webmSetup(true);
+    await userEvent.click(within(panel()).getByRole('radio', { name: /Transparent video \(WebM\)/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Export transparent video' }));
+    await act(async () =>
+      recordings[0]!.resolve({
+        file: new Blob(['webm']),
+        bytes: 2_000_000,
+        frameCount: 300,
+        notes: ['The video’s length could not be written into it.'],
+        dispose: async () => undefined,
+      }),
+    );
+
+    expect(screen.getByRole('link', { name: /GH010042-overlay-1920x1080-30fps\.webm/ })).toHaveAttribute(
+      'download',
+      'GH010042-overlay-1920x1080-30fps.webm',
+    );
+    expect(panel()).toHaveTextContent(/VP9 with an alpha channel, at 30 fps/);
+    expect(panel()).toHaveTextContent(/length could not be written into it/);
+    expect(panel()).not.toHaveTextContent(/set the sequence to/);
+
+    // Choosing the other format leaves this file standing, made with earlier settings.
+    await userEvent.click(within(panel()).getByRole('radio', { name: 'PNG sequence (ZIP)' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(/made with earlier settings/);
   });
 });

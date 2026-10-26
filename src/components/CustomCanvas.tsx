@@ -456,10 +456,6 @@ export function CustomCanvas({
               A video with the overlay burned in needs a source video: add one above.
             </p>
           )}
-          <p className="overlay-controls__hint">
-            Transparent WebM is not made by this app yet (TD-039): the PNG sequence carries the same
-            transparency, and every editor reads it.
-          </p>
         </div>
       )}
     </section>

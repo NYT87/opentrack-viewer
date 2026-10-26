@@ -6,6 +6,9 @@ import {
   frameVideoTime,
   highestFittingFrameRate,
   planExport,
+  planWebmExport,
+  WEBM_MAX_BYTES,
+  webmBitsPerSecond,
 } from './plan';
 
 describe('export plan (AV-1006)', () => {
@@ -102,5 +105,25 @@ describe('frame rates as an editor names them (TD-059)', () => {
     expect(formatFrameRate(60000 / 1001)).toBe('59.94');
     expect(formatFrameRate(24000 / 1001)).toBe('23.976');
     expect(EXPORT_FRAME_RATES).toContain(30000 / 1001);
+  });
+});
+
+describe('planning a transparent WebM (AV-1012)', () => {
+  it('asks for 8 Mbit/s at 1080p, scaled with the area and held between 1 and 24', () => {
+    expect(webmBitsPerSecond(1920, 1080)).toBe(8_000_000);
+    expect(webmBitsPerSecond(1280, 720)).toBe(3_555_556);
+    expect(webmBitsPerSecond(256, 144)).toBe(1_000_000);
+    expect(webmBitsPerSecond(7680, 4320)).toBe(24_000_000);
+  });
+
+  it('takes as long as the overlay, and is at most its bitrate over that length', () => {
+    const plan = planWebmExport({ videoDurationSeconds: 10, fps: 30, width: 1920, height: 1080 });
+    expect(plan).toMatchObject({ frameCount: 300, durationSeconds: 10, estimatedSeconds: 10, estimatedBytes: 10_000_000, fits: true });
+  });
+
+  it('refuses a recording a tab could not hold', () => {
+    const hour = planWebmExport({ videoDurationSeconds: 3600, fps: 30, width: 3840, height: 2160 });
+    expect(hour.estimatedBytes).toBeGreaterThan(WEBM_MAX_BYTES);
+    expect(hour.fits).toBe(false);
   });
 });
