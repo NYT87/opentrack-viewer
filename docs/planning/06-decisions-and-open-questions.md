@@ -963,7 +963,12 @@ question deleted, so the reasoning stays findable.
 
 ### Still open
 
-Nothing. The last question, which image link previews show, is answered by the 1200×630 preview image (TD-024).
+Raised by the map video milestone (M10, `AV-1201` answers them):
+
+- **Which basemaps can a map video use?** The OpenStreetMap tile servers' policy does not allow rendering videos. Candidates: a provider with a free tier that allows it and needs a user's own key (MapTiler, Stadia, Mapbox), keyless open data (OpenFreeMap vector tiles; AWS Open Data terrain tiles for elevation), or a style URL the user supplies. Satellite imagery has the strictest terms and may be key-only.
+- **Is 3D terrain in the first scope?** It needs a `raster-dem` source and costs more tiles and render time per frame.
+- **What length and size limits?** A default length (Relive-style videos run about 30–60 seconds), a maximum length, and whether 4K is offered where memory allows.
+- **Is the map video a page of its own, or a mode of the overlay page?** The plan says its own page (`/map-video`), sharing the overlay renderer and encoder, because the map, camera and tile loading have no place on the overlay page.
 
 
 ### App review follow-up — 25 October 2026

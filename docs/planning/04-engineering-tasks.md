@@ -1305,3 +1305,126 @@ Acceptance criteria:
 - Fixture: the two Garmin Connect cycling files recorded on 2026-09-24 near Imabari, `activity_24573607104.gpx` (5,817 points, 23:55:51Z to 02:11:48Z) and `activity_24573607127.gpx` (10,465 points, 03:26:17Z to 07:36:36Z), which are a morning ride and a continuation 74 minutes later from about the same place. Merging them yields one ride of 16,282 points with a 74-minute pause; the test must give the same result whichever file is chosen first. Committed fixtures are trimmed or synthesized copies if the originals' size or location data should not be committed.
 - Nothing is uploaded or stored; the merge happens in the browser.
 - Tests cover ordering independent of selection order, the pause accounting, overlap handling, a file without timestamps, totals equal to the sum of the parts, GPX export and re-import, and the no-upload privacy behaviour.
+
+### Epic E12: Animated Route Map Video
+
+A page of its own that turns an activity into a short animated map video, in the manner of Relive and MapDirector: the camera flies over the map, the route draws itself behind a moving marker, figures run alongside, and the result is downloaded as a video file. It reuses the overlay renderer and the burned-in encoder (E10) for everything drawn on top of the map, and MapLibre for the map itself. Everything is rendered in the browser; the only network traffic is the map tiles, and the page says so.
+
+#### AV-1201: Evaluate Map Video Rendering, Tile Sources and Their Terms
+
+Dependencies: AV-302, AV-1001, AV-1007
+
+Acceptance criteria:
+- A spike renders a 10-second, 30 fps, 1920x1080 flyover of a fixture ride and records the result as a decision (TD) covering: how a frame is captured (a MapLibre map driven frame by frame with `jumpTo`, waiting for every tile of that frame before the canvas is read, not recorded in real time), how it is encoded (the Mediabunny path of TD-045, H.264 MP4 first, VP9 WebM where H.264 encoding is missing), memory and time per frame, and the longest video and largest size the page will accept.
+- The rendered video must be deterministic: the same activity, settings and tiles give the same frames, whatever the speed of the machine or network. A frame is never written with a tile still loading.
+- The decision chooses the basemaps offered and states each one's terms: street map, satellite imagery and terrain elevation (`raster-dem`) for 3D. The OpenStreetMap tile servers' usage policy does not permit bulk or video rendering, so the default for video must be a source whose terms allow it, or a user-supplied tile URL/style with a key, or route-only with no basemap. A source that needs a key never ships a key in the bundle.
+- The decision states how many tile requests a typical render makes, and whether tiles are cached for the length of a render only (never persisted).
+- The decision lists what the browsers in the test matrix can do (WebGL2, WebCodecs `VideoEncoder`, H.264 and VP9 encoding, `OffscreenCanvas`), and what the page offers where they cannot.
+- Open questions in docs/planning/06 for the basemap, terrain and default length are answered or carried forward with a reason.
+
+#### AV-1202: Add the Map Video Page and Navigation
+
+Dependencies: AV-012, AV-1201
+
+Acceptance criteria:
+- A dedicated route, such as `/map-video`, and a `Tools` entry named `Map video` or an agreed equivalent. Map videos are not made inside the viewer, the overlay page or Route Builder.
+- The page opens on its file slot: an activity file chosen or dropped, read through the existing format detector and parser registry. A file without usable route points is refused with the reason.
+- The viewer, Route Builder (a merged activity, AV-1109) and the video telemetry page can hand the loaded activity over in memory with an action such as `Make a map video`; a reload or direct entry without handoff does not crash and shows the file slot.
+- The page says, before any tile is fetched, that the map is drawn from an online tile provider which learns the area shown, and offers route-only rendering with no basemap.
+- The page uses the app header, theme, Settings modal, route SEO metadata (no file names or activity values) and responsive layout conventions; the workspace layout follows the overlay page's (TD-059).
+- Tests cover the route, `Tools` navigation, the empty state, file read and refusal, handoff entry, reload fallback, and that no tile is requested before the reader has an activity on the page.
+
+#### AV-1203: Define the Map Video Model: Timing, Camera Path and Route Reveal
+
+Dependencies: AV-1003, AV-1201
+
+Acceptance criteria:
+- A map video is a serializable project: the activity reference, output size and fps, length, basemap, camera settings, route style, overlay layout and intro/outro choices, versioned like the overlay layout file (TD-061), saved and reopened as JSON. Activity data is never written into it.
+- Video time maps to activity progress by a stated rule the user chooses: by distance (an even pace along the route) or by recorded time with pauses shortened to a fixed short beat. The mapping is monotonic, starts at the first point and ends at the last, and is computed once, not per frame.
+- The camera path is pure and computed from the route: a follow camera behind the marker with a set zoom, pitch (0 to 60 degrees) and a bearing that follows the heading, smoothed over a window so it never spins on GPS noise or hairpins. A north-up option keeps bearing 0.
+- The route reveal for a frame is the route up to the marker's interpolated position, so the drawn line and the marker meet exactly; the rest of the route may be shown dimmed or hidden.
+- An intro flies from an overview of the whole route to the start, and an outro pulls back to the whole route; each has a length, and either can be turned off.
+- A privacy trim hides a chosen distance (for example 200 m) at the start and end of the route from the drawn line, the marker, the camera and the figures, so a video need not show where someone lives.
+- Unit tests cover the time mapping both ways (including a long pause and a recording with gaps), camera smoothing on a hairpin and a noisy straight, bearing wrap-around at 0/360, reveal and marker agreeing, intro/outro boundaries, the privacy trim, and the project round-trip.
+
+#### AV-1204: Build the Map Video Preview
+
+Dependencies: AV-1202, AV-1203
+
+Acceptance criteria:
+- A MapLibre preview at the output's aspect ratio plays the video's timeline with play, pause and a scrubber, using the same model and camera path as the export.
+- Changing a setting updates the preview without re-reading the file.
+- The preview may skip frames to keep up; the export never does. The page says the preview is a guide and the export is exact.
+- Route-only mode draws the route and marker on the page background with no tile requests.
+- The preview is keyboard-operable (play/pause, step, scrub) and usable on a phone width.
+- Tests cover play/pause/scrub, settings updates, route-only mode with no tile requests, and aspect changes.
+
+#### AV-1205: Style the Map, the Route and the Marker
+
+Dependencies: AV-1203, AV-1204
+
+Acceptance criteria:
+- Basemap choices as decided in AV-1201 (for example dark, light, satellite, route-only), with optional 3D terrain and an exaggeration control where a terrain source is available.
+- Route style: colour, width, a casing, the unrevealed part shown dimmed or hidden, and optional colouring by speed, elevation or heart rate when the stream exists (disabled with the reason when it does not).
+- Marker: a dot, an arrow pointing along the heading, or a sport icon, with size and colour; an optional fading trail ("comet") behind it.
+- Start and finish markers, optionally hidden with the privacy trim.
+- Output size presets matching the custom canvas (1920x1080, 1080x1920, 1080x1080, 3840x2160) and a custom size within the limits AV-1201 sets.
+- Map attribution required by the chosen source is always drawn in the frame and cannot be turned off.
+- Tests cover each style option, colour-by availability, the attribution, and the size limits.
+
+#### AV-1206: Add Camera Keyframes
+
+Dependencies: AV-1203, AV-1204
+
+Acceptance criteria:
+- Besides the automatic follow camera, the user can set keyframes on the timeline: at a moment, a camera position (centre, zoom, pitch, bearing) taken from the preview's current view, with the follow camera's values as the default between keyframes.
+- Between keyframes the camera eases with a stated curve; a keyframe can be moved, edited by its numbers, and deleted; changes are undoable.
+- A keyframe never points the camera away from the marker so far that it leaves the frame, unless the user chooses a fixed camera for that stretch.
+- Keyframes are saved in the project.
+- Tests cover interpolation, easing, ordering, editing and deletion, undo, and the round-trip.
+
+#### AV-1207: Put Figures and Graphics on the Map Video
+
+Dependencies: AV-1011, AV-1203, AV-1204
+
+Acceptance criteria:
+- The overlay components of E10 — live figures, gauges, the progress bar, the elevation profile with a moving cursor, text, shapes and still elements — can be placed over the map with the custom canvas editor and its layout file (TD-062), bound to the map video's timeline rather than a source video's.
+- During the outro a summary card can show the activity's totals (distance, time, elevation gain, average speed or pace) using the still image's figures (TD-061).
+- Figures during a shortened pause show the paused values, not interpolated ones.
+- The preview and the export draw the figures with the same renderer, composited over the map frame.
+- Tests cover binding to the map timeline, figures during a pause, the summary card, and a golden render of a composited frame with stubbed map pixels.
+
+#### AV-1208: Place the Reader's Photos Along the Route
+
+Dependencies: AV-1203, AV-1204
+
+Acceptance criteria:
+- The user can add local photos (JPEG, HEIC where the browser decodes it, PNG). Each is placed on the route by its EXIF time against the activity's clock (with a clock-offset control), or by its EXIF GPS position, or by hand at a point on the route.
+- When the marker reaches a photo, the video pauses its progress for a set time and shows the photo over the map with a short transition, then continues.
+- A photo's EXIF location and other metadata are never written into the exported video or the project file; the project refers to photos by name only and asks for them again on reopening.
+- A photo the browser cannot decode, or one with no time, position or hand placement, is listed with the reason and left out.
+- Tests cover placement by time, by position and by hand, the clock offset, the pause it adds to the timeline, an undecodable photo, and that no EXIF data reaches the output.
+
+#### AV-1209: Export the Map Video
+
+Dependencies: AV-1201, AV-1204, AV-1205, AV-1207
+
+Acceptance criteria:
+- Export renders every frame deterministically (AV-1201) at the chosen size and fps and encodes it in the browser to MP4 (H.264) where the browser can, or WebM (VP9), as the panel offers; a still poster frame (PNG) can be saved from any moment.
+- An optional local audio file (for example music) can be added; it is trimmed or faded out to the video's length. No music is bundled or fetched.
+- Progress shows frames done, time left and tile loading; the export can be stopped and keeps nothing when stopped. A tile that fails after retries stops the export with the reason rather than writing a blank frame.
+- The export works while the tab is in the background where the browser allows; where it cannot, the panel says so before starting.
+- The file name identifies the activity and that it is a map video; output uses `Blob`/object URL downloads and the generated-export storage rules of the 25 October 2026 review (OPFS with Web Locks where available).
+- Tests cover the plan (frames, length, size), MP4 and WebM where supported, the poster frame, the audio track, stopping, a failed tile, and the file name.
+
+#### AV-1210: Map Video Fixtures, E2E, Accessibility, Performance and Privacy Coverage
+
+Dependencies: AV-1202 to AV-1209
+
+Acceptance criteria:
+- Browser tests run against locally served fixture tiles (a small committed tile set or generated solid tiles), never a live provider.
+- An end-to-end test opens the page, loads a fixture ride, chooses a size and style, adds a figure, previews, exports a short MP4 (or WebM), and checks the file's length, size and pixels at known frames: the marker and route colour where the plan puts them, and the figure's text region.
+- A route-only test renders and exports with no tile requests at all.
+- Accessibility tests cover the page's controls, the timeline and keyframe editing by keyboard, and focus order; responsive tests cover desktop and phone widths.
+- Performance checks cover a long activity (250,000 points, the import limit) in the timing, camera and reveal computations, and the memory of a 60-second 1080p export.
+- Privacy tests confirm no activity data, photo, project or output is uploaded, that tile requests are the only network traffic and only for the basemap chosen, and that the privacy trim removes the trimmed points from every frame.

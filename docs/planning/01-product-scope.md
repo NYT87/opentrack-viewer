@@ -25,6 +25,7 @@ The core promise is simple:
 - The `Tools` dropdown should include a `File viewer` option that links to the current viewer/process page.
 - When the GoPro milestone is implemented, the `Tools` dropdown should also include a video telemetry extraction option that opens the dedicated GoPro extraction page.
 - When the Route Builder milestone is implemented, the `Tools` dropdown should also include a route planning/editing option that opens the dedicated Route Builder page.
+- When the map video milestone is implemented, the `Tools` dropdown should also include a `Map video` option that opens the dedicated map video page.
 - Always show the settings entry in the global header, including the homepage, viewer/process page, Terms and Conditions page, and future tool pages.
 - Show Settings as an icon-only header control with an accessible name and visible focus state.
 - Load local activity files through file picker and drag/drop.
@@ -93,6 +94,7 @@ The core promise is simple:
 - Let users export overlay-only assets, such as transparent or chroma-key video/image-sequence overlays, so they can use them in external video editing applications.
 - Let users create standalone visual overlays from a normalized activity without requiring a video, starting with GPX-backed activities and a route-map graphic on a transparent background.
 - Evaluate browser-side burned-in video export where the generated overlay is integrated into the source video and downloaded as a new video file.
+- In a later map video milestone (M10), let users turn an activity into an animated map video on a page of its own, in the manner of Relive and MapDirector: a camera following the route over a 2D or 3D map, the route drawing behind a moving marker, figures and photos along the way, exported as MP4 or WebM from the browser.
 - Add FIT support after the GPX vertical slice validates the domain model and UI contract.
 - Keep all activity-file parsing, normalization, calculations, and privacy-sensitive processing in the browser.
 - Make the app installable as a PWA once the first useful viewer experience exists.
@@ -119,6 +121,8 @@ The core promise is simple:
 - No promise that burned-in video export is feasible for large files until a browser encoding feasibility spike is complete.
 - No full nonlinear video editor; overlay work should stay focused on telemetry gauges, maps, metrics, timing, styling, preview, and export.
 - No turn-by-turn navigation engine, cloud route optimization, routing API dependency, or account-synced route library in the first Route Builder milestone.
+- No server-side map video rendering, tile proxy, bundled or streamed music library, or publishing to social networks from the map video page; the user downloads the file.
+- No use of a tile provider for map video rendering against its usage policy; the OpenStreetMap tile servers are not used for rendering videos.
 - No automatic road snapping or map-provider routing until a separate privacy/product decision is made.
 - No attempt to support every activity format before GPX is solid.
 - No standalone settings page in the target navigation model.
@@ -138,6 +142,7 @@ The core promise is simple:
 - Handoff from the viewer to Route Builder must pass an editable copy of the normalized route client-side. It must not upload route points, file contents, or planned tracks.
 - Route Builder imports, edits, appended tracks, generated tracks, and exports must remain local to the browser unless the user explicitly downloads a file.
 - Telemetry and activity overlay preview, overlay-only export, and burned-in video export must keep source activity files, source video, extracted telemetry, generated overlay frames, and rendered output local to the browser.
+- Map video rendering must keep the activity, photos, audio, project files and output local to the browser; the only network requests are map tiles for the chosen basemap, and route-only rendering makes none. Photo EXIF metadata must not reach the exported video.
 - If browser-side video rendering requires temporary blobs or object URLs, they must be revocable and must not be persisted without explicit user download.
 - The app must not log raw file contents.
 - The app must not send route coordinates, timestamps, device IDs, athlete metadata, or sensor streams to analytics services.

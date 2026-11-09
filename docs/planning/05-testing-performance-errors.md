@@ -195,6 +195,10 @@ Cover:
 - Confirm Route Builder can import another supported track while editing and append its route points to the end of the draft.
 - Confirm Route Builder can export a planned GPX file that re-imports into the viewer with the same route shape.
 - Confirm Route Builder does not offer unsupported export formats as broken controls.
+- When the map video page is implemented, confirm `Tools` includes the `Map video` entry and routes to the dedicated page.
+- Confirm a map video renders and exports against locally served fixture tiles, never a live provider, with the marker, route and figures where the plan puts them at known frames.
+- Confirm route-only map video rendering and export make no tile requests.
+- Confirm the privacy trim removes the start and end of the route from every frame, and photo EXIF data never reaches the exported video.
 
 ### Privacy Regression Tests
 
