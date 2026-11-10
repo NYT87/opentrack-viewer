@@ -1,7 +1,16 @@
 import type { Activity } from '../domain/activity';
 import { buildCameraPath, type MapVideoCamera, type MapVideoCameraPath } from './camera';
 import type { MapVideoSettings } from './project';
-import { buildMapVideoRoute, positionAt, revealAt, trimRoute, type MapVideoRoute, type RoutePosition, type RouteReveal } from './route';
+import {
+  buildMapVideoRoute,
+  positionAt,
+  revealAt,
+  simplifiedIndices,
+  trimRoute,
+  type MapVideoRoute,
+  type RoutePosition,
+  type RouteReveal,
+} from './route';
 import { buildMapVideoTimeline, type MapVideoTimeline, type TimelineSample } from './timing';
 
 /**
@@ -15,8 +24,17 @@ export interface MapVideoModel {
   timeline: MapVideoTimeline;
   camera: MapVideoCameraPath;
   frameCount: number;
+  /** The vertices the line is drawn through: none strays half a pixel from it at the follow zoom. */
+  drawn: number[];
   /** One frame: where the camera is, how much route is drawn, and where on it the marker is. */
   frame: (frame: number) => MapVideoFrame;
+  /** The same for a moment of the video, for a preview that keeps up by skipping frames. */
+  at: (seconds: number) => MapVideoFrame;
+}
+
+/** Metres a pixel covers at a zoom and latitude, on MapLibre's 512-pixel world. */
+export function metersPerPixel(zoom: number, latitude: number): number {
+  return (40_075_016.686 * Math.cos((latitude * Math.PI) / 180)) / (512 * 2 ** zoom);
 }
 
 export interface MapVideoFrame {
@@ -53,6 +71,18 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
     settings.terrain.enabled ? settings.terrain.exaggeration : undefined,
   );
   const frameCount = Math.round(settings.lengthSeconds * settings.output.fps);
+  const middle = route.vertices[Math.floor(route.vertices.length / 2)]!;
+  const drawn = simplifiedIndices(route, metersPerPixel(settings.camera.zoom, middle.lat) / 2);
+  const at = (seconds: number): MapVideoFrame => {
+    const sample = timeline.at(seconds);
+    return {
+      seconds,
+      sample,
+      camera: camera.at(sample),
+      reveal: revealAt(route, sample.distance, drawn),
+      position: positionAt(route, sample.distance),
+    };
+  };
 
   return {
     ok: true,
@@ -61,17 +91,9 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
       timeline,
       camera,
       frameCount,
-      frame: (frame) => {
-        const seconds = timeline.frameSeconds(frame, frameCount);
-        const sample = timeline.at(seconds);
-        return {
-          seconds,
-          sample,
-          camera: camera.at(sample),
-          reveal: revealAt(route, sample.distance),
-          position: positionAt(route, sample.distance),
-        };
-      },
+      drawn,
+      frame: (frame) => at(timeline.frameSeconds(frame, frameCount)),
+      at,
     },
   };
 }

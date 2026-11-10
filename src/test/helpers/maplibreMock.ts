@@ -136,6 +136,14 @@ export class FakeMap {
     this.easeToCalls.push(options);
   }
 
+  /** Every camera set with jumpTo, in order. */
+  readonly jumps: Record<string, unknown>[] = [];
+
+  jumpTo(options: Record<string, unknown>): this {
+    this.jumps.push(options);
+    return this;
+  }
+
   queryRenderedFeatures = vi.fn(() => [] as unknown[]);
 
   remove(): void {

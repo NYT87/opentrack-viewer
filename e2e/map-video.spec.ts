@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { join } from 'node:path';
+import { countPixelsNear, decodePng } from './helpers/png';
 
 /**
  * AV-1202. The map video page in a real browser: reached from Tools, opened
@@ -8,6 +9,10 @@ import { join } from 'node:path';
  */
 
 const ORIGIN = 'http://localhost:4173';
+
+// The service worker would answer fetches itself, out of sight of `page.route`
+// and of the request log: blocked, every request the page makes is seen.
+test.use({ serviceWorkers: 'block' });
 const FIXTURE_DIR = join(process.cwd(), 'src/test/fixtures');
 
 function recordRequests(page: Page): Request[] {
@@ -17,8 +22,32 @@ function recordRequests(page: Page): Request[] {
 }
 const offOrigin = (requests: Request[]) => requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN));
 
-test('opens from Tools on its file slot, reads a route, and fetches nothing', async ({ page }) => {
-  const requests = recordRequests(page);
+/**
+ * OpenFreeMap, answered here: a style of a background alone, so the online
+ * path runs with no live provider (AV-1210) and every request to it is seen.
+ */
+async function stubOpenFreeMap(page: Page): Promise<string[]> {
+  const asked: string[] = [];
+  await page.route('https://tiles.openfreemap.org/**', (route) => {
+    asked.push(route.request().url());
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ version: 8, sources: {}, layers: [{ id: 'land', type: 'background', paint: { 'background-color': '#2d4030' } }] }),
+    });
+  });
+  return asked;
+}
+
+/**
+ * Pixels of the preview as the reader sees it: a screenshot of the frame, not
+ * the canvas's own buffer, which can hold a route the page never shows.
+ */
+async function previewShot(page: Page) {
+  return decodePng(await page.locator('.map-video-preview__frame').screenshot());
+}
+
+test('opens from Tools on its file slot and reads a route', async ({ page }) => {
+  await stubOpenFreeMap(page);
   await page.goto('./');
   await page.getByRole('button', { name: 'Tools' }).click();
   await page.getByRole('menuitem', { name: 'Map video' }).click();
@@ -34,10 +63,6 @@ test('opens from Tools on its file slot, reads a route, and fetches nothing', as
   await expect(choice.getByRole('radio', { name: /^Online map/ })).toBeChecked();
   await expect(choice).toContainText('learns which area the video shows');
 
-  // The basemap is on, but there is no map yet: nothing may have left the page.
-  await page.waitForTimeout(1000);
-  expect(offOrigin(requests)).toEqual([]);
-  await expect(page.locator('.maplibregl-canvas')).toHaveCount(0);
   // The page's own title, never the file's.
   await expect(page).toHaveTitle(/^Make a map video/);
   expect(await page.title()).not.toContain('route-with-elevation');
@@ -80,6 +105,7 @@ test('takes the viewer\'s activity, and shows the file slot again after a reload
 });
 
 test('fits a phone screen without sideways scrolling', async ({ page }) => {
+  await stubOpenFreeMap(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('./#/map-video');
   await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
@@ -87,4 +113,59 @@ test('fits a phone screen without sideways scrolling', async ({ page }) => {
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('previews the route only with no request at all, and plays by keyboard', async ({ page }) => {
+  const asked = await stubOpenFreeMap(page);
+  await page.goto('./#/map-video');
+  const requests = recordRequests(page);
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
+  await page.getByRole('radio', { name: /^Route only/ }).check();
+
+  const preview = page.getByRole('region', { name: 'Preview' });
+  await expect(preview.locator('canvas')).toBeVisible();
+  const time = preview.locator('.map-video-preview__time');
+  await expect(time).toHaveText('0:00.0 / 0:30.0');
+
+  // The middle of the route: the camera is on the marker, so the frame's centre is the route's colour.
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('15');
+  await expect(time).toHaveText('0:15.0 / 0:30.0');
+  await expect
+    .poll(async () => {
+      const shot = await previewShot(page);
+      // The map fills the frame, and the route's colour is at its centre, where the marker is.
+      const centre = (Math.floor(shot.height / 2) * shot.width + Math.floor(shot.width / 2)) * 4;
+      return { orange: countPixelsNear(shot, [0xff, 0x55, 0x33], 30) > 100, centre: [...shot.pixels.subarray(centre, centre + 3)] };
+    }, { timeout: 5000 })
+    .toEqual({ orange: true, centre: [0xff, 0x55, 0x33] });
+  const canvasBox = await page.locator('.map-video-preview__map canvas').boundingBox();
+  const frameBox = await page.locator('.map-video-preview__frame').boundingBox();
+  expect(Math.round(canvasBox!.height)).toBe(Math.round(frameBox!.height));
+
+  const frame = page.getByRole('group', { name: /^Preview,/ });
+  await frame.focus();
+  await page.keyboard.press('Home');
+  await expect(time).toHaveText('0:00.0 / 0:30.0');
+  await page.keyboard.press(' ');
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await expect(time).not.toHaveText('0:00.0 / 0:30.0');
+  await page.keyboard.press(' ');
+  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
+
+  expect(offOrigin(requests)).toEqual([]);
+  expect(asked).toEqual([]);
+});
+
+test('asks OpenFreeMap for the online map, and nothing else outside the page', async ({ page }) => {
+  const asked = await stubOpenFreeMap(page);
+  await page.goto('./#/map-video');
+  const requests = recordRequests(page);
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
+
+  await expect(page.locator('.map-video-preview__map canvas')).toBeVisible();
+  await expect.poll(() => asked.length).toBeGreaterThan(0);
+  expect(asked[0]).toBe('https://tiles.openfreemap.org/styles/liberty');
+  expect(offOrigin(requests).filter((url) => !url.startsWith('https://tiles.openfreemap.org/'))).toEqual([]);
+  // The source's attribution is not folded away.
+  await expect(page.locator('.maplibregl-ctrl-attrib.maplibregl-compact')).toHaveCount(0);
 });

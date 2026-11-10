@@ -31,8 +31,10 @@ function contentSecurityPolicy(): Plugin {
           `script-src 'self' 'unsafe-eval' ${hashes.join(' ')}`,
           // React and MapLibre position elements using inline style attributes.
           "style-src 'self' 'unsafe-inline'",
-          "img-src 'self' blob: data: https://tile.openstreetmap.org",
-          "connect-src 'self' blob: https://tile.openstreetmap.org",
+          // The viewer's map tiles, and the map video's OpenFreeMap style, tiles,
+          // glyphs and sprites, all from that one host (TD-064).
+          "img-src 'self' blob: data: https://tile.openstreetmap.org https://tiles.openfreemap.org",
+          "connect-src 'self' blob: https://tile.openstreetmap.org https://tiles.openfreemap.org",
           "media-src 'self' blob:",
           "worker-src 'self' blob:",
           "font-src 'self'",

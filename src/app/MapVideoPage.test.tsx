@@ -48,7 +48,7 @@ const goToMapVideo = async () => {
 beforeEach(() => {
   window.location.hash = '';
   useActivityStore.getState().clear();
-  useMapVideoStore.setState({ activity: undefined, origin: undefined, basemap: undefined });
+  useMapVideoStore.setState(useMapVideoStore.getInitialState(), true);
   useInteractionStore.getState().setBasemapEnabled(true);
   resetMapLibreMock();
 });
@@ -154,20 +154,23 @@ describe('reading a file (AV-1202)', () => {
     expect(within(slot()).getByText('simple-route.gpx')).toBeInTheDocument();
   });
 
-  it('makes no network request and draws no map, before or after a file', async () => {
+  it('makes no network request while reading, and makes the map only once there is an activity', async () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('no network')));
     const originalFetch = globalThis.fetch;
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
     try {
       window.location.hash = '#/map-video';
       render(<App />);
+      expect(FakeMap.instances).toHaveLength(0);
       await userEvent.upload(screen.getByTestId('map-video-activity-input'), fixtureFile('route-with-elevation.gpx'));
       await within(slot()).findByText('route-with-elevation.gpx');
     } finally {
       globalThis.fetch = originalFetch;
     }
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(FakeMap.instances).toHaveLength(0);
+    // The map, and with it any tile, comes after the notice above it was on the page.
+    await waitFor(() => expect(FakeMap.instances).toHaveLength(1));
+    expect(FakeMap.instances[0]!.options.style).toBe('https://tiles.openfreemap.org/styles/liberty');
   });
 });
 

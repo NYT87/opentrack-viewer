@@ -156,14 +156,85 @@ export interface RouteReveal {
   marker: [number, number];
 }
 
-/** The route drawn up to `distance`, ending exactly where the marker is. */
-export function revealAt(route: MapVideoRoute, distance: number): RouteReveal {
+/**
+ * The vertices worth drawing: Douglas–Peucker within each recorded segment,
+ * keeping every vertex the line would otherwise stray more than
+ * `toleranceMeters` from, and every segment's first and last. With a
+ * tolerance under half a pixel the drawn line looks the same, and a long
+ * route passes the map thousands of points a frame rather than every one.
+ */
+export function simplifiedIndices(route: MapVideoRoute, toleranceMeters: number): number[] {
+  const { vertices } = route;
+  if (!(toleranceMeters > 0)) return vertices.map((_, i) => i);
+  // Local metres: plenty for the distances between neighbouring points.
+  const lat0 = (vertices[0]!.lat * Math.PI) / 180;
+  const x = vertices.map((vertex) => vertex.lon * 111_320 * Math.cos(lat0));
+  const y = vertices.map((vertex) => vertex.lat * 110_574);
+  const keep = new Uint8Array(vertices.length);
+  const squared = toleranceMeters * toleranceMeters;
+  let start = 0;
+  for (let i = 1; i <= vertices.length; i += 1) {
+    if (i < vertices.length && vertices[i]!.segment === vertices[start]!.segment) continue;
+    const end = i - 1;
+    keep[start] = 1;
+    keep[end] = 1;
+    const stack: [number, number][] = [[start, end]];
+    while (stack.length > 0) {
+      const [a, b] = stack.pop()!;
+      const dx = x[b]! - x[a]!;
+      const dy = y[b]! - y[a]!;
+      const length = dx * dx + dy * dy;
+      let worst = -1;
+      let worstDistance = squared;
+      for (let k = a + 1; k < b; k += 1) {
+        const t = length > 0 ? Math.max(0, Math.min(1, ((x[k]! - x[a]!) * dx + (y[k]! - y[a]!) * dy) / length)) : 0;
+        const ex = x[a]! + t * dx - x[k]!;
+        const ey = y[a]! + t * dy - y[k]!;
+        const distance = ex * ex + ey * ey;
+        if (distance > worstDistance) {
+          worstDistance = distance;
+          worst = k;
+        }
+      }
+      if (worst >= 0) {
+        keep[worst] = 1;
+        stack.push([a, worst], [worst, b]);
+      }
+    }
+    start = i;
+  }
+  const kept: number[] = [];
+  keep.forEach((flag, i) => {
+    if (flag) kept.push(i);
+  });
+  return kept;
+}
+
+/**
+ * The route drawn up to `distance`, ending exactly where the marker is. With
+ * `kept` (from `simplifiedIndices`), only those vertices are drawn before the
+ * marker; the marker itself is always the exact place.
+ */
+export function revealAt(route: MapVideoRoute, distance: number, kept?: number[]): RouteReveal {
   const position = positionAt(route, distance);
   const marker: [number, number] = [position.lon, position.lat];
   const lines: [number, number][][] = [];
   let line: [number, number][] = [];
   let segment: number | undefined;
-  for (let i = 0; i <= position.index; i += 1) {
+  let upTo = position.index;
+  if (kept) {
+    // The kept vertices up to the marker's edge.
+    let lo = 0;
+    let hi = kept.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (kept[mid]! <= position.index) lo = mid + 1;
+      else hi = mid;
+    }
+    upTo = lo - 1;
+  }
+  for (let j = 0; j <= upTo; j += 1) {
+    const i = kept ? kept[j]! : j;
     const vertex = route.vertices[i]!;
     if (segment !== undefined && vertex.segment !== segment) {
       if (line.length > 0) lines.push(line);
@@ -172,7 +243,9 @@ export function revealAt(route: MapVideoRoute, distance: number): RouteReveal {
     segment = vertex.segment;
     line.push([vertex.lon, vertex.lat]);
   }
-  if (position.fraction > 0) line.push(marker);
+  // The marker closes the line, unless it stands on the last vertex drawn.
+  const last = line[line.length - 1];
+  if (!last || last[0] !== marker[0] || last[1] !== marker[1]) line.push(marker);
   lines.push(line);
   return { lines, marker };
 }

@@ -1,17 +1,23 @@
-import { useRef, useState } from 'react';
+import { Suspense, lazy, useMemo, useRef, useState } from 'react';
 import { FileDropZone } from '../components/FileDropZone';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
+import { MapVideoSettingsPanel } from '../components/MapVideoSettingsPanel';
+import { MapVideoProjectFile } from '../components/MapVideoProjectFile';
+import { buildMapVideoModel } from '../mapVideo/model';
 import { ActivityError, toActivityError } from '../domain/errors';
 import { formatDistance, formatDuration } from '../domain/units';
 import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { useInteractionStore } from '../state/interactionStore';
 import {
+  effectiveMapVideoSettings,
   mapVideoRefusal,
   useMapVideoStore,
   type MapVideoActivityOrigin,
-  type MapVideoBasemap,
 } from '../state/mapVideoStore';
+
+// MapLibre is loaded with the preview, only once there is an activity to preview.
+const MapVideoPreview = lazy(() => import('../components/MapVideoPreview'));
 
 /** What became of the last file chosen. */
 type SlotState =
@@ -34,20 +40,32 @@ const ORIGIN_LABEL: Record<MapVideoActivityOrigin, string | undefined> = {
  *
  * It opens on its file slot. Nothing on it fetches anything until there is an
  * activity, and before any map is drawn it says what an online basemap
- * tells its tile server, and offers the route alone (TD-064). The preview,
- * the styles and the export are AV-1204 onward.
+ * tells its tile server, and offers the route alone (TD-064).
+ *
+ * AV-1204. With an activity it is a workspace, as the overlay page is
+ * (TD-059): the preview kept in view, and the files, the map and the
+ * settings beside it. Every setting rebuilds the model (TD-066) from the
+ * activity already read, and the preview shows it at once.
  */
 export function MapVideoPage() {
   const activity = useMapVideoStore((state) => state.activity);
   const origin = useMapVideoStore((state) => state.origin);
   const setActivity = useMapVideoStore((state) => state.setActivity);
   const clear = useMapVideoStore((state) => state.clear);
-  const chosenBasemap = useMapVideoStore((state) => state.basemap);
+  const storedSettings = useMapVideoStore((state) => state.settings);
+  const basemapChosen = useMapVideoStore((state) => state.basemapChosen);
   const setBasemap = useMapVideoStore((state) => state.setBasemap);
+  const updateSettings = useMapVideoStore((state) => state.updateSettings);
+  const replaceSettings = useMapVideoStore((state) => state.replaceSettings);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
   // Until chosen here, the app's own setting decides: tiles off there means route only here.
-  const basemap: MapVideoBasemap = chosenBasemap ?? (basemapEnabled ? 'online' : 'route-only');
+  const settings = useMemo(
+    () => effectiveMapVideoSettings(storedSettings, basemapChosen, basemapEnabled),
+    [storedSettings, basemapChosen, basemapEnabled],
+  );
+  const basemap = settings.basemap.source;
+  const built = useMemo(() => (activity ? buildMapVideoModel(activity, settings) : undefined), [activity, settings]);
 
   const [slot, setSlot] = useState<SlotState>(IDLE);
   const slotRef = useRef<HTMLElement>(null);
@@ -87,7 +105,7 @@ export function MapVideoPage() {
   const busy = slot.status === 'reading';
 
   return (
-    <main className="page page--map-video">
+    <main className={activity ? 'page page--map-video is-workspace' : 'page page--map-video'}>
       <div className="page__inner">
         <header className="page__header">
           <h2 className="page__title">Map video</h2>
@@ -97,7 +115,20 @@ export function MapVideoPage() {
           </p>
         </header>
 
-        <div className="overlay-column">
+        <div className={activity ? 'overlay-workspace' : 'overlay-column'}>
+          <div className="overlay-workspace__stage">
+            {built?.ok && (
+              <Suspense fallback={<p role="status">Loading the map…</p>}>
+                {/* A new map for another basemap: MapLibre's setStyle stops its worker. */}
+                <MapVideoPreview key={basemap} model={built.model} settings={settings} />
+              </Suspense>
+            )}
+            {built && !built.ok && (
+              <div className="panel panel--error" role="alert">
+                <p className="panel__message">{built.error}</p>
+              </div>
+            )}
+          </div>
           <div className="overlay-workspace__side">
             <section className="prose overlay-slot" aria-label="Activity" ref={slotRef}>
               <h3 className="prose__title" tabIndex={-1}>
@@ -203,6 +234,15 @@ export function MapVideoPage() {
                 </label>
               </fieldset>
             )}
+            {activity && (
+              <MapVideoSettingsPanel
+                settings={settings}
+                onChange={updateSettings}
+                units={unitSystem}
+                timingNote={built?.ok ? built.model.timeline.modeNote : undefined}
+              />
+            )}
+            {activity && <MapVideoProjectFile activity={activity} settings={settings} onOpen={replaceSettings} />}
           </div>
         </div>
       </div>

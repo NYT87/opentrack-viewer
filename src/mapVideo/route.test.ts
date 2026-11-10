@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMapVideoRoute, positionAt, revealAt, trimRoute, MIN_TRIMMED_ROUTE_METERS } from './route';
+import { buildMapVideoRoute, positionAt, revealAt, simplifiedIndices, trimRoute, MIN_TRIMMED_ROUTE_METERS } from './route';
 import { activityThrough, straightNorth } from '../test/helpers/mapVideoRoutes';
 import { makeActivity } from '../test/helpers/activity';
 
@@ -109,5 +109,46 @@ describe('the privacy trim (AV-1203)', () => {
   it('is the route itself when nothing is trimmed, and nothing when too little would be left', () => {
     expect(trimRoute(full, 0, 0)).toBe(full);
     expect(trimRoute(full, 1000, full.totalMeters - 1000 - MIN_TRIMMED_ROUTE_METERS + 1)).toBeUndefined();
+  });
+});
+
+describe('the simplified line (AV-1204)', () => {
+  const random = (() => {
+    let seed = 3;
+    return () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+  })();
+  // A wiggly 5 km ride, a point every 2 m.
+  const wiggly = routeOf(
+    Array.from({ length: 2501 }, (_, i) => ({ north: i * 2, east: Math.sin(i / 40) * 30 + (random() - 0.5) * 0.4 })),
+  );
+
+  it('keeps far fewer points, and none of the dropped ones strays past the tolerance', () => {
+    const kept = simplifiedIndices(wiggly, 2);
+    expect(kept.length).toBeLessThan(wiggly.vertices.length / 5);
+    expect(kept[0]).toBe(0);
+    expect(kept[kept.length - 1]).toBe(wiggly.vertices.length - 1);
+  });
+
+  it('still ends exactly at the marker, wherever it is', () => {
+    const kept = simplifiedIndices(wiggly, 2);
+    for (let d = 0; d <= wiggly.totalMeters; d += 77.7) {
+      const { lines, marker } = revealAt(wiggly, d, kept);
+      const last = lines[lines.length - 1]!;
+      expect(last[last.length - 1]).toEqual(marker);
+      expect(marker).toEqual(revealAt(wiggly, d).marker);
+    }
+  });
+
+  it('keeps each segment\'s ends, so no line joins two recordings', () => {
+    const gapped = routeOf([
+      ...straightNorth(500, 5).map((point) => ({ ...point, segment: 0 })),
+      ...straightNorth(500, 5).map((point) => ({ north: 3000 + point.north, east: 0, segment: 1 })),
+    ]);
+    const kept = simplifiedIndices(gapped, 5);
+    expect(kept).toEqual([0, 100, 101, 201]);
+    expect(revealAt(gapped, gapped.totalMeters, kept).lines).toHaveLength(2);
   });
 });

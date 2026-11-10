@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { hasValidLocation, type Activity } from '../domain/activity';
 import { ActivityError } from '../domain/errors';
+import { DEFAULT_MAP_VIDEO_SETTINGS, type MapVideoSettings } from '../mapVideo/project';
 
 /**
  * Where the map video's activity came from: a file chosen on the page, or a
@@ -13,18 +14,27 @@ export type MapVideoActivityOrigin = 'hand' | 'viewer' | 'routeBuilder' | 'video
  * What the map is drawn on: an online basemap, whose tile server learns which
  * area is shown, or the route alone, which fetches nothing (TD-064).
  */
-export type MapVideoBasemap = 'online' | 'route-only';
+export type MapVideoBasemap = MapVideoSettings['basemap']['source'];
+
+/** A change to some settings: each section given is merged over the one held. */
+export type MapVideoSettingsPatch = { [K in keyof MapVideoSettings]?: MapVideoSettings[K] extends object | null ? Partial<NonNullable<MapVideoSettings[K]>> | MapVideoSettings[K] : MapVideoSettings[K] };
 
 interface MapVideoState {
   activity?: Activity;
   origin?: MapVideoActivityOrigin;
+  /** Every setting of the video (TD-066), kept across activities: they are the reader's, not the file's. */
+  settings: MapVideoSettings;
   /**
-   * Undefined until the reader chooses; the page then follows the app's
-   * basemap setting, so someone who turned tiles off is not opted back in.
+   * Whether the reader has chosen the basemap here. Until then the page
+   * follows the app's basemap setting, so someone who turned tiles off is
+   * not opted back in (TD-065).
    */
-  basemap?: MapVideoBasemap;
+  basemapChosen: boolean;
   setActivity: (activity: Activity, origin: MapVideoActivityOrigin) => void;
   setBasemap: (basemap: MapVideoBasemap) => void;
+  updateSettings: (patch: MapVideoSettingsPatch) => void;
+  /** Settings opened from a project file: the basemap among them counts as chosen. */
+  replaceSettings: (settings: MapVideoSettings) => void;
   clear: () => void;
 }
 
@@ -35,11 +45,34 @@ interface MapVideoState {
  * and the page asks for a file.
  */
 export const useMapVideoStore = create<MapVideoState>((set) => ({
+  settings: DEFAULT_MAP_VIDEO_SETTINGS,
+  basemapChosen: false,
   setActivity: (activity, origin) => set({ activity, origin }),
-  setBasemap: (basemap) => set({ basemap }),
-  // The basemap is the reader's choice, not the file's: it stays.
+  setBasemap: (source) =>
+    set((state) => ({ basemapChosen: true, settings: { ...state.settings, basemap: { ...state.settings.basemap, source } } })),
+  updateSettings: (patch) =>
+    set((state) => {
+      const settings = { ...state.settings } as Record<string, unknown>;
+      for (const [key, value] of Object.entries(patch)) {
+        const current = settings[key];
+        settings[key] =
+          value !== null && typeof value === 'object' && current !== null && typeof current === 'object' && key !== 'overlay'
+            ? { ...current, ...value }
+            : value;
+      }
+      return { settings: settings as unknown as MapVideoSettings };
+    }),
+  replaceSettings: (settings) => set({ settings, basemapChosen: true }),
+  // The settings are the reader's choice, not the file's: they stay.
   clear: () => set({ activity: undefined, origin: undefined }),
 }));
+
+/** The settings as the page uses them: the basemap follows the app's setting until chosen here. */
+export function effectiveMapVideoSettings(settings: MapVideoSettings, basemapChosen: boolean, basemapEnabled: boolean): MapVideoSettings {
+  if (basemapChosen) return settings;
+  const source: MapVideoBasemap = basemapEnabled ? 'online' : 'route-only';
+  return settings.basemap.source === source ? settings : { ...settings, basemap: { ...settings.basemap, source } };
+}
 
 /**
  * Why an activity cannot become a map video, or undefined when it can. The

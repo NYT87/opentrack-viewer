@@ -37,11 +37,13 @@ export function TermsPage() {
         <section className="prose">
           <h3 className="prose__title">Maps are the exception</h3>
           <p>
-            When the basemap is enabled, the map requests tiles from a third-party tile provider.
-            Those requests reveal the approximate area you are looking at, and are subject to that
-            provider&rsquo;s own terms and privacy practices. They never include your activity
-            file, your route coordinates or any other data from it. You can turn the basemap off
-            in Settings, which stops all external requests.
+            When the basemap is enabled, the map requests tiles from a third-party tile provider:
+            OpenStreetMap for the maps in the viewer and the other tools, and OpenFreeMap for the
+            map video. Those requests reveal the approximate area you are looking at, and are
+            subject to that provider&rsquo;s own terms and privacy practices. They never include
+            your activity file, your route coordinates or any other data from it. You can turn the
+            basemap off in Settings, which stops these requests. The map video page starts on route
+            only when it is off, and asks before using an online map there.
           </p>
         </section>
 
