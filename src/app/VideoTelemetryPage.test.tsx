@@ -133,6 +133,24 @@ describe('reading a video, and handing it over (AV-907)', () => {
     expect(freshStore.getState().activity?.source.format).toBe('gopro');
   }, 60_000);
 
+  it('hands the extracted activity to the map video page (AV-1202)', async () => {
+    mockExtractionFrom('hero7.raw');
+    const { App: Fresh } = await import('./App');
+    const { useMapVideoStore: freshStore } = await import('../state/mapVideoStore');
+    render(<Fresh />);
+    await goToTool();
+    await userEvent.upload(await screen.findByTestId('file-input'), heroVideo());
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Make a map video' }, { timeout: 30_000 }),
+    );
+
+    await waitFor(() => expect(window.location.hash).toBe('#/map-video'));
+    expect(await screen.findByText('From the video telemetry page.')).toBeInTheDocument();
+    expect(freshStore.getState().activity?.source.format).toBe('gopro');
+    expect(freshStore.getState().origin).toBe('videoTelemetry');
+  }, 60_000);
+
   it('explains a video it cannot read, and offers another go', async () => {
     render(<App />);
     await goToTool();

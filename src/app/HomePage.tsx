@@ -22,7 +22,7 @@ const FORMATS: FormatSupport[] = [
 ];
 
 /**
- * The four tools, in the order the header's Tools menu lists them. The labels
+ * The tools, in the order the header's Tools menu lists them. The labels
  * are the menu's own, so a name learnt here is recognised there; the detail
  * says in plain words what each one is for.
  */
@@ -50,6 +50,12 @@ const TOOLS = [
     label: 'Route Builder',
     detail:
       'Plan a track from scratch or from a recorded route, point by point, and export a GPX your device can follow.',
+  },
+  {
+    to: ROUTES.mapVideo,
+    label: 'Map video',
+    detail:
+      'Turn an activity into a short video of the route drawing itself over a map, made on your device for sharing.',
   },
 ] as const;
 

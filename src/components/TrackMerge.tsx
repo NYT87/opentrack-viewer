@@ -22,6 +22,7 @@ import { useInteractionStore } from '../state/interactionStore';
 import { WarningList } from './ErrorPanel';
 import { download } from './ExportPanel';
 import { FileDropZone } from './FileDropZone';
+import { MapVideoLink } from './MapVideoLink';
 import { MapPlaceholder } from './MapPlaceholder';
 
 const ActivityMap = lazy(() =>
@@ -358,6 +359,7 @@ function MergedActivity({ result, units, onEditActivity }: {
         >
           Edit a route copy
         </button>
+        <MapVideoLink activity={activity} origin="routeBuilder" />
       </p>
       {editError && <p role="alert">{editError}</p>}
       <MergedExport activity={activity} joined={joined} />

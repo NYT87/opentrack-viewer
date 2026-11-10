@@ -7,6 +7,7 @@ import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { ExportPanel } from '../components/ExportPanel';
 import { CustomTrackLink } from '../components/CustomTrackLink';
+import { MapVideoLink } from '../components/MapVideoLink';
 import { RouteOverlayLink } from '../components/RouteOverlayLink';
 import { FileDropZone, describeFormats } from '../components/FileDropZone';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
@@ -408,6 +409,18 @@ export function ViewerPage() {
             */}
             {!route.isEmpty && <RouteOverlayLink activity={readyActivity} selectedRange={selectedRange} />}
             {!route.isEmpty && <CustomTrackLink activity={readyActivity} selectedRange={selectedRange} />}
+            {!route.isEmpty && (
+              <div className="export">
+                <h2 className="export__title">Map video</h2>
+                <p className="export__body">
+                  Makes a short video of the route drawing itself over a map, on its own page. The
+                  whole activity goes, and nothing is uploaded.
+                </p>
+                <p>
+                  <MapVideoLink activity={readyActivity} origin="viewer" />
+                </p>
+              </div>
+            )}
           </section>
         </div>
       </div>

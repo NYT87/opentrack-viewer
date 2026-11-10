@@ -25,6 +25,11 @@ export const ROUTES = {
    * viewer: the viewer shows what was recorded, and a draft is what is intended.
    */
   routeBuilder: '/route-builder',
+  /**
+   * AV-1202. Map videos are made on a page of their own (TD-064): the map, its
+   * camera and its tiles have no place on the overlay page.
+   */
+  mapVideo: '/map-video',
 } as const;
 
 /**
@@ -36,4 +41,5 @@ export const TOOLS_ITEMS = [
   { to: ROUTES.videoTelemetry, label: 'Video telemetry' },
   { to: ROUTES.overlays, label: 'Overlays' },
   { to: ROUTES.routeBuilder, label: 'Route Builder' },
+  { to: ROUTES.mapVideo, label: 'Map video' },
 ] as const;

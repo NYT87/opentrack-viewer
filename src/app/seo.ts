@@ -72,6 +72,13 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
       'Start a planned track, or begin from a GPX, FIT, TCX or KML route, and export it as a new ' +
       'file. Everything is built in this browser tab; nothing is uploaded.',
   },
+  [ROUTES.mapVideo]: {
+    title: `Make a map video — ${SITE_NAME}`,
+    // Describes the tool, never an activity someone has open.
+    description:
+      'Turn a GPX, FIT, TCX or KML activity into a short video of the route drawing itself over a ' +
+      'map. The video is made in this browser tab; the activity is never uploaded.',
+  },
   [ROUTES.terms]: {
     title: `Terms and Conditions — ${SITE_NAME}`,
     description:

@@ -213,6 +213,7 @@ describe('Tools menu (AV-012)', () => {
     expect(screen.getByRole('menu', { name: 'Tools' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'File viewer' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Route Builder' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Map video' })).toBeInTheDocument();
 
     await userEvent.click(toolsButton());
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();

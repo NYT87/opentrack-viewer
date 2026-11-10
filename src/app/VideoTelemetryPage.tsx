@@ -6,6 +6,7 @@ import { VideoReadProgress } from '../components/VideoReadProgress';
 import { formatDistance, formatDuration, type UnitSystem } from '../domain/units';
 import { ActivityError, toActivityError } from '../domain/errors';
 import type { Activity } from '../domain/activity';
+import { MapVideoLink } from '../components/MapVideoLink';
 import { useActivityStore } from '../state/activityStore';
 import { useInteractionStore } from '../state/interactionStore';
 import { useOverlayStore, type OverlayVideoTiming } from '../state/overlayStore';
@@ -185,6 +186,7 @@ function ExtractionSummary({
         <button type="button" className="button" onClick={onOverlays}>
           Create overlays
         </button>
+        <MapVideoLink activity={activity} origin="videoTelemetry" />
         <button type="button" className="button" onClick={onReset}>
           Read another video
         </button>
