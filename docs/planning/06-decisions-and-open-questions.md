@@ -838,6 +838,110 @@ Decision (`AV-1012`): the overlay export panel offers **a transparent VP9 WebM**
 
 Reason: TD-039 chose the WebM for editors that take a video more readily than a numbered sequence, and found `MediaRecorder` the only browser path to a transparent video. Recording on the clock is what that API allows; saying so, and stopping rather than writing a video out of step, keeps the file honest.
 
+### TD-064: A Map Video Is MapLibre Driven Frame by Frame on the Page, Waiting for Every Tile, Over OpenFreeMap and Never the OpenStreetMap Servers
+
+Decision (`AV-1201`): a map video is rendered by **a MapLibre map on the page, at the output's exact size, moved with `jumpTo` one frame at a time**. Each frame waits for MapLibre's `idle` event, so nothing is loading and nothing is fading, and **any map error during that wait stops the export**: `idle` counts a failed tile as settled. The canvas is then **copied through a 2D canvas into a `VideoFrame`** and encoded by **Mediabunny**, as in TD-045: **H.264 in MP4** first, **VP9 in WebM** where H.264 cannot be encoded. Nothing is recorded in real time. The default basemap is **OpenFreeMap**, keyless vector tiles whose terms allow video. 3D uses **AWS Terrain Tiles**. Satellite imagery is available only through **a style and key the reader supplies**. **Route-only** rendering makes no requests. **The OpenStreetMap tile servers are never used for a video.**
+
+**How it was measured.** A probe page (`scripts/map-video-probe/`) renders a flyover of a synthetic 28 km loop: 5,001 points with GPS noise, so no real ride is used. It is 10 seconds at 30 fps and 1920 × 1080: a 1.5 s intro from the overview, a follow camera at zoom 14.6 whose heading is averaged over ±400 m, and a 1.5 s outro. Every frame sets the revealed line and the marker, moves the camera, waits, captures, hashes the pixels and encodes. Tiles come from a local server that generates them. A textured raster basemap and Terrarium elevation tiles share the same synthetic hills. An optional delay of 0–600 ms per tile is seeded by the tile, so a slow run is repeatable too, and an option fails one tile in seven. Longer runs of 20 and 60 seconds measured an export's time and memory. Three live renders asked OpenFreeMap and AWS for real tiles. The probe was run headless through Playwright on an Apple M1 in **Chromium 156** (the full build; the headless shell has no H.264 encoder, TD-045) and **WebKit 26.4** (the macOS 14 build, driven by `playwright-core` 1.59). Nothing is claimed for Firefox, a phone, or a GPU other than the M1's.
+
+**What the engines can do**
+
+| | Chromium 156 | WebKit 26.4 |
+| --- | --- | --- |
+| WebGL2; largest renderbuffer and viewport | Yes; 16,384 | Yes; 16,384 |
+| `VideoEncoder`, `VideoFrame`, `OffscreenCanvas` with WebGL2, the origin-private file system | All present | All present |
+| `canEncodeVideo`: H.264 at 1080p, 1080 × 1920 and 4K; VP9 at 1080p and 4K | Yes | Yes |
+| AV1 at 1080p | Yes | No |
+| `crossOriginIsolated` | No (a static host, TD-039) | No |
+
+**Where a browser cannot.** This is decided here and built by AV-1202 and AV-1209. The page asks each question at runtime, never by the browser's name:
+
+- **No WebGL2.** MapLibre cannot draw, so there is no preview and no export. The page reads the file, says that a map video needs WebGL2, which this browser does not offer, and points to the overlay page's route image (TD-047), which needs none.
+- **No `VideoEncoder`, or neither H.264 nor VP9 encodable at the chosen size.** The preview and the PNG poster frame still work. The export is disabled, with the reason, and suggests a smaller size where a smaller one would encode.
+- **No `OffscreenCanvas`.** The frame copy uses an ordinary `<canvas>` element instead. The copy needs a 2D canvas, not a worker.
+- **A phone or tablet.** Declared desktop-only, as in TD-045, until measured.
+
+**Frame capture: wait for `idle`, with fading off, and refuse errors.** `map.once('idle')` is registered, then `jumpTo` is called. `idle` fires only after a render in which no tile or GeoJSON update is loading and no transition is running. A tile that **failed** is not loading either. With one tile in seven answering 500, the render ran to the end without complaint, but 164 of 300 frames in Chromium and 130 in WebKit had settled after a failed request and would have been written with a hole. So the export is to listen for the map's `error` event and stop on a failed request, with the reason, rather than write that frame (AV-1209). Three settings are required:
+
+- **`fadeDuration: 0` on the map and `raster-fade-duration: 0` on every raster layer.** With MapLibre's default 300 ms fades and slow tiles, 17 of 300 frames differed in Chromium and 13 in WebKit. A fade runs on the wall clock, so a slow network changes the picture.
+- **Copy the frame through a 2D canvas.** A `VideoFrame` made straight from the WebGL canvas **crashes WebKit's page at about frame 120**, with or without pixel hashing. Without the encoder the same direct frames run to the end (13.2 fps), so the crash is in encoding frames taken from WebGL. Drawing the map canvas onto an `OffscreenCanvas` and making the frame from that runs to the end in both engines, as does an `ImageBitmap` (10.4 fps over 300 frames). Chromium does not need the copy. It costs Chromium nothing measurable in an export, so it is taken everywhere.
+- **One map for the whole render.** Creating fresh 3D maps one after another hung WebKit: twenty in a row, each drawing one frame, had not finished after 20 minutes. Chromium managed it. The page is to keep one map and move it.
+
+A second way of settling was tried: drive MapLibre with `map.redraw()` and poll `loaded()` and `areTilesLoaded()`, without `preserveDrawingBuffer`. The hope was a loop that would not stall in a background tab. In Chromium it drew exactly the same frames as `idle`. In WebKit it had not finished after 20 minutes. It also does not escape the animation loop: `redraw()` can itself schedule frames, and its readiness check leaves out the placement and terrain work `idle` waits for. So it says nothing about a hidden tab. It is not the plan. **The export needs the tab in front.** MapLibre renders on `requestAnimationFrame`, which a hidden tab stops, so AV-1209's panel says so before starting, as the WebM export does (TD-063).
+
+**Deterministic, measured.** Every frame's pixels were hashed and compared between runs. Then every fifteenth frame (20 frames) was drawn again, each on its own fresh map with tiles delayed 0–600 ms, and compared pixel by pixel with the first run's. A frame has 2,073,600 pixels.
+
+| Case | Chromium | WebKit |
+| --- | --- | --- |
+| 2D, one map, fast tiles vs tiles delayed 0–600 ms | 0 of 300 frames differ | 0 of 300 |
+| 2D, live OpenFreeMap vector tiles with labels, two runs | 0 of 300 frames differ | not run |
+| 2D, 20 frames each drawn again on a fresh map | 4 frames differ, by 1–2 isolated pixels (up to 159 levels of 255) | the same: 0–2 pixels, up to 159 |
+| 3D, the same settings run twice | 261 of 300 hashes differ | 265 of 300 |
+| 3D, 20 frames each on a fresh map: height from the route | 0–156 pixels (≤ 0.008 %), by at most 5 levels | not measured (fresh 3D maps hang WebKit, above) |
+| 3D, the same with the height clamped to the ground | 0–243 pixels (≤ 0.012 %), by at most 3 levels | not measured |
+| 3D, 5 frames drawn again on one fresh map (an earlier run) | 0–24 pixels, by at most 2 | 2–24 pixels, by at most 4 clamped, 1 from the route |
+
+**2D is exact within a render.** On one map, the same activity, settings and tiles give the same pixels however fast the network is, in both engines and with a live vector basemap. A new map can move an isolated pixel or two. That is probably a tile seam, and invisible in motion. **3D is exact to within rounding.** Terrain leaves up to a few hundred scattered pixels a few levels away, which is invisible and below what H.264 keeps, but enough to change a hash.
+
+**This falls short of AV-1201's criterion as written,** which asks that the same activity, settings and tiles give *the same frames*. What holds is: the same frames within a render whatever the network, in 2D. Across renders, and in 3D, they are the same to within the noise above. No frame is ever written with a tile still loading or failed, which was the point of the criterion. The tolerance proposed for AV-1210's tests is **no more than 0.05 % of pixels differing at all, and no more than 0.001 % (about 20 pixels at 1080p) by more than 8 levels**. Every measurement above passes it with room to spare. It replaces the hash comparison only where a hash cannot hold. **It changes the acceptance contract, so it stands only with the owner's agreement**, and is listed under "Still open" until then.
+
+In 3D, **the camera's centre height comes from the activity's own elevation, not from the ground.** With MapLibre's default `centerClampedToGround`, the centre height is set from the terrain loaded at the time, in `jumpTo` and again as tiles arrive during rendering. That ties the camera to what has loaded. Over the probe's smooth hills, clamping on or off made no measurable difference (see the table). That real terrain, which loads a coarser parent tile first, would show more is a reasoned expectation, not a measurement. The choice rests on AV-1203's rule that the camera path is pure: `centerClampedToGround: false`, with the height taken from the route. The probe used the hills' formula directly. The app smooths the route's elevation as it smooths the bearing, which the probe did not do. An activity without elevation falls back to the clamp, with the noise above. A route height that differs from the elevation model's moves the view by a few metres and does not lift the marker or line, which are draped on the ground.
+
+**Time per frame.** At 1080p30, a 10 s video is 300 frames, a 20 s one 600 and a 60 s one 1,800. Pixel hashing was off for the "export" rows, as it will be in the app. The tiles were local, so these times are what the renderer costs, not the network. The same route over a longer video moves the camera less between frames, so fewer tiles change per frame, and a long video renders faster per frame than a short one:
+
+| | Chromium | WebKit |
+| --- | --- | --- |
+| 2D, rendering only, no encoder | 26.5 fps | 10.3 fps |
+| **2D export**, 600 frames | **29.2 fps — 1.0× real time** | **15.2 fps — 0.5×** |
+| **3D export**, 600 frames | **9.2 fps — 0.31×** | **5.4 fps — 0.18×** |
+| **2D export, 60 s**, 1,800 frames | **35.3 fps — 1.2×**, 51 s | **18.3 fps — 0.6×**, 98 s |
+| **3D export, 60 s**, 1,800 frames | **12.4 fps — 0.41×**, 2.4 min | not run |
+| 2D, VP9 WebM (with hashing) | 13.2 fps | 8.5 fps |
+| 3D 4K (3840 × 2160), 120 frames, with hashing | 1.7 fps | 0.8 fps |
+| 2D with every tile delayed 0–600 ms | 2.4 fps | 2.1 fps |
+| **Live**: OpenFreeMap 2D, pitch 45° (first run / second run) | 8.3 / 14.6 fps | not run |
+| **Live**: OpenFreeMap + AWS terrain, 3D | 4.4 fps | not run |
+
+The encoder is never the bottleneck. Adding a 1080p frame took 0.1–4 ms at the median, and 28 ms at 4K in WebKit. Waiting for tiles and the WebGL draw are the cost. On a slow network, time is set by the tiles, at about 400–500 ms a frame for the 600 ms jitter. A **60-second 1080p video** took **51 seconds in 2D and 2.4 minutes in 3D in Chromium, and 98 seconds in 2D in WebKit**, with tiles arriving quickly. WebKit's 3D was not run at that length; from its 20-second rate it would take at most 5½ minutes. A slow connection can stretch any of these to ten minutes or more. The progress estimate (AV-1209) is to be built from measured frame times as the export runs, not from these constants.
+
+**Memory.** The browser's processes together peaked at **0.45–1.03 GB at 1080p and 0.9–1.1 GB at 4K**: the summed resident size, sampled with `ps` every 250 ms, GPU included. The map's in-memory tile cache was capped at 400 tiles. Over the 60-second renders the total did not climb. Sampled every five seconds, Chromium stayed between 0.55 and 0.85 GB, with one momentary peak of 1.03 GB, and WebKit between 0.4 and 0.55 GB. Frames are encoded as they are drawn and released. Chromium's JS heap rose from about 25 MB to 120 MB, which is about the size of the finished output: **about 10 Mbit/s at 1080p, 70–75 MB a minute**. The probe kept that output in memory (Mediabunny's `BufferTarget`, MP4 with its index at the front). **The app must not.** It is to stream the file to the origin-private file system, as TD-045's renders do, and never build a `Blob` of parts. That streaming path was built for burned-in video and was **not exercised by this probe**. AV-1209 measures it at the 3-minute and 4K limits before they are offered.
+
+**Tile requests.** The follow camera visits the whole route at a fixed zoom, so the count grows with the route's length and the zoom, not with the video's length:
+
+| Render (28 km route, 10 s) | Requests |
+| --- | --- |
+| OpenFreeMap 2D, pitch 45° | **113**: 106 vector tiles, 3 glyph ranges, the sprite (2), the TileJSON and the style |
+| OpenFreeMap + AWS terrain, 3D | **698**, of which **439 unique** |
+| Generated 256 px raster, 2D (as a raster provider would be) | 1,043, of which 814 unique |
+| The same, 3D | 1,568, of which 1,165 unique |
+| The same, 3D 4K | 2,700, of which 1,884 unique |
+
+Vector tiles are drawn past their zoom-14 maximum, which is why OpenFreeMap needs a tenth of what a raster basemap does. The repeats among the requests are tiles evicted from the 400-tile cache and fetched again. AV-1209 is to raise that cap for the render, sized to the frame, so a tile is fetched once per render. **Tiles are cached in memory for the length of a render only.** The app writes no tile to the Cache API, OPFS or IndexedDB. The service worker has no runtime caching (`runtimeCaching: []`), and AV-1210's privacy test is to keep it that way. The browser's own HTTP cache follows each provider's headers, as for any map, because providers ask for exactly that; the probe's `cache: 'no-store'` was for honest counting, not the plan.
+
+**Basemaps, and the terms that decide them.** These were read on 10 November 2026. The pages were the [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/); [OpenFreeMap](https://openfreemap.org/) and its [terms](https://openfreemap.org/tos/) (updated 14 October 2026); the [AWS Terrain Tiles registry entry](https://registry.opendata.aws/terrain-tiles/) and [its sources' attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md); [MapTiler Cloud terms](https://www.maptiler.com/terms/cloud/); [EOX cloudless licence](https://cloudless.eox.at/documentation/license) and [usage](https://cloudless.eox.at/documentation/usage); [Stadia Maps terms](https://stadiamaps.com/terms-of-service/) (effective 9 November 2026); [CARTO basemap terms](https://carto.com/legal/basemap-terms/) (29 September 2026); [Mapbox terms](https://www.mapbox.com/legal/tos) and [Mapbox in MapLibre](https://docs.mapbox.com/help/dive-deeper/mapbox-in-maplibre/); [Protomaps API](https://protomaps.com/api). Mapbox's product terms PDF and Esri's World Imagery terms could not be read. Terms change, so AV-1205 reads them again before release.
+
+| Source | Key | Video | Decision |
+| --- | --- | --- | --- |
+| OpenStreetMap tile servers | No | **No.** The usage policy forbids "pre-emptive fetching of tiles other than those a user is actively viewing" and names "headless bots that pan/zoom the map to force rendering". | **Never used for a video.** The viewer's interactive map keeps them (TD-005); the map video page does not offer them. |
+| **OpenFreeMap** (`liberty`, `positron`, `bright`, `dark`) | No | **Yes**: "if you are using this in printed media or video, you must add the following attribution". No limit on requests; commercial use allowed. Automated collection is limited to offline downloads of at most 3,000 tiles or 50 MB, four requests at a time. | **Default.** One render asks for about 100–700 tiles. AV-1209 is to queue its requests four at a time, through a MapLibre protocol handler, since MapLibre itself limits only image requests. Attribution to be drawn in every frame (AV-1205): *OpenFreeMap © OpenMapTiles Data from OpenStreetMap*. |
+| **AWS Terrain Tiles** (Terrarium) | No | Open data, with no restriction on use stated | **3D terrain.** Its sources ask for credit (USGS SRTM, Copernicus EU-DEM and others). A short credit is to be drawn in every frame and the full list on the outro card. |
+| MapTiler Cloud | **Reader's own** | **Yes**, "to produce … videos, or animations for usage in internet channels … with a maximum 100,000 subscribers". Its free plan is non-commercial. | **Satellite and other styles, by the reader's own key**, with MapTiler's attribution. The page is to state the subscriber limit. |
+| EOX Sentinel-2 cloudless | No | 2016 mosaic CC BY 4.0. From 2018 on, CC BY-NC-SA, and "commercial production apps" may not use the public endpoints | **Not offered yet.** Whether the 2016 layer's public endpoint may serve an app like this is not settled. Carried forward. |
+| Stadia Maps, CARTO, Mapbox, Esri World Imagery, Protomaps API | Yes | Not granted on a free tier (Stadia: "electronic media" needs a paid plan), not addressed (CARTO, Protomaps), or not verifiable (Mapbox, Esri) | **Not offered.** A reader with a licence can supply the style URL themselves. |
+| A style URL the reader supplies | Theirs | Their responsibility, stated beside the field | **To be offered.** The URL and any key are to be held in memory for the session only. They are never bundled and never written to the project file (AV-1203), so a shared project carries no key. |
+| Route only | — | — | **To be offered, making no request at all** (shown by the viewer's route-only mode, TD-005). |
+
+**Limits**, to be enforced by AV-1205 and AV-1209. Default length **30 seconds**, the middle of Relive's range. **Maximum 3 minutes**, and **60 seconds at 4K**. **30 fps**, with 60 fps offered up to 1080p. 60 fps doubles the time, and a follow camera gains little from it. Sizes are the custom canvas's presets (1920 × 1080, 1080 × 1920, 1080 × 1080, 3840 × 2160). A custom size runs from 320 px to 4,096 px a side, within the 4K pixel count, and is accepted only where `canEncodeVideo` says yes at that size and the WebGL renderbuffer is large enough. **4K is offered**, with its slower estimate shown first: it ran in both engines in about 1 GB. Like burned-in video (TD-045), the export is **desktop only until measured on a phone**.
+
+**What the probe did not cover**, recorded so later tasks do not assume it:
+
+- **A real activity's elevation against the terrain model.** The hills were the same function on both sides. AV-1203 measures how far a recorded track sits from AWS's terrain, and whether smoothing hides it.
+- **Long routes.** Only 28 km was rendered. A 200 km ride at the same zoom needs about seven times the tiles. In 2D that is about 750 OpenFreeMap requests, well under 3,000. In 3D it is about 3,000 unique requests even at 1080p, mostly terrain from AWS rather than OpenFreeMap, and 4K is more. The 3,000-tile figure is OpenFreeMap's, for offline downloads, and does not bind AWS. Even so, AV-1209 counts requests before starting, from the planned camera path, and lowers the follow zoom on a long route rather than asking any provider for an unbounded number.
+- **Firefox, phones and other GPUs.** The 3D tolerance above is for one GPU. Frames are compared across runs on the same machine, never against a stored image from another.
+- **Tile failures, beyond detection.** The probe shows a failed tile settles `idle` and raises `error`. How many retries to allow, and whether a frame can wait for a retried tile rather than stop, is for AV-1209.
+
+Reason: rendering frame by frame, and waiting for every tile, is the only way a video does not depend on how fast the network was. The probe shows MapLibre can do that, exactly within a 2D render and to within invisible rounding otherwise, provided a failed tile is caught, with a cost the reader can be told before starting. The basemap is chosen by what each provider's terms allow, not by what looks best. OpenFreeMap's terms name video and ask for attribution, with a limit on automated bulk collection that one render stays inside, so it is the default. The OpenStreetMap servers' policy rules out exactly this use, so they are not offered.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.
@@ -948,6 +1052,10 @@ question deleted, so the reasoning stays findable.
 | Which first overlay templates? | Compact HUD, Route inset and Metric strip, each a placement rule rather than a stored layout (TD-043); then the still image (TD-061) and a free custom canvas with shapes (TD-062) for anything they do not cover. |
 | Which image do Open Graph and X previews show? | A purpose-made 1200×630 card, `social/preview-1200x630.png`: the name, what the app does, the formats, and a made-up route and elevation profile, so no one's ride is published. Generated by a script, so it can be made again (TD-024). |
 | Overlapping recordings in a merge: interleave, trim, or refuse? | Refuse, naming both files and the overlap. Two recordings cannot both be the ride at the same moment; interleaving draws a zigzag between devices and trimming drops a stretch silently. A file starting the second the last one ends is a zero-length pause (TD-060). |
+| Which basemaps can a map video use? | OpenFreeMap's vector styles by default: keyless, and their terms name video and ask only for attribution. Satellite and other styles come through a style URL and key the reader supplies, MapTiler's terms allowing video for channels up to 100,000 subscribers. Route-only rendering makes no request. Never the OpenStreetMap tile servers, whose policy forbids headless rendering (TD-064). |
+| Is 3D terrain in the first scope? | Yes, from AWS Terrain Tiles. It costs about three times the render time of 2D (0.41× real time against 1.2× for a 60-second video in Chromium) and about six times the requests, and the page is to say so. It is not bit-exact, so its tests are to compare with a tolerance, which needs the owner's agreement (TD-064). |
+| What length and size limits? | 30 seconds by default, at most 3 minutes, or 60 seconds at 4K. 30 fps, with 60 up to 1080p. The custom canvas's presets including 4K, and custom sizes from 320 to 4,096 px a side. Desktop only until measured on a phone (TD-064). |
+| Is the map video a page of its own, or a mode of the overlay page? | Its own page, `/map-video`, as planned, to be built by AV-1202. It is to render with a MapLibre map on the page rather than in the overlay export's worker, which a map cannot use, and to share Mediabunny and the overlay renderer (TD-064). |
 
 ### Answered, needing no work
 
@@ -963,12 +1071,12 @@ question deleted, so the reasoning stays findable.
 
 ### Still open
 
-Raised by the map video milestone (M10, `AV-1201` answers them):
+Carried forward from `AV-1201` (TD-064):
 
-- **Which basemaps can a map video use?** The OpenStreetMap tile servers' policy does not allow rendering videos. Candidates: a provider with a free tier that allows it and needs a user's own key (MapTiler, Stadia, Mapbox), keyless open data (OpenFreeMap vector tiles; AWS Open Data terrain tiles for elevation), or a style URL the user supplies. Satellite imagery has the strictest terms and may be key-only.
-- **Is 3D terrain in the first scope?** It needs a `raster-dem` source and costs more tiles and render time per frame.
-- **What length and size limits?** A default length (Relive-style videos run about 30–60 seconds), a maximum length, and whether 4K is offered where memory allows.
-- **Is the map video a page of its own, or a mode of the overlay page?** The plan says its own page (`/map-video`), sharing the overlay renderer and encoder, because the map, camera and tile loading have no place on the overlay page.
+- **Is a pixel tolerance acceptable for "the same frames"?** AV-1201 asked for identical frames. A map video is identical within a 2D render, but a new map can move an isolated pixel, and 3D terrain leaves a few hundred pixels a few levels away. TD-064 proposes a tolerance for tests: at most 0.05 % of pixels differing, and at most 0.001 % by more than 8 levels. The repository owner decides whether that meets the intent, or whether AV-1203's model must aim for more.
+
+- **Can the 2016 Sentinel-2 cloudless layer be offered without a key?** The mosaic itself is CC BY 4.0. EOX's rule against "commercial production apps" on its public endpoints is written for the 2018-and-later layers, and whether it reaches the 2016 one is not stated. Ask EOX before offering it.
+- **How far does a recorded track sit from the terrain model?** AV-1203 measures it on real rides, to decide whether the route's own elevation can set the camera height as TD-064 plans, or needs smoothing toward the terrain.
 
 
 ### App review follow-up — 25 October 2026
