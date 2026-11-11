@@ -33,4 +33,12 @@ describe('the basemap tile budget (AV-1209)', () => {
     expect(estimate(28, { lengthSeconds: 60 })).toBeLessThan(estimate(28) * 1.3);
     expect(estimate(28, { camera: { ...DEFAULT_MAP_VIDEO_SETTINGS.camera, zoom: 12 } })).toBeLessThan(estimate(28));
   });
+
+  it('counts more the steeper the tilt, as the camera sees further and MapLibre asks for coarser tiles there too (#13)', () => {
+    const at = (pitch: number) => estimate(28, { camera: { ...DEFAULT_MAP_VIDEO_SETTINGS.camera, zoom: 14, pitch } });
+    const counts = [0, 30, 45, 60].map(at);
+    for (let i = 1; i < counts.length; i += 1) expect(counts[i]!).toBeGreaterThan(counts[i - 1]!);
+    // Measured against real exports at 1080p (TD-076): 60° asked for about four times what 0° did on that ride.
+    expect(counts[3]! / counts[0]!).toBeGreaterThan(2.5);
+  });
 });

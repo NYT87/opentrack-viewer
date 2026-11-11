@@ -6,7 +6,7 @@ import { readMp4 } from './helpers/mp4';
 import { countPixelsNear, decodePng, solidPng, withExif, type DecodedPng } from './helpers/png';
 import { tiffBlock } from '../src/test/helpers/exifFixture';
 import { longRideGpx } from './helpers/overlayFixtures';
-import { TILE_RGB, forbidLiveProviders, serveFixtureTiles } from './helpers/mapVideoTiles';
+import { TILE_RGB, forbidLiveProviders, serveFixtureTiles, serveVectorFixture } from './helpers/mapVideoTiles';
 
 /**
  * AV-1209. The map video made into a file, in a real browser with its own
@@ -530,3 +530,65 @@ test('makes a 60-second 1080p video in steady memory (AV-1210)', async ({ page }
   expect(peak - before, 'what the export adds').toBeLessThan(1024);
   expect(last - middle, 'no climb from the middle third to the last').toBeLessThan(200);
 });
+
+/**
+ * #12 and #13: what an export asks of OpenFreeMap, counted. The ride, at 1080p for 10 s, with the tilt and
+ * zoom given; returns the panel's estimate before it starts and every tile URL asked while it runs.
+ */
+async function countTiles(page: Page, ride: string, { pitch, zoom }: { pitch: number; zoom: number }) {
+  const asked = await serveVectorFixture(page);
+  await page.goto('./#/map-video');
+  await page.getByTestId('map-video-activity-input').setInputFiles(ride);
+  const video = page.getByRole('region', { name: 'Video settings' });
+  await video.getByRole('spinbutton', { name: 'Length', exact: true }).fill('10');
+  for (const [name, value] of [['Tilt', pitch], ['Zoom', zoom]] as const) {
+    await video.getByRole('spinbutton', { name, exact: true }).fill(String(value));
+    await video.getByRole('spinbutton', { name, exact: true }).blur();
+  }
+  const panel = page.getByRole('region', { name: 'Make the video' });
+  await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+  await expect(panel).toContainText(/About [\d,]+ map tiles from OpenFreeMap/);
+  const estimate = Number(/About ([\d,]+) map tiles/.exec((await panel.textContent())!)![1]!.replace(/,/g, ''));
+  // The preview's own map has settled: from here, what is asked is the export's.
+  await page.waitForTimeout(1500);
+  const from = asked.length;
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  await expect(panel.getByRole('link', { name: /\.mp4/ })).toBeVisible({ timeout: 180_000 });
+  return { estimate, tiles: asked.slice(from) };
+}
+
+for (const pitch of [0, 30, 45, 60]) {
+  test(`estimates at least the OpenFreeMap tiles an export asks for, at a ${pitch}° tilt (#13)`, async ({ page }, testInfo) => {
+    test.setTimeout(240_000);
+    // An hour round a 22 km circle, at zoom 14, where OpenFreeMap's tiles are finest: the most a frame asks.
+    const ride = testInfo.outputPath('long-ride.gpx');
+    writeFileSync(ride, longRideGpx(1));
+    const { estimate, tiles } = await countTiles(page, ride, { pitch, zoom: 14 });
+    const unique = new Set(tiles).size;
+    testInfo.annotations.push({ type: 'tiles', description: JSON.stringify({ pitch, estimate, unique }) });
+    expect(unique).toBeGreaterThan(30);
+    expect(estimate).toBeGreaterThanOrEqual(unique);
+    // Generous, not wildly so: measured at 1.3 to 1.7 times.
+    expect(estimate).toBeLessThan(unique * 2.5);
+  });
+}
+
+test('asks for each OpenFreeMap tile once, on a route that comes back on itself and drawn past zoom 14 (#12)', async ({ page }, testInfo) => {
+  test.setTimeout(240_000);
+  // 4 km north and back the same way, steeply tilted at zoom 16: MapLibre asks for the same zoom-14 tile for
+  // each zoom it draws it at, and again on the way back; measured at 567 requests for 54 tiles before.
+  const out = Array.from({ length: 801 }, (_, i) => i);
+  const points = [...out, ...out.slice(0, -1).reverse()].map((step, i) =>
+    `<trkpt lat="${(51.5 + step * 0.000045).toFixed(6)}" lon="-0.12"><time>${new Date(Date.UTC(2024, 5, 1, 8, 0, i)).toISOString().replace('.000Z', 'Z')}</time></trkpt>`,
+  );
+  const ride = testInfo.outputPath('out-and-back.gpx');
+  writeFileSync(ride, `<?xml version="1.0"?><gpx version="1.1" creator="e2e" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>${points.join('')}</trkseg></trk></gpx>`);
+  const { estimate, tiles } = await countTiles(page, ride, { pitch: 60, zoom: 16 });
+  const unique = new Set(tiles).size;
+  expect(unique).toBeGreaterThan(10);
+  expect(tiles.filter((url, index) => tiles.indexOf(url) !== index)).toEqual([]);
+  expect(estimate).toBeGreaterThanOrEqual(unique);
+});
+

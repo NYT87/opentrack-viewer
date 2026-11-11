@@ -54,3 +54,31 @@ export async function serveFixtureTiles(page: Page): Promise<string[]> {
   });
   return asked;
 }
+
+/**
+ * OpenFreeMap as MapLibre sees it, for counting what an export asks of it: a
+ * vector source of 512 px tiles to zoom 14, drawn larger beyond it, each tile
+ * empty. Returns every tile URL asked, in order (the style is not counted).
+ */
+export async function serveVectorFixture(page: Page): Promise<string[]> {
+  const asked: string[] = [];
+  await page.route('https://tiles.openfreemap.org/**', (route) => {
+    const url = route.request().url();
+    if (url.includes('/styles/')) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          version: 8,
+          sources: { openmaptiles: { type: 'vector', tiles: ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'], maxzoom: 14 } },
+          layers: [
+            { id: 'ground', type: 'background', paint: { 'background-color': `rgb(${TILE_RGB.join(' ')})` } },
+            { id: 'water', type: 'fill', source: 'openmaptiles', 'source-layer': 'water', paint: { 'fill-color': '#224466' } },
+          ],
+        }),
+      });
+    }
+    asked.push(url);
+    return route.fulfill({ contentType: 'application/x-protobuf', body: Buffer.alloc(0), headers: { 'access-control-allow-origin': '*' } });
+  });
+  return asked;
+}

@@ -1,4 +1,4 @@
-import { Map as MapLibreMap, addProtocol, setWorkerUrl } from 'maplibre-gl';
+import { Map as MapLibreMap, addProtocol, setWorkerUrl, type AddProtocolResponseData, type GetResourceResponse } from 'maplibre-gl';
 // See ActivityMap: once bundled, MapLibre cannot find its worker on its own.
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Activity } from '../../domain/activity';
@@ -28,22 +28,99 @@ let running = 0;
 const waiting: (() => void)[] = [];
 /** Requests the export's map has made, for the panel to show. */
 let asked = 0;
-addProtocol(QUEUED, async (params, abort) => {
+
+type Fetched = GetResourceResponse<AddProtocolResponseData>;
+
+/** One request through the queue: it waits for one of the four places, then asks. */
+async function fetchQueued(url: string, type: string | undefined, signal?: AbortSignal): Promise<Fetched> {
   if (running >= MAX_PARALLEL_REQUESTS) await new Promise<void>((go) => waiting.push(go));
   running += 1;
   asked += 1;
   try {
-    const response = await fetch(`https://${params.url.slice(QUEUED.length + 3)}`, { signal: abort.signal });
+    const response = await fetch(url, { signal });
     // With its status, as MapLibre's own requests fail: a 404 tile is then no tile there, not an error.
     if (!response.ok) {
       throw Object.assign(new Error(`${response.status} ${response.statusText || 'error'} for ${new URL(response.url).host}`), { status: response.status, url: response.url });
     }
-    const data = params.type === 'json' ? await response.json() : params.type === 'string' ? await response.text() : await response.arrayBuffer();
+    const data = type === 'json' ? await response.json() : type === 'string' ? await response.text() : await response.arrayBuffer();
     return { data, cacheControl: response.headers.get('Cache-Control'), expires: response.headers.get('Expires') };
   } finally {
     running -= 1;
     waiting.shift()?.();
   }
+}
+
+/**
+ * TD-064: tiles are kept in memory for the length of a render, so none is
+ * asked for twice. MapLibre asks again for a tile it let go of, and for the
+ * same zoom-14 tile once for each zoom it is drawn larger at; a provider's
+ * caching headers would spare it those in a browser that keeps its HTTP cache,
+ * and this spares it in one that does not. A tile on its way is waited for,
+ * not asked again. Nothing is written anywhere, and all of it is let go when
+ * the render ends (`forgetKeptTiles`).
+ */
+const kept = new Map<string, Promise<Fetched>>();
+const keptBytes = new Map<string, number>();
+let keptTotal = 0;
+/** The most kept at once: past it, the tile used longest ago goes first. */
+const MAX_KEPT_BYTES = 256 * 1024 * 1024;
+
+function forgetKeptTiles(): void {
+  kept.clear();
+  keptBytes.clear();
+  keptTotal = 0;
+}
+
+/** `promise`, unless `signal` aborts first: one requester's abort does not stop a fetch others wait for. */
+function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(
+      (value) => (signal.removeEventListener('abort', abort), resolve(value)),
+      (error: unknown) => (signal.removeEventListener('abort', abort), reject(error)),
+    );
+  });
+}
+
+addProtocol(QUEUED, async (params, abort) => {
+  const url = `https://${params.url.slice(QUEUED.length + 3)}`;
+  // A style or a description of a source is asked once anyway; tiles and images are kept.
+  if (params.type !== 'arrayBuffer') return fetchQueued(url, params.type, abort.signal);
+  let entry = kept.get(url);
+  if (entry) {
+    // Used now: it goes to the back of the line to be let go.
+    kept.delete(url);
+    kept.set(url, entry);
+  } else {
+    const fetching = fetchQueued(url, params.type);
+    entry = fetching;
+    kept.set(url, fetching);
+    fetching.then(
+      ({ data }) => {
+        if (kept.get(url) !== fetching) return;
+        const bytes = (data as ArrayBuffer).byteLength;
+        keptBytes.set(url, bytes);
+        keptTotal += bytes;
+        for (const [oldest] of kept) {
+          if (keptTotal <= MAX_KEPT_BYTES || oldest === url) break;
+          const size = keptBytes.get(oldest);
+          if (size === undefined) continue;
+          kept.delete(oldest);
+          keptBytes.delete(oldest);
+          keptTotal -= size;
+        }
+      },
+      // A failure is not kept: asked again, it is fetched again.
+      () => {
+        if (kept.get(url) === fetching) kept.delete(url);
+      },
+    );
+  }
+  const fetched = await unlessAborted(entry, abort.signal);
+  // A copy each time: MapLibre hands a tile's buffer to its worker, and a buffer handed on is gone.
+  return { ...fetched, data: (fetched.data as ArrayBuffer).slice(0) };
 });
 /** An outside URL, sent through the queue. */
 const queued = (url: string) => (url.startsWith('https://') ? { url: `${QUEUED}://${url.slice('https://'.length)}` } : { url });
@@ -106,6 +183,7 @@ export async function openMapVideoRenderer(
 
   const errors: { sourceId?: string; message: string }[] = [];
   const startedAsked = asked;
+  forgetKeptTiles();
   const styleUrl = basemapStyleUrl(settings, maptilerKey);
   const map = new MapLibreMap({
     container,
@@ -127,6 +205,7 @@ export async function openMapVideoRenderer(
   const close = () => {
     map.remove();
     container.remove();
+    forgetKeptTiles();
   };
 
   try {
