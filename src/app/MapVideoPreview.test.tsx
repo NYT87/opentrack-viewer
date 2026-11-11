@@ -543,3 +543,32 @@ describe('photos along the route (AV-1208)', () => {
     expect(await within(photosRegion()).findByText(/The project names a photo not added yet: IMG_1\.jpg/)).toBeInTheDocument();
   });
 });
+
+describe('the export panel after the M10 review (TD-073)', () => {
+  const panel = () => screen.getByRole('region', { name: 'Make the video' });
+
+  it('offers a still where the browser has no video encoder', async () => {
+    await openWithRoute();
+    expect(within(panel()).getByRole('alert')).toHaveTextContent(/no video encoder/);
+    expect(within(panel()).getByRole('button', { name: /^Save a still of 0:00\.0 \(PNG\)$/ })).toBeEnabled();
+  });
+
+  it('will not ask OpenFreeMap for more tiles than its terms allow, and says which zoom fits', async () => {
+    // 2,000 points due north, 333 m apart: a 666 km ride, at zoom 14, where OpenFreeMap's tiles are finest.
+    const body = Array.from({ length: 2000 }, (_, i) => `<trkpt lat="${(40 + i * 0.003).toFixed(4)}" lon="7"><time>${new Date(Date.UTC(2026, 10, 1, 8, 0, i * 20)).toISOString()}</time></trkpt>`).join('');
+    const long = new File(
+      [`<?xml version="1.0"?><gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>${body}</trkseg></trk></gpx>`],
+      'long-ride.gpx',
+      { type: 'application/gpx+xml' },
+    );
+    window.location.hash = '#/map-video';
+    render(<App />);
+    await userEvent.upload(screen.getByTestId('map-video-activity-input'), long);
+    await waitFor(() => expect(FakeMap.instances.length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Zoom' }), { target: { value: '14' } });
+    const alert = await within(panel()).findByText(/would ask OpenFreeMap for about [\d,]+ map tiles, more than the 3,000/);
+    expect(alert).toHaveTextContent(/At zoom 1[0-6](\.5)? \(Camera, above\) it would be about [\d,]+\./);
+    await userEvent.click(screen.getByRole('radio', { name: /^Route only/ }));
+    expect(within(panel()).queryByText(/would ask OpenFreeMap/)).not.toBeInTheDocument();
+  });
+});

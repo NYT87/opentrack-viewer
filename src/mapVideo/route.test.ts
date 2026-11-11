@@ -152,3 +152,25 @@ describe('the simplified line (AV-1204)', () => {
     expect(revealAt(gapped, gapped.totalMeters, kept).lines).toHaveLength(2);
   });
 });
+
+describe('fixes from the M10 review (TD-073)', () => {
+  const gapped = routeOf([
+    ...straightNorth(500, 10).map((point) => ({ ...point, segment: 0 })),
+    ...straightNorth(500, 10).map((point) => ({ north: 3000 + point.north, east: 0, segment: 1 })),
+  ]);
+
+  it('cuts the end on the earlier side of a gap, keeping no place of the trimmed segment', () => {
+    // Trimming exactly the last segment's length ends the route on the gap: the earlier segment's end, not the later's start.
+    const trimmed = trimRoute(gapped, 0, gapped.totalMeters - gapped.vertices[50]!.distance)!;
+    const last = trimmed.vertices[trimmed.vertices.length - 1]!;
+    expect(last.lat).toBeCloseTo(gapped.vertices[50]!.lat, 12);
+    expect(trimmed.vertices.every((vertex) => vertex.segment === 0)).toBe(true);
+  });
+
+  it('keeps longitude continuous across 180°, so the marker never crosses the world the long way', () => {
+    const across = buildMapVideoRoute(makeActivity([{ lat: 0, lon: 179.999 }, { lat: 0, lon: -179.999 }]))!;
+    expect(across.vertices[1]!.lon).toBeCloseTo(180.001, 9);
+    expect(across.totalMeters).toBeLessThan(300);
+    expect(positionAt(across, across.totalMeters / 2).lon).toBeCloseTo(180, 6);
+  });
+});

@@ -229,7 +229,10 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
   const holds: MapVideoTimeline['holds'] = [];
   for (const hold of asked) {
     const length = hold.seconds * holdScale;
-    const at = interpolate(meters, seconds, Math.min(route.totalMeters, Math.max(0, hold.distance)));
+    let at = interpolate(meters, seconds, Math.min(route.totalMeters, Math.max(0, hold.distance)));
+    // A second photo at the same place waits after the first, not over it.
+    const before = holds[holds.length - 1];
+    if (before && at >= before.startSeconds && at <= before.endSeconds) at = before.endSeconds;
     const marker = interpolate(seconds, meters, at);
     let i = 0;
     while (i < seconds.length && seconds[i]! < at) i += 1;
@@ -244,6 +247,9 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
     for (const pause of pauses) {
       if (pause.startSeconds >= at) {
         pause.startSeconds += length;
+        pause.endSeconds += length;
+      } else if (pause.endSeconds > at) {
+        // A photo shown within a shortened stop lengthens the stop by its wait: the figures hold the stop through both.
         pause.endSeconds += length;
       }
     }

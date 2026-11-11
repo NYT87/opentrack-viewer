@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
 import type { ExportOutput } from '../overlay/export/client';
@@ -6,7 +6,8 @@ import { isOverlayExportError } from '../overlay/export/errors';
 import { formatBytes } from '../overlay/export/plan';
 import { isLikelyMobile } from '../overlay/export/burnSupport';
 import type { PhotoImage } from '../mapVideo/figures';
-import type { MapVideoModel } from '../mapVideo/model';
+import { buildMapVideoModel, type MapVideoModel } from '../mapVideo/model';
+import { OPENFREEMAP_TILE_BUDGET, estimateBasemapTiles } from '../mapVideo/export/tileBudget';
 import type { MapVideoSettings } from '../mapVideo/project';
 import { decodeAudioFile, fitAudio } from '../mapVideo/export/audio';
 import { planMapVideoExport, posterFileName, type MapVideoFormat } from '../mapVideo/export/plan';
@@ -23,6 +24,24 @@ export interface MapVideoExportPanelProps {
   photoImages: ReadonlyMap<string, PhotoImage>;
   /** The preview's moment, for the poster. */
   pausedAt: number;
+}
+
+/**
+ * The OpenFreeMap tiles a video would ask for, and, over the budget, the
+ * highest follow zoom (half a step at a time) at which it would fit.
+ */
+function tileBudgetFor(activity: Activity, model: MapVideoModel, settings: MapVideoSettings) {
+  if (settings.basemap.source !== 'online') return undefined;
+  const count = estimateBasemapTiles(model, settings);
+  if (count <= OPENFREEMAP_TILE_BUDGET) return { count };
+  for (let zoom = Math.floor(settings.camera.zoom * 2) / 2 - 0.5; zoom >= 10; zoom -= 0.5) {
+    const lower = { ...settings, camera: { ...settings.camera, zoom } };
+    const built = buildMapVideoModel(activity, lower);
+    if (!built.ok) continue;
+    const fits = estimateBasemapTiles(built.model, lower);
+    if (fits <= OPENFREEMAP_TILE_BUDGET) return { count, fits: { zoom, count: fits } };
+  }
+  return { count, fits: undefined };
 }
 
 /** What this browser can encode at the video's size: each format, or why not. */
@@ -104,6 +123,10 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
     [phase],
   );
 
+  // TD-064: OpenFreeMap's terms allow at most 3,000 tiles to be collected at a time, so a video asking for more waits.
+  const tiles = useMemo(() => tileBudgetFor(activity, model, settings), [activity, model, settings]);
+  const overBudget = tiles !== undefined && tiles.count > OPENFREEMAP_TILE_BUDGET;
+
   const format: MapVideoFormat | undefined = chosen && support?.[chosen] ? chosen : support?.mp4 ? 'mp4' : support?.webm ? 'webm' : undefined;
   const plan = format ? planMapVideoExport(activity, model, settings, format) : undefined;
   const planProblem = plan && 'problem' in plan ? plan.problem : undefined;
@@ -118,7 +141,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
     output.current = undefined;
     const active = new AbortController();
     controller.current = active;
-    setPhase({ status: 'running', progress: { done: 0, total: plan.frameCount, waiting: undefined } });
+    setPhase({ status: 'running', progress: { done: 0, total: plan.frameCount, requests: 0, waiting: undefined } });
     const notes: string[] = [];
     try {
       let audio;
@@ -165,7 +188,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
     }
   };
 
-  const blocked = !support || !format || planProblem !== undefined || keyMissing || running;
+  const blocked = !support || !format || planProblem !== undefined || keyMissing || running || overBudget;
 
   return (
     <section className="prose map-video-export" aria-label="Make the video">
@@ -178,6 +201,16 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
       {support?.reason && <p role="alert">{support.reason}</p>}
       {keyMissing && <p role="status">Type your MapTiler key above, or choose another map, to make the video.</p>}
       {planProblem && <p role="alert">{planProblem}</p>}
+      {overBudget && (
+        <p role="alert">
+          This video would ask OpenFreeMap for about {tiles.count.toLocaleString('en')} map tiles, more than the{' '}
+          {OPENFREEMAP_TILE_BUDGET.toLocaleString('en')} its terms allow one download to take.{' '}
+          {tiles.fits
+            ? `At zoom ${tiles.fits.zoom} (Camera, above) it would be about ${tiles.fits.count.toLocaleString('en')}. Lower the zoom, or choose route only.`
+            : 'Even zoomed out it would be more: choose route only, or a shorter stretch with the privacy trim.'}
+          {settings.keyframes.length > 0 && ' Keyframes set their own zoom: lower theirs too.'}
+        </p>
+      )}
 
       {support && (support.mp4 || support.webm) && (
         <>
@@ -210,6 +243,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
             <p className="map-video-settings__hint">
               {plan.frameCount} frames at {plan.width} × {plan.height}, {plan.fps} a second: about {formatBytes(plan.estimatedBytes)}, as{' '}
               {plan.fileName}.
+              {tiles && !overBudget && ` About ${tiles.count.toLocaleString('en')} map tiles from OpenFreeMap, asked four at a time.`}
             </p>
           )}
           <p className="video__actions">
@@ -222,12 +256,15 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
                 {stale ? 'Make it again' : 'Make the video'}
               </button>
             )}
-            <button type="button" className="button" onClick={() => void savePoster()} disabled={poster.busy || keyMissing || running}>
-              {poster.busy ? 'Saving the still…' : `Save a still of ${formatVideoTime(pausedAt)} (PNG)`}
-            </button>
           </p>
         </>
       )}
+      {/* A still needs no video encoder: it is offered wherever the map can be drawn (TD-064). */}
+      <p className="video__actions">
+        <button type="button" className="button" onClick={() => void savePoster()} disabled={poster.busy || keyMissing || running}>
+          {poster.busy ? 'Saving the still…' : `Save a still of ${formatVideoTime(pausedAt)} (PNG)`}
+        </button>
+      </p>
       {poster.message && <p role="status">{poster.message}</p>}
 
       {phase.status === 'running' && (
@@ -236,6 +273,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
             <progress aria-label="Video progress" value={phase.progress.done} max={phase.progress.total} className="overlay-export__progress" />{' '}
             {phase.progress.done} of {phase.progress.total} frames
             {phase.progress.secondsLeft !== undefined && `, about ${formatDuration(phase.progress.secondsLeft)} left`}
+            {phase.progress.requests > 0 && `; ${phase.progress.requests} map requests so far`}
             {phase.progress.waiting === 'tiles' && '. Waiting for map tiles…'}
           </p>
           {phase.progress.waiting === 'hidden' && <p role="alert">Waiting: the tab is hidden, so the map cannot draw. Bring it back to carry on.</p>}

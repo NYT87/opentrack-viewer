@@ -7,6 +7,7 @@ import { colorByChoices, terrainActive } from '../mapVideo/style';
 import { CustomCanvas } from '../components/CustomCanvas';
 import { mapVideoOverlayTimeline, shownActivity, type PhotoImage } from '../mapVideo/figures';
 import { photoInput } from '../mapVideo/readPhoto';
+import { photoItemsForSave } from '../mapVideo/photos';
 import { MapVideoPhotos } from '../components/MapVideoPhotos';
 import { MapVideoExportPanel } from '../components/MapVideoExportPanel';
 import { canvasTemplate, type CanvasDraft } from '../overlay/customCanvas';
@@ -344,7 +345,7 @@ export function MapVideoPage() {
                 host={{
                   title: 'Figures over the map',
                   intro:
-                    'Place live figures, gauges, the progress, the route, the elevation profile, figures for the whole activity, the date, text and shapes over the map. They play along the video, and the preview shows them over the map.',
+                    'Place live figures, gauges, the progress, the route, figures for the whole activity, the date, text and shapes over the map. They play along the video, and the preview shows them over the map.',
                   frame: { width: settings.output.width, height: settings.output.height },
                   timeline: figuresTimeline,
                   seconds: pausedAt,
@@ -366,7 +367,14 @@ export function MapVideoPage() {
                 pausedAt={pausedAt}
               />
             )}
-            {activity && <MapVideoProjectFile activity={activity} settings={settings} onOpen={replaceSettings} />}
+            {activity && (
+              <MapVideoProjectFile
+                activity={activity}
+                // Every photo on the page goes into the project by name, placed as it is now (TD-071).
+                settings={model ? { ...settings, photos: { ...settings.photos, items: photoItemsForSave(settings.photos, model.photos) } } : settings}
+                onOpen={replaceSettings}
+              />
+            )}
           </div>
         </div>
       </div>

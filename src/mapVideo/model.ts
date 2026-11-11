@@ -66,7 +66,8 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
     return { ok: false, error: 'The privacy trim leaves less than 100 m of the route. Trim less, or choose a longer activity.' };
   }
   const trimStart = route === full ? 0 : settings.privacyTrim.startMeters;
-  const placements = placePhotos(photos, settings.photos, full, trimStart, route.totalMeters);
+  const trimEnd = route === full ? 0 : settings.privacyTrim.endMeters;
+  const placements = placePhotos(photos, settings.photos, full, { start: trimStart, end: trimEnd });
   const holds = placements.flatMap((photo) => (photo.distance === undefined ? [] : [{ id: photo.id, distance: photo.distance, seconds: settings.photos.holdSeconds }]));
   const built = buildMapVideoTimeline(route, {
     lengthSeconds: settings.lengthSeconds,
@@ -114,7 +115,7 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
       frame: (frame) => at(timeline.frameSeconds(frame, frameCount)),
       at,
       photos: placements,
-      trim: { fullMeters: full.totalMeters, start: trimStart, end: route === full ? 0 : settings.privacyTrim.endMeters },
+      trim: { fullMeters: full.totalMeters, start: trimStart, end: trimEnd },
     },
   };
 }

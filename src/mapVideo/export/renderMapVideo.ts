@@ -1,4 +1,4 @@
-import { Map as MapLibreMap, setWorkerUrl } from 'maplibre-gl';
+import { Map as MapLibreMap, addProtocol, setWorkerUrl } from 'maplibre-gl';
 // See ActivityMap: once bundled, MapLibre cannot find its worker on its own.
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { Activity } from '../../domain/activity';
@@ -15,6 +15,35 @@ import { startMapVideoEncode } from './encodeClient';
 import type { MapVideoExportPlan } from './plan';
 
 setWorkerUrl(maplibreWorkerUrl);
+
+/**
+ * The export asks every outside host through this queue, at most four
+ * requests at a time: OpenFreeMap's terms allow automated collection only so
+ * (TD-064), and no provider is asked faster. The preview, an ordinary map the
+ * reader moves, asks as any map does.
+ */
+const QUEUED = 'map-video-queued';
+export const MAX_PARALLEL_REQUESTS = 4;
+let running = 0;
+const waiting: (() => void)[] = [];
+/** Requests the export's map has made, for the panel to show. */
+let asked = 0;
+addProtocol(QUEUED, async (params, abort) => {
+  if (running >= MAX_PARALLEL_REQUESTS) await new Promise<void>((go) => waiting.push(go));
+  running += 1;
+  asked += 1;
+  try {
+    const response = await fetch(`https://${params.url.slice(QUEUED.length + 3)}`, { signal: abort.signal });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText || 'error'} for ${new URL(response.url).host}`);
+    const data = params.type === 'json' ? await response.json() : params.type === 'string' ? await response.text() : await response.arrayBuffer();
+    return { data, cacheControl: response.headers.get('Cache-Control'), expires: response.headers.get('Expires') };
+  } finally {
+    running -= 1;
+    waiting.shift()?.();
+  }
+});
+/** An outside URL, sent through the queue. */
+const queued = (url: string) => (url.startsWith('https://') ? { url: `${QUEUED}://${url.slice('https://'.length)}` } : { url });
 
 /**
  * AV-1209. Draws a map video's frames exactly (TD-064, TD-072): a MapLibre map
@@ -51,6 +80,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 const cancelled = () => new OverlayExportError('cancelled', 'The export was stopped.');
 
 export interface MapVideoRenderer {
+  /** How many map requests this render has made so far. */
+  requests: () => number;
   /** The frame at `seconds`, drawn and settled, on the render's canvas (valid until the next call). */
   drawFrame: (seconds: number) => Promise<OffscreenCanvas | HTMLCanvasElement>;
   close: () => void;
@@ -71,9 +102,12 @@ export async function openMapVideoRenderer(
   document.body.append(container);
 
   const errors: { sourceId?: string; message: string }[] = [];
+  const startedAsked = asked;
+  const styleUrl = basemapStyleUrl(settings, maptilerKey);
   const map = new MapLibreMap({
     container,
-    style: basemapStyleUrl(settings, maptilerKey) ?? routeOnlyStyle(),
+    style: styleUrl ? queued(styleUrl).url : routeOnlyStyle(),
+    transformRequest: (url) => queued(url),
     pixelRatio: 1,
     interactive: false,
     attributionControl: false,
@@ -146,14 +180,23 @@ export async function openMapVideoRenderer(
 
   return {
     close,
+    requests: () => asked - startedAsked,
     async drawFrame(seconds) {
       if (signal?.aborted) throw cancelled();
-      errors.length = 0;
+      // Errors are kept from before the first frame too: a map that failed while loading is not drawn as if it had not.
       let idle = nextIdle();
       drawVideoMap(map, model, settings, colors, seconds, 0);
       await waitIdle(idle);
       // A tile that failed is asked for again, waiting longer each time; then the export stops rather than write a hole.
       for (let attempt = 1; errors.length > 0; attempt += 1) {
+        // A sprite, glyph or style that failed belongs to no tile source and cannot be asked for again: stop at once.
+        const unfixable = errors.find((error) => !error.sourceId);
+        if (unfixable) {
+          throw new OverlayExportError(
+            'render_failed',
+            `Part of the map’s style could not be loaded (${unfixable.message}). The export stopped rather than draw the map without it. Try again, or choose route only.`,
+          );
+        }
         if (attempt > TILE_RETRIES) {
           throw new OverlayExportError(
             'render_failed',
@@ -180,6 +223,8 @@ export async function openMapVideoRenderer(
 export interface MapVideoExportProgress {
   done: number;
   total: number;
+  /** Map requests so far: tiles, and the style's own files. */
+  requests: number;
   /** Seconds left at the rate so far, once there is a rate. */
   secondsLeft?: number;
   waiting: RenderWaiting;
@@ -211,6 +256,7 @@ export async function runMapVideoExport(
       done,
       total: plan.frameCount,
       ...(done > 0 ? { secondsLeft: ((performance.now() - started) / 1000 / done) * (plan.frameCount - done) } : {}),
+      requests: renderer?.requests() ?? 0,
       waiting,
     });
   let renderer: MapVideoRenderer | undefined;

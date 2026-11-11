@@ -130,7 +130,11 @@ function degrees(tiff: DataView, value: Entry | undefined, ref: Entry | undefine
 function readLocalTime(text: string | undefined): string | undefined {
   const match = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(text ?? '');
   if (!match || match[1] === '0000') return undefined;
-  return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}`;
+  const iso = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}`;
+  // A date that is no date (month 13, 31 February, hour 25) reads as no time at all: it never becomes NaN.
+  const parsed = new Date(`${iso}Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 19) !== iso) return undefined;
+  return iso;
 }
 
 /** `+09:00` as 540, `-05:30` as -330. */
@@ -176,5 +180,6 @@ export function photoTakenAt(exif: PhotoExif, fallbackOffsetMinutes: number | un
   if (!exif.localTime) return undefined;
   const offset = exif.utcOffsetMinutes ?? fallbackOffsetMinutes;
   if (offset === undefined) return undefined;
-  return Date.parse(`${exif.localTime}Z`) - offset * 60_000;
+  const at = Date.parse(`${exif.localTime}Z`) - offset * 60_000;
+  return Number.isFinite(at) ? at : undefined;
 }

@@ -1428,3 +1428,17 @@ Acceptance criteria:
 - Accessibility tests cover the page's controls, the timeline and keyframe editing by keyboard, and focus order; responsive tests cover desktop and phone widths.
 - Performance checks cover a long activity (250,000 points, the import limit) in the timing, camera and reveal computations, and the memory of a 60-second 1080p export.
 - Privacy tests confirm no activity data, photo, project or output is uploaded, that tile requests are the only network traffic and only for the basemap chosen, and that the privacy trim removes the trimmed points from every frame.
+
+#### AV-1211: An Elevation Profile With a Moving Cursor, for the Overlay and the Map Video
+
+Dependencies: AV-1011, AV-1207
+
+The M10 review found the elevation profile named in AV-1207's criteria was never built (TD-073).
+
+Acceptance criteria:
+- An elevation profile element can be placed with the custom canvas editor and saved in its layout file: the activity's elevation against distance, with a cursor at the current moment.
+- On the overlay page it follows the video's time; over the map video it follows the marker, and through a shortened stop the cursor holds still.
+- Over the map video it draws the trimmed stretch alone, so it cannot show what the privacy trim hides.
+- An activity without elevation leaves the element empty and says why in the editor.
+- A layout using it opens in an earlier version with that element left out and a warning, as any element it does not know is.
+- Tests cover the profile's shape and cursor, the trim, a layout round trip, and a golden render.

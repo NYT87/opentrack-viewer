@@ -231,6 +231,20 @@ export function MapVideoPreview({
     draw(Math.min(latest.current.seconds, length));
   }, [activity, model, settings, colors, ready, draw, length]);
 
+  // A preview resized while paused is drawn again at its new size, so its framing (and a keyframe taken from it) stays the video's.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !ready || typeof ResizeObserver !== 'function') return;
+    let width = container.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (container.clientWidth === width) return;
+      width = container.clientWidth;
+      draw(latest.current.seconds);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [ready, draw]);
+
   // A new map carries on from where the last one was.
   useEffect(() => {
     const start = positionRef?.current ?? 0;

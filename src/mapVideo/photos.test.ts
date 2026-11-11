@@ -3,7 +3,7 @@ import type { OverlayContext2D } from '../overlay/export/drawOverlay';
 import { activityThrough, straightNorth, type TestPoint } from '../test/helpers/mapVideoRoutes';
 import { createMapVideoFigures, drawPhoto } from './figures';
 import { buildMapVideoModel } from './model';
-import { MAX_PHOTO_DISTANCE_METERS, type PhotoInput, type PhotosSettings } from './photos';
+import { MAX_PHOTO_DISTANCE_METERS, photoItemsForSave, type PhotoInput, type PhotosSettings } from './photos';
 import { DEFAULT_MAP_VIDEO_SETTINGS, parseMapVideoProject, serializeMapVideoProject, type MapVideoSettings } from './project';
 import { buildMapVideoRoute, positionAt } from './route';
 
@@ -188,5 +188,63 @@ describe('photos in the project file (AV-1208, TD-071)', () => {
   it('refuses a placement it cannot read, by name', () => {
     const file = JSON.stringify({ kind: 'opentrack-map-video', version: 1, activity: { fileName: null, points: 2 }, settings: { photos: { items: [{ name: 'a.jpg', method: 'teleport' }] } } });
     expect(parseMapVideoProject(file)).toEqual({ ok: false, error: expect.stringContaining('settings.photos.items[0].method') });
+  });
+});
+
+describe('fixes from the M10 review (TD-073)', () => {
+  it('leaves out a photo from the trimmed side of a gap, though it shares its distance with the kept side', () => {
+    const points: TestPoint[] = [
+      ...straightNorth(500, 10, 5).map((point) => ({ ...point, segment: 0 })),
+      ...straightNorth(500, 10, 5).map((point) => ({ north: 3000 + point.north, east: 0, second: 1000 + point.second!, segment: 1 })),
+    ];
+    const gapped = activityThrough(points);
+    const route = buildMapVideoRoute(gapped)!;
+    const gap = route.vertices[50]!.distance;
+    // Taken at the first segment's very end, which the trim removes: the start is cut exactly at the gap.
+    const built = buildMapVideoModel(gapped, { ...DEFAULT_MAP_VIDEO_SETTINGS, privacyTrim: { startMeters: gap, endMeters: 0 } }, [
+      { id: 'p', name: 'p', takenAt: T0 + 100_000 },
+    ]);
+    expect(built.ok && built.model.photos[0]!.reason).toMatch(/privacy trim hides/);
+  });
+
+  it('shows two photos taken at one place one after the other', () => {
+    const model = modelWith([{ id: 'a', name: 'a', takenAt: T0 + 120_000 }, { id: 'b', name: 'b', takenAt: T0 + 120_000 }]);
+    const [a, b] = model.timeline.holds;
+    expect(b!.startSeconds).toBeCloseTo(a!.endSeconds, 9);
+    expect(model.at(model.timeline.introSeconds + a!.startSeconds + 1).sample.photo?.id).toBe('a');
+    expect(model.at(model.timeline.introSeconds + b!.startSeconds + 1).sample.photo?.id).toBe('b');
+  });
+
+  it('lengthens a shortened stop by a photo shown within it', () => {
+    const points: TestPoint[] = straightNorth(1500, 10, 5);
+    const stop = points[points.length - 1]!.second!;
+    // Standing, the fixes drift a centimetre a second (far under the 0.5 m/s of moving): a photo mid-stop lands mid-beat.
+    for (let s = 5; s <= 300; s += 5) points.push({ north: 1500 + s / 100, east: 0, second: stop + s });
+    for (const point of straightNorth(1500, 10, 5).slice(1)) points.push({ north: 1503 + point.north, east: 0, second: stop + 300 + point.second! });
+    const stopped = activityThrough(points);
+    // Taken during the stop, two and a half minutes in.
+    const built = buildMapVideoModel(stopped, { ...DEFAULT_MAP_VIDEO_SETTINGS, timing: { mode: 'time', pauseBeatSeconds: 1 } }, [{ id: 'p', name: 'p', takenAt: T0 + (stop + 150) * 1000 }]);
+    if (!built.ok) throw new Error(built.error);
+    const [pause] = built.model.timeline.pauses;
+    const [hold] = built.model.timeline.holds;
+    expect(hold!.startSeconds).toBeGreaterThan(pause!.startSeconds);
+    expect(pause!.endSeconds).toBeGreaterThanOrEqual(hold!.endSeconds - 1e-9);
+    // Through the photo the figures still hold the stop.
+    expect(built.model.at(built.model.timeline.introSeconds + hold!.startSeconds + 1).sample.paused).toBe(true);
+    expect(pause!.endSeconds - pause!.startSeconds).toBeCloseTo(1 + 3, 6);
+  });
+
+  it('saves every photo on the page by name, placed as it is, besides those named and not yet added', () => {
+    const items = photoItemsForSave(photos({ items: [{ name: 'hand.jpg', method: 'hand', handMeters: 10 }, { name: 'waiting.jpg', method: 'time' }] }), [
+      { id: '1', name: 'hand.jpg', method: 'hand', distance: 10 },
+      { id: '2', name: 'auto.jpg', method: 'time', distance: 600 },
+      { id: '3', name: 'far.jpg', method: 'position', reason: 'Taken 3 km from the route' },
+    ]);
+    expect(items).toEqual([
+      { name: 'hand.jpg', method: 'hand', handMeters: 10 },
+      { name: 'waiting.jpg', method: 'time' },
+      { name: 'auto.jpg', method: 'time' },
+      { name: 'far.jpg', method: 'position' },
+    ]);
   });
 });

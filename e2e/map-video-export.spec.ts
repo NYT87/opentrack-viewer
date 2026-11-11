@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { join } from 'node:path';
 import { readMp4 } from './helpers/mp4';
-import { countPixelsNear, decodePng } from './helpers/png';
+import { countPixelsNear, decodePng, solidPng } from './helpers/png';
 
 /**
  * AV-1209. The map video made into a file, in a real browser with its own
@@ -173,4 +173,54 @@ test('stops, saying why, when a map tile will not load, rather than write a fram
   await expect(panel.getByRole('alert')).toContainText('A map tile could not be loaded after 3 tries', { timeout: 60_000 });
   await expect(panel.getByRole('alert')).toContainText('rather than write a frame with part of the map missing');
   await expect.poll(() => storedExports(page), { timeout: 10_000 }).toEqual([]);
+});
+
+test('stops, saying why, when part of the map\'s style will not load, rather than draw the map without it (TD-073)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const panel = await openSmall(page);
+  // A style whose sprite is missing: no tile fails, but the map would be drawn without its icons.
+  await page.route('https://tiles.openfreemap.org/**', (route) => {
+    if (route.request().url().includes('/styles/')) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 8, sprite: 'https://tiles.openfreemap.org/sprites/missing', sources: {}, layers: [{ id: 'land', type: 'background', paint: { 'background-color': '#2d4030' } }] }),
+      });
+    }
+    return route.fulfill({ status: 404, body: '' });
+  });
+  await page.getByRole('radio', { name: /^Online map/ }).check();
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  await expect(panel.getByRole('alert')).toContainText('Part of the map’s style could not be loaded', { timeout: 60_000 });
+  await expect.poll(() => storedExports(page), { timeout: 10_000 }).toEqual([]);
+});
+
+test('asks for map tiles at most four at a time (TD-073)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const panel = await openSmall(page);
+  const tile = solidPng(128, [0x2d, 0x40, 0x30]);
+  let inFlight = 0;
+  let most = 0;
+  let answered = 0;
+  await page.route('https://tiles.openfreemap.org/**', async (route) => {
+    if (route.request().url().includes('/styles/')) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ version: 8, sources: { land: { type: 'raster', tiles: ['https://tiles.openfreemap.org/slow/{z}/{x}/{y}.png'], tileSize: 128 } }, layers: [{ id: 'land', type: 'raster', source: 'land' }] }),
+      });
+    }
+    // Only the export's own requests are counted: they come through its queue, a plain fetch that
+    // asks for anything, while the preview's map loads its images itself and asks for images.
+    const counted = route.request().headers()['accept'] === '*/*';
+    if (counted) most = Math.max(most, ++inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (counted) { inFlight -= 1; answered += 1; }
+    return route.fulfill({ contentType: 'image/png', body: tile });
+  });
+  await page.getByRole('radio', { name: /^Online map/ }).check();
+  await expect(panel.getByText(/About [\d,]+ map tiles from OpenFreeMap, asked four at a time\./)).toBeVisible();
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  await expect(panel.getByRole('link', { name: /overlay-ride-map-video-640x360\.mp4/ })).toBeVisible({ timeout: 150_000 });
+  expect(answered).toBeGreaterThan(4);
+  expect(most).toBeGreaterThan(1);
+  expect(most).toBeLessThanOrEqual(4);
 });

@@ -91,6 +91,11 @@ export function startMapVideoEncode(
       done += 1;
       waiters.shift()?.();
     } else if (message.type === 'done') {
+      // The stop lost the race with the last frame: the reader asked to stop, so the file is let go, not offered.
+      if (failure?.code === 'cancelled') {
+        end(failure);
+        return;
+      }
       settled = true;
       worker.terminate();
       if (cancelTimer) clearTimeout(cancelTimer);

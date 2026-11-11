@@ -44,9 +44,14 @@ export interface RoutePosition {
 /** The route of an activity, or undefined when fewer than two points have a location. */
 export function buildMapVideoRoute(activity: Activity): MapVideoRoute | undefined {
   const vertices: RouteVertex[] = [];
+  let lastRawLon: number | undefined;
   for (const point of activity.points) {
     if (!hasValidLocation(point)) continue;
     const previous = vertices[vertices.length - 1];
+    // Longitudes are kept continuous: a route across 180° goes on to 180.01°, not back to -179.99°,
+    // so interpolation, bounds and the drawn line never cross the world the long way (MapLibre wraps them).
+    const lon = previous === undefined || lastRawLon === undefined ? point.lon : previous.lon + ((((point.lon - lastRawLon) % 360) + 540) % 360) - 180;
+    lastRawLon = point.lon;
     const segment = point.segmentIndex ?? 0;
     const distance =
       previous === undefined
@@ -54,7 +59,7 @@ export function buildMapVideoRoute(activity: Activity): MapVideoRoute | undefine
         : previous.distance + (previous.segment === segment ? haversineMeters(previous.lat, previous.lon, point.lat, point.lon) : 0);
     const time = point.time instanceof Date && !Number.isNaN(point.time.getTime()) ? point.time.getTime() : undefined;
     vertices.push({
-      lon: point.lon,
+      lon,
       lat: point.lat,
       distance,
       ...(time !== undefined ? { time } : {}),
@@ -110,6 +115,22 @@ export function positionAt(route: MapVideoRoute, distance: number): RoutePositio
   };
 }
 
+/**
+ * A place `distance` along the route, taken from the earlier side of a gap
+ * between recordings when it falls exactly on one: the end of the segment
+ * before, not the start of the one after, which share a distance.
+ */
+export function positionBefore(route: MapVideoRoute, distance: number): RoutePosition {
+  const place = positionAt(route, distance);
+  let index = place.index;
+  const { vertices } = route;
+  if (place.fraction > 0) return place;
+  while (index > 0 && vertices[index - 1]!.distance === vertices[index]!.distance && vertices[index - 1]!.segment !== vertices[index]!.segment) index -= 1;
+  if (index === place.index) return place;
+  const vertex = vertices[index]!;
+  return { lon: vertex.lon, lat: vertex.lat, distance: vertex.distance, elevation: vertex.elevation, time: vertex.time, index, fraction: 0 };
+}
+
 /** The smallest distance the privacy trim may leave: anything shorter is not a route to follow. */
 export const MIN_TRIMMED_ROUTE_METERS = 100;
 
@@ -126,8 +147,9 @@ export function trimRoute(route: MapVideoRoute, startMeters: number, endMeters: 
   if (end - start < MIN_TRIMMED_ROUTE_METERS) return undefined;
   if (start === 0 && end === route.totalMeters) return route;
 
+  // The start is cut on the later side of a gap and the end on the earlier, so neither keeps a place of a trimmed stretch.
   const first = positionAt(route, start);
-  const last = positionAt(route, end);
+  const last = positionBefore(route, end);
   const cut = (position: RoutePosition): RouteVertex => {
     const vertex = route.vertices[position.index]!;
     return {
@@ -141,7 +163,7 @@ export function trimRoute(route: MapVideoRoute, startMeters: number, endMeters: 
     };
   };
   // Strictly between the cuts: a vertex exactly at a cut is the cut itself.
-  const inner = route.vertices.filter((vertex, i) => i > first.index && vertex.distance > start && vertex.distance < end);
+  const inner = route.vertices.filter((vertex, i) => i > first.index && i <= last.index && vertex.distance > start && vertex.distance < end);
   const vertices = [cut(first), ...inner, cut(last)].map((vertex) => ({
     ...vertex,
     distance: vertex.distance - start,

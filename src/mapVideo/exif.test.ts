@@ -42,3 +42,12 @@ describe('reading a photo\'s EXIF (AV-1208)', () => {
     expect(photoTakenAt({}, 0)).toBeUndefined();
   });
 });
+
+describe('fixes from the M10 review (TD-073)', () => {
+  it('reads a date that is no date as no time, never as NaN', () => {
+    expect(readPhotoExif(jpegWithExif({ dateTimeOriginal: '2026:13:10 08:00:00' })).localTime).toBeUndefined();
+    expect(readPhotoExif(jpegWithExif({ dateTimeOriginal: '2026:02:31 08:00:00' })).localTime).toBeUndefined();
+    expect(readPhotoExif(jpegWithExif({ dateTimeOriginal: '2026:02:28 25:00:00' })).localTime).toBeUndefined();
+    expect(readPhotoExif(jpegWithExif({ dateTimeOriginal: '2024:02:29 23:59:59' })).localTime).toBe('2024-02-29T23:59:59');
+  });
+});
