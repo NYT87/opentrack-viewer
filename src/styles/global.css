@@ -1695,6 +1695,8 @@ main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline
 /* Sized by its frame, not positioned in it: MapLibre's own stylesheet makes the
    container `position: relative`, which would collapse an inset box to nothing. */
 .map-video-preview__map { width: 100%; height: 100%; }
+/* AV-1207. The figures, over the map and under the credit; the hand goes through to the map. */
+.map-video-preview__figures { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .map-video-preview__transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .map-video-preview__scrub { flex: 1 1 200px; min-width: 0; display: flex; }
 .map-video-preview__scrub input { width: 100%; }

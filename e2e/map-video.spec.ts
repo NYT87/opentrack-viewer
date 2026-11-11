@@ -123,7 +123,7 @@ test('previews the route only with no request at all, and plays by keyboard', as
   await page.getByRole('radio', { name: /^Route only/ }).check();
 
   const preview = page.getByRole('region', { name: 'Preview' });
-  await expect(preview.locator('canvas')).toBeVisible();
+  await expect(preview.locator('.map-video-preview__map canvas')).toBeVisible();
   const time = preview.locator('.map-video-preview__time');
   await expect(time).toHaveText('0:00.0 / 0:30.0');
 
@@ -251,4 +251,41 @@ test('takes a keyframe from a view dragged by hand, and edits one by keyboard', 
   await keyframes.getByRole('button', { name: 'Undo' }).focus();
   await page.keyboard.press('Enter');
   await expect(row.nth(1).getByRole('spinbutton', { name: 'Zoom' })).not.toHaveValue('13');
+});
+
+test('draws a figure placed in the editor over the map, and the summary card in the outro', async ({ page }) => {
+  await page.goto('./#/map-video');
+  const requests = recordRequests(page);
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'overlay-ride.gpx'));
+  // A point a second, so a live figure has a value at every moment (a sparser file leaves gaps unfilled, TD-041).
+  await page.getByRole('radio', { name: /^Route only/ }).check();
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('12');
+
+  /** White pixels, in a share of the frame: figures are white type, and nothing else on route only is. */
+  const whiteIn = async (left: number, top: number, right: number, bottom: number) => {
+    const shot = await previewShot(page);
+    let count = 0;
+    for (let y = Math.floor(shot.height * top); y < shot.height * bottom; y += 1) {
+      for (let x = Math.floor(shot.width * left); x < shot.width * right; x += 1) {
+        const i = (y * shot.width + x) * 4;
+        if (shot.pixels[i]! > 230 && shot.pixels[i + 1]! > 230 && shot.pixels[i + 2]! > 230) count += 1;
+      }
+    }
+    return count;
+  };
+  // From a little inside the corner: the frame's rounded corner shows the light page behind it.
+  expect(await whiteIn(0.03, 0.04, 0.3, 0.25)).toBe(0);
+
+  const editor = page.getByRole('region', { name: 'Figures over the map' });
+  await editor.getByRole('combobox', { name: 'Add' }).selectOption('metric:heartRate');
+  await editor.getByRole('button', { name: 'Add to the canvas' }).click();
+  // A new element goes in the top-left, a margin in: its type shows there over the map.
+  await expect.poll(() => whiteIn(0.03, 0.04, 0.3, 0.25), { timeout: 5000 }).toBeGreaterThan(30);
+
+  // The outro: the summary card's figures in the middle of the frame.
+  // (The marker's and the ends' white edges are there already: the card adds its figures to them.)
+  const beforeOutro = await whiteIn(0.25, 0.25, 0.75, 0.75);
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('29.5');
+  await expect.poll(() => whiteIn(0.25, 0.25, 0.75, 0.75), { timeout: 5000 }).toBeGreaterThan(beforeOutro + 400);
+  expect(offOrigin(requests)).toEqual([]);
 });

@@ -1,5 +1,5 @@
 import type { Activity } from '../domain/activity';
-import { formatDistance, formatDuration, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
+import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
 import {
   DEFAULT_ROUTE_IMAGE_OPTIONS,
@@ -103,6 +103,7 @@ const SUMMARY_CAPTIONS: Record<SummaryStatKey, string> = {
   distance: 'Distance',
   elapsed: 'Elapsed time',
   moving: 'Moving time',
+  climb: 'Elevation gain',
 };
 
 /**
@@ -138,6 +139,10 @@ export function summaryValue(stat: SummaryStatKey, activity: Activity, units: Un
       return derived?.movingDurationSeconds === undefined
         ? missing('This activity has no moving time: it needs timestamps and a distance, and some movement.')
         : { ok: true, caption: 'Moving time', value: formatDuration(derived.movingDurationSeconds) };
+    case 'climb':
+      return derived?.elevationGainMeters === undefined
+        ? missing('This activity has no elevation gain: it records no elevation.')
+        : { ok: true, caption: 'Elevation gain', value: formatElevation(derived.elevationGainMeters, units) };
   }
 }
 
@@ -281,7 +286,7 @@ export interface StillElementChoice {
 }
 
 export function stillElementChoices(context: StillImageContext): StillElementChoice[] {
-  const figures = (['distance', 'speed', 'pace', 'elapsed', 'moving'] as const).map((stat) => {
+  const figures = (['distance', 'speed', 'pace', 'elapsed', 'moving', 'climb'] as const).map((stat) => {
     const value = summaryValue(stat, context.activity, context.units);
     return { key: stat, label: SUMMARY_CAPTIONS[stat], available: value.ok, ...(value.ok ? {} : { reason: value.reason }) };
   });

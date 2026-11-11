@@ -44,6 +44,8 @@ interface MapVideoState {
   /** Replaces the keyframes, keeping the old list to undo to. */
   editKeyframes: (keyframes: CameraKeyframe[]) => void;
   undoKeyframes: () => void;
+  /** Counts the projects opened, so an editor holding its own copy of the layout starts again from the new one. */
+  settingsGeneration: number;
   /** Settings opened from a project file: the basemap among them counts as chosen. */
   replaceSettings: (settings: MapVideoSettings) => void;
   clear: () => void;
@@ -75,7 +77,9 @@ export const useMapVideoStore = create<MapVideoState>((set) => ({
       }
       return { settings: settings as unknown as MapVideoSettings };
     }),
-  replaceSettings: (settings) => set({ settings, basemapChosen: true, keyframeUndo: [] }),
+  replaceSettings: (settings) =>
+    set((state) => ({ settings, basemapChosen: true, keyframeUndo: [], settingsGeneration: state.settingsGeneration + 1 })),
+  settingsGeneration: 0,
   keyframeUndo: [],
   editKeyframes: (keyframes) =>
     set((state) => ({

@@ -17,6 +17,7 @@ import type { MapVideoModel } from '../mapVideo/model';
 import { formatVideoTime } from '../mapVideo/timing';
 import { clampKeyframe, offsetBetween, type CameraKeyframe } from '../mapVideo/keyframes';
 import { MapVideoKeyframes, freshKeyframeId } from './MapVideoKeyframes';
+import { createMapVideoFigures, type MapVideoFigures } from '../mapVideo/figures';
 import type { MapVideoSettings } from '../mapVideo/project';
 import { MARKER_ICON_PIXELS, markerIconImage, sportIcon } from '../mapVideo/markerIcons';
 import {
@@ -129,6 +130,12 @@ export interface MapVideoPreviewProps {
    * sticks (TD-059). Drawn under the preview when absent.
    */
   keyframesTarget?: HTMLElement | null;
+  /** AV-1207. Told where the preview rests when paused, for the figures editor's clock. */
+  onPausedAt?: (seconds: number) => void;
+  /** A moment to go to, asked by the figures editor; `request` changes for each ask. */
+  seek?: { seconds: number; request: number };
+  /** Told a picture of the map as it settles while paused, for the figures editor to place over. */
+  onSnapshot?: (url: string) => void;
 }
 
 /** MapLibre's pointer and touch handlers: on while paused, so the reader can frame a keyframe; off while playing. */
@@ -174,8 +181,14 @@ export function MapVideoPreview({
   onUndoKeyframes,
   canUndoKeyframes = false,
   keyframesTarget,
+  onPausedAt,
+  seek: seekRequest,
+  onSnapshot,
 }: MapVideoPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const figuresRef = useRef<HTMLCanvasElement>(null);
+  /** The figures, made again only when what they draw from or the canvas's size changes. */
+  const figuresCache = useRef<{ key: unknown[]; figures: MapVideoFigures } | undefined>(undefined);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [ready, setReady] = useState(false);
   const [mapError, setMapError] = useState<string | undefined>();
@@ -196,9 +209,9 @@ export function MapVideoPreview({
   const sport = sportIcon(activity.metadata.sport);
 
   // What the drawing reads, without making a new map for each change; updated before the effects below run.
-  const latest = useRef({ model, settings, seconds, colors });
+  const latest = useRef({ model, settings, seconds, colors, playing, onSnapshot, activity, units });
   useLayoutEffect(() => {
-    latest.current = { model, settings, seconds, colors };
+    latest.current = { model, settings, seconds, colors, playing, onSnapshot, activity, units };
   });
 
   // Make the map once; the parent makes a new component for another basemap or terrain.
@@ -217,6 +230,8 @@ export function MapVideoPreview({
       attributionControl: false,
       // No fades: a fade runs on the wall clock, and the export has none (TD-064).
       fadeDuration: 0,
+      // Kept after drawing, so a settled view can be pictured for the figures editor (AV-1207).
+      canvasContextAttributes: { preserveDrawingBuffer: true },
       // Over terrain the centre is held to the ground, as MapLibre does by default (TD-068).
       centerClampedToGround: true,
     });
@@ -262,6 +277,16 @@ export function MapVideoPreview({
       });
       setReady(true);
     });
+    // Settled and still: a picture of the map for the figures editor to place elements over.
+    map.on('idle', () => {
+      if (latest.current.playing) return;
+      try {
+        const url = map.getCanvas?.()?.toDataURL('image/jpeg', 0.8);
+        if (url) latest.current.onSnapshot?.(url);
+      } catch {
+        // A canvas the browser will not read (it never is here: the tiles come with CORS): no picture, no harm.
+      }
+    });
     map.on('error', (event) => {
       const sourceId = (event as { sourceId?: string }).sourceId;
       if (sourceId && OWN_SOURCES.includes(sourceId)) return;
@@ -273,6 +298,30 @@ export function MapVideoPreview({
     };
     // The basemap and terrain are fixed for this component's life: see the doc comment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** The figures and the summary card over the map, by the export's renderer, at the preview's own pixels. */
+  const drawFigures = useCallback((at: number) => {
+    const canvas = figuresRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const { model: current, settings: now, activity: active, units: shown } = latest.current;
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
+    const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const key = [current, now.overlay, now.summaryCard.enabled, now.terrain, now.basemap.source, active, shown, width, height];
+    const cached = figuresCache.current;
+    const figures =
+      cached && cached.key.every((value, i) => value === key[i])
+        ? cached.figures
+        : createMapVideoFigures({ activity: active, model: current, settings: now, units: shown, width, height });
+    figuresCache.current = { key, figures };
+    ctx.clearRect(0, 0, width, height);
+    figures.drawFrame(ctx, at);
   }, []);
 
   /** Draws the moment `at` of the video: the camera, the line, the trail and the marker. */
@@ -301,7 +350,9 @@ export function MapVideoPreview({
       type: 'FeatureCollection',
       features: [pointFeature(frame.reveal.marker, { rotate: now.marker.shape === 'arrow' ? headingAt(current.route, distance) : 0 })],
     });
-  }, []);
+    drawFigures(at);
+  }, [drawFigures]);
+
 
   // A new model or style: the rest of the route, the ends, the paint, and the frame showing.
   useEffect(() => {
@@ -351,6 +402,16 @@ export function MapVideoPreview({
     if (ready) draw(seconds);
     if (positionRef) positionRef.current = seconds;
   }, [seconds, ready, draw, positionRef]);
+
+  // Where the preview rests, for the figures editor: told when paused, not on every frame of play.
+  useEffect(() => {
+    if (!playing) onPausedAt?.(seconds);
+  }, [seconds, playing, onPausedAt]);
+
+  // The figures editor asks for a moment: go there.
+  useEffect(() => {
+    if (seekRequest) setSeconds(Math.min(latest.current.model.timeline.lengthSeconds, Math.max(0, seekRequest.seconds)));
+  }, [seekRequest]);
 
   // The map can be moved by hand only while paused: playing, the frames move it.
   useEffect(() => {
@@ -466,6 +527,8 @@ export function MapVideoPreview({
         onKeyDown={onKeyDown}
       >
         <div ref={containerRef} className="map-video-preview__map" data-testid="map-video-map" />
+        {/* The figures over the map (AV-1207): drawn as the export draws them, never in the way of the hand. */}
+        <canvas ref={figuresRef} className="map-video-preview__figures" aria-hidden="true" data-testid="map-video-figures" />
         {/* In the frame, as the export draws it, and never turned off (TD-064). */}
         {attribution && <p className="map-video-preview__attribution">{attribution}</p>}
       </div>

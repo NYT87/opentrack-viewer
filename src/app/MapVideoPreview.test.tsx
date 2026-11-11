@@ -402,3 +402,58 @@ describe('camera keyframes on the page (AV-1206)', () => {
     expect(screen.getByRole('button', { name: 'Add keyframe here' })).toBeInTheDocument();
   });
 });
+
+describe('figures over the map (AV-1207)', () => {
+  const editor = () => screen.getByRole('region', { name: 'Figures over the map' });
+
+  it('places figures with the custom canvas editor, at the video\'s size, with none of its own exports', async () => {
+    await openWithRoute();
+    expect(within(editor()).queryByRole('group', { name: 'Resolution' })).not.toBeInTheDocument();
+    expect(within(editor()).queryByRole('button', { name: /Export|Make/ })).not.toBeInTheDocument();
+    expect(within(editor()).getByRole('group', { name: /^Canvas preview, 1920 by 1080 pixels/ })).toBeInTheDocument();
+
+    await userEvent.selectOptions(within(editor()).getByRole('combobox', { name: 'Add' }), 'metric:heartRate');
+    await userEvent.click(within(editor()).getByRole('button', { name: 'Add to the canvas' }));
+    const overlay = useMapVideoStore.getState().settings.overlay;
+    expect(overlay?.components.map((component) => component.source)).toEqual([{ kind: 'metric', metric: 'heartRate' }]);
+    // And it is drawn: the preview's figures layer is over the map, under the credit.
+    expect(screen.getByTestId('map-video-figures')).toBeInTheDocument();
+  });
+
+  it('follows the paused preview\'s moment, and moves the preview from its own scrubber', async () => {
+    await openWithRoute();
+    fireEvent.change(scrubber(), { target: { value: '15' } });
+    await waitFor(() => expect(within(editor()).getByRole('timer', { name: 'Canvas time shown' })).toHaveTextContent('0:15 / 0:30'));
+    expect(within(editor()).queryByRole('button', { name: 'Play' })).not.toBeInTheDocument();
+    fireEvent.change(within(editor()).getByRole('slider', { name: 'Canvas time' }), { target: { value: '21' } });
+    await waitFor(() => expect(readout()).toBe('0:21.0 / 0:30.0'));
+  });
+
+  it('opens a project\'s figures in the editor', async () => {
+    await openWithRoute();
+    const project = {
+      kind: MAP_VIDEO_PROJECT_KIND,
+      version: 1,
+      activity: { fileName: 'route-with-elevation.gpx', points: 4 },
+      settings: {
+        overlay: {
+          version: 2,
+          name: 'Figures',
+          components: [{ id: 'speed', type: 'text', visible: true, unitMode: 'auto', style: {}, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }, source: { kind: 'metric', metric: 'speed' } }],
+        },
+      },
+    };
+    await userEvent.upload(screen.getByTestId('map-video-project-input'), new File([JSON.stringify(project)], 'figures.json'));
+    await waitFor(() => expect(within(editor()).getByRole('button', { name: 'Speed' })).toBeInTheDocument());
+    expect(useMapVideoStore.getState().settings.overlay?.components).toHaveLength(1);
+  });
+
+  it('offers the summary card only with an outro to show it in', async () => {
+    await openWithRoute();
+    const card = () => screen.getByRole('checkbox', { name: /Show the totals on a card/ });
+    expect(card()).toBeChecked();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Pull back to the whole route' }));
+    expect(card()).toBeDisabled();
+    expect(card()).toHaveAccessibleName(/turn the outro on first/);
+  });
+});

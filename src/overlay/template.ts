@@ -101,8 +101,9 @@ export function drawnWithoutTelemetry(component: OverlayComponent): boolean {
 }
 
 /** A figure from the activity's summary, for the still image. */
-export type SummaryStatKey = 'speed' | 'pace' | 'distance' | 'elapsed' | 'moving';
-export const SUMMARY_STAT_KEYS: readonly SummaryStatKey[] = ['speed', 'pace', 'distance', 'elapsed', 'moving'];
+/** AV-1207 added `climb`, the elevation gain, for the map video's summary card. */
+export type SummaryStatKey = 'speed' | 'pace' | 'distance' | 'elapsed' | 'moving' | 'climb';
+export const SUMMARY_STAT_KEYS: readonly SummaryStatKey[] = ['speed', 'pace', 'distance', 'elapsed', 'moving', 'climb'];
 
 /** How a date is written: `2026-09-24`, `24 Sep 2026`, `24/09/2026`, `Thursday 24 September 2026`. */
 export type DateFormatId = 'iso' | 'medium' | 'numeric' | 'long';

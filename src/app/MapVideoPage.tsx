@@ -1,9 +1,13 @@
-import { Suspense, lazy, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useMemo, useRef, useState } from 'react';
 import { FileDropZone } from '../components/FileDropZone';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { MapVideoBasemapChoice } from '../components/MapVideoBasemapChoice';
 import { MapVideoSettingsPanel } from '../components/MapVideoSettingsPanel';
 import { colorByChoices, terrainActive } from '../mapVideo/style';
+import { CustomCanvas } from '../components/CustomCanvas';
+import { mapVideoOverlayTimeline, shownActivity } from '../mapVideo/figures';
+import { canvasTemplate, type CanvasDraft } from '../overlay/customCanvas';
+import type { OverlayComponent } from '../overlay/template';
 import { MapVideoProjectFile } from '../components/MapVideoProjectFile';
 import { buildMapVideoModel } from '../mapVideo/model';
 import { ActivityError, toActivityError } from '../domain/errors';
@@ -63,6 +67,7 @@ export function MapVideoPage() {
   const editKeyframes = useMapVideoStore((state) => state.editKeyframes);
   const undoKeyframes = useMapVideoStore((state) => state.undoKeyframes);
   const canUndoKeyframes = useMapVideoStore((state) => state.keyframeUndo.length > 0);
+  const settingsGeneration = useMapVideoStore((state) => state.settingsGeneration);
   const setMaptilerKey = useMapVideoStore((state) => state.setMaptilerKey);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
@@ -75,12 +80,50 @@ export function MapVideoPage() {
   // A new map for another style, key or terrain: see MapVideoPreview.
   const mapKey = [basemap, settings.basemap.style, settings.basemap.maptilerStyle, basemap === 'maptiler' ? maptilerKey.trim() : '', terrainActive(settings)].join('|');
   const built = useMemo(() => (activity ? buildMapVideoModel(activity, settings) : undefined), [activity, settings]);
+  const model = built?.ok ? built.model : undefined;
+  // What the editor offers and draws from: the map video's clock, and the trimmed stretch (TD-066).
+  const figuresTimeline = useMemo(() => (activity && model ? mapVideoOverlayTimeline(activity, model) : undefined), [activity, model]);
+  const figuresActivity = useMemo(
+    () => (activity && model ? shownActivity(activity, model, settings) : undefined),
+    // The trimmed stretch changes with the model; the rest of the settings do not move it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activity, model],
+  );
+  // Where the editor starts: the project's layout, at the video's size. Made again only for another project.
+  const editorDraft = useMemo<CanvasDraft>(
+    () => ({
+      width: String(settings.output.width),
+      height: String(settings.output.height),
+      frame: { width: settings.output.width, height: settings.output.height },
+      state: { components: settings.overlay?.components ?? [] },
+      history: [],
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settingsGeneration],
+  );
 
   const [slot, setSlot] = useState<SlotState>(IDLE);
   /** Where the preview is in the video, kept here so a new map (another basemap) carries on from it. */
   const positionRef = useRef(0);
   /** Where the preview draws its keyframe list: the side column, below the settings. */
   const [keyframesTarget, setKeyframesTarget] = useState<HTMLDivElement | null>(null);
+  /** AV-1207. The figures editor's moment (the preview's, when paused), its seek requests, and a picture of the map there. */
+  const [pausedAt, setPausedAt] = useState(0);
+  const [seek, setSeek] = useState<{ seconds: number; request: number } | undefined>();
+  const [backdrop, setBackdrop] = useState<string | undefined>();
+  const onEditorSeek = useCallback((seconds: number) => setSeek((current) => ({ seconds, request: (current?.request ?? 0) + 1 })), []);
+  /** The layout as the editor last reported it, so its report on opening writes nothing. */
+  const reported = useRef<OverlayComponent[] | undefined>(undefined);
+  const onComponentsChange = useCallback(
+    (components: OverlayComponent[]) => {
+      if (components === reported.current) return;
+      const first = reported.current === undefined;
+      reported.current = components;
+      if (first) return;
+      updateSettings({ overlay: components.length > 0 ? canvasTemplate(components) : null });
+    },
+    [updateSettings],
+  );
   const slotRef = useRef<HTMLElement>(null);
   const replace = useRef<HTMLInputElement>(null);
   /** A read finishing after a newer one, or after Remove, writes nothing. */
@@ -146,6 +189,9 @@ export function MapVideoPage() {
                   onUndoKeyframes={undoKeyframes}
                   canUndoKeyframes={canUndoKeyframes}
                   keyframesTarget={keyframesTarget}
+                  onPausedAt={setPausedAt}
+                  seek={seek}
+                  onSnapshot={setBackdrop}
                 />
               </Suspense>
             )}
@@ -250,6 +296,26 @@ export function MapVideoPage() {
                 units={unitSystem}
                 timingNote={built?.ok ? built.model.timeline.modeNote : undefined}
                 colorBy={built?.ok ? colorByChoices(activity, built.model.route) : undefined}
+              />
+            )}
+            {activity && figuresActivity && figuresTimeline && (
+              <CustomCanvas
+                key={settingsGeneration}
+                activity={figuresActivity}
+                offsetSeconds={0}
+                units={unitSystem}
+                initialDraft={editorDraft}
+                host={{
+                  title: 'Figures over the map',
+                  intro:
+                    'Place live figures, gauges, the progress, the route, the elevation profile, figures for the whole activity, the date, text and shapes over the map. They play along the video, and the preview shows them over the map.',
+                  frame: { width: settings.output.width, height: settings.output.height },
+                  timeline: figuresTimeline,
+                  seconds: pausedAt,
+                  onSeek: onEditorSeek,
+                  backdrop,
+                  onComponentsChange,
+                }}
               />
             )}
             {activity && <div className="map-video-keyframes-slot" ref={setKeyframesTarget} />}

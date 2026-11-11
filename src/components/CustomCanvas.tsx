@@ -58,7 +58,7 @@ import {
   type SummaryStatKey,
   type TextAlign,
 } from '../overlay/template';
-import { buildOverlayTimeline } from '../overlay/timeline';
+import { buildOverlayTimeline, type OverlayTimeline } from '../overlay/timeline';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportPanel } from './OverlayExportPanel';
@@ -97,6 +97,27 @@ interface CustomCanvasProps {
   initialDraft?: CanvasDraft;
   /** Every change to the draft, for the page to keep. */
   onDraftChange?: (draft: CanvasDraft) => void;
+  /**
+   * AV-1207. The editor placing figures for another page, the map video's:
+   * that page sets the frame, the timeline and the time, and shows a picture
+   * of its map behind the elements. Its own resolution and exports are not
+   * offered, since the host has its own.
+   */
+  host?: CustomCanvasHost;
+}
+
+export interface CustomCanvasHost {
+  title: string;
+  intro: string;
+  frame: { width: number; height: number };
+  timeline: OverlayTimeline;
+  /** The host's moment, which the editor's preview shows and its scrubber moves. */
+  seconds: number;
+  onSeek: (seconds: number) => void;
+  /** A picture of what lies under the elements: the map at this moment. */
+  backdrop?: string;
+  /** Every change to the layout, for the host to draw and keep. */
+  onComponentsChange: (components: OverlayComponent[]) => void;
 }
 
 const SHAPE_LABELS: Record<ShapeKind, string> = {
@@ -131,6 +152,7 @@ export function CustomCanvas({
   onFinishedChange,
   initialDraft = EMPTY_CANVAS_DRAFT,
   onDraftChange,
+  host,
 }: CustomCanvasProps) {
   const id = useId();
   const [width, setWidth] = useState(initialDraft.width);
@@ -149,7 +171,9 @@ export function CustomCanvas({
   /** The last size that could be used: the preview keeps it while a new one is being typed. */
   const reportPng = useCallback((finished: boolean) => onFinishedChange?.('png', finished), [onFinishedChange]);
   const reportVideo = useCallback((finished: boolean) => onFinishedChange?.('video', finished), [onFinishedChange]);
-  const [frame, setFrame] = useState(initialDraft.frame);
+  const [ownFrame, setFrame] = useState(initialDraft.frame);
+  // A host sets the frame: its video's size.
+  const frame = host?.frame ?? ownFrame;
   useEffect(() => {
     onDraftChange?.({ width, height, frame, state, history });
   }, [onDraftChange, width, height, frame, state, history]);
@@ -165,8 +189,8 @@ export function CustomCanvas({
     () => buildOverlayTimeline(activity, { video: { durationSeconds: 0 } }).alignment?.activitySpanSeconds ?? 0,
     [activity],
   );
-  const durationSeconds = video ? (video.timing?.durationSeconds ?? media?.durationSeconds ?? 0) : activitySpan;
-  const timeline = useMemo(
+  const durationSeconds = host ? host.timeline.durationSeconds : video ? (video.timing?.durationSeconds ?? media?.durationSeconds ?? 0) : activitySpan;
+  const ownTimeline = useMemo(
     () =>
       buildOverlayTimeline(activity, {
         video: { durationSeconds, start: video?.timing?.start },
@@ -174,6 +198,11 @@ export function CustomCanvas({
       }),
     [activity, durationSeconds, video, offsetSeconds],
   );
+  const timeline = host?.timeline ?? ownTimeline;
+  const reportComponents = host?.onComponentsChange;
+  useEffect(() => {
+    reportComponents?.(components);
+  }, [components, reportComponents]);
   const stillContext = useMemo<StillImageContext>(
     () => ({ activity, route: extractRoute(activity), units, readerTimeZone }),
     [activity, units, readerTimeZone],
@@ -250,10 +279,10 @@ export function CustomCanvas({
   const presetChosen = presets.find((entry) => entry.width === w && entry.height === h);
 
   return (
-    <section className="prose custom-canvas" aria-label="Custom canvas">
-      <h3 className="prose__title">Custom canvas</h3>
+    <section className="prose custom-canvas" aria-label={host?.title ?? 'Custom canvas'}>
+      <h3 className="prose__title">{host?.title ?? 'Custom canvas'}</h3>
       <p>
-        {video
+        {host ? host.intro : video
           ? 'Lay the overlay out yourself, over this video: place live figures, figures for the whole activity, the date, text and shapes anywhere on it.'
           : 'Lay a video overlay out yourself, with no video: the canvas is the whole picture, and the figures play across the activity.'}{' '}
         It is drawn and exported in this tab; nothing is uploaded.
@@ -276,6 +305,8 @@ export function CustomCanvas({
         onDragStart={() => setHistory((current) => pushHistory(current, state))}
         onDragMove={(next) => setState({ components: measured(next, stillContext, frame), selectedId })}
         onUndo={undo}
+        clock={host ? { seconds: host.seconds, onSeek: host.onSeek } : undefined}
+        backdrop={host?.backdrop}
       />
       {sizeProblem && (
         <p role="alert" className="export__error">
@@ -300,6 +331,7 @@ export function CustomCanvas({
       </p>
 
       <div className="custom-canvas__panels">
+        {!host && (
         <fieldset className="overlay-controls__group">
           <legend>Resolution</legend>
           <div className="overlay-controls__field">
@@ -326,6 +358,7 @@ export function CustomCanvas({
           <NumberInput id={`${id}-h`} label="Height (px)" value={height} onChange={(value) => setSize(width, value)} />
           <p className="overlay-controls__hint">{CANVAS_LIMITS_TEXT} The layout keeps its proportions at any size.</p>
         </fieldset>
+        )}
 
         <fieldset className="overlay-controls__group">
           <legend>Elements</legend>
@@ -422,7 +455,7 @@ export function CustomCanvas({
         )}
       </div>
 
-      {size && components.length > 0 && (
+      {!host && size && components.length > 0 && (
         <div className="custom-canvas__exports">
           <OverlayExportPanel
             video={video}
@@ -590,7 +623,12 @@ function CanvasPreview({
   onDragMove,
   onUndo,
   onMediaInfo,
+  clock,
+  backdrop,
 }: {
+  /** The host's time, shown and moved here instead of a clock of the preview's own (AV-1207). */
+  clock?: { seconds: number; onSeek: (seconds: number) => void };
+  backdrop?: string;
   onMediaInfo?: (media: OverlayMedia) => void;
   activity: Activity;
   video?: OverlayVideo;
@@ -610,7 +648,8 @@ function CanvasPreview({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const element = useRef<HTMLVideoElement>(null);
-  const [time, setTime] = useState(0);
+  const [ownTime, setTime] = useState(0);
+  const time = clock ? clock.seconds : ownTime;
   const [playing, setPlaying] = useState(false);
   const drag = useRef<
     | { mode: 'move' | 'resize'; id: string; startX: number; startY: number; start: OverlayComponent[]; moved: boolean }
@@ -712,6 +751,10 @@ function CanvasPreview({
   };
   const seek = (seconds: number) => {
     const clamped = Math.min(Math.max(0, seconds), durationSeconds);
+    if (clock) {
+      clock.onSeek(clamped);
+      return;
+    }
     if (video && element.current) element.current.currentTime = clamped;
     setTime(clamped);
   };
@@ -762,6 +805,7 @@ function CanvasPreview({
         }}
       >
         {video && <video ref={element} className="custom-canvas__video" playsInline preload="metadata" muted data-testid="canvas-video" />}
+        {backdrop && <img className="custom-canvas__video" src={backdrop} alt="" data-testid="canvas-backdrop" />}
         <canvas
           ref={canvas}
           className="custom-canvas__canvas"
@@ -817,9 +861,11 @@ function CanvasPreview({
         />
       </div>
       <div className="overlay-preview__controls">
-        <button type="button" className="button" onClick={togglePlay} disabled={!(durationSeconds > 0)}>
-          {playing ? 'Pause' : 'Play'}
-        </button>
+        {!clock && (
+          <button type="button" className="button" onClick={togglePlay} disabled={!(durationSeconds > 0)}>
+            {playing ? 'Pause' : 'Play'}
+          </button>
+        )}
         <input
           type="range"
           className="overlay-preview__scrub"

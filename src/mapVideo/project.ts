@@ -66,6 +66,8 @@ export interface MapVideoSettings {
   overlay: OverlayTemplate | null;
   /** The reader's camera keyframes (AV-1206), over the follow camera. Offsets, never places. */
   keyframes: CameraKeyframe[];
+  /** AV-1207. The activity's totals on a card through the outro. */
+  summaryCard: { enabled: boolean };
 }
 
 export interface MapVideoActivityReference {
@@ -117,6 +119,7 @@ export const DEFAULT_MAP_VIDEO_SETTINGS: MapVideoSettings = {
   privacyTrim: { startMeters: 0, endMeters: 0 },
   overlay: null,
   keyframes: [],
+  summaryCard: { enabled: true },
 };
 
 /** The reference a project keeps to an activity: its file name and point count. */
@@ -201,7 +204,7 @@ function section(raw: Record<string, unknown> | undefined, key: string): Record<
   return value as Record<string, unknown>;
 }
 
-const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'marker', 'endpoints', 'privacyTrim', 'overlay', 'keyframes'];
+const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'marker', 'endpoints', 'privacyTrim', 'overlay', 'keyframes', 'summaryCard'];
 
 /** The keyframes of a project, each checked like any other setting. */
 function readKeyframes(raw: unknown, L: typeof MAP_VIDEO_LIMITS): CameraKeyframe[] {
@@ -344,6 +347,7 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
       },
       overlay: null,
       keyframes: [],
+      summaryCard: { enabled: read(section(s, 'summaryCard'), 'enabled', 'settings.summaryCard').boolean(d.summaryCard.enabled) },
     };
     settings.keyframes = readKeyframes(s.keyframes, L);
     const problem = outputProblem(settings);

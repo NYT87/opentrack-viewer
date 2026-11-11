@@ -519,6 +519,7 @@ const STAT_LABELS: Record<SummaryStatKey, string> = {
   distance: 'Distance',
   elapsed: 'Elapsed time',
   moving: 'Moving time',
+  climb: 'Elevation gain',
 };
 
 function ElementEditor({

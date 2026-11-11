@@ -205,6 +205,20 @@ export function MapVideoSettingsPanel({ settings, onChange, units, timingNote, c
         ))}
       </Group>
 
+      <label className="overlay-controls__choice">
+        <input
+          type="checkbox"
+          checked={settings.summaryCard.enabled && settings.outro.enabled}
+          disabled={!settings.outro.enabled}
+          onChange={(event) => onChange({ summaryCard: { enabled: event.target.checked } })}
+        />
+        <span>
+          {settings.outro.enabled
+            ? 'Show the totals on a card through the outro'
+            : 'Show the totals on a card through the outro (turn the outro on first: the card is shown there)'}
+        </span>
+      </label>
+
       <Group legend="Camera">
         <NumberField label="Zoom" value={settings.camera.zoom} range={limits.zoom} step={0.1} onChange={(zoom) => onChange({ camera: { zoom } })} />
         <NumberField label="Tilt" unit="°" value={settings.camera.pitch} range={limits.pitch} step={1} onChange={(pitch) => onChange({ camera: { pitch } })} />

@@ -54,6 +54,8 @@ export interface TimelinePause {
   /** The recorded length of the stop, in seconds. */
   recordedSeconds: number;
   distance: number;
+  /** When the stop began, on the recording's clock (ms): figures hold its values through the beat (AV-1207). */
+  startTime: number;
 }
 
 export interface MapVideoTimeline {
@@ -151,7 +153,7 @@ function timeKnots(route: MapVideoRoute, follow: number, beatWanted: number): Kn
       // The whole stop in one step: `beat` seconds, the marker drifting only as far as the fixes did.
       const startSeconds = clock;
       clock += beat;
-      pauses.push({ startSeconds, endSeconds: clock, recordedSeconds: pause.seconds, distance: vertices[i]!.distance });
+      pauses.push({ startSeconds, endSeconds: clock, recordedSeconds: pause.seconds, distance: vertices[i]!.distance, startTime: vertices[i]!.time! });
       seconds.push(clock);
       meters.push(vertices[pause.to]!.distance);
       i = pause.to - 1;
