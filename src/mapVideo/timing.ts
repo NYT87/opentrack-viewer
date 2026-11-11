@@ -236,3 +236,11 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
     },
   };
 }
+
+/** `0:07.4`: a position in the video to a tenth of a second. */
+export function formatVideoTime(seconds: number): string {
+  const tenths = Math.round(seconds * 10);
+  const minutes = Math.floor(tenths / 600);
+  const rest = (tenths % 600) / 10;
+  return `${minutes}:${rest.toFixed(1).padStart(4, '0')}`;
+}

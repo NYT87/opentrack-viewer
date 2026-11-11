@@ -164,7 +164,24 @@ export class FakeMap {
 
   jumpTo(options: Record<string, unknown>): this {
     this.jumps.push(options);
+    this.view = { ...this.view, ...options };
     return this;
+  }
+
+  /** The camera as the reader left it: the last jump, or what a test moved it to. */
+  view: Record<string, unknown> = {};
+  getCenter() {
+    const [lng, lat] = (this.view.center as [number, number] | undefined) ?? [0, 0];
+    return { lng, lat };
+  }
+  getZoom(): number {
+    return (this.view.zoom as number | undefined) ?? 0;
+  }
+  getPitch(): number {
+    return (this.view.pitch as number | undefined) ?? 0;
+  }
+  getBearing(): number {
+    return (this.view.bearing as number | undefined) ?? 0;
   }
 
   queryRenderedFeatures = vi.fn(() => [] as unknown[]);

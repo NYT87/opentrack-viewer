@@ -1,5 +1,6 @@
 import type { Activity } from '../domain/activity';
 import { buildCameraPath, type MapVideoCamera, type MapVideoCameraPath } from './camera';
+import { withKeyframes } from './keyframes';
 import type { MapVideoSettings } from './project';
 import {
   buildMapVideoRoute,
@@ -22,7 +23,7 @@ export interface MapVideoModel {
   /** The route after the privacy trim: the only route anything below sees. */
   route: MapVideoRoute;
   timeline: MapVideoTimeline;
-  camera: MapVideoCameraPath;
+  camera: MapVideoCameraPath & { atSeconds: (seconds: number) => MapVideoCamera };
   frameCount: number;
   /** The vertices the line is drawn through: none strays half a pixel from it at the follow zoom. */
   drawn: number[];
@@ -67,7 +68,14 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
   // No height for the camera: over terrain the map holds the centre to the
   // ground. A height from the route put the marker off centre wherever the
   // recorded elevation and the terrain model disagree (TD-068).
-  const camera = buildCameraPath(route, settings.camera, { width: settings.output.width, height: settings.output.height });
+  const viewport = { width: settings.output.width, height: settings.output.height };
+  // The follow camera, and the reader's keyframes over it (AV-1206).
+  const camera = withKeyframes(buildCameraPath(route, settings.camera, viewport), settings.keyframes, {
+    timeline,
+    route,
+    viewport,
+    settings: settings.camera,
+  });
   const frameCount = Math.round(settings.lengthSeconds * settings.output.fps);
   const middle = route.vertices[Math.floor(route.vertices.length / 2)]!;
   const drawn = simplifiedIndices(route, metersPerPixel(settings.camera.zoom, middle.lat) / 2);
@@ -76,7 +84,7 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
     return {
       seconds,
       sample,
-      camera: camera.at(sample),
+      camera: camera.atSeconds(seconds),
       reveal: revealAt(route, sample.distance, drawn),
       position: positionAt(route, sample.distance),
     };

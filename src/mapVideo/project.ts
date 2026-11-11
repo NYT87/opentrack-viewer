@@ -1,6 +1,7 @@
 import type { Activity } from '../domain/activity';
 import { parseOverlayTemplate, type OverlayTemplate } from '../overlay/template';
 import type { MapVideoCameraSettings } from './camera';
+import { MAX_FIXED_OFFSET_METERS, MAX_KEYFRAMES, type CameraKeyframe } from './keyframes';
 import type { MapVideoTimingMode } from './timing';
 
 /**
@@ -63,6 +64,8 @@ export interface MapVideoSettings {
   privacyTrim: { startMeters: number; endMeters: number };
   /** Figures and graphics over the map (AV-1207); none until then. */
   overlay: OverlayTemplate | null;
+  /** The reader's camera keyframes (AV-1206), over the follow camera. Offsets, never places. */
+  keyframes: CameraKeyframe[];
 }
 
 export interface MapVideoActivityReference {
@@ -113,6 +116,7 @@ export const DEFAULT_MAP_VIDEO_SETTINGS: MapVideoSettings = {
   endpoints: { shown: true },
   privacyTrim: { startMeters: 0, endMeters: 0 },
   overlay: null,
+  keyframes: [],
 };
 
 /** The reference a project keeps to an activity: its file name and point count. */
@@ -197,7 +201,44 @@ function section(raw: Record<string, unknown> | undefined, key: string): Record<
   return value as Record<string, unknown>;
 }
 
-const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'marker', 'endpoints', 'privacyTrim', 'overlay'];
+const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'marker', 'endpoints', 'privacyTrim', 'overlay', 'keyframes'];
+
+/** The keyframes of a project, each checked like any other setting. */
+function readKeyframes(raw: unknown, L: typeof MAP_VIDEO_LIMITS): CameraKeyframe[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new FieldError('settings.keyframes must be a list.');
+  if (raw.length > MAX_KEYFRAMES) throw new FieldError(`settings.keyframes holds more than ${MAX_KEYFRAMES} keyframes.`);
+  const seen = new Set<string>();
+  return raw.map((entry, index) => {
+    const path = `settings.keyframes[${index}]`;
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new FieldError(`${path} must be an object.`);
+    const k = entry as Record<string, unknown>;
+    if (typeof k.id !== 'string' || k.id.length === 0 || k.id.length > 40 || seen.has(k.id)) throw new FieldError(`${path}.id must be a short text, used once.`);
+    seen.add(k.id);
+    const offset = (typeof k.offset === 'object' && k.offset !== null ? k.offset : undefined) as Record<string, unknown> | undefined;
+    if (!offset) throw new FieldError(`${path}.offset is missing.`);
+    if (k.bearing !== null && (typeof k.bearing !== 'number' || !Number.isFinite(k.bearing) || k.bearing < 0 || k.bearing >= 360)) {
+      throw new FieldError(`${path}.bearing must be a number from 0 to 360, or null to follow the route.`);
+    }
+    return {
+      id: k.id,
+      seconds: read(k, 'seconds', path).number(Number.NaN, [0, L.maxLengthSeconds]),
+      mode: read(k, 'mode', path).oneOf<'follow' | 'fixed'>('follow', ['follow', 'fixed']),
+      offset: {
+        east: read(offset, 'east', `${path}.offset`).number(0, [-MAX_FIXED_OFFSET_METERS, MAX_FIXED_OFFSET_METERS]),
+        north: read(offset, 'north', `${path}.offset`).number(0, [-MAX_FIXED_OFFSET_METERS, MAX_FIXED_OFFSET_METERS]),
+      },
+      zoom: read(k, 'zoom', path).number(Number.NaN, L.zoom),
+      pitch: read(k, 'pitch', path).number(Number.NaN, L.pitch),
+      bearing: k.bearing as number | null,
+    };
+  }).map((keyframe, index) => {
+    if (Number.isNaN(keyframe.seconds) || Number.isNaN(keyframe.zoom) || Number.isNaN(keyframe.pitch)) {
+      throw new FieldError(`settings.keyframes[${index}] needs its seconds, zoom and pitch.`);
+    }
+    return keyframe;
+  });
+}
 
 /**
  * Opens a project file. The kind, version and size are checked, and every
@@ -302,7 +343,9 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
         endMeters: read(trim, 'endMeters', 'settings.privacyTrim').number(d.privacyTrim.endMeters, L.trimMeters),
       },
       overlay: null,
+      keyframes: [],
     };
+    settings.keyframes = readKeyframes(s.keyframes, L);
     const problem = outputProblem(settings);
     if (problem) throw new FieldError(problem);
     if (s.overlay !== undefined && s.overlay !== null) {

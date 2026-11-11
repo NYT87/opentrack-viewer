@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Map as MapLibreMap,
   setWorkerUrl,
@@ -13,6 +14,9 @@ import type { Feature, FeatureCollection, LineString, Point } from 'geojson';
 import type { Activity } from '../domain/activity';
 import { formatElevation, formatSpeed, type UnitSystem } from '../domain/units';
 import type { MapVideoModel } from '../mapVideo/model';
+import { formatVideoTime } from '../mapVideo/timing';
+import { clampKeyframe, offsetBetween, type CameraKeyframe } from '../mapVideo/keyframes';
+import { MapVideoKeyframes, freshKeyframeId } from './MapVideoKeyframes';
 import type { MapVideoSettings } from '../mapVideo/project';
 import { MARKER_ICON_PIXELS, markerIconImage, sportIcon } from '../mapVideo/markerIcons';
 import {
@@ -101,14 +105,6 @@ function restData(model: MapVideoModel): FeatureCollection<LineString> {
   return { type: 'FeatureCollection', features };
 }
 
-/** `0:07.4`: a position in the video to a tenth of a second. */
-export function formatVideoTime(seconds: number): string {
-  const tenths = Math.round(seconds * 10);
-  const minutes = Math.floor(tenths / 600);
-  const rest = (tenths % 600) / 10;
-  return `${minutes}:${rest.toFixed(1).padStart(4, '0')}`;
-}
-
 export interface MapVideoPreviewProps {
   activity: Activity;
   model: MapVideoModel;
@@ -122,6 +118,27 @@ export interface MapVideoPreviewProps {
    * on from where the last one was.
    */
   positionRef?: { current: number };
+  /** AV-1206. The camera keyframes, and how the page keeps them: each change undoable. */
+  keyframes?: CameraKeyframe[];
+  onEditKeyframes?: (keyframes: CameraKeyframe[]) => void;
+  onUndoKeyframes?: () => void;
+  canUndoKeyframes?: boolean;
+  /**
+   * Where the keyframe list is drawn: the page's side column, so the stage
+   * stays only the picture and its transport and fits the screen while it
+   * sticks (TD-059). Drawn under the preview when absent.
+   */
+  keyframesTarget?: HTMLElement | null;
+}
+
+/** MapLibre's pointer and touch handlers: on while paused, so the reader can frame a keyframe; off while playing. */
+const HANDLERS = ['dragPan', 'scrollZoom', 'boxZoom', 'dragRotate', 'touchZoomRotate', 'touchPitch', 'doubleClickZoom'] as const;
+function setInteractive(map: MapLibreMap, on: boolean) {
+  for (const name of HANDLERS) {
+    const handler = (map as unknown as Record<string, { enable?: () => void; disable?: () => void } | undefined>)[name];
+    if (on) handler?.enable?.();
+    else handler?.disable?.();
+  }
 }
 
 /**
@@ -145,11 +162,25 @@ export interface MapVideoPreviewProps {
  * the camera follows the ground is fixed when a map is made. The parent keys
  * this component by them.
  */
-export function MapVideoPreview({ activity, model, settings, maptilerKey = '', units = 'metric', positionRef }: MapVideoPreviewProps) {
+export function MapVideoPreview({
+  activity,
+  model,
+  settings,
+  maptilerKey = '',
+  units = 'metric',
+  positionRef,
+  keyframes = [],
+  onEditKeyframes,
+  onUndoKeyframes,
+  canUndoKeyframes = false,
+  keyframesTarget,
+}: MapVideoPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [ready, setReady] = useState(false);
   const [mapError, setMapError] = useState<string | undefined>();
+  const [keyframeNote, setKeyframeNote] = useState<string | undefined>();
+  const ticksId = useId();
   const [seconds, setSeconds] = useState(0);
   const [playing, setPlaying] = useState(false);
   const scrubberId = useId();
@@ -179,7 +210,9 @@ export function MapVideoPreview({ activity, model, settings, maptilerKey = '', u
     const map = new MapLibreMap({
       container,
       style: styleUrl ?? routeOnlyStyle(background),
-      interactive: false,
+      // Moved by hand while paused, to frame a keyframe (AV-1206). The keys stay the preview's own.
+      interactive: true,
+      keyboard: false,
       // The credit is drawn in the frame below, as the export draws it, so the control is not needed.
       attributionControl: false,
       // No fades: a fade runs on the wall clock, and the export has none (TD-064).
@@ -188,6 +221,8 @@ export function MapVideoPreview({ activity, model, settings, maptilerKey = '', u
       centerClampedToGround: true,
     });
     mapRef.current = map;
+    // The frame around it takes the keys; the canvas is not a second stop for Tab.
+    map.getCanvas?.()?.setAttribute('tabindex', '-1');
     map.on('load', () => {
       for (const id of OWN_SOURCES) map.addSource(id, { type: 'geojson', data: EMPTY, ...(id === TRAIL ? { lineMetrics: true } : {}) });
       if (terrain) {
@@ -317,6 +352,12 @@ export function MapVideoPreview({ activity, model, settings, maptilerKey = '', u
     if (positionRef) positionRef.current = seconds;
   }, [seconds, ready, draw, positionRef]);
 
+  // The map can be moved by hand only while paused: playing, the frames move it.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && ready) setInteractive(map, !playing);
+  }, [playing, ready]);
+
   // Playing: the position follows the clock, so the preview skips what it cannot draw in time.
   useEffect(() => {
     if (!playing) return;
@@ -363,6 +404,55 @@ export function MapVideoPreview({ activity, model, settings, maptilerKey = '', u
   };
 
   const phase = model.timeline.at(seconds).phase;
+  const keyframeContext = { timeline: model.timeline, route: model.route, viewport: { width: settings.output.width, height: settings.output.height } };
+  /** Each keyframe held to its limits; says so when one had to be brought closer to the marker. */
+  const editKeyframes = (next: CameraKeyframe[]) => {
+    if (!onEditKeyframes) return;
+    let moved = false;
+    const held = next.map((keyframe) => {
+      const clamped = clampKeyframe(keyframe, keyframeContext);
+      if (Math.hypot(clamped.offset.east - keyframe.offset.east, clamped.offset.north - keyframe.offset.north) > 0.5) moved = true;
+      return clamped;
+    });
+    setKeyframeNote(moved ? 'Brought closer to the marker, so the marker stays in the frame.' : undefined);
+    onEditKeyframes(held);
+  };
+  /** The view on the map now, as a keyframe at this moment of the follow. */
+  const addKeyframe = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const width = containerRef.current?.clientWidth ?? 0;
+    const zoomOffset = width > 0 ? Math.log2(width / settings.output.width) : 0;
+    const center = map.getCenter();
+    const marker = model.at(seconds).reveal.marker;
+    const keyframe: CameraKeyframe = {
+      id: freshKeyframeId(keyframes),
+      seconds,
+      mode: 'follow',
+      offset: offsetBetween(marker, [center.lng, center.lat]),
+      zoom: map.getZoom() - zoomOffset,
+      pitch: map.getPitch(),
+      bearing: ((map.getBearing() % 360) + 360) % 360,
+    };
+    const outside = phase !== 'follow';
+    editKeyframes([...keyframes, keyframe]);
+    if (outside) setKeyframeNote('Keyframes are for the route itself, so this one was put where the route starts or ends.');
+  };
+
+  const keyframeList = (
+    <MapVideoKeyframes
+      keyframes={keyframes}
+      frameSeconds={frameSeconds}
+      onChange={editKeyframes}
+      onSeek={seek}
+      onUndo={() => {
+        setKeyframeNote(undefined);
+        onUndoKeyframes?.();
+      }}
+      canUndo={canUndoKeyframes}
+      note={keyframeNote}
+    />
+  );
 
   return (
     <section className="prose map-video-preview" aria-label="Preview">
@@ -399,9 +489,27 @@ export function MapVideoPreview({ activity, model, settings, maptilerKey = '', u
             step={frameSeconds}
             value={seconds}
             aria-valuetext={`${formatVideoTime(seconds)} of ${formatVideoTime(length)}`}
+            list={keyframes.length > 0 ? ticksId : undefined}
             onChange={(event) => seek(Number(event.target.value))}
           />
+          {keyframes.length > 0 && (
+            <datalist id={ticksId}>
+              {keyframes.map((keyframe) => (
+                <option key={keyframe.id} value={keyframe.seconds} />
+              ))}
+            </datalist>
+          )}
         </label>
+        {onEditKeyframes && !playing && (
+          <>
+            <button type="button" className="button" onClick={addKeyframe}>
+              Add keyframe here
+            </button>
+            <button type="button" className="button" onClick={() => draw(seconds)}>
+              Reset view
+            </button>
+          </>
+        )}
         <span className="map-video-preview__time" aria-live="off">
           {formatVideoTime(seconds)} / {formatVideoTime(length)}
         </span>
@@ -418,6 +526,7 @@ export function MapVideoPreview({ activity, model, settings, maptilerKey = '', u
           <span>{formatLegend(settings.route.colorBy, colors.high, units)}</span>
         </p>
       )}
+      {onEditKeyframes && (keyframesTarget ? createPortal(keyframeList, keyframesTarget) : keyframeList)}
       {mapError && styleUrl && (
         <p className="map-video-preview__note" role="status">
           The map did not load fully: {mapError}. The route still shows; route only needs no map.

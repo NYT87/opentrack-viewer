@@ -213,3 +213,42 @@ test('draws terrain from the AWS bucket alone, and credits it in the frame', asy
     /OpenFreeMap © OpenMapTiles Data from OpenStreetMap · Terrain: Mapzen, AWS Open Data/,
   );
 });
+
+test('takes a keyframe from a view dragged by hand, and edits one by keyboard', async ({ page }) => {
+  await page.goto('./#/map-video');
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
+  await page.getByRole('radio', { name: /^Route only/ }).check();
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('12');
+  const map = page.locator('.map-video-preview__map canvas');
+  await expect(map).toBeVisible();
+  // The canvas is no second tab stop: the frame around it takes the keys.
+  await expect(map).toHaveAttribute('tabindex', '-1');
+
+  // Drag the map 120 px to the left: the camera moves east of the marker.
+  const box = (await map.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Add keyframe here' }).click();
+
+  const keyframes = page.getByRole('region', { name: 'Camera keyframes' });
+  const row = keyframes.getByRole('listitem');
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAccessibleName('Keyframe 1, at 0:12.0');
+  const east = Number(await row.getByRole('spinbutton', { name: 'East of the marker' }).inputValue());
+  expect(east).toBeGreaterThan(10);
+
+  // By keyboard alone: a second keyframe from the computed view, its zoom typed, then undone.
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('20');
+  await page.getByRole('button', { name: 'Add keyframe here' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(row).toHaveCount(2);
+  const zoom = row.nth(1).getByRole('spinbutton', { name: 'Zoom' });
+  await zoom.focus();
+  await zoom.fill('13');
+  await expect(zoom).toHaveValue('13');
+  await keyframes.getByRole('button', { name: 'Undo' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(row.nth(1).getByRole('spinbutton', { name: 'Zoom' })).not.toHaveValue('13');
+});

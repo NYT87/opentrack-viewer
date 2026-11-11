@@ -18,6 +18,7 @@ const { App } = await import('./App');
 const { useInteractionStore } = await import('../state/interactionStore');
 const { useMapVideoStore } = await import('../state/mapVideoStore');
 const { buildMapVideoModel } = await import('../mapVideo/model');
+const { maxFollowOffsetMeters } = await import('../mapVideo/keyframes');
 const { DEFAULT_MAP_VIDEO_SETTINGS, MAP_VIDEO_PROJECT_KIND } = await import('../mapVideo/project');
 const { fixtureFile } = await import('../test/helpers/fixtures');
 const { FakeMap, resetMapLibreMock } = await import('../test/helpers/maplibreMock');
@@ -312,5 +313,92 @@ describe('styling the map, the route and the marker (AV-1205)', () => {
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Width' }), { target: { value: '4096' } });
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Height' }), { target: { value: '4096' } });
     expect(screen.getByText('The size is larger than 4K (3840 × 2160 pixels).')).toBeInTheDocument();
+  });
+});
+
+describe('camera keyframes on the page (AV-1206)', () => {
+  const keyframesRegion = () => screen.getByRole('region', { name: 'Camera keyframes' });
+  const rows = () => within(keyframesRegion()).queryAllByRole('listitem');
+
+  /** Moves the preview's map as a reader's drag would, then adds a keyframe from it. */
+  async function addFromView(view: Record<string, unknown>) {
+    map().view = { ...map().view, ...view };
+    await userEvent.click(screen.getByRole('button', { name: 'Add keyframe here' }));
+  }
+
+  it('adds a keyframe from the view the reader moved the map to, at the moment showing', async () => {
+    await openWithRoute();
+    fireEvent.change(scrubber(), { target: { value: '10' } });
+    const marker = model().at(10).reveal.marker;
+    await addFromView({ zoom: 15.2, pitch: 30, bearing: 90, center: marker });
+
+    const [keyframe] = useMapVideoStore.getState().settings.keyframes;
+    // jsdom lays nothing out, so the preview is the video's own width and the zoom is the map's.
+    expect(keyframe).toMatchObject({ seconds: 10, mode: 'follow', zoom: 15.2, pitch: 30, bearing: 90 });
+    expect(Math.hypot(keyframe!.offset.east, keyframe!.offset.north)).toBeLessThan(1e-6);
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toHaveAccessibleName('Keyframe 1, at 0:10.0');
+    // The preview now plays it.
+    expect(lastJump()).toMatchObject({ zoom: 15.2, pitch: 30, bearing: 90 });
+  });
+
+  it('brings a keyframe nearer the marker when the view would lose it, and says so', async () => {
+    await openWithRoute();
+    fireEvent.change(scrubber(), { target: { value: '10' } });
+    const [lon, lat] = model().at(10).reveal.marker;
+    await addFromView({ zoom: 16, pitch: 0, bearing: 0, center: [lon + 0.05, lat] });
+    expect(within(keyframesRegion()).getByRole('status')).toHaveTextContent('Brought closer to the marker');
+    const [keyframe] = useMapVideoStore.getState().settings.keyframes;
+    // Asked for about 3.5 km east; held to what a 1080-pixel frame at zoom 16 keeps in view.
+    expect(keyframe!.offset.east).toBeCloseTo(maxFollowOffsetMeters(16, 0, lat, { width: 1920, height: 1080 }), 3);
+    expect(keyframe!.offset.east).toBeLessThan(300);
+  });
+
+  it('moves, edits and deletes keyframes, each change undoable', async () => {
+    await openWithRoute();
+    fireEvent.change(scrubber(), { target: { value: '8' } });
+    await addFromView({ zoom: 14, pitch: 10, bearing: 0, center: model().at(8).reveal.marker });
+    fireEvent.change(scrubber(), { target: { value: '20' } });
+    await addFromView({ zoom: 16, pitch: 40, bearing: 0, center: model().at(20).reveal.marker });
+    expect(rows().map((row) => row.getAttribute('aria-label'))).toEqual(['Keyframe 1, at 0:08.0', 'Keyframe 2, at 0:20.0']);
+
+    // Moved past the other: the list follows the time.
+    fireEvent.change(within(rows()[0]!).getByRole('spinbutton', { name: 'At' }), { target: { value: '24' } });
+    expect(rows().map((row) => row.getAttribute('aria-label'))).toEqual(['Keyframe 1, at 0:20.0', 'Keyframe 2, at 0:24.0']);
+
+    fireEvent.change(within(rows()[0]!).getByRole('spinbutton', { name: 'Zoom' }), { target: { value: '12' } });
+    expect(useMapVideoStore.getState().settings.keyframes.find((k) => k.seconds === 20)!.zoom).toBe(12);
+    await userEvent.click(within(rows()[0]!).getByRole('checkbox', { name: 'Turns with the route' }));
+    expect(useMapVideoStore.getState().settings.keyframes.find((k) => k.seconds === 20)!.bearing).toBeNull();
+
+    await userEvent.click(within(rows()[1]!).getByRole('button', { name: 'Delete' }));
+    expect(rows()).toHaveLength(1);
+
+    const undo = within(keyframesRegion()).getByRole('button', { name: 'Undo' });
+    await userEvent.click(undo);
+    expect(rows()).toHaveLength(2);
+    await userEvent.click(undo);
+    await userEvent.click(undo);
+    await userEvent.click(undo);
+    expect(rows().map((row) => row.getAttribute('aria-label'))).toEqual(['Keyframe 1, at 0:08.0', 'Keyframe 2, at 0:20.0']);
+  });
+
+  it('goes to a keyframe\'s moment, and marks keyframes on the scrubber', async () => {
+    await openWithRoute();
+    fireEvent.change(scrubber(), { target: { value: '18' } });
+    await addFromView({ zoom: 15, pitch: 0, bearing: 0, center: model().at(18).reveal.marker });
+    fireEvent.change(scrubber(), { target: { value: '3' } });
+    await userEvent.click(within(rows()[0]!).getByRole('button', { name: 'Go to' }));
+    expect(readout()).toBe('0:18.0 / 0:30.0');
+    const ticks = document.getElementById(scrubber().getAttribute('list')!)!;
+    expect([...ticks.querySelectorAll('option')].map((option) => option.getAttribute('value'))).toEqual(['18']);
+  });
+
+  it('offers no keyframe while playing, when the frames move the map', async () => {
+    await openWithRoute();
+    await userEvent.click(screen.getByRole('button', { name: 'Play' }));
+    expect(screen.queryByRole('button', { name: 'Add keyframe here' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(screen.getByRole('button', { name: 'Add keyframe here' })).toBeInTheDocument();
   });
 });

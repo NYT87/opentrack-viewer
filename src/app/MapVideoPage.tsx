@@ -60,6 +60,9 @@ export function MapVideoPage() {
   const updateSettings = useMapVideoStore((state) => state.updateSettings);
   const replaceSettings = useMapVideoStore((state) => state.replaceSettings);
   const maptilerKey = useMapVideoStore((state) => state.maptilerKey);
+  const editKeyframes = useMapVideoStore((state) => state.editKeyframes);
+  const undoKeyframes = useMapVideoStore((state) => state.undoKeyframes);
+  const canUndoKeyframes = useMapVideoStore((state) => state.keyframeUndo.length > 0);
   const setMaptilerKey = useMapVideoStore((state) => state.setMaptilerKey);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
@@ -76,6 +79,8 @@ export function MapVideoPage() {
   const [slot, setSlot] = useState<SlotState>(IDLE);
   /** Where the preview is in the video, kept here so a new map (another basemap) carries on from it. */
   const positionRef = useRef(0);
+  /** Where the preview draws its keyframe list: the side column, below the settings. */
+  const [keyframesTarget, setKeyframesTarget] = useState<HTMLDivElement | null>(null);
   const slotRef = useRef<HTMLElement>(null);
   const replace = useRef<HTMLInputElement>(null);
   /** A read finishing after a newer one, or after Remove, writes nothing. */
@@ -136,6 +141,11 @@ export function MapVideoPage() {
                   maptilerKey={maptilerKey}
                   units={unitSystem}
                   positionRef={positionRef}
+                  keyframes={settings.keyframes}
+                  onEditKeyframes={editKeyframes}
+                  onUndoKeyframes={undoKeyframes}
+                  canUndoKeyframes={canUndoKeyframes}
+                  keyframesTarget={keyframesTarget}
                 />
               </Suspense>
             )}
@@ -242,6 +252,7 @@ export function MapVideoPage() {
                 colorBy={built?.ok ? colorByChoices(activity, built.model.route) : undefined}
               />
             )}
+            {activity && <div className="map-video-keyframes-slot" ref={setKeyframesTarget} />}
             {activity && <MapVideoProjectFile activity={activity} settings={settings} onOpen={replaceSettings} />}
           </div>
         </div>

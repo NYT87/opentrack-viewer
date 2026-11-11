@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 import { hasValidLocation, type Activity } from '../domain/activity';
 import { ActivityError } from '../domain/errors';
+import type { CameraKeyframe } from '../mapVideo/keyframes';
 import { DEFAULT_MAP_VIDEO_SETTINGS, type MapVideoSettings } from '../mapVideo/project';
+
+const KEYFRAME_UNDO_DEPTH = 50;
 
 /**
  * Where the map video's activity came from: a file chosen on the page, or a
@@ -36,6 +39,11 @@ interface MapVideoState {
   setActivity: (activity: Activity, origin: MapVideoActivityOrigin) => void;
   setBasemap: (basemap: MapVideoBasemap) => void;
   updateSettings: (patch: MapVideoSettingsPatch) => void;
+  /** Earlier keyframe lists, newest last: every keyframe edit can be undone, fifty deep, as in Route Builder (TD-052). */
+  keyframeUndo: CameraKeyframe[][];
+  /** Replaces the keyframes, keeping the old list to undo to. */
+  editKeyframes: (keyframes: CameraKeyframe[]) => void;
+  undoKeyframes: () => void;
   /** Settings opened from a project file: the basemap among them counts as chosen. */
   replaceSettings: (settings: MapVideoSettings) => void;
   clear: () => void;
@@ -61,13 +69,25 @@ export const useMapVideoStore = create<MapVideoState>((set) => ({
       for (const [key, value] of Object.entries(patch)) {
         const current = settings[key];
         settings[key] =
-          value !== null && typeof value === 'object' && current !== null && typeof current === 'object' && key !== 'overlay'
+          value !== null && typeof value === 'object' && !Array.isArray(value) && current !== null && typeof current === 'object' && key !== 'overlay'
             ? { ...current, ...value }
             : value;
       }
       return { settings: settings as unknown as MapVideoSettings };
     }),
-  replaceSettings: (settings) => set({ settings, basemapChosen: true }),
+  replaceSettings: (settings) => set({ settings, basemapChosen: true, keyframeUndo: [] }),
+  keyframeUndo: [],
+  editKeyframes: (keyframes) =>
+    set((state) => ({
+      keyframeUndo: [...state.keyframeUndo, state.settings.keyframes].slice(-KEYFRAME_UNDO_DEPTH),
+      settings: { ...state.settings, keyframes },
+    })),
+  undoKeyframes: () =>
+    set((state) => {
+      const previous = state.keyframeUndo[state.keyframeUndo.length - 1];
+      if (!previous) return state;
+      return { keyframeUndo: state.keyframeUndo.slice(0, -1), settings: { ...state.settings, keyframes: previous } };
+    }),
   // The settings are the reader's choice, not the file's: they stay.
   clear: () => set({ activity: undefined, origin: undefined }),
 }));

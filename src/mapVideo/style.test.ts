@@ -144,7 +144,8 @@ describe('the style settings in a project (AV-1205)', () => {
       endpoints: { shown: false },
     });
     const json = serializeMapVideoProject({ activity: { fileName: null, points: 2 }, settings: styled });
-    expect(json).not.toMatch(/key/i);
+    // No key field, and no key in a URL: the settings carry neither.
+    expect(json).not.toMatch(/"(maptiler|api)?key"|[?&]key=/i);
     const reopened = parseMapVideoProject(json);
     expect(reopened.ok && reopened.project.settings).toEqual(styled);
   });
