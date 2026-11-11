@@ -8,6 +8,7 @@ import { CustomCanvas } from '../components/CustomCanvas';
 import { mapVideoOverlayTimeline, shownActivity, type PhotoImage } from '../mapVideo/figures';
 import { photoInput } from '../mapVideo/readPhoto';
 import { MapVideoPhotos } from '../components/MapVideoPhotos';
+import { MapVideoExportPanel } from '../components/MapVideoExportPanel';
 import { canvasTemplate, type CanvasDraft } from '../overlay/customCanvas';
 import type { OverlayComponent } from '../overlay/template';
 import { MapVideoProjectFile } from '../components/MapVideoProjectFile';
@@ -354,6 +355,17 @@ export function MapVideoPage() {
               />
             )}
             {activity && <div className="map-video-keyframes-slot" ref={setKeyframesTarget} />}
+            {activity && model && (
+              <MapVideoExportPanel
+                activity={activity}
+                model={model}
+                settings={settings}
+                units={unitSystem}
+                maptilerKey={maptilerKey}
+                photoImages={photoImages}
+                pausedAt={pausedAt}
+              />
+            )}
             {activity && <MapVideoProjectFile activity={activity} settings={settings} onOpen={replaceSettings} />}
           </div>
         </div>

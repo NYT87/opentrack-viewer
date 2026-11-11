@@ -1065,6 +1065,32 @@ Decision (`AV-1208`): the reader can add photos (JPEG, PNG, and HEIC where the b
 
 Reason: the criteria ask for photos placed by time, by position or by hand, a pause while each is shown, reasons for the ones left out, and no EXIF location or metadata in the video or the project. Reading the EXIF ourselves keeps it in the tab. Drawing pixels, not files, is what keeps the metadata out of the video, and naming photos in the project, rather than storing them, keeps a shared project free of them.
 
+### TD-072: A Map Video Is Drawn Frame by Frame in the Page, Encoded in the Export Worker, and Written to a File
+
+Decision (`AV-1209`): the export is TD-064's plan, built.
+
+- **One map, drawn as the preview draws it.** `src/mapVideo/videoMap.ts` holds the style, the layers and the drawing of a frame, and both the preview (TD-067) and the export use it, so the two cannot drift. The export makes a MapLibre map at the video's own size, pixel ratio 1, off the screen but laid out. It has no fades and keeps its drawing buffer.
+- **Every frame waits for all of its map.** For each frame the map is moved and the route set, and the export waits for `idle`. Then the map's canvas is copied onto a 2D canvas, the figures, photos and summary card are drawn over it (TD-070, TD-071), and so is the credit (`drawAttribution`, sized as the preview's in-frame credit, TD-068). A `VideoFrame` is made from that copy, never from the WebGL canvas, which crashes WebKit's encoder (TD-064).
+- **A failed tile stops the export.** `idle` counts a failed tile as settled (TD-064), so the export listens for the map's errors. A tile that failed is asked for again (`refreshTiles`) up to three times, waiting 1, 2 and 3 s. Then the export stops with the reason, rather than write a frame with part of the map missing. The browser test makes every tile of a stubbed style fail and reads that message. A frame also stops the export if its map has not finished within two minutes of the tab being in front.
+- **A hidden tab waits.** MapLibre draws on `requestAnimationFrame`, which a hidden tab stops, so the export cannot run in the background in any browser. The panel says so before starting. While the tab is hidden the export waits and says so, and carries on when the tab is back; the time hidden does not count against the two minutes.
+- **Encoded in the export worker.** The page sends each frame to the existing export worker (transferred, not copied), at most three in flight, so the page never outruns the encoder. The worker encodes with Mediabunny: H.264 in MP4 where the browser can encode it at that size, asking for hardware (TD-045), or VP9 in WebM. Both are offered where both work; a browser that can encode neither says so and suggests a smaller size. The file is written as it is encoded, through a synchronous access handle, to a file in the origin-private file system. That file is owned under a Web Lock, swept up when abandoned, and discarded on a stop: the same `archiveSink` and ownership as every other export, as the 25 October 2026 review set. **Where no file can be had** (a private window, and Playwright's WebKit contexts), a video estimated at 400 MB or less is built in memory instead, since its size is known before it starts; a larger one is refused, saying so.
+- **The reader's sound.** An optional local audio file, decoded by the browser's own `decodeAudioData`, keeps at most two channels. If it runs longer than the video, it is cut at the video's end with a 2-second fade-out; if shorter, it ends early. It is encoded as AAC in MP4 (or Opus where AAC cannot be), and Opus in WebM. A browser that can encode neither makes the video without sound and says so. No music is bundled or fetched.
+- **The poster.** *Save a still* draws the preview's moment through the same renderer, at the video's size, and saves it as a PNG.
+- **Names.** The video is `<activity>-map-video-<width>x<height>.<mp4|webm>`, and the poster `<activity>-map-video-poster-<m>m<s>s.png`. `<activity>` is the file's own name without its extension, made safe for a file name, else the activity's name, else "activity".
+- **Before it starts**, the panel states the frames, the size, the rate, the estimated size of the file and its name. It refuses a size the encoders cannot take, or a MapTiler map without a key. Phones and tablets are declared desktop-only, as in TD-045. While it runs it shows the frames done, the time left at the rate so far, and when it is waiting for map tiles. *Stop* keeps nothing. A finished file made with settings since changed is marked so and offered as *Make it again*.
+
+**Measured.** In Chromium (the full build, in the second Playwright project with the burned-in tests), the browser tests check:
+
+- an MP4 of 150 H.264 frames at 640 × 360 lasting 5 s, with an AAC track cut from 10 s of tone to 5 s;
+- a WebM;
+- a stop that leaves no file in the origin-private file system;
+- a poster at the video's size with the route's colour in it;
+- a failed tile stopping the export.
+
+Every request is checked too: only the stubbed style ever leaves the page, and nothing but GET is made. In **WebKit 26.4** (the macOS 14 build, driven by `playwright-core` 1.59), the same export runs to an MP4, built in memory since that context gives no file. A frame from each engine's MP4, decoded by macOS Quick Look, shows the route, the marker and the figures where the preview put them. Pixel checks at known frames in the browser tests are AV-1210's.
+
+Reason: TD-064 showed the frame-by-frame path is exact, and the overlay exports had already solved storing large files in a worker. Drawing in the page and encoding in the worker uses each where it must be: MapLibre needs the page, and the file system's write handle needs a worker.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.

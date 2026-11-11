@@ -125,6 +125,16 @@ scope.onmessage = (event) => {
     );
     return;
   }
+  // AV-1209. A map video: a start, its frames one by one, a finish. Loaded on demand, like the burned-in render.
+  if (message.type === 'mapVideoStart' || message.type === 'mapVideoFrame' || message.type === 'mapVideoFinish') {
+    if (message.type === 'mapVideoStart') current = new AbortController();
+    const controller = current ?? new AbortController();
+    void import('../../mapVideo/export/encodeWorker').then(
+      ({ handleMapVideo }) => handleMapVideo(message, controller, post),
+      (error: unknown) => reportFailure(error, 'The video encoder could not be loaded.'),
+    );
+    return;
+  }
   if (message.type === 'burn') {
     const controller = new AbortController();
     current = controller;

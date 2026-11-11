@@ -239,3 +239,25 @@ function drawCredit(ctx: OverlayContext2D, text: string, portrait: boolean, widt
   lines.forEach((entry, i) => ctx.fillText(entry, left, bottom - (lines.length - 1 - i) * size * 1.25));
   ctx.restore();
 }
+
+/**
+ * The map's credit, in the frame's pixels (TD-068): bottom right, on a light
+ * box, sized as the preview sizes its own (1.15 % of the width, at least 9 px),
+ * so the export carries what the preview shows.
+ */
+export function drawAttribution(ctx: OverlayContext2D, text: string, width: number, height: number): void {
+  const size = Math.max(9, width * 0.0115);
+  ctx.save();
+  ctx.font = `${size}px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif`;
+  const padX = size * 0.6;
+  const padY = size * 0.3;
+  const boxW = Math.min(width, ctx.measureText(text).width + 2 * padX);
+  const boxH = size * 1.3 + 2 * padY;
+  ctx.fillStyle = 'rgb(255 255 255 / 0.72)';
+  ctx.fillRect(width - boxW, height - boxH, boxW, boxH);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, width - padX, height - boxH / 2, boxW - 2 * padX);
+  ctx.restore();
+}

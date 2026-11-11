@@ -64,8 +64,32 @@ export interface BurnSourceInfo {
   canEncode: boolean;
 }
 
+/**
+ * AV-1209. A map video's encoding: the page draws each frame (the map must be
+ * drawn there) and hands it over; the worker encodes it and writes the file.
+ */
+export interface MapVideoEncodeRequest {
+  archiveName: string;
+  width: number;
+  height: number;
+  fps: number;
+  bitrate: number;
+  format: 'mp4' | 'webm';
+  /** The reader's sound, fitted to the video: one array per channel. */
+  audio?: { sampleRate: number; channels: Float32Array[] };
+  /**
+   * Where no file can be written (a private window), whether the video is small
+   * enough to be built in memory instead: the page knows its size beforehand.
+   */
+  allowMemory: boolean;
+}
+
 export type ToWorker =
   | { type: 'start'; request: ExportRequest }
+  | { type: 'mapVideoStart'; request: MapVideoEncodeRequest }
+  /** A frame, transferred: the page keeps no copy. */
+  | { type: 'mapVideoFrame'; frame: VideoFrame; index: number }
+  | { type: 'mapVideoFinish' }
   | { type: 'cancel' }
   /** Asks which storage the worker can really write to, without exporting. */
   | { type: 'probe'; archiveName: string }
@@ -79,6 +103,9 @@ export type FromWorker =
   | { type: 'inspected'; info: BurnSourceInfo }
   /** A burned-in render's progress, 0 to 1, and how much of the video is done. */
   | { type: 'burnProgress'; fraction: number; processedSeconds: number }
+  /** AV-1209. Ready for frames; and each frame encoded, for the page to send the next. */
+  | { type: 'mapVideoReady' }
+  | { type: 'mapVideoFrameDone'; index: number }
   | {
       type: 'done';
       file: Blob;
