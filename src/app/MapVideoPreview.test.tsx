@@ -13,6 +13,8 @@ vi.mock('maplibre-gl', async () => {
   };
 });
 vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
+// Only reached where a test gives the page a VideoEncoder: jsdom has none, so the export panel says so before asking.
+vi.mock('mediabunny', async (importOriginal) => ({ ...(await importOriginal<typeof import('mediabunny')>()), canEncodeVideo: async () => true }));
 
 const { App } = await import('./App');
 const { useInteractionStore } = await import('../state/interactionStore');
@@ -614,12 +616,45 @@ describe('the export panel after the M10 review (TD-073)', () => {
     await userEvent.upload(screen.getByTestId('map-video-activity-input'), long);
     await waitFor(() => expect(FakeMap.instances.length).toBeGreaterThan(0));
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Zoom' }), { target: { value: '14' } });
-    const alert = await within(panel()).findByText(/would ask OpenFreeMap for about [\d,]+ map tiles, more than the 3,000/);
-    // The zoom that fits is looked for once the settings are still.
-    expect(alert).toHaveTextContent(/Finding a zoom that fits/);
-    await waitFor(() => expect(alert).toHaveTextContent(/At zoom 1[0-3](\.5)? \(Camera, above\) it would be about [\d,]+\./), { timeout: 5000 });
+    // Counted, and the zoom that fits looked for, once the settings are still.
+    const alert = await within(panel()).findByText(/would ask OpenFreeMap for about [\d,]+ map tiles, more than the 3,000/, {}, { timeout: 10_000 });
+    expect(alert).toHaveTextContent(/At zoom 1[0-3](\.5)? \(Camera, above\) it would be about [\d,]+\./);
     await userEvent.click(screen.getByRole('radio', { name: /^Route only/ }));
     expect(within(panel()).queryByText(/would ask OpenFreeMap/)).not.toBeInTheDocument();
     // A 2,000-point ride, counted at nine zooms: seconds on a machine busy with the rest of the suite.
   }, 30_000);
+
+  it('counts the tiles once the camera\'s settings are still, and not again for a colour (TD-077)', async () => {
+    await openWithRoute();
+    const counting = () => within(panel()).queryByText(/Counting the map tiles/);
+    // Opened: counting, then counted.
+    expect(counting()).toBeInTheDocument();
+    await waitFor(() => expect(counting()).not.toBeInTheDocument(), { timeout: 5000 });
+    // A colour moves no camera: no count again.
+    fireEvent.input(screen.getByLabelText('Line colour'), { target: { value: '#00aaff' } });
+    fireEvent.change(screen.getByLabelText('Line colour'), { target: { value: '#00aaff' } });
+    expect(useMapVideoStore.getState().settings.route.color).toBe('#00aaff');
+    expect(counting()).not.toBeInTheDocument();
+    // A tilt does: counting until the settings are still, then counted again.
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Tilt' }), { target: { value: '20' } });
+    expect(counting()).toBeInTheDocument();
+    await waitFor(() => expect(counting()).not.toBeInTheDocument(), { timeout: 5000 });
+  });
+
+  it('does not make the video until the tiles are counted (TD-077)', async () => {
+    // A browser with an encoder, as far as the panel can tell.
+    (globalThis as { VideoEncoder?: unknown }).VideoEncoder = class {};
+    try {
+      await openWithRoute();
+      const make = await within(panel()).findByRole('button', { name: 'Make the video' });
+      expect(within(panel()).getByText(/Counting the map tiles/)).toBeInTheDocument();
+      expect(make).toBeDisabled();
+      await waitFor(() => expect(make).toBeEnabled(), { timeout: 5000 });
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Tilt' }), { target: { value: '20' } });
+      expect(make).toBeDisabled();
+      await waitFor(() => expect(make).toBeEnabled(), { timeout: 5000 });
+    } finally {
+      delete (globalThis as { VideoEncoder?: unknown }).VideoEncoder;
+    }
+  });
 });

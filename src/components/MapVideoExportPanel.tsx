@@ -38,8 +38,33 @@ function zoomThatFits(activity: Activity, settings: MapVideoSettings) {
   return undefined;
 }
 
-/** How long settings must stay still before the zoom that fits is looked for: each look builds up to nine models. */
-const FIT_SEARCH_DELAY_MS = 400;
+/**
+ * How long the camera's settings must stay still before the tiles are counted:
+ * a count walks every frame's view (up to a fifth of a second for three
+ * minutes at 60 fps), and over the budget the zoom that fits builds up to nine
+ * models more, so neither is done while a slider is dragged.
+ */
+const COUNT_DELAY_MS = 400;
+
+/**
+ * What the tile count depends on: what moves the camera or makes more frames.
+ * The route's or marker's colour, a figure, a style or the terrain does not
+ * change which OpenFreeMap tiles are seen, so changing one does not count
+ * again. A photo's wait is read from the model, as photos are not settings.
+ */
+function tileCountKey(settings: MapVideoSettings, model: MapVideoModel): string {
+  const { output, lengthSeconds, timing, intro, outro, camera, privacyTrim, keyframes } = settings;
+  const holds = model.timeline.holds.map((hold) => [hold.startSeconds, hold.endSeconds]);
+  return JSON.stringify([output, lengthSeconds, timing, intro, outro, camera, privacyTrim, keyframes, holds]);
+}
+
+interface TileCount {
+  key: string;
+  activity: Activity;
+  count: number;
+  /** Over the budget: the zoom that fits, or undefined for none. */
+  fits?: ReturnType<typeof zoomThatFits>;
+}
 
 /** What this browser can encode at the video's size: each format, or why not. */
 interface Support {
@@ -121,16 +146,23 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
   );
 
   // TD-064: OpenFreeMap's terms allow at most 3,000 tiles to be collected at a time, so a video asking for more waits.
-  const tiles = useMemo(() => (settings.basemap.source === 'online' ? { count: estimateBasemapTiles(model, settings) } : undefined), [model, settings]);
-  const overBudget = tiles !== undefined && tiles.count > OPENFREEMAP_TILE_BUDGET;
-  // Looked for once the settings are still, so a slider dragged over the budget does not stall the page.
-  const [fitSearch, setFitSearch] = useState<{ settings: MapVideoSettings; fits: ReturnType<typeof zoomThatFits> }>();
+  // Counted once the camera's settings are still (TD-077), and the video waits for the count.
+  const online = settings.basemap.source === 'online';
+  const countKey = useMemo(() => tileCountKey(settings, model), [settings, model]);
+  const [counted, setCounted] = useState<TileCount>();
+  const tiles = online && counted?.key === countKey && counted.activity === activity ? counted : undefined;
+  const counting = online && !tiles;
   useEffect(() => {
-    if (!overBudget) return undefined;
-    const timer = setTimeout(() => setFitSearch({ settings, fits: zoomThatFits(activity, settings) }), FIT_SEARCH_DELAY_MS);
+    if (!counting) return undefined;
+    const timer = setTimeout(() => {
+      const count = estimateBasemapTiles(model, settings);
+      setCounted({ key: countKey, activity, count, ...(count > OPENFREEMAP_TILE_BUDGET ? { fits: zoomThatFits(activity, settings) } : {}) });
+    }, COUNT_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [activity, settings, overBudget]);
-  const fitted = fitSearch?.settings === settings ? fitSearch : undefined;
+    // The count reads the model and settings it was keyed on: a change that does not move the key starts no new count.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [counting, countKey, activity]);
+  const overBudget = tiles !== undefined && tiles.count > OPENFREEMAP_TILE_BUDGET;
 
   const format: MapVideoFormat | undefined = chosen && support?.[chosen] ? chosen : support?.mp4 ? 'mp4' : support?.webm ? 'webm' : undefined;
   const plan = format ? planMapVideoExport(activity, model, settings, format) : undefined;
@@ -193,7 +225,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
     }
   };
 
-  const blocked = !support || !format || planProblem !== undefined || keyMissing || running || overBudget;
+  const blocked = !support || !format || planProblem !== undefined || keyMissing || running || counting || overBudget;
 
   return (
     <section className="prose map-video-export" aria-label="Make the video">
@@ -206,15 +238,14 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
       {support?.reason && <p role="alert">{support.reason}</p>}
       {keyMissing && <p role="status">Type your MapTiler key above, or choose another map, to make the video.</p>}
       {planProblem && <p role="alert">{planProblem}</p>}
+      {counting && <p role="status">Counting the map tiles the video would ask OpenFreeMap for…</p>}
       {overBudget && (
         <p role="alert">
           This video would ask OpenFreeMap for about {tiles.count.toLocaleString('en')} map tiles, more than the{' '}
           {OPENFREEMAP_TILE_BUDGET.toLocaleString('en')} its terms allow one download to take.{' '}
-          {!fitted
-            ? 'Finding a zoom that fits…'
-            : fitted.fits
-              ? `At zoom ${fitted.fits.zoom} (Camera, above) it would be about ${fitted.fits.count.toLocaleString('en')}. Lower the zoom, or choose route only.`
-              : 'Even zoomed out it would be more: choose route only, or a shorter stretch with the privacy trim.'}
+          {tiles.fits
+            ? `At zoom ${tiles.fits.zoom} (Camera, above) it would be about ${tiles.fits.count.toLocaleString('en')}. Lower the zoom, or choose route only.`
+            : 'Even zoomed out it would be more: choose route only, or a shorter stretch with the privacy trim.'}
           {settings.keyframes.length > 0 && ' Keyframes set their own zoom: lower theirs too.'}
         </p>
       )}
