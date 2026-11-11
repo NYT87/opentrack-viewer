@@ -567,7 +567,9 @@ describe('the export panel after the M10 review (TD-073)', () => {
     await waitFor(() => expect(FakeMap.instances.length).toBeGreaterThan(0));
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Zoom' }), { target: { value: '14' } });
     const alert = await within(panel()).findByText(/would ask OpenFreeMap for about [\d,]+ map tiles, more than the 3,000/);
-    expect(alert).toHaveTextContent(/At zoom 1[0-6](\.5)? \(Camera, above\) it would be about [\d,]+\./);
+    // The zoom that fits is looked for once the settings are still.
+    expect(alert).toHaveTextContent(/Finding a zoom that fits/);
+    await waitFor(() => expect(alert).toHaveTextContent(/At zoom 1[0-3](\.5)? \(Camera, above\) it would be about [\d,]+\./), { timeout: 5000 });
     await userEvent.click(screen.getByRole('radio', { name: /^Route only/ }));
     expect(within(panel()).queryByText(/would ask OpenFreeMap/)).not.toBeInTheDocument();
   });

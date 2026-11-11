@@ -139,9 +139,11 @@ export function placePhotos(photos: PhotoInput[], settings: PhotosSettings, full
   const startCut = positionAt(full, trim.start);
   const endMeters = full.totalMeters - trim.end;
   const endCut = positionBefore(full, endMeters);
+  // Exactly at a cut, only a gap between recordings has two sides: the recording a place is on says which.
+  const segment = (index: number) => full.vertices[index]!.segment;
   const shown = (place: Along) =>
-    (place.meters > trim.start || (place.meters === trim.start && place.index >= startCut.index)) &&
-    (place.meters < endMeters || (place.meters === endMeters && place.index <= endCut.index));
+    (place.meters > trim.start || (place.meters === trim.start && segment(place.index) >= segment(startCut.index))) &&
+    (place.meters < endMeters || (place.meters === endMeters && segment(place.index) <= segment(endCut.index)));
   return photos.map((photo): PhotoPlacement => {
     const setting = settings.items.find((item) => item.name === photo.name);
     const method = photoMethod(photo, setting);

@@ -215,6 +215,26 @@ describe('fixes from the M10 review (TD-073)', () => {
     expect(model.at(model.timeline.introSeconds + b!.startSeconds + 1).sample.photo?.id).toBe('b');
   });
 
+  it('shows three photos at the start one after another, none over another (Fable review)', () => {
+    const model = modelWith(['a', 'b', 'c'].map((id) => ({ id, name: id, takenAt: T0 })));
+    const holds = [...model.timeline.holds].sort((x, y) => x.startSeconds - y.startSeconds);
+    expect(holds.map((hold) => hold.id)).toEqual(['a', 'b', 'c']);
+    expect(holds[1]!.startSeconds).toBeCloseTo(holds[0]!.endSeconds, 9);
+    expect(holds[2]!.startSeconds).toBeCloseTo(holds[1]!.endSeconds, 9);
+    for (const hold of holds) expect(model.at(model.timeline.introSeconds + hold.startSeconds + 1).sample.photo?.id).toBe(hold.id);
+  });
+
+  it('keeps a photo taken while standing at the start, with no trim at all (Fable review)', () => {
+    // Four fixes in one place before setting off: the route's first vertices all sit at 0 m.
+    const points: TestPoint[] = [0, 1, 2, 3].map((second) => ({ north: 0, east: 0, second }));
+    for (const point of straightNorth(1000, 10, 5).slice(1)) points.push({ ...point, second: 3 + point.second! });
+    const standing = activityThrough(points);
+    const built = buildMapVideoModel(standing, DEFAULT_MAP_VIDEO_SETTINGS, [{ id: 'p', name: 'p', takenAt: T0 + 2_000 }]);
+    if (!built.ok) throw new Error(built.error);
+    expect(built.model.photos[0]).toMatchObject({ method: 'time', distance: 0 });
+    expect(built.model.photos[0]!.reason).toBeUndefined();
+  });
+
   it('lengthens a shortened stop by a photo shown within it', () => {
     const points: TestPoint[] = straightNorth(1500, 10, 5);
     const stop = points[points.length - 1]!.second!;

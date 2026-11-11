@@ -230,9 +230,9 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
   for (const hold of asked) {
     const length = hold.seconds * holdScale;
     let at = interpolate(meters, seconds, Math.min(route.totalMeters, Math.max(0, hold.distance)));
-    // A second photo at the same place waits after the first, not over it.
-    const before = holds[holds.length - 1];
-    if (before && at >= before.startSeconds && at <= before.endSeconds) at = before.endSeconds;
+    // A photo at the same place as others waits after them all, not over one.
+    let over: (typeof holds)[number] | undefined;
+    while ((over = holds.find((h) => at >= h.startSeconds && at < h.endSeconds))) at = over.endSeconds;
     const marker = interpolate(seconds, meters, at);
     let i = 0;
     while (i < seconds.length && seconds[i]! < at) i += 1;

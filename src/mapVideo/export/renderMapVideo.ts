@@ -34,7 +34,10 @@ addProtocol(QUEUED, async (params, abort) => {
   asked += 1;
   try {
     const response = await fetch(`https://${params.url.slice(QUEUED.length + 3)}`, { signal: abort.signal });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText || 'error'} for ${new URL(response.url).host}`);
+    // With its status, as MapLibre's own requests fail: a 404 tile is then no tile there, not an error.
+    if (!response.ok) {
+      throw Object.assign(new Error(`${response.status} ${response.statusText || 'error'} for ${new URL(response.url).host}`), { status: response.status, url: response.url });
+    }
     const data = params.type === 'json' ? await response.json() : params.type === 'string' ? await response.text() : await response.arrayBuffer();
     return { data, cacheControl: response.headers.get('Cache-Control'), expires: response.headers.get('Expires') };
   } finally {
