@@ -1,11 +1,13 @@
 import type { UnitSystem } from '../domain/units';
 import {
   formatDistance,
+  formatDistanceOnScale,
   formatDuration,
   formatElevation,
   formatPace,
   formatSpeed,
   formatTemperature,
+  paceUnitLabel,
 } from '../domain/units';
 import {
   OVERLAY_METRIC_KEYS,
@@ -85,6 +87,8 @@ export interface OverlayDisplaySetting {
   label?: string;
   /** Decimal places for a plain number (speed, distance, elevation, power…); times and pace keep their own form. */
   decimals?: 0 | 1 | 2;
+  /** `distance` only: the distance so far over the whole activity's, "12.40 / 42.20 km" (TD-080). */
+  ofTotal?: boolean;
 }
 
 /**
@@ -392,7 +396,8 @@ function parseComponent(value: unknown): OverlayComponent | string {
     if (value.display.decimals === 0 || value.display.decimals === 1 || value.display.decimals === 2) {
       display.decimals = value.display.decimals;
     }
-    if (display.label !== undefined || display.decimals !== undefined) component.display = display;
+    if (value.display.ofTotal === true) display.ofTotal = true;
+    if (display.label !== undefined || display.decimals !== undefined || display.ofTotal) component.display = display;
   }
   if (componentType === 'routeInset' && isRecord(value.route)) {
     const route = value.route;
@@ -568,7 +573,8 @@ function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem
     case 'speed':
       return formatSpeed(value, units);
     case 'pace':
-      return formatPace(value, units);
+      // Standing still (TD-080).
+      return value > 0 ? formatPace(value, units) : `0:00 ${paceUnitLabel(units)}`;
     case 'distance':
       return formatDistance(value, units);
     case 'elevation':
@@ -625,6 +631,19 @@ export function formatMetricWith(metric: OverlayMetricKey, value: number, units:
 }
 
 /**
+ * TD-080. The distance so far over the whole, "12.40 / 42.20 km": both in the
+ * unit the whole is written in, so the two read against each other.
+ */
+export function distanceOfTotal(meters: number, totalMeters: number, units: UnitSystem, decimals?: 0 | 1 | 2): string {
+  if (decimals !== undefined) {
+    const [done] = formatMetricWith('distance', meters, units, decimals).split(' ');
+    return `${done} / ${formatMetricWith('distance', totalMeters, units, decimals)}`;
+  }
+  const [done] = formatDistanceOnScale(meters, totalMeters, units).split(' ');
+  return `${done} / ${formatDistanceOnScale(totalMeters, totalMeters, units)}`;
+}
+
+/**
  * Resolves one component against one sample. Missing data yields `hidden`,
  * never a placeholder: a dash on a speedometer reads as a broken overlay.
  */
@@ -667,7 +686,10 @@ export function resolveOverlayComponent(
 
   const label = component.display?.label?.trim() || describeSource(source, timeline);
   let text: string;
-  if (source.kind === 'metric') {
+  const total = timeline.distanceTotalMeters;
+  if (source.kind === 'metric' && source.metric === 'distance' && component.display?.ofTotal && total !== undefined) {
+    text = distanceOfTotal(value, total, unitSystem, component.display.decimals);
+  } else if (source.kind === 'metric') {
     text =
       component.display?.decimals !== undefined
         ? formatMetricWith(source.metric, value, unitSystem, component.display.decimals)

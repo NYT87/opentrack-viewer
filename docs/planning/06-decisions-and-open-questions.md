@@ -1223,6 +1223,16 @@ Tests: unit tests for the fit (north up and turned, the margin, another width, t
 
 Reason: the map video already draws a route on a real map, exactly, within its providers' terms; an image of it is that map stopped and seen from above, and anything else would be a second renderer to keep in step with the first. Seen from straight above, the route is always drawn true, and there is no terrain to fetch.
 
+### TD-080: Through a Stop the Overlay's Figures Hold, and Those of Motion Read Zero; Distance Can Be Shown of the Total
+
+Decision: a stop no longer makes the overlay's figures disappear. Where the timeline cannot bridge two points (a gap longer than 10 s, or a new segment where the recorder paused), it is a **stop** unless the distance says the activity moved across it, by the moving-time rule (0.5 m a second, TD-058). Through a stop, speed, pace, power and both cadences read **0**, and everything else (distance, moving time, elevation, heart rate, temperature, grade, the camera's streams, the route marker and the progress) holds the value it had when the stop began. The clock runs on. Standing still while recording, pace reads `0:00 /km` (or `/mi`) rather than vanishing. A gap the activity moved across is a dropout, and nothing is known there, so it is still not drawn. The map video's shortened stops read a pace of 0 too. Outside the recording nothing is drawn, as before.
+
+A distance figure can be written **of the total**: "12.40 / 42.20 km", the distance so far over the whole activity's, both in the unit the whole is written in (`display.ofTotal`, chosen in the canvas editor under *Show*; `distanceOfTotal`). The total is on the same basis as the distance read, from the first recorded distance.
+
+Reason: a figure that blinks out at every traffic light reads as a broken overlay; standing still is a speed of zero, and the distance ridden does not go away. A dropout is different: the activity moved and no one knows how.
+
+Tests: unit tests for the stop (zeroes and held values through a pause, a long gap still, pace at zero while recording, a dropout still unknown), the total's basis, the distance written alone and of the total in both unit systems, the map video's pause, and the editor's *Show* choice.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.

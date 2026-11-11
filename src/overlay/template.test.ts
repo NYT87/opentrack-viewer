@@ -292,6 +292,39 @@ describe('shapes, holding and a figure’s format (AV-1011)', () => {
       text: expect.stringMatching(/^1[01]\.\d\d mph$/),
     });
   });
+
+  it('writes the distance so far alone, or of the whole, in the whole’s unit (TD-080)', () => {
+    const parsed = read([
+      { id: 'd', type: 'text', rect, source: { kind: 'metric', metric: 'distance' } },
+      { id: 't', type: 'text', rect, source: { kind: 'metric', metric: 'distance' }, display: { ofTotal: true } },
+      { id: 'n', type: 'text', rect, source: { kind: 'metric', metric: 'distance' }, display: { ofTotal: true, decimals: 1 } },
+    ]);
+    expect(parsed.template.components.map((entry) => entry.display)).toEqual([undefined, { ofTotal: true }, { ofTotal: true, decimals: 1 }]);
+    const timeline = buildOverlayTimeline(
+      makeActivity(Array.from({ length: 101 }, (_, i) => ({ time: at(i), distanceMeters: i * 42 }))),
+      { video: { durationSeconds: 100 } },
+    );
+    const sample = timeline.sampleAt(10) as OverlaySample;
+    const texts = parsed.template.components.map((entry) => resolveOverlayComponent(parsed.template, entry, sample, timeline, 'metric'));
+    expect(texts.map((entry) => entry.status === 'ready' && entry.text)).toEqual(['420 m', '0.42 / 4.20 km', '0.4 / 4.2 km']);
+    expect(resolveOverlayComponent(parsed.template, parsed.template.components[1]!, sample, timeline, 'imperial')).toMatchObject({ text: '0.26 / 2.61 mi' });
+  });
+
+  it('writes a pace of zero standing still, rather than hiding it (TD-080)', () => {
+    const parsed = read([{ id: 'p', type: 'text', rect, source: { kind: 'metric', metric: 'pace' } }]);
+    const timeline = buildOverlayTimeline(
+      makeActivity([
+        { time: at(0), speedMetersPerSecond: 4 },
+        { time: at(2), speedMetersPerSecond: 0 },
+        { time: at(4), speedMetersPerSecond: 0 },
+      ]),
+      { video: { durationSeconds: 4 } },
+    );
+    expect(resolveOverlayComponent(parsed.template, parsed.template.components[0]!, timeline.sampleAt(3), timeline, 'metric')).toMatchObject({
+      status: 'ready',
+      text: '0:00 /km',
+    });
+  });
 });
 
 describe('the elevation profile in a layout (AV-1211)', () => {

@@ -139,18 +139,58 @@ describe('buildOverlayTimeline (AV-1003)', () => {
       expect(timeline.available.has('metric:power')).toBe(false);
     });
 
-    it('does not interpolate across a long gap or a segment boundary', () => {
+    it('holds the values through a stop, a long gap or a pause, rather than inventing a path across it (TD-080)', () => {
       const gap = makeActivity([
         { time: at(0), heartRateBpm: 100 },
         { time: at(60), heartRateBpm: 160 },
       ]);
-      expect(buildOverlayTimeline(gap).sampleAt(30)!.values['metric:heartRate']).toBeUndefined();
+      expect(buildOverlayTimeline(gap).sampleAt(30)!.values['metric:heartRate']).toBe(100);
 
       const split = makeActivity([
         { time: at(0), heartRateBpm: 100, segmentIndex: 0 },
         { time: at(2), heartRateBpm: 160, segmentIndex: 1 },
       ]);
-      expect(buildOverlayTimeline(split).sampleAt(1)!.values['metric:heartRate']).toBeUndefined();
+      expect(buildOverlayTimeline(split).sampleAt(1)!.values['metric:heartRate']).toBe(100);
+    });
+
+    it('reads the figures of motion as zero through a stop, and holds the distance, the place and the rest (TD-080)', () => {
+      // Riding 5 m/s, then paused for two minutes in a new segment, then riding on from the same place.
+      const paused = makeActivity([
+        { time: at(0), lat: 1, lon: 1, speedMetersPerSecond: 5, powerWatts: 200, heartRateBpm: 130, segmentIndex: 0 },
+        { time: at(4), lat: 1 + 20 / 111_320, lon: 1, speedMetersPerSecond: 5, powerWatts: 220, heartRateBpm: 140, segmentIndex: 0 },
+        { time: at(124), lat: 1 + 20 / 111_320, lon: 1, speedMetersPerSecond: 5, powerWatts: 210, heartRateBpm: 110, segmentIndex: 1 },
+        { time: at(128), lat: 1 + 40 / 111_320, lon: 1, speedMetersPerSecond: 5, powerWatts: 200, heartRateBpm: 120, segmentIndex: 1 },
+      ]);
+      const timeline = buildOverlayTimeline(paused);
+      const sample = timeline.sampleAt(60)!;
+      expect(sample.values['metric:speed']).toBe(0);
+      expect(sample.values['metric:pace']).toBe(0);
+      expect(sample.values['metric:power']).toBe(0);
+      expect(sample.values['metric:heartRate']).toBe(140);
+      expect(sample.values['metric:distance']).toBeCloseTo(20, 0);
+      expect(sample.values['metric:elapsed']).toBe(60);
+      expect(sample.position).toEqual({ lat: 1 + 20 / 111_320, lon: 1 });
+      expect(sample.progress).toBeCloseTo(0.5, 1);
+    });
+
+    it('gives a pace of zero standing still while recording, rather than none', () => {
+      const activity = makeActivity([
+        { time: at(0), speedMetersPerSecond: 4 },
+        { time: at(2), speedMetersPerSecond: 0 },
+        { time: at(4), speedMetersPerSecond: 0 },
+      ]);
+      expect(buildOverlayTimeline(activity).sampleAt(3)!.values['metric:pace']).toBe(0);
+    });
+
+    it('knows nothing across a dropout the activity moved across', () => {
+      // 60 s without a point, 600 m further on: moving, so not a stop.
+      const dropout = makeActivity([
+        { time: at(0), distanceMeters: 0, heartRateBpm: 100 },
+        { time: at(60), distanceMeters: 600, heartRateBpm: 160 },
+      ]);
+      const sample = buildOverlayTimeline(dropout).sampleAt(30)!;
+      expect(sample.values['metric:heartRate']).toBeUndefined();
+      expect(sample.values['metric:distance']).toBeUndefined();
     });
 
     it('reports a pace that is unavailable when the activity never moves', () => {
@@ -231,6 +271,16 @@ describe('buildOverlayTimeline (AV-1003)', () => {
     expect(timeline.available.has('sensor:GRAV')).toBe(false);
     expect(timeline.sampleAt(2)!.values['sensor:ACCL']).toBeCloseTo(2);
     expect(timeline.sampleAt(6)!.values['sensor:ACCL']).toBeUndefined();
+  });
+
+  it('states the whole distance, on the basis the distance is read on (TD-080)', () => {
+    expect(buildOverlayTimeline(ride()).distanceTotalMeters).toBeCloseTo(100);
+    const odometer = makeActivity([
+      { time: at(0), distanceMeters: 5000 },
+      { time: at(10), distanceMeters: 5100 },
+    ]);
+    expect(buildOverlayTimeline(odometer).distanceTotalMeters).toBeCloseTo(100);
+    expect(buildOverlayTimeline(makeActivity([{ time: at(0) }, { time: at(4) }])).distanceTotalMeters).toBeUndefined();
   });
 
   it('reports whether there is a route, and the range of each charted stream', () => {

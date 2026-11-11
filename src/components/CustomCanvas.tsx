@@ -1060,6 +1060,27 @@ function ComponentEditor({
               <option value="imperial">Imperial</option>
             </select>
           </div>
+          {component.source?.kind === 'metric' && component.source.metric === 'distance' && (
+            <div className="overlay-controls__field">
+              <label htmlFor={`${id}-of-total`}>Show</label>
+              <select
+                id={`${id}-of-total`}
+                className="select"
+                value={component.display?.ofTotal ? 'total' : 'so-far'}
+                onChange={(event) =>
+                  update((current) => {
+                    const display = { ...current.display };
+                    if (event.target.value === 'total') display.ofTotal = true;
+                    else delete display.ofTotal;
+                    return { ...current, display };
+                  })
+                }
+              >
+                <option value="so-far">The distance so far</option>
+                <option value="total">The distance so far, of the total</option>
+              </select>
+            </div>
+          )}
           {numeric && (
             <div className="overlay-controls__field">
               <label htmlFor={`${id}-decimals`}>Decimal places</label>

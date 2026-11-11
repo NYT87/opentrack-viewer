@@ -63,9 +63,9 @@ export function mapVideoOverlayTimeline(activity: Activity, model: MapVideoModel
     if (!sample) return undefined;
     const values = { ...sample.values };
     if (pause) {
-      // Standing still: no speed, and no pace to speak of.
+      // Standing still: a speed and a pace of zero, as the overlay's stops read (TD-080).
       values[SPEED] = 0;
-      delete values[PACE];
+      if (base.available.has(PACE)) values[PACE] = 0;
     }
     return { ...sample, videoTimeSeconds: videoSeconds, values, progress: route.totalMeters > 0 ? frame.sample.distance / route.totalMeters : 0 };
   };

@@ -116,6 +116,8 @@ export interface OverlayTimeline {
   available: ReadonlySet<string>;
   /** Whether any point carries a valid position, so a route can be drawn. */
   hasRoute: boolean;
+  /** The whole activity's distance, on the same basis as `metric:distance`; absent without one. */
+  distanceTotalMeters?: number;
   /**
    * The activity's charted camera streams, keyed by `sensor:` id, with the
    * range their values span (a gauge needs bounds the source does not state).
@@ -181,6 +183,12 @@ interface DerivedStreams {
 
 /** A step is moving at or above this, as the stats count moving time (TD-058). */
 const MOVING_SPEED_THRESHOLD_MPS = 0.5;
+
+/**
+ * TD-080. What reads zero while the activity stands still: the figures of
+ * motion. Everything else holds the value it had when the stop began.
+ */
+const STILL_AT_ZERO: readonly string[] = ['metric:speed', 'metric:runningCadence', 'metric:cyclingCadence', 'metric:power'];
 
 /**
  * AV-1011. Moving time so far at each point, counted the way the stats count
@@ -381,10 +389,15 @@ export function buildOverlayTimeline(
     const exact = gap === 0 || seconds === a.seconds;
     const fraction = exact ? 0 : (seconds - a.seconds) / gap;
     // Interpolate only inside a single recorded segment and a short gap.
-    const bridges =
-      !exact &&
-      gap <= maxGap &&
-      (a.point.segmentIndex ?? 0) === (b.point.segmentIndex ?? 0);
+    const sameSegment = (a.point.segmentIndex ?? 0) === (b.point.segmentIndex ?? 0);
+    const bridges = !exact && gap <= maxGap && sameSegment;
+    // TD-080. A gap that is not bridged is a stop (a pause, or a long gap the
+    // activity did not move across, by the moving-time rule), unless the
+    // distance says it moved: then it is a dropout, and nothing is known there.
+    const da = finite(derived.distance[a.index]);
+    const db = finite(derived.distance[b.index]);
+    const movedAcross = sameSegment && da !== undefined && db !== undefined && (db - da) / gap >= MOVING_SPEED_THRESHOLD_MPS;
+    const stopped = !exact && !bridges && !movedAcross;
 
     const values: Partial<Record<string, number>> = {};
     for (const { id, read } of sources) {
@@ -393,13 +406,15 @@ export function buildOverlayTimeline(
       let value: number | undefined;
       if (exact) value = va;
       else if (bridges && va !== undefined && vb !== undefined) value = va + (vb - va) * fraction;
+      else if (stopped) value = va;
       else value = undefined;
       if (value !== undefined) values[id] = value;
     }
+    if (stopped) for (const id of STILL_AT_ZERO) if (available.has(id)) values[id] = 0;
+    // Standing still is a pace of zero, as it is a speed of zero (TD-080).
     if (values['metric:pace'] !== undefined) {
-      const pace = paceFromSpeed(values['metric:speed']);
-      if (pace === undefined) delete values['metric:pace'];
-      else values['metric:pace'] = pace;
+      if (available.has('metric:pace')) values['metric:pace'] = paceFromSpeed(values['metric:speed']) ?? 0;
+      else delete values['metric:pace'];
     }
     // Elapsed is the clock, not a recorded value: it is defined everywhere.
     values['metric:elapsed'] = seconds;
@@ -407,7 +422,7 @@ export function buildOverlayTimeline(
     let position: Coordinate | undefined;
     const pa = toValidCoordinate(a.point.lat, a.point.lon);
     const pb = toValidCoordinate(b.point.lat, b.point.lon);
-    if (exact) position = pa;
+    if (exact || stopped) position = pa;
     else if (bridges && pa && pb) {
       position = { lat: pa.lat + (pb.lat - pa.lat) * fraction, lon: lerpLongitude(pa.lon, pb.lon, fraction) };
     }
@@ -467,5 +482,14 @@ export function buildOverlayTimeline(
       }
     : undefined;
 
-  return { durationSeconds, offsetSeconds, available, hasRoute, sensorLabels, sampleAt, alignment };
+  return {
+    durationSeconds,
+    offsetSeconds,
+    available,
+    hasRoute,
+    ...(distanceSpan > 0 && endDistance !== undefined ? { distanceTotalMeters: endDistance } : {}),
+    sensorLabels,
+    sampleAt,
+    alignment,
+  };
 }

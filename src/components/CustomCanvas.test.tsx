@@ -234,6 +234,18 @@ describe('the custom canvas (AV-1011)', () => {
     expect((await layoutJson()).template.components[0]).toMatchObject({ unitMode: 'imperial', display: { label: 'Ridden', decimals: 2 } });
   });
 
+  it('shows the distance so far, or so far of the total, and offers that for distance alone (TD-080)', async () => {
+    setup();
+    await add('Distance');
+    expect(field('Show')).toHaveValue('so-far');
+    await userEvent.selectOptions(field('Show'), 'total');
+    expect((await layoutJson()).template.components[0]).toMatchObject({ display: { ofTotal: true } });
+    await userEvent.selectOptions(field('Show'), 'so-far');
+    expect((await layoutJson()).template.components[0]).not.toMatchObject({ display: { ofTotal: true } });
+    await add('Speed');
+    expect(screen.queryByLabelText('Show')).not.toBeInTheDocument();
+  });
+
   it('saves a layout and opens it again', async () => {
     setup();
     await add('Ellipse');

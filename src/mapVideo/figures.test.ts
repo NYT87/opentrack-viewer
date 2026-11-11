@@ -78,7 +78,7 @@ describe('figures on the map video\'s clock (AV-1207)', () => {
     expect(timeline.durationSeconds).toBe(10);
   });
 
-  it('hold the paused values through a shortened stop, rather than racing through it', () => {
+  it('hold the paused values through a shortened stop, a speed and pace of zero (TD-080), rather than racing through it', () => {
     // 1 km at 5 m/s, ten minutes standing, 1 km more; heart rate climbing a beat a second all along.
     const points: TestPoint[] = straightNorth(1000, 10, 5);
     const t = points[points.length - 1]!.second!;
@@ -96,7 +96,7 @@ describe('figures on the map video\'s clock (AV-1207)', () => {
     const samples = [0.1, 0.9, 1.9].map((d) => clock.sampleAt(into + d)!);
     for (const sample of samples) {
       expect(sample.values[SPEED]).toBe(0);
-      expect(sample.values['metric:pace']).toBeUndefined();
+      expect(sample.values['metric:pace']).toBe(0);
       expect(sample.activityElapsedSeconds).toBeCloseTo(t, 6);
       expect(sample.values[HEART]).toBeCloseTo(100 + t, 6);
     }
