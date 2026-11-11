@@ -1,6 +1,7 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import type { UnitSystem } from '../domain/units';
-import { MAP_VIDEO_LIMITS, type MapVideoSettings } from '../mapVideo/project';
+import { MAP_VIDEO_LIMITS, outputProblem, type MapVideoColorBy, type MapVideoMarkerShape, type MapVideoSettings } from '../mapVideo/project';
+import type { ColorByChoice } from '../mapVideo/style';
 import type { MapVideoSettingsPatch } from '../state/mapVideoStore';
 
 const FEET_PER_METER = 3.280839895;
@@ -19,6 +20,8 @@ export interface MapVideoSettingsPanelProps {
   units: UnitSystem;
   /** Why the chosen timing could not be used, from the model. */
   timingNote?: string;
+  /** What the route's colour can show for this activity (AV-1205). */
+  colorBy?: ColorByChoice[];
 }
 
 const clamp = (value: number, [min, max]: readonly [number, number]) => Math.min(max, Math.max(min, value));
@@ -79,12 +82,18 @@ function Group({ legend, children }: { legend: string; children: ReactNode }) {
  * styles are AV-1205's. Every value is held to TD-064's limits as it is
  * typed, so the model never sees one it would refuse.
  */
-export function MapVideoSettingsPanel({ settings, onChange, units, timingNote }: MapVideoSettingsPanelProps) {
+export function MapVideoSettingsPanel({ settings, onChange, units, timingNote, colorBy }: MapVideoSettingsPanelProps) {
+  const ids = { colorBy: useId(), routeColor: useId(), casingColor: useId(), markerColor: useId(), custom: useId() };
+  /** Custom chosen while the size still matches a preset: its fields stay open. */
+  const [customChosen, setCustomChosen] = useState(false);
   const limits = MAP_VIDEO_LIMITS;
   const { output } = settings;
   const above1080p = output.width * output.height > limits.maxPixelsAt60;
   const maxLength = above1080p ? limits.maxLengthSecondsAbove1080p : limits.maxLengthSeconds;
-  const sizeIndex = MAP_VIDEO_SIZES.findIndex((size) => size.width === output.width && size.height === output.height);
+  const presetIndex = MAP_VIDEO_SIZES.findIndex((size) => size.width === output.width && size.height === output.height);
+  const sizeIndex = customChosen ? -1 : presetIndex;
+  /** Encoders work in blocks of two pixels, so a custom side is held to an even number. */
+  const even = (value: number) => Math.round(value / 2) * 2;
   const imperial = units === 'imperial';
   const trimUnit = imperial ? 'ft' : 'm';
   const toShown = (meters: number) => (imperial ? meters * FEET_PER_METER : meters);
@@ -101,7 +110,11 @@ export function MapVideoSettingsPanel({ settings, onChange, units, timingNote }:
           <select
             value={sizeIndex}
             onChange={(event) => {
-              const size = MAP_VIDEO_SIZES[Number(event.target.value)]!;
+              const index = Number(event.target.value);
+              // Custom keeps the size, and opens its fields.
+              setCustomChosen(index < 0);
+              if (index < 0) return;
+              const size = MAP_VIDEO_SIZES[index]!;
               const big = size.width * size.height > limits.maxPixelsAt60;
               // A 4K video is held to a minute and 30 frames a second (TD-064).
               onChange({
@@ -110,7 +123,7 @@ export function MapVideoSettingsPanel({ settings, onChange, units, timingNote }:
               });
             }}
           >
-            {sizeIndex < 0 && <option value={-1}>{`${output.width} × ${output.height}`}</option>}
+            <option value={-1}>{presetIndex < 0 ? `Custom, ${output.width} × ${output.height}` : 'Custom'}</option>
             {MAP_VIDEO_SIZES.map((size, index) => (
               <option key={size.label} value={index}>
                 {size.label}
@@ -118,6 +131,17 @@ export function MapVideoSettingsPanel({ settings, onChange, units, timingNote }:
             ))}
           </select>
         </label>
+        {sizeIndex < 0 && (
+          <>
+            <NumberField label="Width" unit="px" value={output.width} range={[limits.minSide, limits.maxSide]} step={2} onChange={(width) => onChange({ output: { ...output, width: even(width) } })} />
+            <NumberField label="Height" unit="px" value={output.height} range={[limits.minSide, limits.maxSide]} step={2} onChange={(height) => onChange({ output: { ...output, height: even(height) } })} />
+            {outputProblem(settings) && (
+              <p className="map-video-settings__hint" role="alert" id={ids.custom}>
+                {outputProblem(settings)}
+              </p>
+            )}
+          </>
+        )}
         <NumberField
           label="Length"
           unit="s"
@@ -191,6 +215,81 @@ export function MapVideoSettingsPanel({ settings, onChange, units, timingNote }:
             onChange={(event) => onChange({ camera: { bearing: event.target.checked ? 'north' : 'follow' } })}
           />
           <span>Keep north up, rather than turning with the route</span>
+        </label>
+      </Group>
+
+      <Group legend="Route">
+        <div className="map-video-settings__field">
+          <label htmlFor={ids.colorBy}>Colour</label>
+          <select
+            id={ids.colorBy}
+            value={settings.route.colorBy}
+            onChange={(event) => onChange({ route: { colorBy: event.target.value as MapVideoColorBy } })}
+          >
+            {(colorBy ?? [{ value: 'none', label: 'One colour', available: true }]).map((choice) => (
+              <option key={choice.value} value={choice.value} disabled={!choice.available}>
+                {choice.available ? choice.label : `${choice.label} (not recorded)`}
+              </option>
+            ))}
+          </select>
+        </div>
+        {colorBy
+          ?.filter((choice) => !choice.available)
+          .map((choice) => (
+            <p key={choice.value} className="map-video-settings__hint">
+              {choice.label}: {choice.reason}
+            </p>
+          ))}
+        <div className="map-video-settings__field">
+          <label htmlFor={ids.routeColor}>{settings.route.colorBy === 'none' ? 'Line colour' : 'Colour of the rest'}</label>
+          <input id={ids.routeColor} type="color" value={settings.route.color} onChange={(event) => onChange({ route: { color: event.target.value } })} />
+        </div>
+        <NumberField label="Line width" unit="px" value={settings.route.width} range={limits.routeWidth} step={1} onChange={(width) => onChange({ route: { width } })} />
+        <label className="overlay-controls__choice">
+          <input type="checkbox" checked={settings.route.casing} onChange={(event) => onChange({ route: { casing: event.target.checked } })} />
+          <span>A darker edge along the line</span>
+        </label>
+        {settings.route.casing && (
+          <div className="map-video-settings__field">
+            <label htmlFor={ids.casingColor}>Edge colour</label>
+            <input id={ids.casingColor} type="color" value={settings.route.casingColor} onChange={(event) => onChange({ route: { casingColor: event.target.value } })} />
+          </div>
+        )}
+        <label className="overlay-controls__choice">
+          <input
+            type="checkbox"
+            checked={settings.route.unrevealed === 'dimmed'}
+            onChange={(event) => onChange({ route: { unrevealed: event.target.checked ? 'dimmed' : 'hidden' } })}
+          />
+          <span>Show the route still to come, dimmed</span>
+        </label>
+      </Group>
+
+      <Group legend="Marker">
+        {(
+          [
+            ['dot', 'A dot'],
+            ['arrow', 'An arrow pointing the way'],
+            ['sport', 'The sport’s icon'],
+          ] as [MapVideoMarkerShape, string][]
+        ).map(([shape, label]) => (
+          <label key={shape} className="overlay-controls__choice">
+            <input type="radio" name="map-video-marker" checked={settings.marker.shape === shape} onChange={() => onChange({ marker: { shape } })} />
+            <span>{label}</span>
+          </label>
+        ))}
+        <NumberField label="Marker size" unit="px" value={settings.marker.size} range={limits.markerSize} step={1} onChange={(size) => onChange({ marker: { size } })} />
+        <div className="map-video-settings__field">
+          <label htmlFor={ids.markerColor}>Marker colour</label>
+          <input id={ids.markerColor} type="color" value={settings.marker.color} onChange={(event) => onChange({ marker: { color: event.target.value } })} />
+        </div>
+        <label className="overlay-controls__choice">
+          <input type="checkbox" checked={settings.marker.trail} onChange={(event) => onChange({ marker: { trail: event.target.checked } })} />
+          <span>A fading trail behind it</span>
+        </label>
+        <label className="overlay-controls__choice">
+          <input type="checkbox" checked={settings.endpoints.shown} onChange={(event) => onChange({ endpoints: { shown: event.target.checked } })} />
+          <span>Start and finish markers, where the trimmed route begins and ends</span>
         </label>
       </Group>
 

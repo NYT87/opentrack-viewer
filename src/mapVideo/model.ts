@@ -64,12 +64,10 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
   });
   if (!built.ok) return built;
   const { timeline } = built;
-  const camera = buildCameraPath(
-    route,
-    settings.camera,
-    { width: settings.output.width, height: settings.output.height },
-    settings.terrain.enabled ? settings.terrain.exaggeration : undefined,
-  );
+  // No height for the camera: over terrain the map holds the centre to the
+  // ground. A height from the route put the marker off centre wherever the
+  // recorded elevation and the terrain model disagree (TD-068).
+  const camera = buildCameraPath(route, settings.camera, { width: settings.output.width, height: settings.output.height });
   const frameCount = Math.round(settings.lengthSeconds * settings.output.fps);
   const middle = route.vertices[Math.floor(route.vertices.length / 2)]!;
   const drawn = simplifiedIndices(route, metersPerPixel(settings.camera.zoom, middle.lat) / 2);

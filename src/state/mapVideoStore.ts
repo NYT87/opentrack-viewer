@@ -30,6 +30,9 @@ interface MapVideoState {
    * not opted back in (TD-065).
    */
   basemapChosen: boolean;
+  /** The reader's MapTiler key: in memory only, never in a project file or storage (TD-064). */
+  maptilerKey: string;
+  setMaptilerKey: (key: string) => void;
   setActivity: (activity: Activity, origin: MapVideoActivityOrigin) => void;
   setBasemap: (basemap: MapVideoBasemap) => void;
   updateSettings: (patch: MapVideoSettingsPatch) => void;
@@ -47,6 +50,8 @@ interface MapVideoState {
 export const useMapVideoStore = create<MapVideoState>((set) => ({
   settings: DEFAULT_MAP_VIDEO_SETTINGS,
   basemapChosen: false,
+  maptilerKey: '',
+  setMaptilerKey: (maptilerKey) => set({ maptilerKey }),
   setActivity: (activity, origin) => set({ activity, origin }),
   setBasemap: (source) =>
     set((state) => ({ basemapChosen: true, settings: { ...state.settings, basemap: { ...state.settings.basemap, source } } })),

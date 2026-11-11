@@ -19,17 +19,46 @@ export const MAP_VIDEO_PROJECT_MAX_BYTES = 256 * 1024;
 export type MapVideoBasemapStyle = 'liberty' | 'positron' | 'bright' | 'dark';
 export const MAP_VIDEO_BASEMAP_STYLES: readonly MapVideoBasemapStyle[] = ['liberty', 'positron', 'bright', 'dark'];
 
+/** MapTiler's maps, drawn with the reader's own key (TD-064): satellite is only offered this way. */
+export type MapTilerStyle = 'satellite' | 'hybrid' | 'outdoor-v2' | 'streets-v2';
+export const MAPTILER_STYLES: readonly MapTilerStyle[] = ['satellite', 'hybrid', 'outdoor-v2', 'streets-v2'];
+
+/** `online` is OpenFreeMap; `maptiler` needs the reader's key; `route-only` fetches nothing. */
+export type MapVideoBasemapSource = 'online' | 'maptiler' | 'route-only';
+export const MAP_VIDEO_BASEMAP_SOURCES: readonly MapVideoBasemapSource[] = ['online', 'maptiler', 'route-only'];
+
+/** What the route's colour shows: one colour, or how a recorded value changes along it. */
+export type MapVideoColorBy = 'none' | 'speed' | 'elevation' | 'heartRate';
+export const MAP_VIDEO_COLOR_BY: readonly MapVideoColorBy[] = ['none', 'speed', 'elevation', 'heartRate'];
+
+export type MapVideoMarkerShape = 'dot' | 'arrow' | 'sport';
+export const MAP_VIDEO_MARKER_SHAPES: readonly MapVideoMarkerShape[] = ['dot', 'arrow', 'sport'];
+
 export interface MapVideoSettings {
   output: { width: number; height: number; fps: number };
   lengthSeconds: number;
   timing: { mode: MapVideoTimingMode; pauseBeatSeconds: number };
   intro: { enabled: boolean; seconds: number };
   outro: { enabled: boolean; seconds: number };
-  /** `online` draws OpenFreeMap's style; `route-only` fetches nothing (TD-064). */
-  basemap: { source: 'online' | 'route-only'; style: MapVideoBasemapStyle };
+  /**
+   * `online` draws OpenFreeMap's style; `maptiler` MapTiler's, with a key the
+   * reader types, which is held in memory and never written here; `route-only`
+   * fetches nothing (TD-064).
+   */
+  basemap: { source: MapVideoBasemapSource; style: MapVideoBasemapStyle; maptilerStyle: MapTilerStyle };
   terrain: { enabled: boolean; exaggeration: number };
   camera: MapVideoCameraSettings;
-  route: { color: string; width: number; casingColor: string; unrevealed: 'dimmed' | 'hidden' };
+  route: {
+    color: string;
+    width: number;
+    casing: boolean;
+    casingColor: string;
+    unrevealed: 'dimmed' | 'hidden';
+    colorBy: MapVideoColorBy;
+  };
+  marker: { shape: MapVideoMarkerShape; size: number; color: string; trail: boolean };
+  /** Start and finish flags, at the ends of the route as trimmed. */
+  endpoints: { shown: boolean };
   /** Hidden from the line, the marker, the camera and the figures (`trimRoute`). */
   privacyTrim: { startMeters: number; endMeters: number };
   /** Figures and graphics over the map (AV-1207); none until then. */
@@ -66,6 +95,7 @@ export const MAP_VIDEO_LIMITS = {
   smoothingMeters: [50, 2000] as const,
   exaggeration: [1, 3] as const,
   routeWidth: [1, 24] as const,
+  markerSize: [6, 48] as const,
   trimMeters: [0, 5000] as const,
 } as const;
 
@@ -75,10 +105,12 @@ export const DEFAULT_MAP_VIDEO_SETTINGS: MapVideoSettings = {
   timing: { mode: 'distance', pauseBeatSeconds: 0.6 },
   intro: { enabled: true, seconds: 2 },
   outro: { enabled: true, seconds: 3 },
-  basemap: { source: 'online', style: 'liberty' },
+  basemap: { source: 'online', style: 'liberty', maptilerStyle: 'satellite' },
   terrain: { enabled: false, exaggeration: 1.5 },
   camera: { zoom: 14.5, pitch: 45, bearing: 'follow', smoothingMeters: 300 },
-  route: { color: '#ff5533', width: 6, casingColor: '#1a1a1a', unrevealed: 'dimmed' },
+  route: { color: '#ff5533', width: 6, casing: true, casingColor: '#1a1a1a', unrevealed: 'dimmed', colorBy: 'none' },
+  marker: { shape: 'dot', size: 18, color: '#ff5533', trail: false },
+  endpoints: { shown: true },
   privacyTrim: { startMeters: 0, endMeters: 0 },
   overlay: null,
 };
@@ -99,6 +131,8 @@ export function outputProblem(settings: Pick<MapVideoSettings, 'output' | 'lengt
   const { width, height, fps } = settings.output;
   const limits = MAP_VIDEO_LIMITS;
   if (!Number.isInteger(width) || !Number.isInteger(height)) return 'The size must be whole pixels.';
+  // H.264 and VP9 encode in blocks of two pixels.
+  if (width % 2 !== 0 || height % 2 !== 0) return 'Each side must be an even number of pixels.';
   if (Math.min(width, height) < limits.minSide || Math.max(width, height) > limits.maxSide) {
     return `Each side must be between ${limits.minSide} and ${limits.maxSide} pixels.`;
   }
@@ -163,7 +197,7 @@ function section(raw: Record<string, unknown> | undefined, key: string): Record<
   return value as Record<string, unknown>;
 }
 
-const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'privacyTrim', 'overlay'];
+const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'marker', 'endpoints', 'privacyTrim', 'overlay'];
 
 /**
  * Opens a project file. The kind, version and size are checked, and every
@@ -211,6 +245,8 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
     const camera = section(s, 'camera');
     const route = section(s, 'route');
     const trim = section(s, 'privacyTrim');
+    const marker = section(s, 'marker');
+    const endpoints = section(s, 'endpoints');
 
     const settings: MapVideoSettings = {
       output: {
@@ -232,8 +268,9 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
         seconds: read(outro, 'seconds', 'settings.outro').number(d.outro.seconds, L.phaseSeconds),
       },
       basemap: {
-        source: read(basemap, 'source', 'settings.basemap').oneOf<'online' | 'route-only'>(d.basemap.source, ['online', 'route-only']),
+        source: read(basemap, 'source', 'settings.basemap').oneOf(d.basemap.source, MAP_VIDEO_BASEMAP_SOURCES),
         style: read(basemap, 'style', 'settings.basemap').oneOf(d.basemap.style, MAP_VIDEO_BASEMAP_STYLES),
+        maptilerStyle: read(basemap, 'maptilerStyle', 'settings.basemap').oneOf(d.basemap.maptilerStyle, MAPTILER_STYLES),
       },
       terrain: {
         enabled: read(terrain, 'enabled', 'settings.terrain').boolean(d.terrain.enabled),
@@ -248,9 +285,18 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
       route: {
         color: read(route, 'color', 'settings.route').color(d.route.color),
         width: read(route, 'width', 'settings.route').number(d.route.width, L.routeWidth),
+        casing: read(route, 'casing', 'settings.route').boolean(d.route.casing),
         casingColor: read(route, 'casingColor', 'settings.route').color(d.route.casingColor),
         unrevealed: read(route, 'unrevealed', 'settings.route').oneOf<'dimmed' | 'hidden'>(d.route.unrevealed, ['dimmed', 'hidden']),
+        colorBy: read(route, 'colorBy', 'settings.route').oneOf(d.route.colorBy, MAP_VIDEO_COLOR_BY),
       },
+      marker: {
+        shape: read(marker, 'shape', 'settings.marker').oneOf(d.marker.shape, MAP_VIDEO_MARKER_SHAPES),
+        size: read(marker, 'size', 'settings.marker').number(d.marker.size, L.markerSize),
+        color: read(marker, 'color', 'settings.marker').color(d.marker.color),
+        trail: read(marker, 'trail', 'settings.marker').boolean(d.marker.trail),
+      },
+      endpoints: { shown: read(endpoints, 'shown', 'settings.endpoints').boolean(d.endpoints.shown) },
       privacyTrim: {
         startMeters: read(trim, 'startMeters', 'settings.privacyTrim').number(d.privacyTrim.startMeters, L.trimMeters),
         endMeters: read(trim, 'endMeters', 'settings.privacyTrim').number(d.privacyTrim.endMeters, L.trimMeters),

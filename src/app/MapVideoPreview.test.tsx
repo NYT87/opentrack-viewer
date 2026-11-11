@@ -132,6 +132,14 @@ describe('the map video preview (AV-1204)', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/privacy trim leaves less than 100 m/);
   });
 
+  it('keeps its place in the video when another basemap makes a new map', async () => {
+    await openWithRoute();
+    fireEvent.change(scrubber(), { target: { value: '12' } });
+    await userEvent.click(screen.getByRole('radio', { name: /^Route only/ }));
+    await waitFor(() => expect(FakeMap.instances).toHaveLength(2));
+    await waitFor(() => expect(readout()).toBe('0:12.0 / 0:30.0'));
+  });
+
   it('draws route only on a map that asks for nothing, and makes a new map to switch', async () => {
     await openWithRoute();
     const online = map();
@@ -191,5 +199,118 @@ describe('the project file (AV-1204, TD-066)', () => {
     expect(JSON.parse(json).activity).toEqual({ fileName: 'route-with-elevation.gpx', points: expect.any(Number) });
     const { activity } = useMapVideoStore.getState();
     for (const point of activity!.points) expect(json).not.toContain(String(point.lat));
+  });
+});
+
+describe('styling the map, the route and the marker (AV-1205)', () => {
+  const attribution = () => document.querySelector('.map-video-preview__frame .map-video-preview__attribution');
+
+  it('draws the map\'s credit in the frame, with no setting to remove it', async () => {
+    await openWithRoute();
+    expect(attribution()).toHaveTextContent('OpenFreeMap © OpenMapTiles Data from OpenStreetMap');
+    expect(screen.queryByRole('checkbox', { name: /attribution|credit/i })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Style' }), 'dark');
+    await waitFor(() => expect(map().options.style).toBe('https://tiles.openfreemap.org/styles/dark'));
+    expect(attribution()).toHaveTextContent('OpenFreeMap');
+  });
+
+  it('credits no one on route only, and offers no terrain there, saying why', async () => {
+    await openWithRoute();
+    await userEvent.click(screen.getByRole('radio', { name: /^Route only/ }));
+    expect(attribution()).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /3D terrain/ })).toBeDisabled();
+    expect(screen.getByText('Terrain needs a map: route only fetches nothing.')).toBeInTheDocument();
+  });
+
+  it('draws terrain from AWS Terrain Tiles, credited in the frame, with the hills exaggerated as asked', async () => {
+    await openWithRoute();
+    await userEvent.click(screen.getByRole('checkbox', { name: /3D terrain/ }));
+    await waitFor(() => expect(FakeMap.instances).toHaveLength(2));
+    act(() => map().completeStyleLoad());
+    await waitFor(() => expect(map().terrain).toEqual({ source: 'map-video-dem', exaggeration: 1.5 }));
+    expect(map().sourceSpecs.get('map-video-dem')).toMatchObject({
+      type: 'raster-dem',
+      encoding: 'terrarium',
+      tiles: ['https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png'],
+    });
+    // The map holds the centre to the ground, so the marker stays in the middle of the frame (TD-068).
+    expect(map().options.centerClampedToGround).toBe(true);
+    expect(lastJump()).not.toHaveProperty('elevation');
+    expect(attribution()).toHaveTextContent(/Terrain: Mapzen, AWS Open Data/);
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Hills exaggerated' }), { target: { value: '2.5' } });
+    expect(map().terrain).toEqual({ source: 'map-video-dem', exaggeration: 2.5 });
+    expect(FakeMap.instances).toHaveLength(2);
+  });
+
+  it('asks MapTiler only with a key, which never reaches the project file', async () => {
+    await openWithRoute();
+    await userEvent.click(screen.getByRole('radio', { name: /^MapTiler/ }));
+    await waitFor(() => expect(typeof map().options.style).toBe('object'));
+    expect(screen.getByText(/Type your key to see the map/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('MapTiler key'), 'k3y');
+    await waitFor(() => expect(map().options.style).toBe('https://api.maptiler.com/maps/satellite/style.json?key=k3y'));
+    expect(attribution()).toHaveTextContent('© MapTiler © OpenStreetMap contributors');
+    expect(JSON.stringify(useMapVideoStore.getState().settings)).not.toContain('k3y');
+    expect(window.localStorage.getItem('opentrack-viewer:map-video')).toBeNull();
+  });
+
+  it('colours the line by a recorded value, and disables what the file lacks, with the reason', async () => {
+    await openWithRoute('simple-route.gpx');
+    const bare = screen.getByRole('combobox', { name: 'Colour' });
+    expect(within(bare).getByRole('option', { name: 'Elevation (not recorded)' })).toBeDisabled();
+    expect(within(bare).getByRole('option', { name: 'Heart rate (not recorded)' })).toBeDisabled();
+    expect(screen.getByText(/Heart rate: This activity records no heart rate/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await userEvent.upload(screen.getByTestId('map-video-activity-input'), fixtureFile('route-with-elevation.gpx'));
+    const colour = await screen.findByRole('combobox', { name: 'Colour' });
+    await waitFor(() => expect(within(colour).getByRole('option', { name: 'Elevation' })).toBeEnabled());
+    act(() => map().completeStyleLoad());
+    await userEvent.selectOptions(colour, 'elevation');
+    const paint = map().paintProperties['map-video-reveal.line-color'] as unknown[];
+    expect(paint[0]).toBe('match');
+    expect(screen.getByRole('paragraph', { name: 'Route colours' })).toBeInTheDocument();
+    fireEvent.change(scrubber(), { target: { value: '27' } });
+    const reveal = map().sources.get('map-video-reveal')!.data as { features: { properties: { bin: number } }[] };
+    expect(new Set(reveal.features.map((feature) => feature.properties.bin)).size).toBeGreaterThan(1);
+  });
+
+  it('sets the line\'s width, casing and the rest of the route', async () => {
+    await openWithRoute();
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Line width' }), { target: { value: '10' } });
+    expect(map().paintProperties['map-video-reveal.line-width']).toBe(10);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'A darker edge along the line' }));
+    expect(map().layoutProperties['map-video-reveal-casing']).toBe('none');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Show the route still to come, dimmed' }));
+    expect((map().sources.get('map-video-rest')!.data as { features: unknown[] }).features).toHaveLength(0);
+  });
+
+  it('turns the arrow with the route, and draws the trail and the start and finish', async () => {
+    await openWithRoute();
+    fireEvent.change(scrubber(), { target: { value: '15' } });
+    await userEvent.click(screen.getByRole('radio', { name: 'An arrow pointing the way' }));
+    // jsdom has no canvas to draw the icon on, so the map falls back to the dot: the layer is chosen, and the turn set.
+    const marker = map().sources.get('map-video-marker')!.data as { features: { properties: { rotate: number } }[] };
+    expect(typeof marker.features[0]!.properties.rotate).toBe('number');
+    expect(map().layoutProperties['map-video-marker-icon.icon-size']).toBeCloseTo(18 / 96, 9);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'A fading trail behind it' }));
+    const trail = map().sources.get('map-video-trail')!.data as { features: { geometry: { coordinates: unknown[] } }[] };
+    expect(trail.features[0]!.geometry.coordinates.length).toBeGreaterThan(1);
+    expect(map().sourceSpecs.get('map-video-trail')).toMatchObject({ lineMetrics: true });
+    const ends = map().sources.get('map-video-ends')!.data as { features: { properties: { end: string } }[] };
+    expect(ends.features.map((feature) => feature.properties.end)).toEqual(['start', 'finish']);
+    await userEvent.click(screen.getByRole('checkbox', { name: /Start and finish markers/ }));
+    expect((map().sources.get('map-video-ends')!.data as { features: unknown[] }).features).toHaveLength(0);
+  });
+
+  it('takes a custom size in even pixels, and says when it is too large', async () => {
+    await openWithRoute();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Size' }), 'Custom');
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Width' }), { target: { value: '1281' } });
+    expect(useMapVideoStore.getState().settings.output.width % 2).toBe(0);
+    expect(frame()).toHaveStyle({ aspectRatio: `${useMapVideoStore.getState().settings.output.width} / 1080` });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Width' }), { target: { value: '4096' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Height' }), { target: { value: '4096' } });
+    expect(screen.getByText('The size is larger than 4K (3840 × 2160 pixels).')).toBeInTheDocument();
   });
 });

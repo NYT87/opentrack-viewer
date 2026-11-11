@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { join } from 'node:path';
-import { countPixelsNear, decodePng } from './helpers/png';
+import { countPixelsNear, decodePng, solidPng } from './helpers/png';
 
 /**
  * AV-1202. The map video page in a real browser: reached from Tools, opened
@@ -168,4 +168,48 @@ test('asks OpenFreeMap for the online map, and nothing else outside the page', a
   expect(offOrigin(requests).filter((url) => !url.startsWith('https://tiles.openfreemap.org/'))).toEqual([]);
   // The source's attribution is not folded away.
   await expect(page.locator('.maplibregl-ctrl-attrib.maplibregl-compact')).toHaveCount(0);
+});
+
+test('styles the route by elevation with an arrow on route only, asking nothing', async ({ page }) => {
+  await page.goto('./#/map-video');
+  const requests = recordRequests(page);
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
+  await page.getByRole('radio', { name: /^Route only/ }).check();
+  await page.getByRole('combobox', { name: 'Colour' }).selectOption('elevation');
+  await page.getByRole('radio', { name: 'An arrow pointing the way' }).check();
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('27');
+
+  // The palette's two ends are both on the drawn line: the route climbs from the coolest step to the hottest.
+  await expect
+    .poll(async () => {
+      const shot = await previewShot(page);
+      return [countPixelsNear(shot, [0x2c, 0x7b, 0xb6], 30) > 20, countPixelsNear(shot, [0xd7, 0x19, 0x1c], 30) > 20];
+    }, { timeout: 5000 })
+    .toEqual([true, true]);
+  await expect(page.locator('.map-video-preview__attribution')).toHaveCount(0);
+  expect(offOrigin(requests)).toEqual([]);
+});
+
+test('draws terrain from the AWS bucket alone, and credits it in the frame', async ({ page }) => {
+  const asked = await stubOpenFreeMap(page);
+  const terrain: string[] = [];
+  // A flat Terrarium tile: elevation 0 everywhere (red 128, green 0, blue 0).
+  const flat = solidPng(256, [128, 0, 0]);
+  await page.route('https://elevation-tiles-prod.s3.amazonaws.com/**', (route) => {
+    terrain.push(route.request().url());
+    return route.fulfill({ contentType: 'image/png', body: flat, headers: { 'access-control-allow-origin': '*' } });
+  });
+  await page.goto('./#/map-video');
+  const requests = recordRequests(page);
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
+  await page.getByRole('checkbox', { name: /3D terrain/ }).check();
+
+  await expect.poll(() => terrain.length, { timeout: 10_000 }).toBeGreaterThan(0);
+  expect(terrain.every((url) => /^https:\/\/elevation-tiles-prod\.s3\.amazonaws\.com\/terrarium\/\d+\/\d+\/\d+\.png$/.test(url))).toBe(true);
+  expect(asked.length).toBeGreaterThan(0);
+  const hosts = new Set(offOrigin(requests).map((url) => new URL(url).host));
+  expect([...hosts].sort()).toEqual(['elevation-tiles-prod.s3.amazonaws.com', 'tiles.openfreemap.org']);
+  await expect(page.locator('.map-video-preview__frame .map-video-preview__attribution')).toHaveText(
+    /OpenFreeMap © OpenMapTiles Data from OpenStreetMap · Terrain: Mapzen, AWS Open Data/,
+  );
 });

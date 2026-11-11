@@ -11,9 +11,9 @@ const settings = (patch: Partial<MapVideoCameraSettings> = {}): MapVideoCameraSe
   ...patch,
 });
 const viewport = { width: 1920, height: 1080 };
-const pathOf = (points: TestPoint[], patch?: Partial<MapVideoCameraSettings>, elevationScale?: number) => {
+const pathOf = (points: TestPoint[], patch?: Partial<MapVideoCameraSettings>) => {
   const route = buildMapVideoRoute(activityThrough(points))!;
-  return { route, path: buildCameraPath(route, settings(patch), viewport, elevationScale) };
+  return { route, path: buildCameraPath(route, settings(patch), viewport) };
 };
 /** The signed shortest turn from `a` to `b`, in degrees. */
 const turn = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
@@ -93,20 +93,6 @@ describe('the follow camera (AV-1203)', () => {
   it('interpolates bearings the short way round', () => {
     expect(lerpBearing(350, 10, 0.5)).toBeCloseTo(0, 9);
     expect(lerpBearing(10, 350, 0.25)).toBeCloseTo(5, 9);
-  });
-});
-
-describe('the camera height (AV-1203, TD-064)', () => {
-  const climbing = straightNorth(2000).map((point) => ({ ...point, elevation: 100 + point.north / 10 }));
-
-  it('comes from the route\'s elevation, smoothed and exaggerated', () => {
-    const { path } = pathOf(climbing, {}, 1.5);
-    expect(path.follow(1000).elevation).toBeCloseTo(200 * 1.5, 0);
-  });
-
-  it('is left to the map on a flat map, or a route without elevation', () => {
-    expect(pathOf(climbing).path.follow(1000).elevation).toBeUndefined();
-    expect(pathOf(straightNorth(2000), {}, 1.5).path.follow(1000).elevation).toBeUndefined();
   });
 });
 

@@ -1,16 +1,48 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Map as MapLibreMap, setWorkerUrl, type GeoJSONSource, type StyleSpecification } from 'maplibre-gl';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  Map as MapLibreMap,
+  setWorkerUrl,
+  type ExpressionSpecification,
+  type GeoJSONSource,
+  type StyleSpecification,
+} from 'maplibre-gl';
 // See ActivityMap: once bundled, MapLibre cannot find its worker on its own.
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { FeatureCollection, LineString, MultiLineString, Point } from 'geojson';
-import type { MapVideoFrame, MapVideoModel } from '../mapVideo/model';
+import type { Feature, FeatureCollection, LineString, Point } from 'geojson';
+import type { Activity } from '../domain/activity';
+import { formatElevation, formatSpeed, type UnitSystem } from '../domain/units';
+import type { MapVideoModel } from '../mapVideo/model';
 import type { MapVideoSettings } from '../mapVideo/project';
+import { MARKER_ICON_PIXELS, markerIconImage, sportIcon } from '../mapVideo/markerIcons';
+import {
+  COLOR_BY_PALETTE,
+  TERRAIN_TILES,
+  coloredRuns,
+  drawnWithColorSteps,
+  headingAt,
+  mapVideoAttribution,
+  routeColors,
+  terrainActive,
+  trailAt,
+} from '../mapVideo/style';
 
 setWorkerUrl(maplibreWorkerUrl);
 
 /** OpenFreeMap's styles, keyless and allowed for video with attribution (TD-064). */
 export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/';
+/** MapTiler's styles, asked for with the reader's own key. */
+export const MAPTILER_STYLE_URL = 'https://api.maptiler.com/maps/';
+
+/** The style a map video's basemap is drawn from, or undefined for route only, or MapTiler without a key. */
+export function basemapStyleUrl(settings: MapVideoSettings, maptilerKey: string): string | undefined {
+  if (settings.basemap.source === 'online') return `${OPENFREEMAP_STYLE_URL}${settings.basemap.style}`;
+  if (settings.basemap.source === 'maptiler') {
+    const key = maptilerKey.trim();
+    return key ? `${MAPTILER_STYLE_URL}${settings.basemap.maptilerStyle}/style.json?key=${encodeURIComponent(key)}` : undefined;
+  }
+  return undefined;
+}
 
 /**
  * Route only: a background and nothing else, so no tile, glyph or sprite is
@@ -22,37 +54,50 @@ function routeOnlyStyle(background: string): StyleSpecification {
 
 const REST = 'map-video-rest';
 const REVEAL = 'map-video-reveal';
+const CASING = 'map-video-reveal-casing';
+const TRAIL = 'map-video-trail';
 const MARKER = 'map-video-marker';
+const MARKER_ICON = 'map-video-marker-icon';
+const ENDS = 'map-video-ends';
+const DEM = 'map-video-dem';
+const OWN_SOURCES = [REST, REVEAL, TRAIL, MARKER, ENDS];
+
+/** How far behind the marker its trail reaches, in metres. */
+const TRAIL_METERS = 400;
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
+const lineFeature = (coordinates: [number, number][], properties: Record<string, unknown> = {}): Feature<LineString> => ({
+  type: 'Feature',
+  properties,
+  geometry: { type: 'LineString', coordinates },
+});
+const pointFeature = (coordinates: [number, number], properties: Record<string, unknown> = {}): Feature<Point> => ({
+  type: 'Feature',
+  properties,
+  geometry: { type: 'Point', coordinates },
+});
 
-function revealData(frame: MapVideoFrame): FeatureCollection<MultiLineString> {
-  // A one-point line draws nothing; MapLibre is given only lines it can draw.
-  const lines = frame.reveal.lines.filter((line) => line.length > 1);
-  return {
-    type: 'FeatureCollection',
-    features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: lines } }],
-  };
-}
-
-function markerData(frame: MapVideoFrame): FeatureCollection<Point> {
-  return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: frame.reveal.marker } }] };
+/** The drawn line's colour: one, or a step of the palette per run. */
+function revealColor(settings: MapVideoSettings, colored: boolean): string | ExpressionSpecification {
+  if (!colored) return settings.route.color;
+  const steps = COLOR_BY_PALETTE.flatMap((color, bin) => [bin, color]);
+  return ['match', ['get', 'bin'], ...steps, settings.route.color] as unknown as ExpressionSpecification;
 }
 
 function restData(model: MapVideoModel): FeatureCollection<LineString> {
-  const features: FeatureCollection<LineString>['features'] = [];
+  const features: Feature<LineString>[] = [];
   let line: [number, number][] = [];
   let segment: number | undefined;
   for (const i of model.drawn) {
     const vertex = model.route.vertices[i]!;
     if (segment !== undefined && vertex.segment !== segment && line.length > 0) {
-      features.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: line } });
+      features.push(lineFeature(line));
       line = [];
     }
     segment = vertex.segment;
     line.push([vertex.lon, vertex.lat]);
   }
-  features.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: line } });
+  features.push(lineFeature(line));
   return { type: 'FeatureCollection', features };
 }
 
@@ -65,8 +110,18 @@ export function formatVideoTime(seconds: number): string {
 }
 
 export interface MapVideoPreviewProps {
+  activity: Activity;
   model: MapVideoModel;
   settings: MapVideoSettings;
+  /** The reader's MapTiler key, held in memory only. */
+  maptilerKey?: string;
+  units?: UnitSystem;
+  /**
+   * Where the preview is in the video, held by the page: read once to start,
+   * written as the position moves, so a new map for another basemap carries
+   * on from where the last one was.
+   */
+  positionRef?: { current: number };
 }
 
 /**
@@ -79,11 +134,18 @@ export interface MapVideoPreviewProps {
  * The framing is the export's: the zoom is offset by how much smaller the
  * preview is than the video, so the same stretch of map is in view.
  *
- * A map is made per basemap: switching between online and route only makes a
- * new one, since MapLibre's `setStyle` stops its worker (ActivityMap, AV-803).
- * The parent keys this component by the basemap.
+ * AV-1205. Styled as the export will be: the route in one colour or by a
+ * recorded value, with or without a casing, the rest dimmed or hidden; the
+ * marker a dot, an arrow along the heading or the sport's icon, with a
+ * fading trail; start and finish markers; 3D terrain; and the map's credit
+ * drawn in the frame, where no setting removes it.
+ *
+ * A map is made per basemap and terrain: switching makes a new one, since
+ * MapLibre's `setStyle` stops its worker (ActivityMap, AV-803), and whether
+ * the camera follows the ground is fixed when a map is made. The parent keys
+ * this component by them.
  */
-export function MapVideoPreview({ model, settings }: MapVideoPreviewProps) {
+export function MapVideoPreview({ activity, model, settings, maptilerKey = '', units = 'metric', positionRef }: MapVideoPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [ready, setReady] = useState(false);
@@ -93,86 +155,167 @@ export function MapVideoPreview({ model, settings }: MapVideoPreviewProps) {
   const scrubberId = useId();
   const length = model.timeline.lengthSeconds;
   const frameSeconds = 1 / settings.output.fps;
-  const online = settings.basemap.source === 'online';
+  const styleUrl = basemapStyleUrl(settings, maptilerKey);
+  const terrain = terrainActive(settings);
+  const attribution = mapVideoAttribution(settings);
+  const colors = useMemo(() => {
+    const steps = routeColors(activity, model.route, settings.route.colorBy);
+    return steps && { ...steps, drawn: drawnWithColorSteps(model.drawn, steps) };
+  }, [activity, model.route, model.drawn, settings.route.colorBy]);
+  const sport = sportIcon(activity.metadata.sport);
 
-  // What the drawing reads, without making a new map for each change.
-  // Updated before the effects below run, which draw from it.
-  const latest = useRef({ model, settings, seconds });
+  // What the drawing reads, without making a new map for each change; updated before the effects below run.
+  const latest = useRef({ model, settings, seconds, colors });
   useLayoutEffect(() => {
-    latest.current = { model, settings, seconds };
+    latest.current = { model, settings, seconds, colors };
   });
 
-  // Make the map once; the parent makes a new component for another basemap.
+  // Make the map once; the parent makes a new component for another basemap or terrain.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const background = getComputedStyle(container).getPropertyValue('--map-video-background').trim() || '#11161c';
+    const now = latest.current.settings;
     const map = new MapLibreMap({
       container,
-      style: online ? `${OPENFREEMAP_STYLE_URL}${latest.current.settings.basemap.style}` : routeOnlyStyle(background),
+      style: styleUrl ?? routeOnlyStyle(background),
       interactive: false,
-      // The source's attribution is always shown on an online map, never folded away (TD-064).
-      attributionControl: online ? { compact: false } : false,
+      // The credit is drawn in the frame below, as the export draws it, so the control is not needed.
+      attributionControl: false,
       // No fades: a fade runs on the wall clock, and the export has none (TD-064).
       fadeDuration: 0,
+      // Over terrain the centre is held to the ground, as MapLibre does by default (TD-068).
+      centerClampedToGround: true,
     });
     mapRef.current = map;
     map.on('load', () => {
-      map.addSource(REST, { type: 'geojson', data: EMPTY });
-      map.addSource(REVEAL, { type: 'geojson', data: EMPTY });
-      map.addSource(MARKER, { type: 'geojson', data: EMPTY });
-      const route = latest.current.settings.route;
-      map.addLayer({ id: REST, type: 'line', source: REST, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': route.color, 'line-opacity': 0.35, 'line-width': route.width * 0.6 } });
-      map.addLayer({ id: `${REVEAL}-casing`, type: 'line', source: REVEAL, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': route.casingColor, 'line-width': route.width + 3 } });
-      map.addLayer({ id: REVEAL, type: 'line', source: REVEAL, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': route.color, 'line-width': route.width } });
-      map.addLayer({ id: MARKER, type: 'circle', source: MARKER, paint: { 'circle-radius': route.width + 3, 'circle-color': route.color, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
+      for (const id of OWN_SOURCES) map.addSource(id, { type: 'geojson', data: EMPTY, ...(id === TRAIL ? { lineMetrics: true } : {}) });
+      if (terrain) {
+        map.addSource(DEM, { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 15 });
+        map.setTerrain({ source: DEM, exaggeration: now.terrain.exaggeration });
+      }
+      const round = { 'line-join': 'round', 'line-cap': 'round' } as const;
+      map.addLayer({ id: REST, type: 'line', source: REST, layout: round, paint: { 'line-opacity': 0.35 } });
+      map.addLayer({ id: CASING, type: 'line', source: REVEAL, layout: round, paint: {} });
+      map.addLayer({ id: REVEAL, type: 'line', source: REVEAL, layout: round, paint: {} });
+      map.addLayer({ id: TRAIL, type: 'line', source: TRAIL, layout: round, paint: {} });
+      map.addLayer({
+        id: ENDS,
+        type: 'circle',
+        source: ENDS,
+        paint: {
+          'circle-radius': 7,
+          'circle-color': ['match', ['get', 'end'], 'start', '#2fbf71', '#1a1a1a'],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 3,
+          'circle-pitch-alignment': 'map',
+        },
+      });
+      map.addLayer({ id: MARKER, type: 'circle', source: MARKER, paint: { 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } });
+      map.addLayer({
+        id: MARKER_ICON,
+        type: 'symbol',
+        source: MARKER,
+        layout: {
+          'icon-image': MARKER_ICON,
+          'icon-rotate': ['get', 'rotate'],
+          'icon-rotation-alignment': 'map',
+          'icon-pitch-alignment': 'map',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+        },
+      });
       setReady(true);
     });
     map.on('error', (event) => {
       const sourceId = (event as { sourceId?: string }).sourceId;
-      if (sourceId === REST || sourceId === REVEAL || sourceId === MARKER) return;
+      if (sourceId && OWN_SOURCES.includes(sourceId)) return;
       setMapError(event.error?.message ?? 'The online map could not be loaded.');
     });
     return () => {
       map.remove();
       mapRef.current = null;
     };
-    // The basemap is fixed for this component's life: see the doc comment.
+    // The basemap and terrain are fixed for this component's life: see the doc comment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Draws the moment `at` of the video: the camera, the line and the marker. */
+  /** Draws the moment `at` of the video: the camera, the line, the trail and the marker. */
   const draw = useCallback((at: number) => {
     const map = mapRef.current;
     if (!map) return;
-    const { model: current, settings: now } = latest.current;
+    const { model: current, settings: now, colors: steps } = latest.current;
     const frame = current.at(at);
     const width = containerRef.current?.clientWidth ?? 0;
     const offset = width > 0 ? Math.log2(width / now.output.width) : 0;
     const { center, zoom, pitch, bearing } = frame.camera;
     map.jumpTo({ center, zoom: zoom + offset, pitch, bearing });
-    (map.getSource(REVEAL) as GeoJSONSource | undefined)?.setData(revealData(frame));
-    (map.getSource(MARKER) as GeoJSONSource | undefined)?.setData(markerData(frame));
+    const distance = frame.sample.distance;
+    const revealed: FeatureCollection<LineString> = steps
+      ? {
+          type: 'FeatureCollection',
+          features: coloredRuns(current.route, distance, steps.drawn, steps)
+            .filter((run) => run.line.length > 1)
+            .map((run) => lineFeature(run.line, { bin: run.bin })),
+        }
+      : { type: 'FeatureCollection', features: frame.reveal.lines.filter((line) => line.length > 1).map((line) => lineFeature(line)) };
+    (map.getSource(REVEAL) as GeoJSONSource | undefined)?.setData(revealed);
+    const trail = now.marker.trail ? trailAt(current.route, distance, TRAIL_METERS) : [];
+    (map.getSource(TRAIL) as GeoJSONSource | undefined)?.setData(trail.length > 1 ? { type: 'FeatureCollection', features: [lineFeature(trail)] } : EMPTY);
+    (map.getSource(MARKER) as GeoJSONSource | undefined)?.setData({
+      type: 'FeatureCollection',
+      features: [pointFeature(frame.reveal.marker, { rotate: now.marker.shape === 'arrow' ? headingAt(current.route, distance) : 0 })],
+    });
   }, []);
 
-  // A new model (any setting changed): the rest of the route, the style, and the frame showing.
+  // A new model or style: the rest of the route, the ends, the paint, and the frame showing.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    (map.getSource(REST) as GeoJSONSource | undefined)?.setData(settings.route.unrevealed === 'hidden' ? EMPTY : restData(model));
-    const route = settings.route;
+    const { route, marker, endpoints, terrain: relief } = settings;
+    (map.getSource(REST) as GeoJSONSource | undefined)?.setData(route.unrevealed === 'hidden' ? EMPTY : restData(model));
+    const first = model.route.vertices[0]!;
+    const last = model.route.vertices[model.route.vertices.length - 1]!;
+    (map.getSource(ENDS) as GeoJSONSource | undefined)?.setData(
+      endpoints.shown
+        ? { type: 'FeatureCollection', features: [pointFeature([first.lon, first.lat], { end: 'start' }), pointFeature([last.lon, last.lat], { end: 'finish' })] }
+        : EMPTY,
+    );
     map.setPaintProperty(REST, 'line-color', route.color);
-    map.setPaintProperty(REVEAL, 'line-color', route.color);
-    map.setPaintProperty(`${REVEAL}-casing`, 'line-color', route.casingColor);
-    map.setPaintProperty(MARKER, 'circle-color', route.color);
+    map.setPaintProperty(REST, 'line-width', Math.max(1, route.width * 0.6));
+    map.setPaintProperty(REVEAL, 'line-color', revealColor(settings, colors !== undefined));
+    map.setPaintProperty(REVEAL, 'line-width', route.width);
+    map.setPaintProperty(CASING, 'line-color', route.casingColor);
+    map.setPaintProperty(CASING, 'line-width', route.width + 4);
+    map.setLayoutProperty(CASING, 'visibility', route.casing ? 'visible' : 'none');
+    map.setPaintProperty(TRAIL, 'line-width', route.width * 1.8);
+    map.setPaintProperty(TRAIL, 'line-gradient', ['interpolate', ['linear'], ['line-progress'], 0, `${marker.color}00`, 1, `${marker.color}cc`]);
+    map.setPaintProperty(MARKER, 'circle-color', marker.color);
+    map.setPaintProperty(MARKER, 'circle-radius', marker.size / 2);
+    const icon = markerIconImage(marker.shape, sport, marker.color);
+    if (map.hasImage(MARKER_ICON)) map.removeImage(MARKER_ICON);
+    if (icon) map.addImage(MARKER_ICON, icon, { pixelRatio: 1 });
+    map.setLayoutProperty(MARKER, 'visibility', marker.shape === 'dot' || !icon ? 'visible' : 'none');
+    map.setLayoutProperty(MARKER_ICON, 'visibility', marker.shape !== 'dot' && icon ? 'visible' : 'none');
+    map.setLayoutProperty(MARKER_ICON, 'icon-size', marker.size / MARKER_ICON_PIXELS);
+    if (terrain) map.setTerrain({ source: DEM, exaggeration: relief.exaggeration });
     if (latest.current.seconds > length) setSeconds(length);
     draw(Math.min(latest.current.seconds, length));
-  }, [model, settings.route, ready, draw, length]);
+  }, [model, settings, colors, sport, ready, draw, length, terrain]);
+
+  // A new map carries on from where the last one was.
+  useEffect(() => {
+    const start = positionRef?.current ?? 0;
+    if (start > 0) setSeconds(Math.min(start, latest.current.model.timeline.lengthSeconds));
+    // Once, when this map's preview starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The frame showing, whenever the position moves.
   useEffect(() => {
     if (ready) draw(seconds);
-  }, [seconds, ready, draw]);
+    if (positionRef) positionRef.current = seconds;
+  }, [seconds, ready, draw, positionRef]);
 
   // Playing: the position follows the clock, so the preview skips what it cannot draw in time.
   useEffect(() => {
@@ -233,6 +376,8 @@ export function MapVideoPreview({ model, settings }: MapVideoPreviewProps) {
         onKeyDown={onKeyDown}
       >
         <div ref={containerRef} className="map-video-preview__map" data-testid="map-video-map" />
+        {/* In the frame, as the export draws it, and never turned off (TD-064). */}
+        {attribution && <p className="map-video-preview__attribution">{attribution}</p>}
       </div>
       <div className="map-video-preview__transport">
         <button type="button" className="button" onClick={togglePlay}>
@@ -266,13 +411,27 @@ export function MapVideoPreview({ model, settings }: MapVideoPreviewProps) {
         The preview is a guide: it skips frames to keep up, and may show the map before every tile has
         arrived. The export draws every frame, each with all of its map.
       </p>
-      {mapError && online && (
+      {colors && (
+        <p className="map-video-preview__legend" aria-label="Route colours">
+          <span>{formatLegend(settings.route.colorBy, colors.low, units)}</span>
+          <span className="map-video-preview__ramp" style={{ background: `linear-gradient(to right, ${COLOR_BY_PALETTE.join(', ')})` }} />
+          <span>{formatLegend(settings.route.colorBy, colors.high, units)}</span>
+        </p>
+      )}
+      {mapError && styleUrl && (
         <p className="map-video-preview__note" role="status">
-          The online map did not load fully: {mapError}. The route still shows; route only needs no map.
+          The map did not load fully: {mapError}. The route still shows; route only needs no map.
         </p>
       )}
     </section>
   );
+}
+
+/** A legend end, in the reader's units. */
+function formatLegend(by: MapVideoSettings['route']['colorBy'], value: number, units: UnitSystem): string {
+  if (by === 'speed') return formatSpeed(value, units);
+  if (by === 'elevation') return formatElevation(value, units);
+  return `${Math.round(value)} bpm`;
 }
 
 export default MapVideoPreview;

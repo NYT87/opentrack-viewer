@@ -31,10 +31,11 @@ function contentSecurityPolicy(): Plugin {
           `script-src 'self' 'unsafe-eval' ${hashes.join(' ')}`,
           // React and MapLibre position elements using inline style attributes.
           "style-src 'self' 'unsafe-inline'",
-          // The viewer's map tiles, and the map video's OpenFreeMap style, tiles,
-          // glyphs and sprites, all from that one host (TD-064).
-          "img-src 'self' blob: data: https://tile.openstreetmap.org https://tiles.openfreemap.org",
-          "connect-src 'self' blob: https://tile.openstreetmap.org https://tiles.openfreemap.org",
+          // The viewer's map tiles; the map video's OpenFreeMap style, tiles, glyphs
+          // and sprites, all from that one host; MapTiler's, with the reader's key;
+          // and AWS Terrain Tiles from their own bucket, not all of S3 (TD-064).
+          "img-src 'self' blob: data: https://tile.openstreetmap.org https://tiles.openfreemap.org https://api.maptiler.com https://elevation-tiles-prod.s3.amazonaws.com",
+          "connect-src 'self' blob: https://tile.openstreetmap.org https://tiles.openfreemap.org https://api.maptiler.com https://elevation-tiles-prod.s3.amazonaws.com",
           "media-src 'self' blob:",
           "worker-src 'self' blob:",
           "font-src 'self'",

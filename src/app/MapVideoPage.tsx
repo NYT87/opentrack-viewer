@@ -1,7 +1,9 @@
 import { Suspense, lazy, useMemo, useRef, useState } from 'react';
 import { FileDropZone } from '../components/FileDropZone';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
+import { MapVideoBasemapChoice } from '../components/MapVideoBasemapChoice';
 import { MapVideoSettingsPanel } from '../components/MapVideoSettingsPanel';
+import { colorByChoices, terrainActive } from '../mapVideo/style';
 import { MapVideoProjectFile } from '../components/MapVideoProjectFile';
 import { buildMapVideoModel } from '../mapVideo/model';
 import { ActivityError, toActivityError } from '../domain/errors';
@@ -57,6 +59,8 @@ export function MapVideoPage() {
   const setBasemap = useMapVideoStore((state) => state.setBasemap);
   const updateSettings = useMapVideoStore((state) => state.updateSettings);
   const replaceSettings = useMapVideoStore((state) => state.replaceSettings);
+  const maptilerKey = useMapVideoStore((state) => state.maptilerKey);
+  const setMaptilerKey = useMapVideoStore((state) => state.setMaptilerKey);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
   // Until chosen here, the app's own setting decides: tiles off there means route only here.
@@ -65,9 +69,13 @@ export function MapVideoPage() {
     [storedSettings, basemapChosen, basemapEnabled],
   );
   const basemap = settings.basemap.source;
+  // A new map for another style, key or terrain: see MapVideoPreview.
+  const mapKey = [basemap, settings.basemap.style, settings.basemap.maptilerStyle, basemap === 'maptiler' ? maptilerKey.trim() : '', terrainActive(settings)].join('|');
   const built = useMemo(() => (activity ? buildMapVideoModel(activity, settings) : undefined), [activity, settings]);
 
   const [slot, setSlot] = useState<SlotState>(IDLE);
+  /** Where the preview is in the video, kept here so a new map (another basemap) carries on from it. */
+  const positionRef = useRef(0);
   const slotRef = useRef<HTMLElement>(null);
   const replace = useRef<HTMLInputElement>(null);
   /** A read finishing after a newer one, or after Remove, writes nothing. */
@@ -120,7 +128,15 @@ export function MapVideoPage() {
             {built?.ok && (
               <Suspense fallback={<p role="status">Loading the map…</p>}>
                 {/* A new map for another basemap: MapLibre's setStyle stops its worker. */}
-                <MapVideoPreview key={basemap} model={built.model} settings={settings} />
+                <MapVideoPreview
+                  key={mapKey}
+                  activity={activity!}
+                  model={built.model}
+                  settings={settings}
+                  maptilerKey={maptilerKey}
+                  units={unitSystem}
+                  positionRef={positionRef}
+                />
               </Suspense>
             )}
             {built && !built.ok && (
@@ -209,30 +225,13 @@ export function MapVideoPage() {
 
             {/* Said before any map exists, so no tile is fetched before the reader has read this (TD-064). */}
             {activity && (
-              <fieldset className="prose map-video-basemap">
-                <legend className="prose__title">Map</legend>
-                <label className="overlay-controls__choice">
-                  <input
-                    type="radio"
-                    name="map-video-basemap"
-                    checked={basemap === 'online'}
-                    onChange={() => setBasemap('online')}
-                  />
-                  <span>
-                    Online map. Its tiles come from OpenFreeMap, whose server learns which area the video
-                    shows, as any online map does. The route itself is never sent.
-                  </span>
-                </label>
-                <label className="overlay-controls__choice">
-                  <input
-                    type="radio"
-                    name="map-video-basemap"
-                    checked={basemap === 'route-only'}
-                    onChange={() => setBasemap('route-only')}
-                  />
-                  <span>Route only. The route is drawn on a plain background, and nothing is fetched.</span>
-                </label>
-              </fieldset>
+              <MapVideoBasemapChoice
+                settings={settings}
+                onSource={setBasemap}
+                onChange={updateSettings}
+                maptilerKey={maptilerKey}
+                onMaptilerKey={setMaptilerKey}
+              />
             )}
             {activity && (
               <MapVideoSettingsPanel
@@ -240,6 +239,7 @@ export function MapVideoPage() {
                 onChange={updateSettings}
                 units={unitSystem}
                 timingNote={built?.ok ? built.model.timeline.modeNote : undefined}
+                colorBy={built?.ok ? colorByChoices(activity, built.model.route) : undefined}
               />
             )}
             {activity && <MapVideoProjectFile activity={activity} settings={settings} onOpen={replaceSettings} />}
