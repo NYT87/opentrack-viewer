@@ -8,6 +8,7 @@ import { OverlayExportPanel } from '../components/OverlayExportPanel';
 import { OverlayPreview } from '../components/OverlayPreview';
 import { RouteOverlayPanel } from '../components/RouteOverlayPanel';
 import { CustomCanvas } from '../components/CustomCanvas';
+import { MapImagePanel } from '../components/MapImagePanel';
 import { VideoReadProgress } from '../components/VideoReadProgress';
 import type { Activity } from '../domain/activity';
 import { ActivityError, toActivityError } from '../domain/errors';
@@ -15,6 +16,7 @@ import { formatDistance, formatDuration, formatFileSize, type UnitSystem } from 
 import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { useInteractionStore } from '../state/interactionStore';
+import { useMapImageStore } from '../state/mapImageStore';
 import {
   hasOverlaySource,
   useOverlayStore,
@@ -96,6 +98,9 @@ export function OverlayPage() {
   const canvasMode = useOverlayStore((state) => state.canvasMode);
   const setCanvasMode = useOverlayStore((state) => state.setCanvasMode);
   const canvasDraft = useOverlayStore((state) => state.canvasDraft);
+  /** AV-1013. Making an image of the activity's map, which needs no video. */
+  const mapImageChosen = useMapImageStore((state) => state.chosen);
+  const setMapImageChosen = useMapImageStore((state) => state.setChosen);
   const setCanvasDraft = useOverlayStore((state) => state.setCanvasDraft);
   /** Records whether each export holds a finished file: the template's and the canvas's alike. */
   const exportFinished = useCallback(
@@ -340,16 +345,18 @@ export function OverlayPage() {
     </div>
   );
 
-  const canvas = canvasMode && source.activity !== undefined;
+  const mapImage = mapImageChosen && !source.video && source.activity !== undefined;
+  const canvas = canvasMode && source.activity !== undefined && !mapImage;
   /*
-   * The still image is made from the activity alone: once it is chosen, the
-   * file slots give way to it, and Start over, below it, is the way to another
-   * activity or to a video.
+   * The still image and the map image are made from the activity alone: once
+   * one is chosen, the file slots give way to it, and Start over, below it, is
+   * the way to another activity or to a video.
    */
-  const stillImage = !source.video && source.activity !== undefined && !canvas;
+  const routeImage = !source.video && source.activity !== undefined && !canvas && !mapImage;
+  const stillImage = routeImage || mapImage;
 
   return (
-    <main className={source.video || canvas ? 'page page--overlays is-workspace' : 'page page--overlays'}>
+    <main className={source.video || canvas || mapImage ? 'page page--overlays is-workspace' : 'page page--overlays'}>
       <div className="page__inner">
         <header className="page__header">
           <h2 className="page__title">Overlays</h2>
@@ -414,11 +421,41 @@ export function OverlayPage() {
               <fieldset className="overlay-mode" aria-label="What to make">
                 <legend className="summary__label">What to make</legend>
                 <label className="overlay-controls__choice">
-                  <input type="radio" name="overlay-mode" checked={!canvas} onChange={() => setCanvasMode(false)} />
+                  <input
+                    type="radio"
+                    name="overlay-mode"
+                    checked={!canvas && !mapImage}
+                    onChange={() => {
+                      setCanvasMode(false);
+                      setMapImageChosen(false);
+                    }}
+                  />
                   <span>{source.video ? 'An overlay from a template' : 'A still image'}</span>
                 </label>
+                {!source.video && (
+                  <label className="overlay-controls__choice">
+                    <input
+                      type="radio"
+                      name="overlay-mode"
+                      checked={mapImage}
+                      onChange={() => {
+                        setCanvasMode(false);
+                        setMapImageChosen(true);
+                      }}
+                    />
+                    <span>A map image, with the activity’s details</span>
+                  </label>
+                )}
                 <label className="overlay-controls__choice">
-                  <input type="radio" name="overlay-mode" checked={canvas} onChange={() => setCanvasMode(true)} />
+                  <input
+                    type="radio"
+                    name="overlay-mode"
+                    checked={canvas}
+                    onChange={() => {
+                      setCanvasMode(true);
+                      setMapImageChosen(false);
+                    }}
+                  />
                   <span>{source.video ? 'A custom canvas over the video' : 'A custom video overlay, with no video'}</span>
                 </label>
               </fieldset>
@@ -440,7 +477,8 @@ export function OverlayPage() {
               />
             )}
             {/* Below the files, so the slots never move when a route image appears. */}
-            {!source.video && source.activity && !canvas && (
+            {mapImage && source.activity && <MapImagePanel activity={source.activity} units={unitSystem} />}
+            {routeImage && source.activity && (
               <RouteOverlayPanel
                 activity={source.activity}
                 focusedSection={source.focusedSection}

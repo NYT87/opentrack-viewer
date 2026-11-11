@@ -76,7 +76,7 @@ export type CanvasElementKey =
 export interface CanvasElementChoice {
   key: CanvasElementKey;
   label: string;
-  group: 'Live figures' | 'Whole activity' | 'Shapes';
+  group: 'Live figures' | 'Along the route' | 'Whole activity' | 'Shapes';
   available: boolean;
   reason?: string;
 }

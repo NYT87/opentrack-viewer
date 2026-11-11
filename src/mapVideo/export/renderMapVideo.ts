@@ -215,15 +215,37 @@ export interface MapVideoRenderer {
   close: () => void;
 }
 
-export async function openMapVideoRenderer(
-  input: MapVideoRenderInput,
-  options: { signal?: AbortSignal; onWaiting?: (waiting: RenderWaiting) => void } = {},
-): Promise<MapVideoRenderer> {
-  const { activity, model, settings, units, maptilerKey, photoImages } = input;
-  const { width, height } = settings.output;
-  const { signal, onWaiting } = options;
+/** An offscreen map moved by its owner, which waits for every tile before it is read (TD-064). */
+export interface ExportMap {
+  map: MapLibreMap;
+  /**
+   * Moves the map with `move`, then waits until it is drawn with every tile
+   * in. A tile that failed is asked for again, waiting longer each time; then
+   * it throws rather than leave a hole.
+   */
+  settle: (move: () => void) => Promise<void>;
+  /** How many map requests this map has made so far. */
+  requests: () => number;
+  close: () => void;
+}
 
-  // Laid out at the video's size, out of sight: WebGL draws it all the same.
+/**
+ * A MapLibre map at `width` × `height`, off the screen, every request it makes
+ * sent through the export's queue (four at a time, each tile once). Resolves
+ * once its style has loaded; `styleUrl` undefined draws route only and asks
+ * for nothing.
+ */
+export async function openExportMap(options: {
+  width: number;
+  height: number;
+  styleUrl: string | undefined;
+  /** "a frame", "the image": what is not written with a hole in it. */
+  what: string;
+  signal?: AbortSignal;
+  onWaiting?: (waiting: RenderWaiting) => void;
+}): Promise<ExportMap> {
+  const { width, height, styleUrl, what, signal, onWaiting } = options;
+  // Laid out at the picture's size, out of sight: WebGL draws it all the same.
   const container = document.createElement('div');
   container.setAttribute('aria-hidden', 'true');
   Object.assign(container.style, { position: 'fixed', top: '0', left: `${-(width + 200)}px`, width: `${width}px`, height: `${height}px`, pointerEvents: 'none' });
@@ -232,7 +254,6 @@ export async function openMapVideoRenderer(
   const errors: { sourceId?: string; message: string }[] = [];
   const startedAsked = asked;
   forgetKeptTiles();
-  const styleUrl = basemapStyleUrl(settings, maptilerKey);
   const map = new MapLibreMap({
     container,
     style: styleUrl ? queued(styleUrl).url : routeOnlyStyle(),
@@ -274,19 +295,6 @@ export async function openMapVideoRenderer(
     close();
     throw error;
   }
-  installVideoLayers(map, settings);
-  const colors = videoMapColors(activity, model, settings);
-  styleVideoMap(map, activity, model, settings, colors);
-
-  const canvas: OffscreenCanvas | HTMLCanvasElement =
-    typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(width, height) : Object.assign(document.createElement('canvas'), { width, height });
-  const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
-  if (!ctx) {
-    close();
-    throw new OverlayExportError('unsupported_browser', 'This browser cannot draw the video’s frames.');
-  }
-  const figures = createMapVideoFigures({ activity, model, settings, units, width, height, photoImages });
-  const credit = mapVideoAttribution(settings);
 
   /** Waits for `idle`, counting only time with the tab in front; a hidden tab draws nothing (TD-064). */
   const waitIdle = async (idle: Promise<void>) => {
@@ -302,22 +310,22 @@ export async function openMapVideoRenderer(
       else if (waited >= 300) onWaiting?.('tiles');
       await Promise.race([idle, sleep(250)]);
       if (!hidden) waited += 250;
-      if (waited > FRAME_TIMEOUT_MS) throw new OverlayExportError('render_failed', 'The map did not finish drawing a frame within two minutes.');
+      if (waited > FRAME_TIMEOUT_MS) throw new OverlayExportError('render_failed', `The map did not finish drawing ${what} within two minutes.`);
     }
     onWaiting?.(undefined);
   };
   const nextIdle = () => new Promise<void>((resolve) => map.once('idle', () => resolve()));
 
   return {
+    map,
     close,
     requests: () => asked - startedAsked,
-    async drawFrame(seconds) {
+    async settle(move) {
       if (signal?.aborted) throw cancelled();
       // Errors are kept from before the first frame too: a map that failed while loading is not drawn as if it had not.
       let idle = nextIdle();
-      drawVideoMap(map, model, settings, colors, seconds, 0);
+      move();
       await waitIdle(idle);
-      // A tile that failed is asked for again, waiting longer each time; then the export stops rather than write a hole.
       for (let attempt = 1; errors.length > 0; attempt += 1) {
         // A sprite, glyph or style that failed belongs to no tile source and cannot be asked for again: stop at once.
         const unfixable = errors.find((error) => !error.sourceId);
@@ -330,7 +338,7 @@ export async function openMapVideoRenderer(
         if (attempt > TILE_RETRIES) {
           throw new OverlayExportError(
             'render_failed',
-            `A map tile could not be loaded after ${TILE_RETRIES} tries (${errors[0]!.message}). The export stopped rather than write a frame with part of the map missing. Try again, or choose route only.`,
+            `A map tile could not be loaded after ${TILE_RETRIES} tries (${errors[0]!.message}). The export stopped rather than write ${what} with part of the map missing. Try again, or choose route only.`,
           );
         }
         const sources = [...new Set(errors.map((error) => error.sourceId).filter((id): id is string => Boolean(id)))];
@@ -341,6 +349,37 @@ export async function openMapVideoRenderer(
         map.triggerRepaint();
         await waitIdle(idle);
       }
+    },
+  };
+}
+
+export async function openMapVideoRenderer(
+  input: MapVideoRenderInput,
+  options: { signal?: AbortSignal; onWaiting?: (waiting: RenderWaiting) => void } = {},
+): Promise<MapVideoRenderer> {
+  const { activity, model, settings, units, maptilerKey, photoImages } = input;
+  const { width, height } = settings.output;
+  const exportMap = await openExportMap({ width, height, styleUrl: basemapStyleUrl(settings, maptilerKey), what: 'a frame', ...options });
+  const { map, close } = exportMap;
+  installVideoLayers(map, settings);
+  const colors = videoMapColors(activity, model, settings);
+  styleVideoMap(map, activity, model, settings, colors);
+
+  const canvas: OffscreenCanvas | HTMLCanvasElement =
+    typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(width, height) : Object.assign(document.createElement('canvas'), { width, height });
+  const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+  if (!ctx) {
+    close();
+    throw new OverlayExportError('unsupported_browser', 'This browser cannot draw the video’s frames.');
+  }
+  const figures = createMapVideoFigures({ activity, model, settings, units, width, height, photoImages });
+  const credit = mapVideoAttribution(settings);
+
+  return {
+    close,
+    requests: exportMap.requests,
+    async drawFrame(seconds) {
+      await exportMap.settle(() => drawVideoMap(map, model, settings, colors, seconds, 0));
       ctx.clearRect(0, 0, width, height);
       ctx.drawImage(map.getCanvas(), 0, 0, width, height);
       figures.drawFrame(ctx, seconds);

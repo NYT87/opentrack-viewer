@@ -119,6 +119,13 @@ export interface CustomCanvasHost {
   backdrop?: string;
   /** Every change to the layout, for the host to draw and keep. */
   onComponentsChange: (components: OverlayComponent[]) => void;
+  /**
+   * AV-1013. A still picture, the map image's: there is no time to move
+   * through, so no scrubber, and no figure that only means something as it
+   * plays (a live speed, a gauge, the progress). The route and the profile
+   * are offered, shown at the finish.
+   */
+  still?: boolean;
 }
 
 const SHAPE_LABELS: Record<ShapeKind, string> = {
@@ -208,7 +215,16 @@ export function CustomCanvas({
     () => ({ activity, route: extractRoute(activity), units, readerTimeZone }),
     [activity, units, readerTimeZone],
   );
-  const choices = useMemo(() => canvasElementChoices(timeline, stillContext), [timeline, stillContext]);
+  const still = host?.still === true;
+  const choices = useMemo(
+    () =>
+      still
+        ? canvasElementChoices(timeline, stillContext)
+            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && choice.key !== 'progress')
+            .map((choice) => (choice.group === 'Live figures' ? { ...choice, group: 'Along the route' as const } : choice))
+        : canvasElementChoices(timeline, stillContext),
+    [timeline, stillContext, still],
+  );
   const template = useMemo(() => canvasTemplate(components), [components]);
 
   /** Changes the layout, keeping what it was for Undo. */
@@ -306,7 +322,7 @@ export function CustomCanvas({
         onDragStart={() => setHistory((current) => pushHistory(current, state))}
         onDragMove={(next) => setState({ components: measured(next, stillContext, frame), selectedId })}
         onUndo={undo}
-        clock={host ? { seconds: host.seconds, onSeek: host.onSeek } : undefined}
+        clock={host ? { seconds: host.seconds, onSeek: host.onSeek, still } : undefined}
         backdrop={host?.backdrop}
       />
       {sizeProblem && (
@@ -629,7 +645,7 @@ function CanvasPreview({
   backdrop,
 }: {
   /** The host's time, shown and moved here instead of a clock of the preview's own (AV-1207). */
-  clock?: { seconds: number; onSeek: (seconds: number) => void };
+  clock?: { seconds: number; onSeek: (seconds: number) => void; still?: boolean };
   backdrop?: string;
   onMediaInfo?: (media: OverlayMedia) => void;
   activity: Activity;
@@ -862,6 +878,7 @@ function CanvasPreview({
           }}
         />
       </div>
+      {!clock?.still && (
       <div className="overlay-preview__controls">
         {!clock && (
           <button type="button" className="button" onClick={togglePlay} disabled={!(durationSeconds > 0)}>
@@ -883,6 +900,7 @@ function CanvasPreview({
           {formatDuration(time)} / {formatDuration(durationSeconds)}
         </span>
       </div>
+      )}
     </div>
   );
 }

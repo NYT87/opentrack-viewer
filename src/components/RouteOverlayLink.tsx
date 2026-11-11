@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { hasValidLocation, type Activity, type ActivityPointRange } from '../domain/activity';
 import { sliceActivity } from '../domain/activitySlice';
 import { ROUTES } from '../app/routes';
+import { useMapImageStore } from '../state/mapImageStore';
 import { useOverlayStore } from '../state/overlayStore';
 
 interface RouteOverlayLinkProps {
@@ -24,6 +25,8 @@ export function RouteOverlayLink({ activity, selectedRange }: RouteOverlayLinkPr
   const id = useId();
   const navigate = useNavigate();
   const setStandalone = useOverlayStore((state) => state.setStandaloneActivity);
+  const setCanvasMode = useOverlayStore((state) => state.setCanvasMode);
+  const setMapImage = useMapImageStore((state) => state.setChosen);
   const [wantsSection, setWantsSection] = useState(false);
 
   // A single located fix is a route the image can draw (as a dot), so the
@@ -40,9 +43,12 @@ export function RouteOverlayLink({ activity, selectedRange }: RouteOverlayLinkPr
   // whole activity: the button is disabled until they choose again.
   const sectionLost = wantsSection && !section;
 
-  const handOff = () => {
+  /** AV-1013: to the route overlay, or to an image of the route on a map. */
+  const handOff = (mapImage: boolean) => {
     if (wantsSection && section) setStandalone(section, { focusedSection: true });
     else setStandalone(activity);
+    setMapImage(mapImage);
+    if (mapImage) setCanvasMode(false);
     navigate(ROUTES.overlays);
   };
 
@@ -50,8 +56,9 @@ export function RouteOverlayLink({ activity, selectedRange }: RouteOverlayLinkPr
     <div className="export route-overlay-link">
       <h2 className="export__title">Route overlay</h2>
       <p className="export__body">
-        Makes the route into a transparent PNG for placing over a video or a design. It is drawn
-        in this tab, with no map under it, and nothing is uploaded.
+        Makes the route into a transparent PNG for placing over a video or a design, or into an
+        image of the route on a map with the activity's details. Either is drawn in this tab, and
+        nothing of the activity is uploaded.
       </p>
       {(section || wantsSection) && (
         <label className="export__choice" htmlFor={id}>
@@ -69,9 +76,17 @@ export function RouteOverlayLink({ activity, selectedRange }: RouteOverlayLinkPr
           type="button"
           className="button"
           disabled={!wholeRoute || sectionLost}
-          onClick={handOff}
+          onClick={() => handOff(false)}
         >
           Create route overlay
+        </button>{' '}
+        <button
+          type="button"
+          className="button"
+          disabled={!wholeRoute || sectionLost}
+          onClick={() => handOff(true)}
+        >
+          Create a map image
         </button>
       </p>
       {sectionLost && (

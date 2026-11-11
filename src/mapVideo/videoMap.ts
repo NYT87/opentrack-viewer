@@ -4,6 +4,7 @@ import type { Activity } from '../domain/activity';
 import { MARKER_ICON_PIXELS, markerIconImage, sportIcon } from './markerIcons';
 import type { MapVideoModel } from './model';
 import type { MapVideoSettings } from './project';
+import { revealAt } from './route';
 import {
   COLOR_BY_PALETTE,
   TERRAIN_TILES,
@@ -77,10 +78,13 @@ const pointFeature = (coordinates: [number, number], properties: Record<string, 
   geometry: { type: 'Point', coordinates },
 });
 
+/** What the route's line is drawn from: the route, and the vertices worth drawing. */
+export type RouteLine = Pick<MapVideoModel, 'route' | 'drawn'>;
+
 /** The route's colours, and the vertices a coloured line is drawn through, or undefined for one colour. */
 export type VideoMapColors = RouteColors & { drawn: number[] };
 
-export function videoMapColors(activity: Activity, model: MapVideoModel, settings: MapVideoSettings): VideoMapColors | undefined {
+export function videoMapColors(activity: Activity, model: RouteLine, settings: Pick<MapVideoSettings, 'route'>): VideoMapColors | undefined {
   const steps = routeColors(activity, model.route, settings.route.colorBy);
   return steps && { ...steps, drawn: drawnWithColorSteps(model.drawn, steps) };
 }
@@ -92,7 +96,7 @@ function revealColor(settings: MapVideoSettings, colored: boolean): string | Exp
   return ['match', ['get', 'bin'], ...steps, settings.route.color] as unknown as ExpressionSpecification;
 }
 
-function restData(model: MapVideoModel): FeatureCollection<LineString> {
+function restData(model: RouteLine): FeatureCollection<LineString> {
   const features: Feature<LineString>[] = [];
   let line: [number, number][] = [];
   let segment: number | undefined;
@@ -150,7 +154,7 @@ export function installVideoLayers(map: MapLibreMap, settings: MapVideoSettings)
 }
 
 /** The route's look for a model and settings: the rest of the route, the ends, the paint, the marker, the terrain. */
-export function styleVideoMap(map: MapLibreMap, activity: Activity, model: MapVideoModel, settings: MapVideoSettings, colors: VideoMapColors | undefined): void {
+export function styleVideoMap(map: MapLibreMap, activity: Activity, model: RouteLine, settings: MapVideoSettings, colors: VideoMapColors | undefined): void {
   const { route, marker, endpoints, terrain: relief } = settings;
   (map.getSource(REST) as GeoJSONSource | undefined)?.setData(route.unrevealed === 'hidden' ? EMPTY : restData(model));
   const first = model.route.vertices[0]!;
@@ -212,4 +216,18 @@ export function drawVideoMap(
     type: 'FeatureCollection',
     features: [pointFeature(frame.reveal.marker, { rotate: settings.marker.shape === 'arrow' ? headingAt(model.route, distance) : 0 })],
   });
+}
+
+/**
+ * AV-1013. The whole route at once, as the video's last frame draws it but
+ * with no marker or trail: for a still map, whose camera its owner sets.
+ */
+export function drawWholeRoute(map: MapLibreMap, line: RouteLine, colors: VideoMapColors | undefined): void {
+  const distance = line.route.totalMeters;
+  const lines = colors
+    ? coloredRuns(line.route, distance, colors.drawn, colors).map((run) => lineFeature(run.line, { bin: run.bin }))
+    : revealAt(line.route, distance, line.drawn).lines.map((points) => lineFeature(points));
+  (map.getSource(REVEAL) as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: lines.filter((feature) => feature.geometry.coordinates.length > 1) });
+  (map.getSource(TRAIL) as GeoJSONSource | undefined)?.setData(EMPTY);
+  (map.getSource(MARKER) as GeoJSONSource | undefined)?.setData(EMPTY);
 }

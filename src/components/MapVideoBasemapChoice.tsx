@@ -28,6 +28,8 @@ export interface MapVideoBasemapChoiceProps {
   onChange: (patch: MapVideoSettingsPatch) => void;
   maptilerKey: string;
   onMaptilerKey: (key: string) => void;
+  /** AV-1013. For the map image: no terrain, since it is always seen from above, and an image's terms. */
+  forImage?: boolean;
 }
 
 /**
@@ -37,7 +39,7 @@ export interface MapVideoBasemapChoiceProps {
  * terrain comes from AWS Terrain Tiles, over a map only. Each choice says
  * who learns what (TD-064).
  */
-export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKey, onMaptilerKey }: MapVideoBasemapChoiceProps) {
+export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKey, onMaptilerKey, forImage = false }: MapVideoBasemapChoiceProps) {
   const source = settings.basemap.source;
   const ids = { style: useId(), maptilerStyle: useId(), key: useId(), exaggeration: useId() };
   return (
@@ -46,7 +48,7 @@ export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKe
       <label className="overlay-controls__choice">
         <input type="radio" name="map-video-basemap" checked={source === 'online'} onChange={() => onSource('online')} />
         <span>
-          Online map. Its tiles come from OpenFreeMap, whose server learns which area the video shows, as
+          Online map. Its tiles come from OpenFreeMap, whose server learns which area the {forImage ? 'image' : 'video'} shows, as
           any online map does. The route itself is never sent.
         </span>
       </label>
@@ -66,8 +68,10 @@ export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKe
         <input type="radio" name="map-video-basemap" checked={source === 'maptiler'} onChange={() => onSource('maptiler')} />
         <span>
           MapTiler, with your own key: satellite imagery and other maps. MapTiler learns the area shown and
-          counts the use against your key. Its terms allow videos for channels of up to 100,000 subscribers,
-          and its free plan is for non-commercial use.
+          counts the use against your key.{' '}
+          {forImage
+            ? 'Its free plan is for non-commercial use, and its terms decide what the image may be used for.'
+            : 'Its terms allow videos for channels of up to 100,000 subscribers, and its free plan is for non-commercial use.'}
         </span>
       </label>
       {source === 'maptiler' && (
@@ -110,6 +114,7 @@ export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKe
         <span>Route only. The route is drawn on a plain background, and nothing is fetched.</span>
       </label>
 
+      {!forImage && (
       <div className="map-video-basemap__terrain">
         <label className="overlay-controls__choice">
           <input
@@ -149,6 +154,7 @@ export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKe
           </div>
         )}
       </div>
+      )}
     </fieldset>
   );
 }

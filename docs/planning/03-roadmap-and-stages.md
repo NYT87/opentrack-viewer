@@ -189,6 +189,7 @@ Outcome:
 - User can export overlay-only assets, such as transparent WebM where supported, chroma-key background video, or PNG/WebP frame sequences, for use in external video editing applications.
 - Browser-side burned-in video export is implemented only after a feasibility spike confirms the encoding stack, browser support, memory profile, export duration limits, and quality are acceptable.
 - Overlay generation remains entirely client-side and does not introduce a backend render queue.
+- An activity can also be exported as an image of its map, seen from straight above, with its details in a panel below or placed freely over it (AV-1013).
 
 ### M9: Route Builder and Custom Track Export
 

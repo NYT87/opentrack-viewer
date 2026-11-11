@@ -24,7 +24,7 @@ const PACE = dataSourceId({ kind: 'metric', metric: 'pace' });
  * trim hides (TD-066). The summary's totals stay the whole activity's: a
  * total is a number, not a place.
  */
-export function shownActivity(activity: Activity, model: MapVideoModel, settings: Pick<MapVideoSettings, 'privacyTrim'>): Activity {
+export function shownActivity(activity: Activity, model: Pick<MapVideoModel, 'route'>, settings: Pick<MapVideoSettings, 'privacyTrim'>): Activity {
   const { vertices } = model.route;
   const first = vertices[0]!;
   const last = vertices[vertices.length - 1]!;

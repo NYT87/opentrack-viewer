@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { RouteOverlayLink } from './RouteOverlayLink';
 import { ROUTES } from '../app/routes';
+import { useMapImageStore } from '../state/mapImageStore';
 import { useOverlayStore } from '../state/overlayStore';
 import { makeActivity } from '../test/helpers/activity';
 
@@ -12,6 +13,7 @@ const ride = makeActivity(
 );
 
 beforeEach(() => {
+  useMapImageStore.setState({ chosen: false });
   useOverlayStore.getState().clear();
   useOverlayStore.setState({ controls: useOverlayStore.getInitialState().controls });
 });
@@ -40,6 +42,23 @@ const gappy = makeActivity([
 ]);
 
 describe('RouteOverlayLink (AV-1009)', () => {
+  it('hands the activity to the overlay page for a map image, which the page then shows (AV-1013)', async () => {
+    useOverlayStore.getState().setCanvasMode(true);
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Create a map image' }));
+    expect(screen.getByText('overlay page')).toBeInTheDocument();
+    expect(useOverlayStore.getState().source.activity).toBe(ride);
+    expect(useMapImageStore.getState().chosen).toBe(true);
+    expect(useOverlayStore.getState().canvasMode).toBe(false);
+  });
+
+  it('asks for the still image, not the map image, from Create route overlay (AV-1013)', async () => {
+    useMapImageStore.setState({ chosen: true });
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Create route overlay' }));
+    expect(useMapImageStore.getState().chosen).toBe(false);
+  });
+
   it('hands the whole activity to the overlay page by default', async () => {
     setup();
     await userEvent.click(screen.getByRole('button', { name: 'Create route overlay' }));

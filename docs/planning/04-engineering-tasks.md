@@ -1184,6 +1184,23 @@ Acceptance criteria:
 - Everything stays in the browser.
 - Unit tests cover the duration patch on recorder-shaped files (unknown-size clusters, block groups, a known-size segment with SeekHead and Cues, an existing Duration), the real-time loop (pacing, the last frame's length, a hidden tab, falling behind, a short hitch, a stop, a frame that fails), the plan, the capability check and the panel; a browser test records the overlay of the committed clip, checks the file's length is finite and as planned, and plays it over magenta to check what is clear stayed clear.
 
+#### AV-1013: Export an Activity as an Image of Its Map, With the Details Below or Placed Over It
+
+Dependencies: AV-1009, AV-1010, AV-1011, AV-1209, AV-1211
+
+GitHub issue #14. The overlay page's still image (AV-1009, AV-1010) is drawn on a transparent background and never bakes in a basemap; the map video's still (AV-1209) has a real map but only as a frame of the video. This is the picture between them: the activity on a real map, with its details, as one image.
+
+Acceptance criteria:
+- **Where it lives:** a third thing to make on the overlay page with an activity and no video, beside the still image and the custom canvas: *A map image*. The viewer hands the open activity to it, as it does for the route overlay.
+- **Basemap:** OpenFreeMap's styles, MapTiler's with the reader's own key, or route only: the map video's choices and terms (TD-064, TD-068), said before any map is drawn. Never the OpenStreetMap tile servers. The provider's credit is drawn in the image.
+- **The map is always seen from straight above.** It starts fitted to the route with a margin, north up, and can then be moved, zoomed and turned to any heading, never tilted; there is no 3D terrain. The route uses the map video's styles (colour, width, edge, colour by speed, elevation or heart rate) and is drawn whole, with start and finish marked.
+- **Two layouts:**
+  - *Map and panel:* the map on top and a panel of a chosen colour below it, holding the details the reader picks: the activity's name, the date, distance, moving time, elapsed time, elevation gain, average speed or pace, average heart rate, and the elevation profile. A detail the activity lacks is offered disabled with the reason. The panel's height follows from what is picked and the image's shape, so it is never a fixed box with empty space or crowded text.
+  - *Free canvas:* the map fills the image, and the custom canvas editor (TD-062) places what goes over it, as the map video hosts it (AV-1207): shapes, text, figures for the whole activity, the date and the elevation profile, with its layout file.
+- **Size and output:** landscape, portrait, square and social presets (1080 × 1350, 1200 × 630 among them) or a custom size within stated limits; a PNG, or a JPEG.
+- **Privacy and requests:** the privacy trim hides the start and end from the fit, the route and the profile. Rendering waits for every tile; a failed tile is tried again and then the export stops rather than save a picture with a hole. Requests go through the export's queue, four at a time and each tile once (TD-076). Nothing is uploaded, and a route-only image asks for nothing.
+- **Tests:** unit tests for the panel's layout (its height for each set of details and each image shape), the fit, and the framing at a heading; a browser test over fixture tiles that exports each layout and checks pixels (the basemap, the route's colour, the panel's colour and its text, the credit); privacy: only the chosen map host is asked, by GET, nothing of the activity is sent, and route only asks for nothing.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model
