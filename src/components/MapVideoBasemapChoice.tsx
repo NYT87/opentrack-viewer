@@ -28,7 +28,7 @@ export interface MapVideoBasemapChoiceProps {
   onChange: (patch: MapVideoSettingsPatch) => void;
   maptilerKey: string;
   onMaptilerKey: (key: string) => void;
-  /** AV-1013. For the map image: no terrain, since it is always seen from above, and an image's terms. */
+  /** AV-1013. For the map image: no terrain, since it is always seen from above, and no MapTiler, whose terms forbid it (TD-079). */
   forImage?: boolean;
 }
 
@@ -64,14 +64,14 @@ export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKe
           </select>
         </div>
       )}
+      {/* TD-079: MapTiler's terms allow videos, not a saved image of its map, so an image is not offered it. */}
+      {!forImage && (
+      <>
       <label className="overlay-controls__choice">
         <input type="radio" name="map-video-basemap" checked={source === 'maptiler'} onChange={() => onSource('maptiler')} />
         <span>
           MapTiler, with your own key: satellite imagery and other maps. MapTiler learns the area shown and
-          counts the use against your key.{' '}
-          {forImage
-            ? 'Its free plan is for non-commercial use, and its terms decide what the image may be used for.'
-            : 'Its terms allow videos for channels of up to 100,000 subscribers, and its free plan is for non-commercial use.'}
+          counts the use against your key. Its terms allow videos for channels of up to 100,000 subscribers, and its free plan is for non-commercial use.
         </span>
       </label>
       {source === 'maptiler' && (
@@ -108,6 +108,8 @@ export function MapVideoBasemapChoice({ settings, onSource, onChange, maptilerKe
           </div>
           {!maptilerKey.trim() && <p className="map-video-settings__hint" role="status">Type your key to see the map; until then the route is drawn alone.</p>}
         </div>
+      )}
+      </>
       )}
       <label className="overlay-controls__choice">
         <input type="radio" name="map-video-basemap" checked={source === 'route-only'} onChange={() => onSource('route-only')} />

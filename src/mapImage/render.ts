@@ -24,7 +24,6 @@ export interface MapImageRenderInput {
   activity: Activity;
   settings: MapImageSettings;
   units: UnitSystem;
-  maptilerKey: string;
   readerTimeZone?: string;
 }
 
@@ -41,13 +40,13 @@ export async function renderMapImage(
   input: MapImageRenderInput,
   options: { signal?: AbortSignal; onWaiting?: (waiting: RenderWaiting) => void } = {},
 ): Promise<MapImageRenderResult> {
-  const { activity, settings, units, maptilerKey, readerTimeZone } = input;
+  const { activity, settings, units, readerTimeZone } = input;
   const planned = planMapImage({ activity, settings, units, measure: measureText, readerTimeZone });
   if (!planned.ok) throw new OverlayExportError('render_failed', planned.error);
   const { plan } = planned;
   const { width, height, mapHeight, camera } = plan;
 
-  const exportMap = await openExportMap({ width, height: mapHeight, styleUrl: basemapStyleUrl(plan.video, maptilerKey), what: 'the image', ...options });
+  const exportMap = await openExportMap({ width, height: mapHeight, styleUrl: basemapStyleUrl(plan.video, ''), what: 'the image', ...options });
   try {
     const { map } = exportMap;
     installVideoLayers(map, plan.video);

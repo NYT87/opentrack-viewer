@@ -63,6 +63,16 @@ export const MAP_IMAGE_SIZE_PRESETS: readonly MapImageSizePreset[] = [
   { id: 'landscape-4k', label: 'Landscape 4K, 3840 × 2160', width: 3840, height: 2160 },
 ];
 
+/**
+ * The basemaps an image may be drawn on: OpenFreeMap's, whose terms ask only
+ * for the credit in "printed media or video", or route only. Never MapTiler's:
+ * its terms forbid exporting map content for use outside its service and
+ * saving it as a static image (§6.2, §7.2), and allow videos alone (TD-079).
+ */
+export function imageBasemap(basemap: MapVideoSettings['basemap']): MapVideoSettings['basemap'] {
+  return basemap.source === 'maptiler' ? { ...basemap, source: 'online' } : basemap;
+}
+
 export const DEFAULT_MAP_IMAGE_SETTINGS: MapImageSettings = {
   layout: 'panel',
   output: { width: 1080, height: 1350 },
@@ -94,7 +104,7 @@ export function videoSettingsForImage(settings: MapImageSettings, mapSize: { wid
   return {
     ...DEFAULT_MAP_VIDEO_SETTINGS,
     output: { ...mapSize, fps: DEFAULT_MAP_VIDEO_SETTINGS.output.fps },
-    basemap: settings.basemap,
+    basemap: imageBasemap(settings.basemap),
     terrain: { ...DEFAULT_MAP_VIDEO_SETTINGS.terrain, enabled: false },
     route: { ...settings.route, unrevealed: 'hidden' },
     endpoints: settings.endpoints,

@@ -91,3 +91,13 @@ describe('the map image’s route and fit (AV-1013)', () => {
     expect(fitCamera(dot.route, { width: 1000, height: 1000 }).zoom).toBeLessThanOrEqual(17);
   });
 });
+
+describe('the map image’s basemap (TD-079)', () => {
+  it('is never MapTiler’s: a MapTiler choice is drawn on OpenFreeMap, and route only stays route only', async () => {
+    const { imageBasemap, videoSettingsForImage, DEFAULT_MAP_IMAGE_SETTINGS } = await import('./settings');
+    expect(imageBasemap({ source: 'maptiler', style: 'positron', maptilerStyle: 'satellite' }).source).toBe('online');
+    expect(imageBasemap({ source: 'route-only', style: 'positron', maptilerStyle: 'satellite' }).source).toBe('route-only');
+    const video = videoSettingsForImage({ ...DEFAULT_MAP_IMAGE_SETTINGS, basemap: { source: 'maptiler', style: 'dark', maptilerStyle: 'hybrid' } }, { width: 100, height: 100 });
+    expect(video.basemap).toMatchObject({ source: 'online', style: 'dark' });
+  });
+});

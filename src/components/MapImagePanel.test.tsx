@@ -3,7 +3,6 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MapImagePanel } from './MapImagePanel';
 import { useMapImageStore } from '../state/mapImageStore';
-import { useMapVideoStore } from '../state/mapVideoStore';
 import { useInteractionStore } from '../state/interactionStore';
 import { activityThrough, straightNorth } from '../test/helpers/mapVideoRoutes';
 import type { MapImageRenderInput } from '../mapImage/render';
@@ -22,7 +21,6 @@ const hilly = activityThrough(straightNorth(3000, 20, 5).map((point) => ({ ...po
 
 beforeEach(() => {
   useMapImageStore.setState(useMapImageStore.getInitialState());
-  useMapVideoStore.setState({ maptilerKey: '' });
   useInteractionStore.setState({ basemapEnabled: true });
 });
 
@@ -84,13 +82,19 @@ describe('MapImagePanel (AV-1013)', () => {
     expect(renderImage.mock.calls[0]![0].settings.camera).toMatchObject({ bearing: 30 });
   });
 
-  it('will not save a MapTiler map without a key, nor a size past the limits', async () => {
+  it('never offers MapTiler, whose terms forbid a saved image of its map, and draws OpenFreeMap for a MapTiler choice made before (TD-079)', async () => {
+    useMapImageStore.setState({ basemapChosen: true, settings: { ...useMapImageStore.getState().settings, basemap: { source: 'maptiler', style: 'liberty', maptilerStyle: 'satellite' } } });
+    const { panel, renderImage } = setup();
+    expect(within(panel).queryByRole('radio', { name: /MapTiler/ })).not.toBeInTheDocument();
+    expect(within(panel).queryByLabelText('MapTiler key')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('radio', { name: /^Online map/ })).toBeChecked();
+    await userEvent.click(within(panel).getByRole('button', { name: 'Save the image' }));
+    await waitFor(() => expect(renderImage).toHaveBeenCalled());
+    expect(renderImage.mock.calls[0]![0].settings.basemap.source).toBe('online');
+  });
+
+  it('will not save a size past the limits', async () => {
     const { panel } = setup();
-    await userEvent.click(within(panel).getByRole('radio', { name: /^MapTiler/ }));
-    expect(within(panel).getByRole('button', { name: 'Save the image' })).toBeDisabled();
-    expect(within(panel).getByText(/Type your MapTiler key above/)).toBeInTheDocument();
-    await userEvent.click(within(panel).getByRole('radio', { name: /^Route only/ }));
-    expect(within(panel).getByRole('button', { name: 'Save the image' })).toBeEnabled();
     const width = within(panel).getByRole('spinbutton', { name: 'Width' });
     const height = within(panel).getByRole('spinbutton', { name: 'Height' });
     await userEvent.clear(width);

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Activity } from '../domain/activity';
 import { cameraAtWidth } from '../mapImage/geometry';
-import { DEFAULT_MAP_IMAGE_SETTINGS, type MapImageCamera, type MapImageSettings } from '../mapImage/settings';
+import { DEFAULT_MAP_IMAGE_SETTINGS, imageBasemap, type MapImageCamera, type MapImageSettings } from '../mapImage/settings';
 import type { MapVideoBasemap } from './mapVideoStore';
 
 /** A change to some settings: each section given is merged over the one held. */
@@ -33,8 +33,8 @@ interface MapImageState {
 
 /**
  * AV-1013. The map image's own store, beside the overlay page's: in memory
- * only, like every handoff (§5). The MapTiler key is the map video's, also in
- * memory only, so it is typed once (TD-064).
+ * only, like every handoff (§5). MapTiler is never offered for an image
+ * (TD-079), so no key is held here.
  */
 export const useMapImageStore = create<MapImageState>((set) => ({
   settings: DEFAULT_MAP_IMAGE_SETTINGS,
@@ -69,7 +69,7 @@ export function effectiveMapImageSettings(
   basemapEnabled: boolean,
 ): MapImageSettings {
   const { settings, basemapChosen, view } = state;
-  const source = basemapChosen ? settings.basemap.source : basemapEnabled ? 'online' : 'route-only';
+  const source = imageBasemap(basemapChosen ? settings.basemap : { ...settings.basemap, source: basemapEnabled ? 'online' : 'route-only' }).source;
   const camera = view && view.activity === activity ? cameraAtWidth(view.camera, view.width, settings.output.width) : undefined;
   return {
     ...settings,

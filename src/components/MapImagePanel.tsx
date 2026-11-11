@@ -14,7 +14,6 @@ import { measureText } from '../overlay/measureText';
 import type { OverlayComponent } from '../overlay/template';
 import { useInteractionStore } from '../state/interactionStore';
 import { effectiveMapImageSettings, useMapImageStore } from '../state/mapImageStore';
-import { useMapVideoStore } from '../state/mapVideoStore';
 import { CustomCanvas } from './CustomCanvas';
 import { MapVideoBasemapChoice } from './MapVideoBasemapChoice';
 import { useNumberDraft } from './useNumberDraft';
@@ -81,8 +80,6 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   const update = useMapImageStore((state) => state.updateSettings);
   const setBasemap = useMapImageStore((state) => state.setBasemap);
   const setCamera = useMapImageStore((state) => state.setCamera);
-  const maptilerKey = useMapVideoStore((state) => state.maptilerKey);
-  const setMaptilerKey = useMapVideoStore((state) => state.setMaptilerKey);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const settings = useMemo(
     () => effectiveMapImageSettings({ settings: stored, basemapChosen, view }, activity, basemapEnabled),
@@ -131,8 +128,7 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const stop = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => stop.current?.abort(), []);
-  const keyMissing = settings.basemap.source === 'maptiler' && !maptilerKey.trim();
-  const blocked = Boolean(sizeProblem) || !plan || keyMissing || phase.status === 'rendering';
+  const blocked = Boolean(sizeProblem) || !plan || phase.status === 'rendering';
   const exportImage = async () => {
     if (blocked) return;
     const controller = new AbortController();
@@ -141,7 +137,7 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
     try {
       const renderImage = render ?? (await import('../mapImage/render')).renderMapImage;
       const { blob, requests } = await renderImage(
-        { activity, settings, units, maptilerKey, readerTimeZone },
+        { activity, settings, units, readerTimeZone },
         { signal: controller.signal, onWaiting: (waiting) => setPhase({ status: 'rendering', waiting }) },
       );
       const fileName = `map-image.${settings.format === 'jpeg' ? 'jpg' : 'png'}`;
@@ -164,7 +160,7 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   const fromShown = (value: number) => (imperial ? value / FEET_PER_METER : value);
   const trimRange = [0, toShown(MAP_VIDEO_LIMITS.trimMeters[1])] as const;
   const presetChosen = MAP_IMAGE_SIZE_PRESETS.find((preset) => preset.width === settings.output.width && preset.height === settings.output.height);
-  const styleKey = [settings.basemap.source, settings.basemap.style, settings.basemap.maptilerStyle, settings.basemap.source === 'maptiler' ? maptilerKey.trim() : ''].join('|');
+  const styleKey = [settings.basemap.source, settings.basemap.style].join('|');
   const toggleDetail = (detail: MapImageDetail, on: boolean) =>
     update({ panel: { details: on ? [...stored.panel.details.filter((entry) => entry !== detail), detail] : stored.panel.details.filter((entry) => entry !== detail) } });
   const videoView = plan?.video;
@@ -188,7 +184,6 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
                 activity={activity}
                 plan={plan}
                 settings={shownSettings}
-                maptilerKey={maptilerKey}
                 units={units}
                 onCamera={onCamera}
                 onSnapshot={setBackdrop}
@@ -237,7 +232,6 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
               <input type="radio" name="map-image-format" checked={settings.format === 'jpeg'} onChange={() => update({ format: 'jpeg' })} />
               <span>JPEG, smaller</span>
             </label>
-            {keyMissing && <p className="map-video-settings__hint">Type your MapTiler key above, or choose another map, to save the image.</p>}
             <p className="video__actions">
               <button type="button" className="button button--primary" onClick={() => void exportImage()} disabled={blocked}>
                 Save the image
@@ -289,8 +283,8 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
               onChange={(patch) => {
                 if (patch.basemap) update({ basemap: patch.basemap });
               }}
-              maptilerKey={maptilerKey}
-              onMaptilerKey={setMaptilerKey}
+          maptilerKey=""
+          onMaptilerKey={() => undefined}
               forImage
             />
           )}

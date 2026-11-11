@@ -29,7 +29,6 @@ export interface MapImagePreviewProps {
   activity: Activity;
   plan: MapImagePlan;
   settings: MapImageSettings;
-  maptilerKey: string;
   units: UnitSystem;
   /** Where the reader has moved the map to, in the image's own pixels. */
   onCamera: (camera: MapImageCamera) => void;
@@ -60,7 +59,7 @@ const sameCamera = (a: MapImageCamera, b: MapImageCamera) =>
  *
  * The map is made once; the page makes a new preview for another basemap.
  */
-export default function MapImagePreview({ activity, plan, settings, maptilerKey, units, onCamera, onSnapshot, readerTimeZone }: MapImagePreviewProps) {
+export default function MapImagePreview({ activity, plan, settings, units, onCamera, onSnapshot, readerTimeZone }: MapImagePreviewProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLCanvasElement>(null);
@@ -78,7 +77,8 @@ export default function MapImagePreview({ activity, plan, settings, maptilerKey,
   /** Set while the page moves the map, so the move is not reported back as the reader's. */
   const moving = useRef(false);
 
-  const styleUrl = basemapStyleUrl(plan.video, maptilerKey);
+  // Never MapTiler's (TD-079): no key is needed.
+  const styleUrl = basemapStyleUrl(plan.video, '');
   useEffect(() => {
     const container = mapRef.current;
     if (!container) return;

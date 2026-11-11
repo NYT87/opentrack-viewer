@@ -1192,7 +1192,7 @@ GitHub issue #14. The overlay page's still image (AV-1009, AV-1010) is drawn on 
 
 Acceptance criteria:
 - **Where it lives:** a third thing to make on the overlay page with an activity and no video, beside the still image and the custom canvas: *A map image*. The viewer hands the open activity to it, as it does for the route overlay.
-- **Basemap:** OpenFreeMap's styles, MapTiler's with the reader's own key, or route only: the map video's choices and terms (TD-064, TD-068), said before any map is drawn. Never the OpenStreetMap tile servers. The provider's credit is drawn in the image.
+- **Basemap:** OpenFreeMap's styles or route only, said before any map is drawn (TD-064, TD-068). Never the OpenStreetMap tile servers, and not MapTiler, whose terms forbid saving its map as an image (TD-079). The provider's credit is drawn in the image.
 - **The map is always seen from straight above.** It starts fitted to the route with a margin, north up, and can then be moved, zoomed and turned to any heading, never tilted; there is no 3D terrain. The route uses the map video's styles (colour, width, edge, colour by speed, elevation or heart rate) and is drawn whole, with start and finish marked.
 - **Two layouts:**
   - *Map and panel:* the map on top and a panel of a chosen colour below it, holding the details the reader picks: the activity's name, the date, distance, moving time, elapsed time, elevation gain, average speed or pace, average heart rate, and the elevation profile. A detail the activity lacks is offered disabled with the reason. The panel's height follows from what is picked and the image's shape, so it is never a fixed box with empty space or crowded text.
