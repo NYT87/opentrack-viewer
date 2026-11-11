@@ -122,12 +122,15 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
   });
 
   let frames = 0;
+  // TD-081. The conversion's frames are timed from the trim's start, so the overlay is drawn from there.
+  const from = request.trim?.start ?? 0;
   try {
     const conversion = await mb.Conversion.init({
       input,
       output,
       tracks: 'primary',
       showWarnings: false,
+      ...(request.trim ? { trim: { start: request.trim.start, end: request.trim.end } } : {}),
       video: {
         codec: 'avc',
         quality: new mb.Quality({ bitrate: request.bitrate }),
@@ -143,7 +146,7 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
         process: (sample) => {
           frames += 1;
           sample.draw(ctx, 0, 0, request.width, request.height);
-          renderer.drawFrame(ctx, Math.max(0, sample.timestamp), { clear: false });
+          renderer.drawFrame(ctx, from + Math.max(0, sample.timestamp), { clear: false });
           return canvas;
         },
       },
@@ -173,7 +176,7 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
     } finally {
       signal?.removeEventListener('abort', stop);
     }
-    options.onProgress?.(1, request.videoDurationSeconds);
+    options.onProgress?.(1, request.trim ? request.trim.end - request.trim.start : request.videoDurationSeconds);
     return { frameCount: frames, notes };
   } finally {
     input.dispose();

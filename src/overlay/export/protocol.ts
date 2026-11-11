@@ -13,6 +13,8 @@ export interface ExportRequest {
   /** The video's wall-clock start, where the container states one. */
   videoStart?: Date;
   offsetSeconds: number;
+  /** TD-081. Where in the video the first frame is drawn: the trim's start. The frame count sets the end. */
+  trimStartSeconds?: number;
   units: UnitSystem;
   template: OverlayTemplate;
   activity: Activity;
@@ -40,6 +42,8 @@ export interface BurnRequest {
   videoDurationSeconds: number;
   videoStart?: Date;
   offsetSeconds: number;
+  /** TD-081. The part of the video rendered, in its own seconds; absent, the whole. */
+  trim?: { start: number; end: number };
   units: UnitSystem;
   template: OverlayTemplate;
   activity: Activity;

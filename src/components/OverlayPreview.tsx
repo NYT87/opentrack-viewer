@@ -4,6 +4,7 @@ import type { Activity } from '../domain/activity';
 import { formatDateTime, formatDuration, type UnitSystem } from '../domain/units';
 import { buildOverlay, type OverlayControls as Controls } from '../overlay/presets';
 import { buildOverlayTimeline, type OverlayAlignment } from '../overlay/timeline';
+import { trimRange, withTrimEnd, withTrimStart, type TrimRange, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { OverlayControls } from './OverlayControls';
 import { OverlayLayer } from './OverlayLayer';
@@ -13,6 +14,9 @@ interface OverlayPreviewProps {
   activity: Activity | undefined;
   offsetSeconds: number;
   onOffsetChange: (seconds: number) => void;
+  /** TD-081. The part of the video exported, set on the video's lane; absent, the whole. */
+  trim?: VideoTrim;
+  onTrimChange?: (trim: VideoTrim | undefined) => void;
   units: UnitSystem;
   controls: Controls;
   onControlsChange: (patch: Partial<Controls>) => void;
@@ -108,6 +112,8 @@ export function OverlayPreview({
   activity,
   offsetSeconds,
   onOffsetChange,
+  trim,
+  onTrimChange,
   units,
   controls,
   onControlsChange,
@@ -286,6 +292,7 @@ export function OverlayPreview({
   // activity, so they cannot push it off into a span the bar does not show. A
   // typed time is taken as typed: it says what the reader meant, and is
   // answered by the no-overlap notice rather than quietly changed.
+  const kept = trimRange(trim, durationSeconds);
   const stepVideoStart = (start: number) => {
     if (!alignment) return;
     setVideoStart(Math.min(Math.max(start, -durationSeconds), alignment.activitySpanSeconds));
@@ -361,8 +368,11 @@ export function OverlayPreview({
           alignment={alignment}
           videoTime={time}
           videoDuration={durationSeconds}
+          kept={kept}
           onVideoStart={stepVideoStart}
           onSeek={scrubTo}
+          onTrimStart={onTrimChange && ((seconds) => onTrimChange(withTrimStart(trim, seconds, durationSeconds)))}
+          onTrimEnd={onTrimChange && ((seconds) => onTrimChange(withTrimEnd(trim, seconds, durationSeconds)))}
         />
       )}
       {summary && <p className="overlay-preview__summary">{summary}</p>}
@@ -405,6 +415,28 @@ export function OverlayPreview({
         onReset={() => onOffsetChange(0)}
         videoTime={time}
       />
+      {onTrimChange && durationSeconds > 0 && (
+        <div className="overlay-trim" role="group" aria-label="Part exported">
+          <p className="overlay-trim__line">
+            {kept.trimmed
+              ? `Exporting ${formatDuration(kept.start)} to ${formatDuration(kept.end)} of the video, ${formatDuration(kept.length)}.`
+              : 'Exporting the whole video. Drag its ends on the video’s lane, or set them at the playhead, to export a part.'}
+          </p>
+          <div className="overlay-trim__actions">
+            <button type="button" className="button" onClick={() => onTrimChange(withTrimStart(trim, time, durationSeconds))}>
+              Start the export here
+            </button>
+            <button type="button" className="button" onClick={() => onTrimChange(withTrimEnd(trim, time, durationSeconds))}>
+              End the export here
+            </button>
+            {kept.trimmed && (
+              <button type="button" className="button" onClick={() => onTrimChange(undefined)}>
+                Export the whole video
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {warnings.length > 0 && (
         <ul className="overlay-preview__warnings" aria-label="Overlay warnings">
           {warnings.map((warning) => (
@@ -479,25 +511,34 @@ function SyncStatus({ alignment }: { alignment: OverlayAlignment }) {
 
 /**
  * TD-059. Where the video falls in the activity, under the picture it
- * describes: the activity's span with its speed or elevation traced over it,
- * the video's span, and the playhead. It is a control as well as a picture.
- * Dragging slides the video along the activity, the way a sprint or a climb is
- * lined up by eye; a click inside the video shows that moment; the arrow keys
- * move the video a second at a time, ten with Shift, a minute with Page Up and
- * Page Down.
+ * describes: two lanes on one scale, as an editor's timeline has them. The
+ * activity's lane, with its speed or elevation traced over it; the video's,
+ * with the part exported and the parts cut (TD-081); and the playhead across
+ * both. It is a control as well as a picture. Dragging slides the video along
+ * the activity, the way a sprint or a climb is lined up by eye, whichever is
+ * longer; a click inside the video shows that moment; the arrow keys move the
+ * video a second at a time, ten with Shift, a minute with Page Up and Page
+ * Down. The video's ends are handles of their own: dragged or stepped, they
+ * cut what is exported.
  */
 function SyncBar({
   alignment,
   videoTime,
   videoDuration,
+  kept,
   onVideoStart,
   onSeek,
+  onTrimStart,
+  onTrimEnd,
 }: {
   alignment: OverlayAlignment;
   videoTime: number;
   videoDuration: number;
+  kept: TrimRange;
   onVideoStart: (start: number) => void;
   onSeek: (videoSeconds: number) => void;
+  onTrimStart?: (videoSeconds: number) => void;
+  onTrimEnd?: (videoSeconds: number) => void;
 }) {
   const bar = useRef<HTMLDivElement>(null);
   /** The press being dragged, with the scale it began on, so the bar does not rescale under the pointer. */
@@ -584,22 +625,121 @@ function SyncBar({
         )}
         <div className="overlay-sync__bar">
           <span className="overlay-sync__activity" style={{ left: at(0), width: width(span) }} />
-          <span className="overlay-sync__video" style={{ left: at(start), width: width(end - start) }} />
-          <span className="overlay-sync__playhead" style={{ left: at(start + videoTime) }} />
         </div>
+        <div className="overlay-sync__bar overlay-sync__bar--video">
+          <span className="overlay-sync__clip" style={{ left: at(start), width: width(end - start) }} />
+          <span className="overlay-sync__video" style={{ left: at(start + kept.start), width: width(kept.length) }} />
+          {onTrimStart && (
+            <TrimHandle
+              label="Export starts at"
+              side="start"
+              value={kept.start}
+              max={videoDuration}
+              left={at(start + kept.start)}
+              secondsPerPixel={() => (high - low) / barWidth()}
+              onChange={onTrimStart}
+            />
+          )}
+          {onTrimEnd && (
+            <TrimHandle
+              label="Export ends at"
+              side="end"
+              value={kept.end}
+              max={videoDuration}
+              left={at(start + kept.end)}
+              secondsPerPixel={() => (high - low) / barWidth()}
+              onChange={onTrimEnd}
+            />
+          )}
+        </div>
+        <span className="overlay-sync__playhead" style={{ left: at(start + videoTime) }} />
       </div>
       <p className="overlay-sync__legend" aria-hidden="true">
         <span className="overlay-sync__key overlay-sync__key--activity" /> Activity{' '}
-        <span className="overlay-sync__key overlay-sync__key--video" /> Video
+        <span className="overlay-sync__key overlay-sync__key--video" /> Video exported
+        {kept.trimmed && (
+          <>
+            {' '}
+            <span className="overlay-sync__key overlay-sync__key--clip" /> Cut
+          </>
+        )}
         {trace && (
           <>
             {' '}
             <span className="overlay-sync__key overlay-sync__key--trace" /> {trace.label}
           </>
         )}
-        <span className="overlay-sync__how">Drag to slide the video · click to see that moment</span>
+        <span className="overlay-sync__how">Drag to slide the video · drag its ends to cut it · click to see that moment</span>
       </p>
     </div>
+  );
+}
+
+/**
+ * TD-081. One end of the part exported, on the video's lane: dragged, or
+ * stepped by the arrow keys a second at a time, ten with Shift. Its press is
+ * its own, so it never slides the video.
+ */
+function TrimHandle({
+  label,
+  side,
+  value,
+  max,
+  left,
+  secondsPerPixel,
+  onChange,
+}: {
+  label: string;
+  side: 'start' | 'end';
+  value: number;
+  max: number;
+  left: string;
+  secondsPerPixel: () => number;
+  onChange: (videoSeconds: number) => void;
+}) {
+  const drag = useRef<{ x: number; value: number; scale: number } | null>(null);
+  const keySteps: Record<string, number> = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 };
+  return (
+    <span
+      className={`overlay-sync__handle overlay-sync__handle--${side}`}
+      style={{ left }}
+      role="slider"
+      tabIndex={0}
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={Math.round(max * 10) / 10}
+      aria-valuenow={Math.round(value * 10) / 10}
+      aria-valuetext={`${formatDuration(value)} of the video`}
+      onKeyDown={(event) => {
+        const step = keySteps[event.key];
+        if (event.key === 'Home') onChange(0);
+        else if (event.key === 'End') onChange(max);
+        else if (step !== undefined) onChange(value + (event.shiftKey ? step * 10 : step));
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        drag.current = { x: event.clientX, value, scale: secondsPerPixel() };
+      }}
+      onPointerMove={(event) => {
+        const press = drag.current;
+        if (!press) return;
+        event.stopPropagation();
+        onChange(Math.round((press.value + (event.clientX - press.x) * press.scale) * 10) / 10);
+      }}
+      onPointerUp={(event) => {
+        if (!drag.current) return;
+        event.stopPropagation();
+        drag.current = null;
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+      }}
+    />
   );
 }
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { VideoTrim } from '../overlay/trim';
 import type { Activity } from '../domain/activity';
 import { DEFAULT_OVERLAY_CONTROLS, type OverlayControls } from '../overlay/presets';
 import { EMPTY_CANVAS_DRAFT, type CanvasDraft } from '../overlay/customCanvas';
@@ -79,6 +80,12 @@ interface OverlayState {
   offsetSeconds: number;
   setOffsetSeconds: (seconds: number) => void;
   /**
+   * TD-081. The part of the video exported. It belongs to the video, so it is
+   * forgotten when the video is replaced, and kept when the activity is.
+   */
+  trim: VideoTrim | undefined;
+  setTrim: (trim: VideoTrim | undefined) => void;
+  /**
    * AV-1005. Template, component, layout and style choices. Kept for the
    * session — across template switches and replaced files, so a reader's
    * accent colour is not lost with the video — and in memory only, like the
@@ -138,12 +145,15 @@ interface OverlayState {
 export interface OverlaySnapshot {
   source: OverlaySource;
   offsetSeconds: number;
+  trim: VideoTrim | undefined;
   media: OverlayMedia | undefined;
 }
 
 export const useOverlayStore = create<OverlayState>((set, get) => ({
   source: {},
   offsetSeconds: 0,
+  trim: undefined,
+  setTrim: (trim) => set({ trim }),
   controls: DEFAULT_OVERLAY_CONTROLS,
   canvasMode: false,
   setCanvasMode: (canvasMode) => set({ canvasMode }),
@@ -169,6 +179,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
       const keepsActivity = state.source.activityOrigin === 'hand';
       return {
         offsetSeconds: 0,
+        trim: undefined,
         media: undefined,
         source: {
           video,
@@ -196,6 +207,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
   setStandaloneActivity: (activity, options) =>
     set({
       offsetSeconds: 0,
+      trim: undefined,
       media: undefined,
       source: {
         activity,
@@ -211,9 +223,9 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
   },
 
   clear: () => {
-    const { source, offsetSeconds, media } = get();
-    set({ source: {}, offsetSeconds: 0, media: undefined });
-    return { source, offsetSeconds, media };
+    const { source, offsetSeconds, trim, media } = get();
+    set({ source: {}, offsetSeconds: 0, trim: undefined, media: undefined });
+    return { source, offsetSeconds, trim, media };
   },
 
   restore: (snapshot) => set({ ...snapshot }),

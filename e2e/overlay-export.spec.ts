@@ -205,3 +205,38 @@ test('exports a short overlay-only asset from the committed clip and ride, fast 
   // The overlay moves with the ride: the last frame is not the first.
   expect(Buffer.from(entries.at(-1)!.data).equals(Buffer.from(entries[1]!.data))).toBe(false);
 });
+
+test('exports only the part of the video kept, each frame as at that moment of the whole (TD-081)', async ({ page }) => {
+  await page.goto('./#/overlays');
+  await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
+  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
+    timeout: 30_000,
+  });
+  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  const panel = page.getByRole('region', { name: 'Export overlay' });
+  await panel.getByLabel('Frame rate').selectOption('10');
+  const exportZip = async (name: RegExp) => {
+    await panel.getByRole('button', { name: /^Export PNG sequence|^Export again/ }).click();
+    const link = panel.getByRole('link', { name });
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    return readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!)));
+  };
+  const whole = await exportZip(/overlay-test-clip-overlay-256x144-10fps\.zip/);
+
+  // From 2 s to 5 s, by the handles' keys.
+  const start = page.getByRole('slider', { name: 'Export starts at' });
+  await start.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  const end = page.getByRole('slider', { name: 'Export ends at' });
+  await end.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(panel.getByTestId('export-plan')).toContainText('30 frames, 256 × 144, 0:03 long, from 0:02 to 0:05 of the video');
+
+  const part = await exportZip(/overlay-test-clip-overlay-256x144-10fps\.zip/);
+  expect(part).toHaveLength(31);
+  expect(JSON.parse(new TextDecoder().decode(part[0]!.data))).toMatchObject({ frameCount: 30, durationSeconds: 3, videoDurationSeconds: 6, videoStartSeconds: 2 });
+  // The cut's first frame is the whole video's frame at 2 s, and its last the one at 4.9 s.
+  expect(Buffer.from(part[1]!.data).equals(Buffer.from(whole[21]!.data))).toBe(true);
+  expect(Buffer.from(part[30]!.data).equals(Buffer.from(whole[50]!.data))).toBe(true);
+});

@@ -77,6 +77,8 @@ export function OverlayPage() {
   const restore = useOverlayStore((state) => state.restore);
   const offsetSeconds = useOverlayStore((state) => state.offsetSeconds);
   const setOffsetSeconds = useOverlayStore((state) => state.setOffsetSeconds);
+  const trim = useOverlayStore((state) => state.trim);
+  const setTrim = useOverlayStore((state) => state.setTrim);
   const controls = useOverlayStore((state) => state.controls);
   const setControls = useOverlayStore((state) => state.setControls);
   const media = useOverlayStore((state) => state.media);
@@ -381,6 +383,8 @@ export function OverlayPage() {
                 activity={source.activity}
                 offsetSeconds={offsetSeconds}
                 onOffsetChange={setOffsetSeconds}
+                trim={trim}
+                onTrimChange={setTrim}
                 units={unitSystem}
                 controls={controls}
                 onControlsChange={setControls}
@@ -468,6 +472,7 @@ export function OverlayPage() {
                 video={source.video}
                 media={media}
                 offsetSeconds={offsetSeconds}
+                trim={trim}
                 units={unitSystem}
                 onOpenSync={source.video ? () => setCanvasMode(false) : undefined}
                 onMediaInfo={setMedia}
@@ -537,6 +542,7 @@ export function OverlayPage() {
                   activity={source.activity}
                   controls={controls}
                   offsetSeconds={offsetSeconds}
+                  trim={trim}
                   units={unitSystem}
                   media={media}
                   onFinishedChange={pngFinished}
@@ -546,6 +552,7 @@ export function OverlayPage() {
                   activity={source.activity}
                   controls={controls}
                   offsetSeconds={offsetSeconds}
+                  trim={trim}
                   units={unitSystem}
                   media={media}
                   onFinishedChange={videoFinished}

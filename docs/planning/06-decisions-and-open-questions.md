@@ -1233,6 +1233,16 @@ Reason: a figure that blinks out at every traffic light reads as a broken overla
 
 Tests: unit tests for the stop (zeroes and held values through a pause, a long gap still, pace at zero while recording, a dropout still unknown), the total's basis, the distance written alone and of the total in both unit systems, the map video's pause, and the editor's *Show* choice.
 
+### TD-081: The Video Is Lined Up and Cut on Two Lanes, and Only the Part Kept Is Exported
+
+Decision: the sync bar under the preview is a timeline of two lanes on one scale, as an editor's is: the activity's, with its speed or elevation traced over it, and the video's, with the playhead across both. Dragging slides the video along the activity whichever is longer, as before (TD-059). The video's lane now has a handle at each end of the part exported: dragged, or stepped by the arrow keys a second at a time (ten with Shift, Home and End to the video's ends), they cut the video at its start and its end. The cut parts are hatched. The Sync panel says which part is exported and has **Start the export here** and **End the export here**, at the playhead, and **Export the whole video**. Those sit in the panel, not the sticky stage, which holds only the picture, its transport and the bar: in the stage they made it too tall on a phone to reach the controls under it, as a browser test found.
+
+The cut is the video's own, in its seconds (`VideoTrim`, `trimRange`): kept when the activity is replaced or the video slid, forgotten with the video and by Start over, and held inside the video and at least a second long. The preview still plays the whole video. Every export draws only the part kept: the PNG sequence and the transparent WebM draw their frames from the cut's start (`trimStartSeconds`; the sequence's metadata says where it starts, as `videoStartSeconds`, so an editor can place it), and the burned-in render asks Mediabunny to cut the video and its sound (`trim`). Mediabunny times a cut video's frames from the cut, so the overlay is drawn at the cut's start plus each frame's time; a browser test asks the library that rather than assuming it. The export panels say the part and plan the frames, size and time for it. The custom canvas exports the same part, cut in Sync.
+
+Reason: a ride is hours and a clip of it minutes, or the other way round; lining one up against the other and keeping the stretch that matters is what an editor's two tracks are for, and doing it here saves a second trip through one.
+
+Tests: unit tests for the cut's rules; component tests for the handles, the buttons, keeping the ends apart, and a slide keeping the cut; the export panels' plans and requests; the burned-in render's cut and its timing; and browser tests that a cut PNG sequence's first and last frames are byte for byte the whole export's frames at those moments, and that a cut burned-in render is that much shorter.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.

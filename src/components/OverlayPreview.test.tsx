@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { VideoTrim } from '../overlay/trim';
 import { OverlayPreview } from './OverlayPreview';
 import { DEFAULT_OVERLAY_CONTROLS } from '../overlay/presets';
 import { makeActivity } from '../test/helpers/activity';
@@ -64,6 +65,7 @@ function Harness(props: { source?: ReturnType<typeof activity> | null }) {
   // parameter would swallow `undefined`).
   const source = props.source === null ? undefined : (props.source ?? activity());
   const [offset, setOffset] = useState(0);
+  const [trim, setTrim] = useState<VideoTrim | undefined>(undefined);
   const [controls, setControls] = useState(DEFAULT_OVERLAY_CONTROLS);
   return (
     <OverlayPreview
@@ -71,6 +73,8 @@ function Harness(props: { source?: ReturnType<typeof activity> | null }) {
       activity={source}
       offsetSeconds={offset}
       onOffsetChange={setOffset}
+      trim={trim}
+      onTrimChange={setTrim}
       units="metric"
       controls={controls}
       onControlsChange={(patch) => setControls((current) => ({ ...current, ...patch }))}
@@ -310,6 +314,51 @@ describe('overlay preview sync (AV-1004, TD-059)', () => {
     // The scrubber's own arrows step a frame, held to this video's frame.
     await userEvent.keyboard('{ArrowLeft}');
     expect(document.querySelector('video')!.currentTime).toBeCloseTo(5 - 1 / 30, 5);
+  });
+});
+
+describe('cutting the video to the part exported (TD-081)', () => {
+  const line = () => within(screen.getByRole('group', { name: 'Part exported' })).getByText(/^Exporting/);
+
+  it('sets the ends at the playhead, steps them by key, and lets the whole video back', async () => {
+    render(<Harness />);
+    expect(line()).toHaveTextContent('Exporting the whole video.');
+    seekTo(3);
+    await userEvent.click(screen.getByRole('button', { name: 'Start the export here' }));
+    expect(line()).toHaveTextContent('Exporting 0:03 to 0:10 of the video, 0:07.');
+    const start = screen.getByRole('slider', { name: 'Export starts at' });
+    const end = screen.getByRole('slider', { name: 'Export ends at' });
+    expect(start).toHaveAttribute('aria-valuenow', '3');
+    expect(end).toHaveAttribute('aria-valuenow', '10');
+    end.focus();
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}');
+    expect(line()).toHaveTextContent('Exporting 0:03 to 0:08 of the video, 0:05.');
+    // A handle's keys cut the video; they never slide it along the activity.
+    expect(screen.getByRole('slider', { name: 'Where the video starts in the activity' })).toHaveAttribute('aria-valuenow', '0');
+    expect(document.querySelector('.overlay-sync__legend')).toHaveTextContent(/Cut/);
+    await userEvent.click(screen.getByRole('button', { name: 'Export the whole video' }));
+    expect(line()).toHaveTextContent('Exporting the whole video.');
+  });
+
+  it('keeps the ends apart', async () => {
+    render(<Harness />);
+    seekTo(6);
+    await userEvent.click(screen.getByRole('button', { name: 'End the export here' }));
+    seekTo(9);
+    await userEvent.click(screen.getByRole('button', { name: 'Start the export here' }));
+    expect(screen.getByRole('slider', { name: 'Export starts at' })).toHaveAttribute('aria-valuenow', '5');
+    expect(screen.getByRole('slider', { name: 'Export ends at' })).toHaveAttribute('aria-valuenow', '6');
+  });
+
+  it('slides the video along the activity with its cut, which stays the video’s own', async () => {
+    render(<Harness />);
+    seekTo(2);
+    await userEvent.click(screen.getByRole('button', { name: 'Start the export here' }));
+    const bar = screen.getByRole('slider', { name: 'Where the video starts in the activity' });
+    bar.focus();
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}');
+    expect(bar).toHaveAttribute('aria-valuenow', '2');
+    expect(screen.getByRole('slider', { name: 'Export starts at' })).toHaveAttribute('aria-valuenow', '2');
   });
 });
 
@@ -563,7 +612,7 @@ describe('the sync panel (TD-059)', () => {
   it('draws the activity\'s speed along the bar, to line a sprint up by', () => {
     render(<Harness />);
     expect(document.querySelector('.overlay-sync__trace polyline')?.getAttribute('points')).toMatch(/\d/);
-    expect(document.querySelector('.overlay-sync__legend')).toHaveTextContent(/Video Speed/);
+    expect(document.querySelector('.overlay-sync__legend')).toHaveTextContent(/Video exported Speed/);
   });
 
   it('keeps text that is not a time, and says why, instead of reverting it', async () => {

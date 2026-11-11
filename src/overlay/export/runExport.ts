@@ -17,6 +17,8 @@ export interface RunExportOptions {
   /** The video's length, for the metadata file. */
   videoDurationSeconds: number;
   telemetryOffsetSeconds: number;
+  /** TD-081. Where in the video the first frame belongs. */
+  videoStartSeconds?: number;
   templateName: string;
   /** Draws the overlay at this video time and returns it as a PNG. */
   renderFrame: (frameIndex: number, videoTimeSeconds: number) => Promise<Uint8Array>;
@@ -56,6 +58,7 @@ export function exportMetadata(options: RunExportOptions): string {
       durationSeconds: options.frameCount / options.fps,
       videoDurationSeconds: options.videoDurationSeconds,
       telemetryOffsetSeconds: options.telemetryOffsetSeconds,
+      videoStartSeconds: options.videoStartSeconds ?? 0,
       template: options.templateName,
       firstFrame: frameFileName(0, options.frameCount),
     },

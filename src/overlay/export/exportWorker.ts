@@ -56,6 +56,7 @@ async function run(request: ExportRequest, controller: AbortController): Promise
     });
 
     let lastPosted = 0;
+    const from = request.trimStartSeconds ?? 0;
     const result = await runExport({
       frameCount: request.frameCount,
       fps: request.fps,
@@ -63,11 +64,12 @@ async function run(request: ExportRequest, controller: AbortController): Promise
       height: request.height,
       videoDurationSeconds: request.videoDurationSeconds,
       telemetryOffsetSeconds: request.offsetSeconds,
+      videoStartSeconds: from,
       templateName: request.template.name,
       signal: controller.signal,
       sink: archive.sink,
       renderFrame: async (_index, videoTime) => {
-        renderer.drawFrame(ctx, videoTime);
+        renderer.drawFrame(ctx, from + videoTime);
         const blob = await canvas.convertToBlob({ type: 'image/png' });
         return new Uint8Array(await blob.arrayBuffer());
       },

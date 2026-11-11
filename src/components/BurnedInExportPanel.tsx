@@ -16,6 +16,7 @@ import type { ArchiveStorage, BurnSourceInfo } from '../overlay/export/protocol'
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
 import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
 import { buildOverlayTimeline } from '../overlay/timeline';
+import { trimRange, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 
 interface BurnedInExportPanelProps {
@@ -30,6 +31,8 @@ interface BurnedInExportPanelProps {
    */
   size?: { width: number; height: number };
   offsetSeconds: number;
+  /** TD-081. The part of the video rendered; absent, the whole. */
+  trim?: VideoTrim;
   units: UnitSystem;
   media: OverlayMedia | undefined;
   /** Injected by tests; the page uses the real worker and the real browser. */
@@ -92,6 +95,7 @@ export function BurnedInExportPanel({
   template: customTemplate,
   size,
   offsetSeconds,
+  trim,
   units,
   media,
   start = startBurnedInExport,
@@ -121,6 +125,8 @@ export function BurnedInExportPanel({
   );
 
   const ready = media !== undefined && durationSeconds !== undefined && durationSeconds > 0;
+  // TD-081. The part kept: the render is cut to it, sound and all.
+  const range = trimRange(trim, durationSeconds ?? 0);
   const height = heightChoice === NATIVE ? (media?.height ?? 1080) : Number(heightChoice);
   const { width: outWidth, height: outHeight } =
     size ?? exportDimensions(media ? media.width / media.height : 16 / 9, height);
@@ -141,7 +147,7 @@ export function BurnedInExportPanel({
   const source: Source =
     inspected && inspected.key === inspectKey ? inspected : { status: 'checking' };
   const plan = planBurn({
-    videoDurationSeconds: durationSeconds ?? 0,
+    videoDurationSeconds: range.length,
     width: outWidth,
     height: outHeight,
     frameRate,
@@ -222,7 +228,7 @@ export function BurnedInExportPanel({
   const drawnAnyway = built.template.components.some((component) => component.visible && drawnWithoutTelemetry(component));
   const noOverlap = outsideActivity && !drawnAnyway;
 
-  const signature = JSON.stringify([built.template, units, offsetSeconds, outWidth, outHeight]);
+  const signature = JSON.stringify([built.template, units, offsetSeconds, range.start, range.end, outWidth, outHeight]);
   const running = phase.status === 'running';
   const nothingOn = built.template.components.length === 0;
   const readiness =
@@ -255,6 +261,7 @@ export function BurnedInExportPanel({
           videoDurationSeconds: durationSeconds ?? 0,
           videoStart: video.timing?.start,
           offsetSeconds,
+          ...(range.trimmed ? { trim: { start: range.start, end: range.end } } : {}),
           units,
           template: built.template,
           activity,
@@ -379,8 +386,8 @@ export function BurnedInExportPanel({
               <p data-testid="burn-plan">
                 {outWidth} × {outHeight}, H.264 at about {(plan.bitrate / 1e6).toFixed(1)} Mbps — roughly{' '}
                 {formatBytes(plan.estimatedBytes)}. Rendering takes roughly{' '}
-                {formatDuration(Math.max(1, plan.estimatedSeconds))} for {formatDuration(durationSeconds)}{' '}
-                of video (about {plan.realtimeMultiple.toFixed(1)}× faster than playing it).
+                {formatDuration(Math.max(1, plan.estimatedSeconds))} for {formatDuration(range.length)}{' '}
+                of video{range.trimmed ? `, from ${formatDuration(range.start)} to ${formatDuration(range.end)}` : ''} (about {plan.realtimeMultiple.toFixed(1)}× faster than playing it).
               </p>
 
               {readiness && readiness.notes.length > 0 && (
@@ -432,7 +439,7 @@ export function BurnedInExportPanel({
             className="overlay-export__progress"
           />{' '}
           {Math.round(phase.fraction * 100)}% — {formatDuration(phase.seconds)} of{' '}
-          {formatDuration(durationSeconds)}
+          {formatDuration(range.length)}
         </p>
       )}
       {phase.status === 'running' && (

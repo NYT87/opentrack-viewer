@@ -203,7 +203,7 @@ export function startWebmExport(
     fps: request.fps,
     width: request.width,
     height: request.height,
-    drawFrame: (ctx, videoTime) => renderer.drawFrame(ctx, videoTime),
+    drawFrame: (ctx, videoTime) => renderer.drawFrame(ctx, (request.trimStartSeconds ?? 0) + videoTime),
     signal: controller.signal,
     onProgress,
     deps,

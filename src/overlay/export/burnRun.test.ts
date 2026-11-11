@@ -296,6 +296,20 @@ describe('the burned-in render (AV-1007)', () => {
     expect(events).toContain('text:10.8 km/h'); // the activity as it was at t = 3
   });
 
+  it('cuts the video to the part kept, and draws each frame at its time in the whole video (TD-081)', async () => {
+    // The library times a cut video's frames from the cut: 3 s into a cut at 2 s is 5 s into the video.
+    const { promise, seen } = run({ frames: [3] }, { request: request({ trim: { start: 2, end: 8 } }) });
+    await promise;
+    expect(seen.initOptions).toMatchObject({ trim: { start: 2, end: 8 } });
+    expect(events).toContain('text:18.0 km/h');
+  });
+
+  it('asks for no cut when given none', async () => {
+    const { promise, seen } = run({});
+    await promise;
+    expect(seen.initOptions).not.toHaveProperty('trim');
+  });
+
   it('writes the output where the muxer says, at that position', async () => {
     const { promise, seen } = run({
       during: async () => {

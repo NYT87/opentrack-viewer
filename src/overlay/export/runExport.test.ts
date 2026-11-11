@@ -62,6 +62,7 @@ describe('the export loop (AV-1006)', () => {
       durationSeconds: 0.5,
       videoDurationSeconds: 0.5,
       telemetryOffsetSeconds: -1.5,
+      videoStartSeconds: 0,
       template: 'Metric strip',
       firstFrame: 'frame_000001.png',
     });

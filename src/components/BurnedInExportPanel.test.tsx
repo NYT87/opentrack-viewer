@@ -171,6 +171,19 @@ describe('the burned-in export panel (AV-1007)', () => {
     );
   });
 
+  it('renders only the part of the video kept, and says so (TD-081)', async () => {
+    const { start } = setup({ trim: { startSeconds: 2, endSeconds: 7 } });
+    expect(await screen.findByTestId('burn-plan')).toHaveTextContent(/for 0:05 of video, from 0:02 to 0:07/);
+    await userEvent.click(renderButton());
+    expect(start.mock.calls[0]![0]).toMatchObject({ trim: { start: 2, end: 7 }, videoDurationSeconds: 10 });
+  });
+
+  it('asks for no cut when the whole video is kept', async () => {
+    const { start } = setup();
+    await userEvent.click(renderButton());
+    expect(start.mock.calls[0]![0]).not.toHaveProperty('trim');
+  });
+
   it('starts the render with the file, the size, the template, the offset and the units', async () => {
     const { start } = setup({ offsetSeconds: 1.5, units: 'imperial' });
     await userEvent.click(renderButton());

@@ -28,6 +28,7 @@ import { ZIP_MAX_BYTES } from '../overlay/export/zip';
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
 import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
 import { buildOverlayTimeline } from '../overlay/timeline';
+import { trimRange, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 
 interface OverlayExportPanelProps {
@@ -43,6 +44,8 @@ interface OverlayExportPanelProps {
   /** AV-1011. The canvas's own resolution, which takes the place of the picture-size choice. */
   size?: { width: number; height: number };
   offsetSeconds: number;
+  /** TD-081. The part of the video exported; absent, the whole. */
+  trim?: VideoTrim;
   units: UnitSystem;
   media: OverlayMedia | undefined;
   /** Injected by tests; the page uses the real worker and the real browser. */
@@ -120,6 +123,7 @@ export function OverlayExportPanel({
   template: customTemplate,
   size,
   offsetSeconds,
+  trim,
   units,
   media,
   start = startOverlayExport,
@@ -196,19 +200,22 @@ export function OverlayExportPanel({
     [activity, durationSeconds, videoStart, effectiveOffset],
   );
 
+  // TD-081. A video's frames run over the part kept; an activity alone has nothing to trim.
+  const range = video && durationSeconds ? trimRange(trim, durationSeconds) : undefined;
+  const exportSeconds = range ? range.length : (durationSeconds ?? 0);
   const ready = (size !== undefined || media !== undefined) && durationSeconds !== undefined && durationSeconds > 0;
   const height = heightChoice === NATIVE ? (media?.height ?? 1080) : Number(heightChoice);
   const { width: exportWidth, height: exportHeight } =
     size ?? exportDimensions(media ? media.width / media.height : 16 / 9, height);
   const plan = planExport({
-    videoDurationSeconds: durationSeconds ?? 0,
+    videoDurationSeconds: exportSeconds,
     fps,
     width: exportWidth,
     height: exportHeight,
     limitBytes: storageLimitBytesNow,
   });
   const webmPlan = planWebmExport({
-    videoDurationSeconds: durationSeconds ?? 0,
+    videoDurationSeconds: exportSeconds,
     fps,
     width: exportWidth,
     height: exportHeight,
@@ -219,11 +226,11 @@ export function OverlayExportPanel({
     [customTemplate, controls, timeline, exportWidth, exportHeight],
   );
   // Everything that changes the picture. A finished export is compared with it.
-  const signature = JSON.stringify([built.template, units, effectiveOffset, plan.fps, plan.width, plan.height, asWebm]);
+  const signature = JSON.stringify([built.template, units, effectiveOffset, range?.start, range?.end, plan.fps, plan.width, plan.height, asWebm]);
   const fallbackFps = plan.fitsArchive || asWebm
     ? undefined
     : highestFittingFrameRate({
-        videoDurationSeconds: durationSeconds ?? 0,
+        videoDurationSeconds: exportSeconds,
         width: exportWidth,
         height: exportHeight,
         limitBytes: storageLimitBytesNow,
@@ -270,6 +277,7 @@ export function OverlayExportPanel({
   const noOverlap = outsideActivity && !drawnAnyway;
 
   const running = phase.status === 'running';
+  const trimmedPart = range?.trimmed ? `, from ${formatDuration(range.start)} to ${formatDuration(range.end)} of the video` : '';
   const nothingOn = built.template.components.length === 0;
 
   const begin = () => {
@@ -290,6 +298,7 @@ export function OverlayExportPanel({
           videoDurationSeconds: durationSeconds ?? 0,
           videoStart,
           offsetSeconds: effectiveOffset,
+          ...(range?.trimmed ? { trimStartSeconds: range.start } : {}),
           units,
           template: built.template,
           activity,
@@ -447,14 +456,14 @@ export function OverlayExportPanel({
           {asWebm ? (
             <p data-testid="export-plan">
               {webmPlan.frameCount} frames, {webmPlan.width} × {webmPlan.height},{' '}
-              {formatDuration(webmPlan.durationSeconds)} long. At most about {formatBytes(webmPlan.estimatedBytes)}.
+              {formatDuration(webmPlan.durationSeconds)} long{trimmedPart}. At most about {formatBytes(webmPlan.estimatedBytes)}.
               Recorded in real time, so it takes {formatDuration(Math.max(1, webmPlan.estimatedSeconds))}: keep this
               tab open and in front until it finishes.
             </p>
           ) : (
             <p data-testid="export-plan">
               {plan.frameCount} frames, {plan.width} × {plan.height}, {formatDuration(plan.durationSeconds)}{' '}
-              long. About {formatBytes(plan.estimatedBytes)}; roughly{' '}
+              long{trimmedPart}. About {formatBytes(plan.estimatedBytes)}; roughly{' '}
               {formatDuration(Math.max(1, plan.estimatedSeconds))} to draw.
             </p>
           )}

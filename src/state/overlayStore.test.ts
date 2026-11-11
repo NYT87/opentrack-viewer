@@ -67,3 +67,21 @@ describe('a focused section on the overlay store (AV-1009)', () => {
     expect(useOverlayStore.getState().source.focusedSection).toBeUndefined();
   });
 });
+
+describe('the part of the video exported (TD-081)', () => {
+  const clip = { file: new File(['x'], 'clip.mp4') };
+
+  it('is the video’s own: kept when the activity changes, forgotten with the video, and put back with Start over’s undo', () => {
+    const store = useOverlayStore.getState();
+    store.setVideo(clip);
+    store.setTrim({ startSeconds: 2, endSeconds: 8 });
+    useOverlayStore.getState().setActivity(activity(), 'hand');
+    expect(useOverlayStore.getState().trim).toEqual({ startSeconds: 2, endSeconds: 8 });
+    const snapshot = useOverlayStore.getState().clear();
+    expect(useOverlayStore.getState().trim).toBeUndefined();
+    useOverlayStore.getState().restore(snapshot);
+    expect(useOverlayStore.getState().trim).toEqual({ startSeconds: 2, endSeconds: 8 });
+    useOverlayStore.getState().setVideo({ file: new File(['y'], 'other.mp4') });
+    expect(useOverlayStore.getState().trim).toBeUndefined();
+  });
+});

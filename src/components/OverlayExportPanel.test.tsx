@@ -181,6 +181,13 @@ describe('the export panel (AV-1006)', () => {
     ]);
   });
 
+  it('exports only the part of the video kept, from its start (TD-081)', async () => {
+    const { start } = setup({ trim: { startSeconds: 2, endSeconds: 6.5 } });
+    expect(screen.getByTestId('export-plan')).toHaveTextContent(/135 frames, 1920 × 1080, 0:05 long, from 0:02 to 0:07 of the video/);
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]![0]).toMatchObject({ frameCount: 135, trimStartSeconds: 2, videoDurationSeconds: 10 });
+  });
+
   it('shows progress, and stops on request without saving anything', async () => {
     const { jobs, progress } = setup();
     await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));

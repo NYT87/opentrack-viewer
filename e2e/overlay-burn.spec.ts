@@ -147,6 +147,66 @@ test('renders the video with the overlay burned in, keeps the sound, and uploads
   await expect.poll(() => storedArchives(page)).toEqual([]);
 });
 
+test('renders only the part of the video kept, cut on the video’s lane (TD-081)', async ({ page }, testInfo) => {
+  const panel = await openWithFiles(page, testInfo.outputDir);
+  await expect(panel.getByTestId('burn-plan').or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot render here: ${refusal.join(' ')}`);
+
+  // Two seconds off the start, by the handle's own keys.
+  const start = page.getByRole('slider', { name: 'Export starts at' });
+  await start.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(start).toHaveAttribute('aria-valuenow', '2');
+  await expect(page.getByRole('group', { name: 'Part exported' })).toContainText('Exporting 0:02 to');
+  await expect(panel.getByTestId('burn-plan')).toContainText('from 0:02 to');
+
+  await panel.getByRole('button', { name: 'Render video with overlay' }).click();
+  const link = panel.getByRole('link', { name: /hero8-with-overlay\.mp4/ });
+  await expect(link).toBeVisible({ timeout: 120_000 });
+  const base64 = await page.evaluate(async (href) => {
+    const bytes = new Uint8Array(await (await fetch(href)).arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+  }, (await link.getAttribute('href'))!);
+  const [made, original] = await Promise.all([readMp4(Buffer.from(base64, 'base64')), readMp4(readFileSync(FIXTURE))]);
+  expect(Math.abs(made.durationSeconds - (original.durationSeconds - 2))).toBeLessThan(0.5);
+
+  // The overlay is drawn at the cut's start plus each frame's time, because the
+  // library times a cut video's frames from the cut. Asked of the library here,
+  // in this browser, rather than assumed.
+  const mediabunny = readFileSync(join(process.cwd(), 'node_modules/mediabunny/dist/bundles/mediabunny.min.mjs'), 'utf8');
+  const inspection = await page.context().newPage();
+  await inspection.route('**/__review_decoder__', (route) => route.fulfill({
+    contentType: 'text/html', body: '<!doctype html><title>Local video inspection</title>',
+  }));
+  await inspection.goto(new URL('/__review_decoder__', page.url()).href);
+  const first = await inspection.evaluate(
+    async ({ sourceB64, library }) => {
+      const mb = await import(URL.createObjectURL(new Blob([library], { type: 'text/javascript' })));
+      const bytes = Uint8Array.from(atob(sourceB64), (c) => c.charCodeAt(0));
+      const input = new mb.Input({ source: new mb.BlobSource(new Blob([bytes])), formats: [mb.MP4] });
+      const output = new mb.Output({ format: new mb.Mp4OutputFormat(), target: new mb.BufferTarget() });
+      const seen: number[] = [];
+      const conversion = await mb.Conversion.init({
+        input,
+        output,
+        tracks: 'primary',
+        trim: { start: 2, end: 3 },
+        audio: { discard: true },
+        video: { codec: 'avc', process: (sample: { timestamp: number }) => (seen.push(sample.timestamp), sample) },
+      });
+      await conversion.execute();
+      return Math.min(...seen);
+    },
+    { sourceB64: readFileSync(FIXTURE).toString('base64'), library: mediabunny },
+  );
+  await inspection.close();
+  expect(first).toBeLessThan(0.1);
+});
+
 test('stops on request, keeps nothing, and can be started again', async ({ page }, testInfo) => {
   const panel = await openWithFiles(page, testInfo.outputDir);
   const render = panel.getByRole('button', { name: 'Render video with overlay' });

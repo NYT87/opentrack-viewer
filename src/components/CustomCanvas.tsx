@@ -60,6 +60,7 @@ import {
   type TextAlign,
 } from '../overlay/template';
 import { buildOverlayTimeline, type OverlayTimeline } from '../overlay/timeline';
+import type { VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportPanel } from './OverlayExportPanel';
@@ -79,6 +80,8 @@ interface CustomCanvasProps {
   video?: OverlayVideo;
   media?: OverlayMedia;
   offsetSeconds: number;
+  /** TD-081. The part of the video exported, as set in Sync. */
+  trim?: VideoTrim;
   units: UnitSystem;
   /** Where the video is lined up: the template workspace's Sync. */
   onOpenSync?: () => void;
@@ -153,6 +156,7 @@ export function CustomCanvas({
   video,
   media,
   offsetSeconds,
+  trim,
   units,
   onOpenSync,
   onMediaInfo,
@@ -332,7 +336,7 @@ export function CustomCanvas({
       )}
       {video && (
         <p className="overlay-controls__hint">
-          The video is lined up as it is set in Sync, on the template workspace.{' '}
+          The video is lined up, and cut, as it is set in Sync, on the template workspace.{' '}
           {onOpenSync && (
             <button type="button" className="button" onClick={onOpenSync}>
               Change where the video starts
@@ -481,6 +485,7 @@ export function CustomCanvas({
             template={template}
             size={size}
             offsetSeconds={offsetSeconds}
+            trim={trim}
             units={units}
             media={media}
             onFinishedChange={reportPng}
@@ -493,6 +498,7 @@ export function CustomCanvas({
               template={template}
               size={size}
               offsetSeconds={offsetSeconds}
+              trim={trim}
               units={units}
               media={media}
               onFinishedChange={reportVideo}
