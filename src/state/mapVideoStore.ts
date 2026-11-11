@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { hasValidLocation, type Activity } from '../domain/activity';
 import { ActivityError } from '../domain/errors';
 import type { CameraKeyframe } from '../mapVideo/keyframes';
+import type { MapVideoPhoto } from '../mapVideo/readPhoto';
 import { DEFAULT_MAP_VIDEO_SETTINGS, type MapVideoSettings } from '../mapVideo/project';
 
 const KEYFRAME_UNDO_DEPTH = 50;
@@ -44,6 +45,13 @@ interface MapVideoState {
   /** Replaces the keyframes, keeping the old list to undo to. */
   editKeyframes: (keyframes: CameraKeyframe[]) => void;
   undoKeyframes: () => void;
+  /**
+   * AV-1208. The reader's photos as read: their pixels and what their EXIF
+   * says, in memory only, never in a project or storage (TD-071).
+   */
+  photos: MapVideoPhoto[];
+  addPhotos: (photos: MapVideoPhoto[]) => void;
+  removePhoto: (id: string) => void;
   /** Counts the projects opened, so an editor holding its own copy of the layout starts again from the new one. */
   settingsGeneration: number;
   /** Settings opened from a project file: the basemap among them counts as chosen. */
@@ -80,6 +88,22 @@ export const useMapVideoStore = create<MapVideoState>((set) => ({
   replaceSettings: (settings) =>
     set((state) => ({ settings, basemapChosen: true, keyframeUndo: [], settingsGeneration: state.settingsGeneration + 1 })),
   settingsGeneration: 0,
+  photos: [],
+  addPhotos: (photos) => set((state) => ({ photos: [...state.photos, ...photos] })),
+  removePhoto: (id) =>
+    set((state) => {
+      const gone = state.photos.find((photo) => photo.id === id);
+      gone?.image?.close();
+      const stillNamed = gone && state.photos.some((photo) => photo.id !== id && photo.name === gone.name);
+      return {
+        photos: state.photos.filter((photo) => photo.id !== id),
+        // Its placement goes with it, unless another photo by that name keeps it.
+        settings:
+          gone && !stillNamed
+            ? { ...state.settings, photos: { ...state.settings.photos, items: state.settings.photos.items.filter((item) => item.name !== gone.name) } }
+            : state.settings,
+      };
+    }),
   keyframeUndo: [],
   editKeyframes: (keyframes) =>
     set((state) => ({

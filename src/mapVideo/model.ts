@@ -1,6 +1,7 @@
 import type { Activity } from '../domain/activity';
 import { buildCameraPath, type MapVideoCamera, type MapVideoCameraPath } from './camera';
 import { withKeyframes } from './keyframes';
+import { placePhotos, type PhotoInput, type PhotoPlacement } from './photos';
 import type { MapVideoSettings } from './project';
 import {
   buildMapVideoRoute,
@@ -31,6 +32,10 @@ export interface MapVideoModel {
   frame: (frame: number) => MapVideoFrame;
   /** The same for a moment of the video, for a preview that keeps up by skipping frames. */
   at: (seconds: number) => MapVideoFrame;
+  /** AV-1208. Where each photo went, or why it was left out. */
+  photos: PhotoPlacement[];
+  /** The route as recorded, and how much of each end the privacy trim took: for placing by hand on the whole route. */
+  trim: { fullMeters: number; start: number; end: number };
 }
 
 /** Metres a pixel covers at a zoom and latitude, on MapLibre's 512-pixel world. */
@@ -49,19 +54,27 @@ export interface MapVideoFrame {
 
 export type BuildMapVideoModelResult = { ok: true; model: MapVideoModel } | { ok: false; error: string };
 
-export function buildMapVideoModel(activity: Activity, settings: MapVideoSettings): BuildMapVideoModelResult {
+/**
+ * `photos` are the reader's photos as the page read them (their EXIF in
+ * memory only, TD-071): placed here, and each held on screen in the timeline.
+ */
+export function buildMapVideoModel(activity: Activity, settings: MapVideoSettings, photos: PhotoInput[] = []): BuildMapVideoModelResult {
   const full = buildMapVideoRoute(activity);
   if (!full) return { ok: false, error: 'This activity has fewer than two points with a location, so there is no route to follow.' };
   const route = trimRoute(full, settings.privacyTrim.startMeters, settings.privacyTrim.endMeters);
   if (!route) {
     return { ok: false, error: 'The privacy trim leaves less than 100 m of the route. Trim less, or choose a longer activity.' };
   }
+  const trimStart = route === full ? 0 : settings.privacyTrim.startMeters;
+  const placements = placePhotos(photos, settings.photos, full, trimStart, route.totalMeters);
+  const holds = placements.flatMap((photo) => (photo.distance === undefined ? [] : [{ id: photo.id, distance: photo.distance, seconds: settings.photos.holdSeconds }]));
   const built = buildMapVideoTimeline(route, {
     lengthSeconds: settings.lengthSeconds,
     mode: settings.timing.mode,
     pauseBeatSeconds: settings.timing.pauseBeatSeconds,
     introSeconds: settings.intro.enabled ? settings.intro.seconds : 0,
     outroSeconds: settings.outro.enabled ? settings.outro.seconds : 0,
+    holds,
   });
   if (!built.ok) return built;
   const { timeline } = built;
@@ -100,6 +113,8 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
       drawn,
       frame: (frame) => at(timeline.frameSeconds(frame, frameCount)),
       at,
+      photos: placements,
+      trim: { fullMeters: full.totalMeters, start: trimStart, end: route === full ? 0 : settings.privacyTrim.endMeters },
     },
   };
 }

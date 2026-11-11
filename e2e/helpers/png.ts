@@ -109,6 +109,24 @@ export function countPixelsNear(
   return count;
 }
 
+/** A PNG with an `eXIf` chunk after its header: a photo as a phone might save one, its EXIF inside. */
+export function withExif(png: Buffer, tiff: Uint8Array): Buffer {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const body = Buffer.concat([Buffer.from('eXIf', 'ascii'), Buffer.from(tiff)]);
+  let c = 0xffffffff;
+  for (const byte of body) c = crcTable[(c ^ byte) & 0xff]! ^ (c >>> 8);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(tiff.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE((c ^ 0xffffffff) >>> 0);
+  // The signature (8) and the IHDR chunk (25) come first.
+  return Buffer.concat([png.subarray(0, 33), length, body, crc, png.subarray(33)]);
+}
+
 /** A PNG of one colour: enough to stand in for a map tile, such as a flat terrain tile. */
 export function solidPng(size: number, [r, g, b]: [number, number, number]): Buffer {
   const crcTable = Array.from({ length: 256 }, (_, n) => {

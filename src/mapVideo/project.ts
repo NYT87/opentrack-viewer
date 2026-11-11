@@ -2,6 +2,7 @@ import type { Activity } from '../domain/activity';
 import { parseOverlayTemplate, type OverlayTemplate } from '../overlay/template';
 import type { MapVideoCameraSettings } from './camera';
 import { MAX_FIXED_OFFSET_METERS, MAX_KEYFRAMES, type CameraKeyframe } from './keyframes';
+import { DEFAULT_PHOTOS_SETTINGS, PHOTO_LIMITS, PHOTO_PLACEMENT_METHODS, type PhotoPlacementMethod, type PhotosSettings } from './photos';
 import type { MapVideoTimingMode } from './timing';
 
 /**
@@ -68,6 +69,8 @@ export interface MapVideoSettings {
   keyframes: CameraKeyframe[];
   /** AV-1207. The activity's totals on a card through the outro. */
   summaryCard: { enabled: boolean };
+  /** AV-1208. The photos by name and how each is placed: never what their EXIF says. */
+  photos: PhotosSettings;
 }
 
 export interface MapVideoActivityReference {
@@ -120,6 +123,7 @@ export const DEFAULT_MAP_VIDEO_SETTINGS: MapVideoSettings = {
   overlay: null,
   keyframes: [],
   summaryCard: { enabled: true },
+  photos: DEFAULT_PHOTOS_SETTINGS,
 };
 
 /** The reference a project keeps to an activity: its file name and point count. */
@@ -204,7 +208,28 @@ function section(raw: Record<string, unknown> | undefined, key: string): Record<
   return value as Record<string, unknown>;
 }
 
-const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'marker', 'endpoints', 'privacyTrim', 'overlay', 'keyframes', 'summaryCard'];
+const KNOWN_SECTIONS = ['output', 'lengthSeconds', 'timing', 'intro', 'outro', 'basemap', 'terrain', 'camera', 'route', 'marker', 'endpoints', 'privacyTrim', 'overlay', 'keyframes', 'summaryCard', 'photos'];
+
+/** The photos' settings: by name and method, and how far along the route for one placed by hand. */
+function readPhotos(raw: Record<string, unknown> | undefined): PhotosSettings {
+  const d = DEFAULT_PHOTOS_SETTINGS;
+  const items = raw?.items;
+  if (items !== undefined && !Array.isArray(items)) throw new FieldError('settings.photos.items must be a list.');
+  if (Array.isArray(items) && items.length > PHOTO_LIMITS.maxPhotos) throw new FieldError(`settings.photos.items holds more than ${PHOTO_LIMITS.maxPhotos} photos.`);
+  return {
+    holdSeconds: read(raw, 'holdSeconds', 'settings.photos').number(d.holdSeconds, PHOTO_LIMITS.holdSeconds),
+    clockOffsetSeconds: read(raw, 'clockOffsetSeconds', 'settings.photos').number(d.clockOffsetSeconds, PHOTO_LIMITS.clockOffsetSeconds),
+    items: (items ?? []).map((entry, index) => {
+      const path = `settings.photos.items[${index}]`;
+      if (typeof entry !== 'object' || entry === null) throw new FieldError(`${path} must be an object.`);
+      const item = entry as Record<string, unknown>;
+      if (typeof item.name !== 'string' || item.name.length === 0 || item.name.length > 255) throw new FieldError(`${path}.name must be a file name.`);
+      const method = read(item, 'method', path).oneOf<PhotoPlacementMethod>('time', PHOTO_PLACEMENT_METHODS);
+      const handMeters = item.handMeters === undefined ? undefined : read(item, 'handMeters', path).number(0, [0, 10_000_000]);
+      return { name: item.name, method, ...(handMeters !== undefined ? { handMeters } : {}) };
+    }),
+  };
+}
 
 /** The keyframes of a project, each checked like any other setting. */
 function readKeyframes(raw: unknown, L: typeof MAP_VIDEO_LIMITS): CameraKeyframe[] {
@@ -348,6 +373,7 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
       overlay: null,
       keyframes: [],
       summaryCard: { enabled: read(section(s, 'summaryCard'), 'enabled', 'settings.summaryCard').boolean(d.summaryCard.enabled) },
+      photos: readPhotos(section(s, 'photos')),
     };
     settings.keyframes = readKeyframes(s.keyframes, L);
     const problem = outputProblem(settings);

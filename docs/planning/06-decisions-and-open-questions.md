@@ -1042,6 +1042,29 @@ Decision (`AV-1207`): figures and graphics are placed over the map video with **
 
 Reason: the criteria ask for the E10 components placed with the canvas editor and its layout file, on the map video's timeline, with a summary card and figures that hold during a pause, drawn by one renderer for the preview and the export. Hosting the existing editor reuses its tested placement, undo and layout file rather than copying them. Binding by the marker's recorded time, and cutting the route the figures draw from at the trim, keeps them true to the video and to the privacy trim.
 
+### TD-071: Photos Are Placed by Their EXIF in Memory, Held in the Timeline, Drawn as Pixels, and Named Only in the Project
+
+Decision (`AV-1208`): the reader can add photos (JPEG, PNG, and HEIC where the browser decodes it). When the marker reaches one, the route's progress waits while the photo is shown over the map, then carries on.
+
+- **EXIF, read here, kept in memory.** A small reader of our own (`src/mapVideo/exif.ts`, no dependency) takes three things from a photo's EXIF:
+  - when it was taken, as the local time the camera wrote;
+  - that time's offset from UTC, where the camera wrote one;
+  - where it was taken (its GPS position).
+
+  It finds them in JPEG's APP1 segment, PNG's `eXIf` chunk, and a HEIC's `Exif` item (found by its marker in the first 512 KB). It never throws: a missing or broken block reads as nothing known. A time without an offset is read in the activity's own zone where the file states one (TD-061), else in the reader's zone on that date, and the page says which. None of it is written anywhere.
+- **Pixels, not files.** A photo is decoded by the browser (`createImageBitmap`), turned upright by its EXIF orientation, and kept at most 2,048 px on its long side. The video is drawn from those pixels alone, so no EXIF can reach it: a test checks that drawing a photo hands the context the decoded image and nothing else. A photo over 50 MB, or one the browser cannot decode, is listed with its reason and left out. HEIC outside Safari is the common case, and the page says so.
+- **Placing.** Each photo is placed in one of three ways:
+  - **By when it was taken** (the default when it records a time): the place on the route at that moment of the activity's clock, interpolated between points. The reader can correct a camera's clock by seconds ahead or behind. A time outside the activity is left out, naming both clocks.
+  - **By where it was taken** (the default for a photo with a position and no time): the nearest place on the route, within 200 m.
+  - **By hand:** at the marker's place in the preview, or a distance typed along the route, in the reader's units.
+
+  Places are measured on the route as recorded, then on the route as shown. A photo in a stretch the privacy trim hides is left out, so the trim hides it too.
+- **Holding in the timeline.** Each placed photo is a wait of a set length (3 s by default, 1–10 s) where the marker reaches it, put into the timing knots (TD-066). The riding fills what the waits leave, so the video keeps its length and the last frame is still the route's end. Waits come in route order and sit beside the shortened stops, each moving the other later. If photos would take more than half the follow, each is shown for less, and the page says for how long. Through a wait the marker and the figures stand still where they are.
+- **Drawn.** A photo is fitted within three quarters of the frame, in the middle, with a white edge and a soft shadow, above the figures. It comes in and goes out over 0.4 s (or a quarter of its showing), fading and growing a little. The preview and the export draw it with the same code (TD-070).
+- **In the project, names only.** The project holds the wait's length, the camera clock offset, and per photo its file name, how it is placed, and, for one placed by hand, the distance along the route. A photo's time, position and pixels are never written. Opening a project names the photos it expects and asks for them; one added again by the same name is placed as before.
+
+Reason: the criteria ask for photos placed by time, by position or by hand, a pause while each is shown, reasons for the ones left out, and no EXIF location or metadata in the video or the project. Reading the EXIF ourselves keeps it in the tab. Drawing pixels, not files, is what keeps the metadata out of the video, and naming photos in the project, rather than storing them, keeps a shared project free of them.
+
 ### TD-025: GoPro Telemetry Is Read With `gpmf-extract` and `gopro-telemetry`
 
 Decision (`AV-901`): the browser locates the GoPro metadata track with **`gpmf-extract`** (over **`mp4box`**) and interprets the raw payload with **`gopro-telemetry`**. GoPro's own `gpmf-parser` is kept as the *specification reference*, not compiled; `telemetrik` is kept as a *fixture oracle*, not a dependency.

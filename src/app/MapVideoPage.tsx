@@ -5,7 +5,9 @@ import { MapVideoBasemapChoice } from '../components/MapVideoBasemapChoice';
 import { MapVideoSettingsPanel } from '../components/MapVideoSettingsPanel';
 import { colorByChoices, terrainActive } from '../mapVideo/style';
 import { CustomCanvas } from '../components/CustomCanvas';
-import { mapVideoOverlayTimeline, shownActivity } from '../mapVideo/figures';
+import { mapVideoOverlayTimeline, shownActivity, type PhotoImage } from '../mapVideo/figures';
+import { photoInput } from '../mapVideo/readPhoto';
+import { MapVideoPhotos } from '../components/MapVideoPhotos';
 import { canvasTemplate, type CanvasDraft } from '../overlay/customCanvas';
 import type { OverlayComponent } from '../overlay/template';
 import { MapVideoProjectFile } from '../components/MapVideoProjectFile';
@@ -68,6 +70,9 @@ export function MapVideoPage() {
   const undoKeyframes = useMapVideoStore((state) => state.undoKeyframes);
   const canUndoKeyframes = useMapVideoStore((state) => state.keyframeUndo.length > 0);
   const settingsGeneration = useMapVideoStore((state) => state.settingsGeneration);
+  const photos = useMapVideoStore((state) => state.photos);
+  const addPhotos = useMapVideoStore((state) => state.addPhotos);
+  const removePhoto = useMapVideoStore((state) => state.removePhoto);
   const setMaptilerKey = useMapVideoStore((state) => state.setMaptilerKey);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
@@ -79,7 +84,16 @@ export function MapVideoPage() {
   const basemap = settings.basemap.source;
   // A new map for another style, key or terrain: see MapVideoPreview.
   const mapKey = [basemap, settings.basemap.style, settings.basemap.maptilerStyle, basemap === 'maptiler' ? maptilerKey.trim() : '', terrainActive(settings)].join('|');
-  const built = useMemo(() => (activity ? buildMapVideoModel(activity, settings) : undefined), [activity, settings]);
+  // AV-1208. The photos as the model places them, and their pixels as the preview draws them.
+  const photoInputs = useMemo(() => photos.map((photo) => photoInput(photo, activity?.metadata.utcOffsetMinutes)), [photos, activity]);
+  const photoImages = useMemo(
+    () =>
+      new Map<string, PhotoImage>(
+        photos.flatMap((photo) => (photo.image ? [[photo.id, { image: photo.image, width: photo.width, height: photo.height }] as const] : [])),
+      ),
+    [photos],
+  );
+  const built = useMemo(() => (activity ? buildMapVideoModel(activity, settings, photoInputs) : undefined), [activity, settings, photoInputs]);
   const model = built?.ok ? built.model : undefined;
   // What the editor offers and draws from: the map video's clock, and the trimmed stretch (TD-066).
   const figuresTimeline = useMemo(() => (activity && model ? mapVideoOverlayTimeline(activity, model) : undefined), [activity, model]);
@@ -192,6 +206,7 @@ export function MapVideoPage() {
                   onPausedAt={setPausedAt}
                   seek={seek}
                   onSnapshot={setBackdrop}
+                  photoImages={photoImages}
                 />
               </Suspense>
             )}
@@ -298,6 +313,26 @@ export function MapVideoPage() {
                 colorBy={built?.ok ? colorByChoices(activity, built.model.route) : undefined}
               />
             )}
+            {activity && model && (
+              <MapVideoPhotos
+                photos={photos}
+                placements={model.photos}
+                shownAt={new Map(model.timeline.holds.map((hold) => [hold.id, model.timeline.introSeconds + hold.startSeconds]))}
+                settings={settings.photos}
+                onAdd={addPhotos}
+                onRemove={removePhoto}
+                onChange={(patch) => updateSettings({ photos: patch })}
+                markerMeters={model.at(pausedAt).sample.distance + model.trim.start}
+                routeMeters={model.trim.fullMeters}
+                units={unitSystem}
+                zoneNote={
+                  activity.metadata.utcOffsetMinutes !== undefined
+                    ? `A photo time without its own zone is read in the activity's, UTC${formatOffset(activity.metadata.utcOffsetMinutes)}.`
+                    : 'A photo time without its own zone is read in your time zone.'
+                }
+                holdNote={model.timeline.holdNote}
+              />
+            )}
             {activity && figuresActivity && figuresTimeline && (
               <CustomCanvas
                 key={settingsGeneration}
@@ -325,4 +360,11 @@ export function MapVideoPage() {
       </div>
     </main>
   );
+}
+
+/** `+09:00` for 540 minutes. */
+function formatOffset(minutes: number): string {
+  const sign = minutes < 0 ? '-' : '+';
+  const abs = Math.abs(minutes);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
 }

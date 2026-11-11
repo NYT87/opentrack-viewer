@@ -143,11 +143,50 @@ export interface MapVideoFiguresInput {
   width: number;
   height: number;
   readerTimeZone?: string;
+  /** AV-1208. The photos' pixels, decoded in the page: drawn as pixels, so nothing of their EXIF goes with them. */
+  photoImages?: ReadonlyMap<string, PhotoImage>;
+}
+
+/** A photo as drawn: its decoded pixels and their size. */
+export interface PhotoImage {
+  image: CanvasImageSource;
+  width: number;
+  height: number;
+}
+
+/** How long a photo takes to come in and to go, at most a quarter of its showing. */
+const PHOTO_TRANSITION_SECONDS = 0.4;
+
+/**
+ * A photo over the map while the marker waits for it: fitted within three
+ * quarters of the frame, in the middle, with a white edge, coming in and
+ * going out by fading and growing a little.
+ */
+export function drawPhoto(ctx: OverlayContext2D, photo: PhotoImage, shown: { elapsed: number; duration: number }, width: number, height: number): void {
+  const fade = Math.min(PHOTO_TRANSITION_SECONDS, shown.duration / 4);
+  const t = Math.min(1, shown.elapsed / fade, (shown.duration - shown.elapsed) / fade);
+  const eased = t * t * (3 - 2 * t);
+  const fit = Math.min((width * 0.75) / photo.width, (height * 0.75) / photo.height) * (0.92 + 0.08 * eased);
+  const w = photo.width * fit;
+  const h = photo.height * fit;
+  const x = (width - w) / 2;
+  const y = (height - h) / 2;
+  const edge = Math.max(2, Math.min(width, height) * 0.012);
+  ctx.save();
+  ctx.globalAlpha = eased;
+  ctx.shadowColor = 'rgb(0 0 0 / 0.5)';
+  ctx.shadowBlur = edge * 2;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x - edge, y - edge, w + 2 * edge, h + 2 * edge);
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.drawImage(photo.image, x, y, w, h);
+  ctx.restore();
 }
 
 /** The figures of a map video, ready to draw at any moment. */
 export function createMapVideoFigures(input: MapVideoFiguresInput): MapVideoFigures {
-  const { activity, model, settings, units, width, height, readerTimeZone } = input;
+  const { activity, model, settings, units, width, height, readerTimeZone, photoImages } = input;
   const timeline = mapVideoOverlayTimeline(activity, model);
   const shown = shownActivity(activity, model, settings);
   const overlay = settings.overlay && settings.overlay.components.length > 0
@@ -163,6 +202,9 @@ export function createMapVideoFigures(input: MapVideoFiguresInput): MapVideoFigu
     activity: shown,
     drawFrame: (ctx, seconds) => {
       overlay?.drawFrame(ctx, seconds, { clear: false });
+      const photo = model.timeline.at(seconds).photo;
+      const image = photo && photoImages?.get(photo.id);
+      if (photo && image) drawPhoto(ctx, image, photo, width, height);
       if (!card || model.timeline.at(seconds).phase !== 'outro') return;
       card.drawFrame(ctx, seconds, { clear: false });
       if (credit) drawCredit(ctx, credit, settings.output.height > settings.output.width, width, height);

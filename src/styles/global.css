@@ -1727,6 +1727,14 @@ main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline
 .map-video-settings__field input[type='password'] { width: 14em; max-width: 100%; }
 /* AV-1206. Keyframes, one card each in time order. */
 .map-video-keyframes-slot:empty { display: none; }
+/* AV-1208. Photos, one row each: a thumbnail, how it is placed, and where it went or why not. */
+.map-video-photos__list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.map-video-photo { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.map-video-photo__thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; background: var(--border); }
+.map-video-photo__body { display: grid; gap: 6px; min-width: 0; }
+.prose .map-video-photo__name { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.map-video-photo__hand { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.prose .map-video-photo__status { margin: 0; font-size: 13px; }
 .map-video-keyframes__list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .map-video-keyframe { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
 .map-video-keyframe__head, .map-video-keyframe__fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }

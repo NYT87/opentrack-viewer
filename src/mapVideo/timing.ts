@@ -24,6 +24,8 @@ export interface MapVideoTimingOptions {
   pauseBeatSeconds: number;
   introSeconds: number;
   outroSeconds: number;
+  /** AV-1208. Places where the marker waits a while, each a photo shown: metres along the route, and for how long. */
+  holds?: { id: string; distance: number; seconds: number }[];
 }
 
 /** Slower than this, a stretch is standing still: the moving-time rule of the stats (`computeStats`). */
@@ -34,6 +36,8 @@ export const MIN_PAUSE_SECONDS = 60;
 export const MIN_FOLLOW_SECONDS = 1;
 /** Beats never take more than this share of the follow; with many stops, each beat is shortened. */
 const MAX_BEAT_SHARE = 0.25;
+/** Photos never take more than this share of the follow; with many, each is shown for less. */
+const MAX_HOLD_SHARE = 0.5;
 
 export type MapVideoPhase = 'intro' | 'follow' | 'outro';
 
@@ -45,6 +49,8 @@ export interface TimelineSample {
   distance: number;
   /** Whether the marker is held in a shortened stop. */
   paused: boolean;
+  /** AV-1208. The photo shown while the marker waits for it: how far into its showing, and for how long. */
+  photo?: { id: string; elapsed: number; duration: number };
 }
 
 /** A stop as shown: the video seconds it takes, and where on the route it is. */
@@ -69,6 +75,10 @@ export interface MapVideoTimeline {
   /** The beat each long stop was given, after shortening for many stops. */
   beatSeconds: number;
   pauses: TimelinePause[];
+  /** AV-1208. Each photo's showing, in follow seconds (as `pauses`). */
+  holds: { id: string; startSeconds: number; endSeconds: number; distance: number }[];
+  /** Why the photos are shown for less than asked, when they are. */
+  holdNote?: string;
   /** Where the video is at `seconds`, from 0 to `lengthSeconds`. */
   at: (seconds: number) => TimelineSample;
   /** The first video second at which the marker reaches `distance`. */
@@ -194,22 +204,65 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
     return { ok: false, error: `The intro and outro leave less than ${MIN_FOLLOW_SECONDS} second for the route. Shorten them or lengthen the video.` };
   }
 
+  // Photos are held out of the follow first: the riding fills what they leave.
+  const asked = (options.holds ?? []).filter((hold) => hold.seconds > 0).sort((a, b) => a.distance - b.distance);
+  const askedTotal = asked.reduce((sum, hold) => sum + hold.seconds, 0);
+  const holdScale = askedTotal > follow * MAX_HOLD_SHARE ? (follow * MAX_HOLD_SHARE) / askedTotal : 1;
+  const holdNote = holdScale < 1 ? `So many photos would leave too little time for the route: each is shown for ${(asked[0]!.seconds * holdScale).toFixed(1)} s.` : undefined;
+  const riding = follow - askedTotal * holdScale;
+
   let mode = options.mode;
   let modeNote: string | undefined;
   let knots: Knots | undefined;
   if (mode === 'time') {
     modeNote = timeModeRefusal(route);
-    knots = modeNote ? undefined : timeKnots(route, follow, options.pauseBeatSeconds);
+    knots = modeNote ? undefined : timeKnots(route, riding, options.pauseBeatSeconds);
     if (!knots) {
       modeNote ??= 'The route is all stops, so the video follows it at an even pace.';
       mode = 'distance';
     }
   }
-  knots ??= distanceKnots(route, follow);
+  knots ??= distanceKnots(route, riding);
   const { seconds, meters, pauses, beat } = knots;
+
+  // Each photo's wait, put in where the marker reaches it: what comes after moves later.
+  const holds: MapVideoTimeline['holds'] = [];
+  for (const hold of asked) {
+    const length = hold.seconds * holdScale;
+    const at = interpolate(meters, seconds, Math.min(route.totalMeters, Math.max(0, hold.distance)));
+    const marker = interpolate(seconds, meters, at);
+    let i = 0;
+    while (i < seconds.length && seconds[i]! < at) i += 1;
+    // Split the stretch it falls in, unless a knot is there already, then wait.
+    if (seconds[i] !== at) {
+      seconds.splice(i, 0, at);
+      meters.splice(i, 0, marker);
+    }
+    for (let k = i + 1; k < seconds.length; k += 1) seconds[k]! += length;
+    seconds.splice(i + 1, 0, at + length);
+    meters.splice(i + 1, 0, marker);
+    for (const pause of pauses) {
+      if (pause.startSeconds >= at) {
+        pause.startSeconds += length;
+        pause.endSeconds += length;
+      }
+    }
+    for (const earlier of holds) {
+      if (earlier.startSeconds > at) {
+        earlier.startSeconds += length;
+        earlier.endSeconds += length;
+      }
+    }
+    holds.push({ id: hold.id, startSeconds: at, endSeconds: at + length, distance: marker });
+  }
+  seconds[seconds.length - 1] = Math.max(seconds[seconds.length - 1]!, follow);
 
   const pausedAt = (followSeconds: number) =>
     pauses.some((pause) => followSeconds >= pause.startSeconds && followSeconds < pause.endSeconds);
+  const photoAt = (followSeconds: number) => {
+    const hold = holds.find((entry) => followSeconds >= entry.startSeconds && followSeconds < entry.endSeconds);
+    return hold && { id: hold.id, elapsed: followSeconds - hold.startSeconds, duration: hold.endSeconds - hold.startSeconds };
+  };
 
   const at = (t: number): TimelineSample => {
     const time = Math.min(length, Math.max(0, t));
@@ -218,7 +271,8 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
       return { phase: 'outro', phaseProgress: (time - intro - follow) / outro, distance: route.totalMeters, paused: false };
     }
     const s = Math.min(follow, time - intro);
-    return { phase: 'follow', phaseProgress: s / follow, distance: interpolate(seconds, meters, s), paused: pausedAt(s) };
+    const photo = photoAt(s);
+    return { phase: 'follow', phaseProgress: s / follow, distance: interpolate(seconds, meters, s), paused: pausedAt(s), ...(photo ? { photo } : {}) };
   };
 
   return {
@@ -232,6 +286,8 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
       ...(modeNote ? { modeNote } : {}),
       beatSeconds: beat,
       pauses,
+      holds,
+      ...(holdNote ? { holdNote } : {}),
       at,
       secondsAt: (distance) => intro + interpolate(meters, seconds, Math.min(route.totalMeters, Math.max(0, distance))),
       frameSeconds: (frame, frameCount) => (frameCount <= 1 ? 0 : (Math.min(frameCount - 1, Math.max(0, frame)) / (frameCount - 1)) * length),

@@ -19,6 +19,8 @@ const { useInteractionStore } = await import('../state/interactionStore');
 const { useMapVideoStore } = await import('../state/mapVideoStore');
 const { buildMapVideoModel } = await import('../mapVideo/model');
 const { maxFollowOffsetMeters } = await import('../mapVideo/keyframes');
+const { jpegWithExif } = await import('../test/helpers/exifFixture');
+const { photoInput } = await import('../mapVideo/readPhoto');
 const { DEFAULT_MAP_VIDEO_SETTINGS, MAP_VIDEO_PROJECT_KIND } = await import('../mapVideo/project');
 const { fixtureFile } = await import('../test/helpers/fixtures');
 const { FakeMap, resetMapLibreMock } = await import('../test/helpers/maplibreMock');
@@ -39,8 +41,8 @@ async function openWithRoute(fixture = 'route-with-elevation.gpx') {
   await waitFor(() => expect(map().jumps.length).toBeGreaterThan(0));
 }
 const model = () => {
-  const { activity, settings } = useMapVideoStore.getState();
-  const built = buildMapVideoModel(activity!, settings);
+  const { activity, settings, photos } = useMapVideoStore.getState();
+  const built = buildMapVideoModel(activity!, settings, photos.map((photo) => photoInput(photo, activity!.metadata.utcOffsetMinutes)));
   if (!built.ok) throw new Error(built.error);
   return built.model;
 };
@@ -455,5 +457,89 @@ describe('figures over the map (AV-1207)', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'Pull back to the whole route' }));
     expect(card()).toBeDisabled();
     expect(card()).toHaveAccessibleName(/turn the outro on first/);
+  });
+});
+
+describe('photos along the route (AV-1208)', () => {
+  const photosRegion = () => screen.getByRole('region', { name: 'Photos' });
+  const row = (name: string) => within(photosRegion()).getByRole('listitem', { name });
+  /** A photo file: EXIF as a camera writes it, in a file the stub below decodes (or not). */
+  const photo = (name: string, exif: Parameters<typeof jpegWithExif>[0] = {}) => new File([jpegWithExif(exif)], name, { type: 'image/jpeg' });
+
+  beforeEach(() => {
+    // jsdom decodes no images: a stand-in that does, refusing a file named as damaged.
+    globalThis.createImageBitmap = vi.fn(async (source: unknown, options?: ImageBitmapOptions) => {
+      if (source instanceof File && source.name.includes('damaged')) throw new Error('decode');
+      return { width: options?.resizeWidth ?? 4000, height: options?.resizeHeight ?? 3000, close: vi.fn() } as unknown as ImageBitmap;
+    }) as unknown as typeof createImageBitmap;
+  });
+
+  it('places a photo by when it was taken, and lets it go again', async () => {
+    await openWithRoute();
+    // The ride runs 10:00 to 10:03 UTC; this was taken at 10:01:30.
+    await userEvent.upload(screen.getByTestId('map-video-photo-input'), photo('IMG_1.jpg', { dateTimeOriginal: '2024:01:01 10:01:30', offsetTimeOriginal: '+00:00' }));
+    await waitFor(() => expect(row('IMG_1.jpg')).toHaveTextContent(/Shown at 0:\d\d\.\d, .* along the route\./));
+    expect(within(row('IMG_1.jpg')).getByRole('combobox', { name: 'Placed' })).toHaveValue('time');
+    expect(model().timeline.holds).toHaveLength(1);
+
+    await userEvent.click(within(row('IMG_1.jpg')).getByRole('button', { name: 'Remove' }));
+    expect(within(photosRegion()).queryByRole('listitem')).not.toBeInTheDocument();
+    expect(useMapVideoStore.getState().photos).toHaveLength(0);
+  });
+
+  it('moves a photo by the camera clock offset', async () => {
+    await openWithRoute();
+    // The camera's clock read 10:11:30 for 10:01:30: ten minutes ahead.
+    await userEvent.upload(screen.getByTestId('map-video-photo-input'), photo('IMG_2.jpg', { dateTimeOriginal: '2024:01:01 10:11:30', offsetTimeOriginal: '+00:00' }));
+    await waitFor(() => expect(row('IMG_2.jpg')).toHaveTextContent(/Left out: Taken at 10:11 UTC, outside the activity/));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Camera clock ahead of the activity by' }), { target: { value: '600' } });
+    expect(row('IMG_2.jpg')).toHaveTextContent(/Shown at/);
+  });
+
+  it('places by hand, at the marker, a photo that says neither when nor where', async () => {
+    await openWithRoute();
+    await userEvent.upload(screen.getByTestId('map-video-photo-input'), photo('drawing.jpg'));
+    await waitFor(() => expect(row('drawing.jpg')).toHaveTextContent(/Left out: Not placed yet/));
+    fireEvent.change(scrubber(), { target: { value: '15' } });
+    await userEvent.click(within(row('drawing.jpg')).getByRole('button', { name: 'Place at the marker' }));
+    // At the place the marker was at 0:15; the 3 s it now waits there leave less time for the riding before it.
+    expect(row('drawing.jpg')).toHaveTextContent(/Shown at 0:1[0-5]\.\d/);
+    expect(useMapVideoStore.getState().settings.photos.items).toEqual([{ name: 'drawing.jpg', method: 'hand', handMeters: expect.any(Number) }]);
+  });
+
+  it('lists a photo it cannot decode, with the reason, and leaves it out', async () => {
+    await openWithRoute();
+    await userEvent.upload(screen.getByTestId('map-video-photo-input'), photo('damaged.jpg', { dateTimeOriginal: '2024:01:01 10:01:30', offsetTimeOriginal: '+00:00' }));
+    await waitFor(() => expect(row('damaged.jpg')).toHaveTextContent('Left out: It could not be decoded'));
+    expect(model().timeline.holds).toHaveLength(0);
+  });
+
+  it('saves photos by name only, and asks for them again when the project is opened', async () => {
+    const blobs: Blob[] = [];
+    const original = URL.createObjectURL;
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      blobs.push(blob);
+      return 'blob:saved';
+    });
+    URL.revokeObjectURL = vi.fn();
+    try {
+      await openWithRoute();
+      await userEvent.upload(
+        screen.getByTestId('map-video-photo-input'),
+        photo('IMG_1.jpg', { dateTimeOriginal: '2024:01:01 10:01:30', offsetTimeOriginal: '+00:00', lat: 51.5, lon: -0.002 }),
+      );
+      await waitFor(() => expect(row('IMG_1.jpg')).toHaveTextContent(/Shown at/));
+      await userEvent.selectOptions(within(row('IMG_1.jpg')).getByRole('combobox', { name: 'Placed' }), 'position');
+      await userEvent.click(screen.getByRole('button', { name: 'Save project' }));
+    } finally {
+      URL.createObjectURL = original;
+    }
+    const json = await blobs[0]!.text();
+    expect(JSON.parse(json).settings.photos.items).toEqual([{ name: 'IMG_1.jpg', method: 'position' }]);
+    expect(json).not.toMatch(/10:01|2024|-0\.002|"lat"|"lon"/);
+
+    useMapVideoStore.getState().removePhoto(useMapVideoStore.getState().photos[0]!.id);
+    await userEvent.upload(screen.getByTestId('map-video-project-input'), new File([json], 'saved.json'));
+    expect(await within(photosRegion()).findByText(/The project names a photo not added yet: IMG_1\.jpg/)).toBeInTheDocument();
   });
 });

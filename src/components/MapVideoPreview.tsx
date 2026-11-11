@@ -17,7 +17,7 @@ import type { MapVideoModel } from '../mapVideo/model';
 import { formatVideoTime } from '../mapVideo/timing';
 import { clampKeyframe, offsetBetween, type CameraKeyframe } from '../mapVideo/keyframes';
 import { MapVideoKeyframes, freshKeyframeId } from './MapVideoKeyframes';
-import { createMapVideoFigures, type MapVideoFigures } from '../mapVideo/figures';
+import { createMapVideoFigures, type MapVideoFigures, type PhotoImage } from '../mapVideo/figures';
 import type { MapVideoSettings } from '../mapVideo/project';
 import { MARKER_ICON_PIXELS, markerIconImage, sportIcon } from '../mapVideo/markerIcons';
 import {
@@ -136,6 +136,8 @@ export interface MapVideoPreviewProps {
   seek?: { seconds: number; request: number };
   /** Told a picture of the map as it settles while paused, for the figures editor to place over. */
   onSnapshot?: (url: string) => void;
+  /** AV-1208. The photos' decoded pixels, by id, shown while the marker waits for each. */
+  photoImages?: ReadonlyMap<string, PhotoImage>;
 }
 
 /** MapLibre's pointer and touch handlers: on while paused, so the reader can frame a keyframe; off while playing. */
@@ -184,6 +186,7 @@ export function MapVideoPreview({
   onPausedAt,
   seek: seekRequest,
   onSnapshot,
+  photoImages,
 }: MapVideoPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const figuresRef = useRef<HTMLCanvasElement>(null);
@@ -209,9 +212,9 @@ export function MapVideoPreview({
   const sport = sportIcon(activity.metadata.sport);
 
   // What the drawing reads, without making a new map for each change; updated before the effects below run.
-  const latest = useRef({ model, settings, seconds, colors, playing, onSnapshot, activity, units });
+  const latest = useRef({ model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages });
   useLayoutEffect(() => {
-    latest.current = { model, settings, seconds, colors, playing, onSnapshot, activity, units };
+    latest.current = { model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages };
   });
 
   // Make the map once; the parent makes a new component for another basemap or terrain.
@@ -305,7 +308,7 @@ export function MapVideoPreview({
     const canvas = figuresRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const { model: current, settings: now, activity: active, units: shown } = latest.current;
+    const { model: current, settings: now, activity: active, units: shown, photoImages: images } = latest.current;
     const ratio = window.devicePixelRatio || 1;
     const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
@@ -313,12 +316,12 @@ export function MapVideoPreview({
       canvas.width = width;
       canvas.height = height;
     }
-    const key = [current, now.overlay, now.summaryCard.enabled, now.terrain, now.basemap.source, active, shown, width, height];
+    const key = [current, now.overlay, now.summaryCard.enabled, now.terrain, now.basemap.source, active, shown, images, width, height];
     const cached = figuresCache.current;
     const figures =
       cached && cached.key.every((value, i) => value === key[i])
         ? cached.figures
-        : createMapVideoFigures({ activity: active, model: current, settings: now, units: shown, width, height });
+        : createMapVideoFigures({ activity: active, model: current, settings: now, units: shown, width, height, photoImages: images });
     figuresCache.current = { key, figures };
     ctx.clearRect(0, 0, width, height);
     figures.drawFrame(ctx, at);

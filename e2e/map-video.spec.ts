@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
 import { join } from 'node:path';
-import { countPixelsNear, decodePng, solidPng } from './helpers/png';
+import { countPixelsNear, decodePng, solidPng, withExif } from './helpers/png';
+import { tiffBlock } from '../src/test/helpers/exifFixture';
 
 /**
  * AV-1202. The map video page in a real browser: reached from Tools, opened
@@ -287,5 +288,28 @@ test('draws a figure placed in the editor over the map, and the summary card in 
   const beforeOutro = await whiteIn(0.25, 0.25, 0.75, 0.75);
   await page.getByRole('slider', { name: 'Position in the video' }).fill('29.5');
   await expect.poll(() => whiteIn(0.25, 0.25, 0.75, 0.75), { timeout: 5000 }).toBeGreaterThan(beforeOutro + 400);
+  expect(offOrigin(requests)).toEqual([]);
+});
+
+test('places a photo by the time in its EXIF, and shows it while the marker waits', async ({ page }) => {
+  await page.goto('./#/map-video');
+  const requests = recordRequests(page);
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'overlay-ride.gpx'));
+  await page.getByRole('radio', { name: /^Route only/ }).check();
+  // The ride runs 10:00:00 to 10:01:00 UTC; a magenta photo taken at 10:00:30, with a place and a time in its EXIF.
+  const photo = withExif(solidPng(300, [255, 0, 255]), tiffBlock({ dateTimeOriginal: '2024:01:01 10:00:30', offsetTimeOriginal: '+00:00', lat: 51.503, lon: 0 }));
+  await page.getByTestId('map-video-photo-input').setInputFiles({ name: 'IMG_0001.png', mimeType: 'image/png', buffer: photo });
+
+  const row = page.getByRole('region', { name: 'Photos' }).getByRole('listitem', { name: 'IMG_0001.png' });
+  await expect(row).toContainText(/Shown at 0:\d\d\.\d/);
+  const shownAt = /Shown at 0:(\d\d\.\d)/.exec((await row.textContent()) ?? '')![1]!;
+
+  const magenta = async () => countPixelsNear(await previewShot(page), [255, 0, 255], 20);
+  expect(await magenta()).toBe(0);
+  await page.getByRole('slider', { name: 'Position in the video' }).fill(String(Number(shownAt) + 1.5));
+  await expect.poll(magenta, { timeout: 5000 }).toBeGreaterThan(5000);
+  // Gone once the marker moves on.
+  await page.getByRole('slider', { name: 'Position in the video' }).fill(String(Number(shownAt) + 6));
+  await expect.poll(magenta, { timeout: 5000 }).toBe(0);
   expect(offOrigin(requests)).toEqual([]);
 });
