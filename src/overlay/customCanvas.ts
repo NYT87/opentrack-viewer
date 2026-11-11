@@ -69,6 +69,7 @@ export type CanvasElementKey =
   | 'gauge:heartRate'
   | 'route'
   | 'progress'
+  | 'elevationProfile'
   | `still:${string}`
   | `shape:${ShapeKind}`;
 
@@ -80,13 +81,16 @@ export interface CanvasElementChoice {
   reason?: string;
 }
 
+/** Why an activity cannot show its elevation, as a figure or a profile. */
+export const ELEVATION_MISSING = 'This activity has no elevation.';
+
 const LIVE_FIGURES: readonly { metric: OverlayMetricKey; label: string; missing: string }[] = [
   { metric: 'speed', label: 'Speed', missing: 'This activity has no speed: it needs positions or a recorded speed, and times.' },
   { metric: 'pace', label: 'Pace', missing: 'This activity has no pace: it needs a speed, and some movement.' },
   { metric: 'distance', label: 'Distance', missing: 'This activity has no distance: it has no positions or recorded distance.' },
   { metric: 'elapsed', label: 'Elapsed time', missing: 'This activity has no timestamps.' },
   { metric: 'moving', label: 'Moving time', missing: 'This activity has no moving time: it needs a distance and times.' },
-  { metric: 'elevation', label: 'Elevation', missing: 'This activity has no elevation.' },
+  { metric: 'elevation', label: 'Elevation', missing: ELEVATION_MISSING },
   { metric: 'heartRate', label: 'Heart rate', missing: 'This activity has no heart rate.' },
   { metric: 'power', label: 'Power', missing: 'This activity has no power.' },
   { metric: 'cyclingCadence', label: 'Cycling cadence', missing: 'This activity has no cycling cadence.' },
@@ -125,6 +129,13 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
       ...(!timeline.unavailable && timeline.hasRoute ? {} : { reason: 'This activity has no positions, so there is no route.' }),
     },
     { key: 'progress', label: 'Progress bar', group: 'Live figures', available: !timeline.unavailable },
+    {
+      key: 'elevationProfile',
+      label: 'Elevation profile',
+      group: 'Live figures',
+      available: has('metric:elevation'),
+      ...(has('metric:elevation') ? {} : { reason: ELEVATION_MISSING }),
+    },
   ];
   const whole: CanvasElementChoice[] = stillElementChoices(still)
     .filter((choice) => choice.key !== 'route')
@@ -182,6 +193,11 @@ export function newCanvasComponent(
   }
   if (key === 'progress') {
     return { ...base, id: freshComponentId(template, 'progress'), type: 'progress', rect: at(0.5, Math.max(0.006, 0.012 * aspect)) };
+  }
+  if (key === 'elevationProfile') {
+    // A strip, four times as wide as it is tall on the frame, whatever the frame's shape.
+    const width = Math.min(0.4, 0.4 / aspect);
+    return { ...base, id: freshComponentId(template, 'elevation-profile'), type: 'elevationProfile', rect: at(width, (width * aspect) / 4) };
   }
   if (key === 'gauge:speed' || key === 'gauge:heartRate') {
     const metric = key === 'gauge:speed' ? 'speed' : 'heartRate';

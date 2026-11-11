@@ -319,6 +319,8 @@ export function describeStillComponent(component: OverlayComponent): string {
       return component.summary ? SUMMARY_CAPTIONS[component.summary.stat] : 'Figure';
     case 'date':
       return 'Date';
+    case 'elevationProfile':
+      return 'Elevation profile';
     case 'label': {
       const first = (component.content ?? '').split('\n')[0]!.trim();
       return first ? `Text: ${first.length > 24 ? `${first.slice(0, 23)}…` : first}` : 'Text';

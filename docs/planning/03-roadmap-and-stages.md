@@ -218,7 +218,7 @@ Outcome:
 - User can open a dedicated Map video page from the header `Tools` dropdown, or hand the loaded activity over from the viewer, Route Builder or the video telemetry page.
 - The camera follows the route over the map, in 2D or 3D terrain, while the route draws itself behind a moving marker; an intro flies in from an overview and an outro pulls back to the whole route with a summary card.
 - User can set the length, the size (landscape, portrait, square, 4K), the basemap or route-only, the route and marker style, and camera keyframes.
-- Figures, gauges, the elevation profile (AV-1211) and other overlay components from M8's custom canvas run alongside, bound to the map video's timeline.
+- Figures, gauges, the elevation profile (AV-1211, TD-075) and other overlay components from M8's custom canvas run alongside, bound to the map video's timeline.
 - User can place local photos along the route by time or position; they pause the journey and show on the map.
 - A privacy trim hides the start and end of the route.
 - The video is rendered frame by frame, deterministically, and exported as MP4 or WebM with an optional local audio track, plus a poster image.

@@ -337,3 +337,29 @@ test('the guard against live providers stops a request to one, and sees it (AV-1
   // Seen, and so cleared: the check after each test is for requests nobody meant to make.
   live.length = 0;
 });
+
+test('places an elevation profile with the editor, and draws it over the map with its cursor (AV-1211)', async ({ page }) => {
+  await page.goto('./#/map-video');
+  const requests = recordRequests(page);
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
+  await page.getByRole('radio', { name: /^Route only/ }).check();
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('15');
+
+  /** Pixels of the accent colour (the cursor and its dot) in the frame's top half, where a new element goes. */
+  const accent = async () => {
+    const shot = await previewShot(page);
+    const top = { ...shot, height: Math.floor(shot.height / 2), pixels: shot.pixels.subarray(0, Math.floor(shot.height / 2) * shot.width * 4) };
+    return countPixelsNear(top, [0xff, 0x6a, 0x00], 30);
+  };
+  expect(await accent()).toBe(0);
+
+  const editor = page.getByRole('region', { name: 'Figures over the map' });
+  const add = editor.getByRole('combobox', { name: 'Add' });
+  await expect(add.locator('option[value="elevationProfile"]')).toHaveText('Elevation profile');
+  await expect(add.locator('option[value="elevationProfile"]')).toBeEnabled();
+  await add.selectOption('elevationProfile');
+  await editor.getByRole('button', { name: 'Add to the canvas' }).click();
+  await expect(editor.getByRole('group', { name: 'Selected: Elevation profile' })).toBeVisible();
+  await expect.poll(accent, { timeout: 5000 }).toBeGreaterThan(20);
+  expect(offOrigin(requests)).toEqual([]);
+});

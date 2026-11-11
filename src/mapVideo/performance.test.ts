@@ -67,7 +67,9 @@ const drawEveryFrame = (activity: typeof longest, model: MapVideoModel) => {
   for (let f = 0; f < model.frameCount; f += 1) drawVideoMap(map, model, settings, colors, model.timeline.frameSeconds(f, model.frameCount), 0);
 };
 
-describe('a map video of the longest activity (AV-1210)', () => {
+// As in the overlay's checks: on a machine busy with the rest of the suite, the per-test timeout is not
+// the budget under test, so it is generous. The budgets are the assertions.
+describe('a map video of the longest activity (AV-1210)', { timeout: 90_000 }, () => {
   it('reads 250,000 points', () => {
     expect(longest.points).toHaveLength(MAX_ACTIVITY_POINTS);
     expect(build(longest).frameCount).toBe(900);

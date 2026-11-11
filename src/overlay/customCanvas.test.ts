@@ -191,6 +191,20 @@ describe('what the canvas offers (AV-1011)', () => {
     expect(template.components.filter((c) => c.type === 'shape').map((c) => c.shape!.kind)).toEqual(['roundedRect', 'rect', 'ellipse', 'line']);
   });
 
+  it('offers the elevation profile where the activity has elevation, says why not where it has none, and makes it a strip (AV-1211)', () => {
+    const climbing = ride((i) => ({ elevationMeters: 100 + i }));
+    const offer = (activity: Activity) => canvasElementChoices(timelineOf(activity), still(activity)).find((choice) => choice.key === 'elevationProfile');
+    expect(offer(climbing)).toMatchObject({ label: 'Elevation profile', group: 'Live figures', available: true });
+    expect(offer(ride())).toMatchObject({ available: false, reason: 'This activity has no elevation.' });
+    for (const size of [{ width: 1920, height: 1080 }, { width: 1080, height: 1920 }]) {
+      const made = newCanvasComponent(canvasTemplate([]), 'elevationProfile', size, timelineOf(climbing));
+      expect(made).toMatchObject({ id: 'elevation-profile-1', type: 'elevationProfile' });
+      expect(made.source).toBeUndefined();
+      // Four times as wide as it is tall, on the frame.
+      expect((made.rect.width * size.width) / (made.rect.height * size.height)).toBeCloseTo(4, 6);
+    }
+  });
+
   it('starts from a built-in template’s layout', () => {
     const components = componentsFromPreset('metric-strip', timelineOf(ride()), { width: 1080, height: 1920 });
     expect(components.map((c) => c.id)).toEqual(expect.arrayContaining(['speed', 'distance', 'elapsed']));

@@ -73,3 +73,25 @@ describe('figures on a clear background (TD-059)', () => {
     expect(markup({ backgroundOpacity: 0.35 }, 5)).not.toMatch(/text-shadow/);
   });
 });
+
+describe('the elevation profile in the preview (AV-1211)', () => {
+  const template = {
+    version: 2 as const,
+    name: 'Profile',
+    style: buildOverlay(DEFAULT_OVERLAY_CONTROLS, timeline, 16 / 9).template.style,
+    components: [{ id: 'profile', type: 'elevationProfile' as const, visible: true, unitMode: 'auto' as const, rect: { x: 0.05, y: 0.75, width: 0.6, height: 0.2 }, style: {} }],
+  };
+  const layer = (at: number) =>
+    render(<OverlayLayer template={template} timeline={timeline} sample={timeline.sampleAt(at)} activity={ride} units="metric" frameAspect={16 / 9} />).container;
+
+  it('draws the line, its fill and a cursor that moves along it, as the canvas does', async () => {
+    const early = layer(1);
+    const late = layer(4);
+    const cursorX = (container: HTMLElement) => Number(container.querySelector('.overlay-item__profile rect')!.getAttribute('x'));
+    expect(early.querySelectorAll('.overlay-item__profile polyline')).toHaveLength(1);
+    expect(early.querySelectorAll('.overlay-item__profile polygon')).toHaveLength(1);
+    expect(early.querySelector('.overlay-item__profile-dot')).not.toBeNull();
+    expect(cursorX(late)).toBeGreaterThan(cursorX(early));
+    await expect(early.innerHTML.replace(/-?\d+\.\d{3,}/g, (n) => String(Math.round(Number(n) * 100) / 100)).replace(/></g, '>\n<') + '\n').toMatchFileSnapshot(snapshot('layer-profile-t1'));
+  });
+});

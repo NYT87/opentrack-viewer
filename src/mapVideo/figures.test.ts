@@ -173,3 +173,57 @@ describe('a composited map video frame, as a golden (AV-1207)', () => {
     await expect(at5).toMatchFileSnapshot('./__golden__/map-video-figures-t5.txt');
   });
 });
+
+describe('the elevation profile over the map video (AV-1211)', () => {
+  const profileLayout: OverlayTemplate = {
+    version: OVERLAY_TEMPLATE_VERSION,
+    name: 'Profile',
+    style: { ...DEFAULT_OVERLAY_STYLE },
+    // The lower half of a 1280 × 720 frame: 360 px tall from y = 360.
+    components: [{ id: 'profile', type: 'elevationProfile', visible: true, unitMode: 'auto', rect: { x: 0, y: 0.5, width: 1, height: 0.5 }, style: { accentColor: '#ff3366' } }],
+  };
+  const drawn = (activity: typeof ride, patch: Partial<MapVideoSettings>) => {
+    const model = modelOf(activity, patch);
+    const figures = createMapVideoFigures({ activity, model, settings: settings({ ...patch, overlay: profileLayout, summaryCard: { enabled: false } }), units: 'metric', width: 1280, height: 720 });
+    return { model, at: (t: number) => displayList((ctx) => figures.drawFrame(ctx, t)) };
+  };
+  /** The highest the line goes (the least y), and where the cursor stands. */
+  const read = (list: string) => ({
+    top: Math.min(...[...list.matchAll(/(?:moveTo|lineTo)\(([\d.]+), ([\d.]+)\)/g)].map((match) => Number(match[2])).filter((y) => y < 720)),
+    cursor: Number(/fillRect\(([\d.]+), 360, [\d.]+, 360\) fill="#ff3366"/.exec(list)![1]),
+  });
+
+  it('draws only the stretch the privacy trim leaves: a cliff in the hidden start sets nothing of its height', () => {
+    // 3 km north: the first 500 m at 900 m, the rest rolling between 100 and 150 m.
+    const cliff = activityThrough(straightNorth(3000).map((point) => ({ ...point, elevation: point.north < 500 ? 900 : 125 + 25 * Math.sin(point.north / 200) })));
+    /** How tall the line's second half stands, in pixels: the rolling stretch alone, past any cliff. */
+    const rise = (list: string) => {
+      const ys = [...list.matchAll(/lineTo\(([\d.]+), ([\d.]+)\)/g)].filter((match) => Number(match[1]) > 640 && Number(match[2]) < 720).map((match) => Number(match[2]));
+      return Math.max(...ys) - Math.min(...ys);
+    };
+    const trimmed = drawn(cliff, { privacyTrim: { startMeters: 600, endMeters: 0 } }).at(5);
+    // The shown stretch's own highest point is at the top of the box (12 % down it), and its rolling fills the box.
+    expect(read(trimmed).top).toBeCloseTo(360 + 0.12 * 360, 0);
+    expect(rise(trimmed)).toBeGreaterThan(200);
+    // Untrimmed, the rolling stretch is flattened under the cliff: so the check can fail.
+    expect(rise(drawn(cliff, { privacyTrim: { startMeters: 0, endMeters: 0 } }).at(5))).toBeLessThan(40);
+  });
+
+  it('moves its cursor with the marker, and holds it still through a shortened stop', () => {
+    // 1 km, ten minutes standing, 1 km more, climbing all the way.
+    const points: TestPoint[] = straightNorth(1000, 10, 5);
+    const t = points[points.length - 1]!.second!;
+    for (let s = 5; s <= 600; s += 5) points.push({ north: 1000, east: 0, second: t + s });
+    for (const point of straightNorth(1000, 10, 5).slice(1)) points.push({ north: 1000 + point.north, east: 0, second: t + 600 + point.second! });
+    const stopped = activityThrough(points.map((point) => ({ ...point, elevation: 100 + point.north / 20 })));
+    const { model, at } = drawn(stopped, { lengthSeconds: 30, timing: { mode: 'time', pauseBeatSeconds: 2 } });
+    const [pause] = model.timeline.pauses;
+    const into = model.timeline.introSeconds + pause!.startSeconds;
+    const during = [0.1, 0.9, 1.9].map((d) => read(at(into + d)).cursor);
+    expect(new Set(during).size).toBe(1);
+    // Half way along: the stop is at the first kilometre of two.
+    expect(during[0]!).toBeCloseTo(640, -1);
+    expect(read(at(into - 3)).cursor).toBeLessThan(during[0]!);
+    expect(read(at(into + 2 + 3)).cursor).toBeGreaterThan(during[0]!);
+  });
+});

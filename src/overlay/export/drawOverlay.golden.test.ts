@@ -186,6 +186,20 @@ describe('custom canvas render goldens (AV-1011)', () => {
     await expect(list).toMatchFileSnapshot(snapshot('custom-data-t5'));
   });
 
+  it('draws the elevation profile with its cursor, which moves along it as the ride goes (AV-1211)', async () => {
+    const profile: OverlayComponent = { id: 'profile', type: 'elevationProfile', visible: true, rect: at(0.05, 0.75, 0.6, 0.2), unitMode: 'auto', style: { textColor: '#ffeeaa', accentColor: '#ff3366' } };
+    const early = custom([profile], 1);
+    const late = custom([profile], 4);
+    // The line and its fill in the line colour; the cursor and its dot in the accent.
+    expect(early).toMatch(/stroke\(\) stroke="#ffeeaa"/);
+    expect(early).toMatch(/fill\(\) fill="#ffeeaa" alpha=0.25/);
+    expect(early).toMatch(/fillRect\([\d.]+, 540, [\d.]+, 144\) fill="#ff3366"/);
+    const cursorX = (list: string) => Number(/fillRect\(([\d.]+), 540,/.exec(list)![1]);
+    expect(cursorX(late)).toBeGreaterThan(cursorX(early));
+    await expect(early).toMatchFileSnapshot(snapshot('custom-profile-t1'));
+    await expect(late).toMatchFileSnapshot(snapshot('custom-profile-t4'));
+  });
+
   it('draws shapes and texts for the whole activity where the activity does not reach, and its figures only where it does', () => {
     // A two-minute video, the minute-long ride starting 30 s in: it covers 30 s to 90 s.
     const late = buildOverlayTimeline(ride, { video: { durationSeconds: 120 }, offsetSeconds: 30 });

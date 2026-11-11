@@ -23,6 +23,7 @@ import {
   setHolder,
   type CanvasElementChoice,
   type CanvasElementKey,
+  ELEVATION_MISSING,
   EMPTY_CANVAS_DRAFT,
   type CanvasDraft,
   type CanvasState,
@@ -514,6 +515,7 @@ export function describeCanvasComponent(component: OverlayComponent): string {
   }
   if (component.type === 'routeInset') return 'Route with position';
   if (component.type === 'progress') return 'Progress bar';
+  if (component.type === 'elevationProfile') return 'Elevation profile';
   return describeStillComponent(component);
 }
 
@@ -907,6 +909,7 @@ function ComponentEditor({
   const holders = components.filter((entry) => entry.type === 'shape' && entry.id !== component.id);
   const isData = component.type === 'text' || component.type === 'gauge';
   const isStill = STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
+  const isLine = component.type === 'routeInset' || component.type === 'elevationProfile';
   const shape: OverlayShapeSetting | undefined = component.type === 'shape' ? (component.shape ?? DEFAULT_SHAPE) : undefined;
   const setShape = (patch: Partial<OverlayShapeSetting>) => update((current) => ({ ...current, shape: { ...(current.shape ?? DEFAULT_SHAPE), ...patch } }));
   const style = { ...DEFAULT_OVERLAY_STYLE, ...component.style };
@@ -915,6 +918,11 @@ function ComponentEditor({
   return (
     <fieldset className="overlay-controls__group still-image__editor" aria-label={`Selected: ${name}`}>
       <legend>Selected: {name}</legend>
+      {component.type === 'elevationProfile' && !stillContext.activity.streams.hasElevation && (
+        <p className="overlay-controls__note" role="status">
+          {ELEVATION_MISSING} The profile stays empty until an activity with elevation is opened.
+        </p>
+      )}
 
       <div className="still-image__position">
         <PercentField id={`${id}-x`} label="From the left (%)" value={percent(component.rect.x)} onCommit={(value) => onChange(moveComponent(components, component.id, value / 100, component.rect.y))} />
@@ -1080,9 +1088,9 @@ function ComponentEditor({
       )}
       {component.type === 'date' && <DateSettings id={id} component={component} context={stillContext} onChange={(change) => update(change)} />}
 
-      {(isData || isStill || component.type === 'routeInset' || component.type === 'progress') && (
+      {(isData || isStill || isLine || component.type === 'progress') && (
         <>
-          <ColorField id={`${id}-text`} label={component.type === 'routeInset' ? 'Line colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
+          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
           {!isStill && (
             <>
               <ColorField id={`${id}-accent`} label="Accent colour" value={style.accentColor} onChange={(accentColor) => update((current) => ({ ...current, style: { ...current.style, accentColor } }))} />

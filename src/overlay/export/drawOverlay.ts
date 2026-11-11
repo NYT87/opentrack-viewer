@@ -1,6 +1,7 @@
 import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import { BASE_FONT_CQW } from '../presets';
+import { projectProfile, type ProjectedProfile } from '../elevationProfile';
 import { projectRoute, type ProjectedRoute } from '../routeProjection';
 import { drawShape } from '../shapes';
 import { extractRoute } from '../routeImage';
@@ -82,6 +83,13 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
       routes.set(component.id, activity ? projectRoute(activity, box.w / box.h) : undefined);
     }
     return routes.get(component.id);
+  };
+
+  // So is the elevation profile, which is in the same units whatever the box.
+  let profile: ProjectedProfile | undefined | null = null;
+  const profileOf = (): ProjectedProfile | undefined => {
+    if (profile === null) profile = activity ? projectProfile(activity) : undefined;
+    return profile;
   };
 
   const boxOf = (component: OverlayComponent): Box => ({
@@ -174,6 +182,42 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     }
   }
 
+  /** AV-1211. The profile as the preview's `ElevationProfile` draws it: a soft fill, the line, and the cursor. */
+  function drawProfile(ctx: OverlayContext2D, box: Box, ready: Ready): void {
+    const projected = profileOf();
+    if (!projected) return;
+    const px = (x: number) => box.x + x * box.w;
+    const py = (y: number) => box.y + y * box.h;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const run of projected.runs) {
+      ctx.beginPath();
+      run.forEach(([x, y], index) => (index === 0 ? ctx.moveTo(px(x), py(y)) : ctx.lineTo(px(x), py(y))));
+      ctx.lineTo(px(run[run.length - 1]![0]), box.y + box.h);
+      ctx.lineTo(px(run[0]![0]), box.y + box.h);
+      ctx.closePath();
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = ready.style.textColor;
+      ctx.fill();
+      ctx.beginPath();
+      run.forEach(([x, y], index) => (index === 0 ? ctx.moveTo(px(x), py(y)) : ctx.lineTo(px(x), py(y))));
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = ready.style.textColor;
+      ctx.lineWidth = Math.max(1, 0.025 * box.h);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    const progress = ready.fraction ?? 0;
+    ctx.fillStyle = ready.style.accentColor;
+    ctx.fillRect(px(progress) - Math.max(1, 0.01 * box.h), box.y, Math.max(2, 0.02 * box.h), box.h);
+    const point = projected.at(progress);
+    if (point) {
+      ctx.beginPath();
+      ctx.arc(px(point[0]), py(point[1]), 0.06 * box.h, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   /*
    * AV-1011. A text, a figure from the summary or the date describes the whole
    * activity, so it is the same in every frame: set once, by the still image's
@@ -243,6 +287,8 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
 
         if (component.type === 'routeInset') {
           drawRoute(ctx, box, ready, sample);
+        } else if (component.type === 'elevationProfile') {
+          drawProfile(ctx, box, ready);
         } else if (component.type === 'progress') {
           ctx.fillStyle = 'rgb(255 255 255 / 0.25)';
           ctx.fillRect(box.x, box.y, box.w, box.h);

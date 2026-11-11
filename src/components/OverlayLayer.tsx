@@ -2,6 +2,7 @@ import { useMemo, type CSSProperties } from 'react';
 import type { Activity } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from '../overlay/presets';
+import { projectProfile } from '../overlay/elevationProfile';
 import { projectRoute } from '../overlay/routeProjection';
 import {
   needsHalo,
@@ -97,6 +98,17 @@ function OverlayItem({
       </div>
     );
   }
+  if (component.type === 'elevationProfile') {
+    return (
+      <div className={base} style={style} data-component={component.id}>
+        <ElevationProfile
+          activity={activity}
+          progress={resolved.fraction ?? 0}
+          aspect={(component.rect.width * frameAspect) / component.rect.height}
+        />
+      </div>
+    );
+  }
   if (component.type === 'progress') {
     return (
       <div className={base} style={style} data-component={component.id}>
@@ -156,6 +168,40 @@ function RouteInset({
         />
       ))}
       {dot && <circle cx={dot[0] * aspect} cy={dot[1]} r="0.05" fill="var(--overlay-accent)" />}
+    </svg>
+  );
+}
+
+/**
+ * AV-1211. The activity's elevation along it, stretched to the box, with a
+ * cursor at the moment shown: the canvas renderer's `drawProfile`, as SVG, in
+ * the same box-height units.
+ */
+function ElevationProfile({ activity, progress, aspect }: { activity: Activity | undefined; progress: number; aspect: number }) {
+  // The profile does not change as the video plays; only the cursor moves.
+  const profile = useMemo(() => (activity ? projectProfile(activity) : undefined), [activity]);
+  const runs = useMemo(
+    () =>
+      profile?.runs.map((run) => {
+        const line = run.map(([x, y]) => `${x * aspect},${y}`).join(' ');
+        return { line, area: `${line} ${run[run.length - 1]![0] * aspect},1 ${run[0]![0] * aspect},1` };
+      }),
+    [profile, aspect],
+  );
+  if (!profile || !runs) return null;
+  const point = profile.at(progress);
+  // The cursor is as wide as a fiftieth of the box's height, as the canvas draws it.
+  const cursor = 0.02;
+  return (
+    <svg className="overlay-item__profile" viewBox={`0 0 ${aspect} 1`} preserveAspectRatio="none" aria-hidden="true">
+      {runs.map(({ line, area }, index) => (
+        <g key={index}>
+          <polygon points={area} fill="currentColor" fillOpacity="0.25" />
+          <polyline points={line} fill="none" stroke="currentColor" strokeOpacity="0.9" strokeWidth="0.025" strokeLinejoin="round" strokeLinecap="round" />
+        </g>
+      ))}
+      <rect x={progress * aspect - cursor / 2} y="0" width={cursor} height="1" fill="var(--overlay-accent)" />
+      {point && <circle className="overlay-item__profile-dot" cx={point[0] * aspect} cy={point[1]} r="0.06" fill="var(--overlay-accent)" />}
     </svg>
   );
 }

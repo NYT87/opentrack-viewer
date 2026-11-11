@@ -475,6 +475,29 @@ describe('figures over the map (AV-1207)', () => {
     expect(useMapVideoStore.getState().settings.overlay?.components).toHaveLength(1);
   });
 
+  it('offers no elevation profile for an activity without elevation, and says why one placed is empty (AV-1211)', async () => {
+    await openWithRoute('simple-route.gpx');
+    const offer = within(editor()).getByRole('option', { name: /Elevation profile/ });
+    expect(offer).toBeDisabled();
+    const project = {
+      kind: MAP_VIDEO_PROJECT_KIND,
+      version: 1,
+      activity: { fileName: 'simple-route.gpx', points: 4 },
+      settings: {
+        overlay: {
+          version: 2,
+          name: 'Profile',
+          components: [{ id: 'profile', type: 'elevationProfile', visible: true, unitMode: 'auto', style: {}, rect: { x: 0.05, y: 0.75, width: 0.6, height: 0.2 } }],
+        },
+      },
+    };
+    await userEvent.upload(screen.getByTestId('map-video-project-input'), new File([JSON.stringify(project)], 'profile.json'));
+    await userEvent.click(await within(editor()).findByRole('button', { name: 'Elevation profile' }));
+    expect(within(editor()).getByRole('group', { name: 'Selected: Elevation profile' })).toHaveTextContent(
+      'This activity has no elevation. The profile stays empty until an activity with elevation is opened.',
+    );
+  });
+
   it('offers the summary card only with an outro to show it in', async () => {
     await openWithRoute();
     const card = () => screen.getByRole('checkbox', { name: /Show the totals on a card/ });
@@ -597,5 +620,6 @@ describe('the export panel after the M10 review (TD-073)', () => {
     await waitFor(() => expect(alert).toHaveTextContent(/At zoom 1[0-3](\.5)? \(Camera, above\) it would be about [\d,]+\./), { timeout: 5000 });
     await userEvent.click(screen.getByRole('radio', { name: /^Route only/ }));
     expect(within(panel()).queryByText(/would ask OpenFreeMap/)).not.toBeInTheDocument();
-  });
+    // A 2,000-point ride, counted at nine zooms: seconds on a machine busy with the rest of the suite.
+  }, 30_000);
 });

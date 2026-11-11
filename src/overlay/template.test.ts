@@ -293,3 +293,31 @@ describe('shapes, holding and a figure’s format (AV-1011)', () => {
     });
   });
 });
+
+describe('the elevation profile in a layout (AV-1211)', () => {
+  const profile = component({ id: 'elevation-profile', type: 'elevationProfile', rect: { x: 0.05, y: 0.8, width: 0.6, height: 0.15 }, style: { textColor: '#ffeeaa', accentColor: '#ff3366' } });
+
+  it('round-trips through a layout file, needing no data source', () => {
+    const withProfile = { ...template, components: [profile] };
+    expect(parseOverlayTemplate(serializeOverlayTemplate(withProfile))).toEqual({ ok: true, template: withProfile, warnings: [] });
+  });
+
+  it('is an element an earlier version does not know, so one opens the layout without it, with a warning', () => {
+    // Before AV-1211, the parser knew this list less 'elevationProfile': as it reads any type it does not know.
+    const json = JSON.stringify({ version: 2, components: [{ id: 'ok', type: 'progress', rect }, { id: 'future', type: 'contourMap', rect }] });
+    const result = parseOverlayTemplate(json);
+    expect(result.ok && result.template.components.map((c) => c.id)).toEqual(['ok']);
+    expect(result.ok && result.warnings).toHaveLength(1);
+  });
+
+  it('is drawn at the moment\'s progress where the activity has elevation, and hidden where it has none', () => {
+    const climbing = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: at(i), lat: 46 + i * 0.0001, lon: 7, elevationMeters: 100 + i })));
+    const flatland = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: at(i), lat: 46 + i * 0.0001, lon: 7 })));
+    const resolve = (activity: typeof climbing) => {
+      const timeline = buildOverlayTimeline(activity, { video: { durationSeconds: 10 } });
+      return resolveOverlayComponent({ ...template, components: [profile] }, profile, timeline.sampleAt(5), timeline, 'metric');
+    };
+    expect(resolve(climbing)).toMatchObject({ status: 'ready', fraction: expect.closeTo(0.5, 6) });
+    expect(resolve(flatland)).toEqual({ status: 'hidden', reason: 'no_data', componentId: 'elevation-profile' });
+  });
+});

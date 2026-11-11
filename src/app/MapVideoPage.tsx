@@ -345,7 +345,7 @@ export function MapVideoPage() {
                 host={{
                   title: 'Figures over the map',
                   intro:
-                    'Place live figures, gauges, the progress, the route, figures for the whole activity, the date, text and shapes over the map. They play along the video, and the preview shows them over the map.',
+                    'Place live figures, gauges, the progress, the route, the elevation profile, figures for the whole activity, the date, text and shapes over the map. They play along the video, and the preview shows them over the map.',
                   frame: { width: settings.output.width, height: settings.output.height },
                   timeline: figuresTimeline,
                   seconds: pausedAt,

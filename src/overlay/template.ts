@@ -36,6 +36,8 @@ export type OverlayComponentType =
   | 'gauge'
   | 'routeInset'
   | 'progress'
+  /** AV-1211. The activity's elevation along it, with a cursor at the moment shown. */
+  | 'elevationProfile'
   | 'sensorChart'
   | 'label'
   | 'summary'
@@ -48,6 +50,7 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'gauge',
   'routeInset',
   'progress',
+  'elevationProfile',
   'sensorChart',
   'label',
   'summary',
@@ -198,7 +201,7 @@ export interface OverlayComponent {
   unitMode: OverlayUnitMode;
   /** Merged over the template's style. */
   style: Partial<OverlayStyle>;
-  /** Absent for `routeInset` and `progress`, which read the sample's position and progress. */
+  /** Absent for `routeInset`, `progress` and `elevationProfile`, which read the sample's position and progress. */
   source?: OverlayDataSource;
   /** Gauge bounds in the metric's stored unit. */
   range?: { min: number; max: number };
@@ -318,7 +321,11 @@ function parseComponent(value: unknown): OverlayComponent | string {
   const componentType = type as OverlayComponentType;
   const stillOnly = STILL_IMAGE_COMPONENT_TYPES.includes(componentType);
   const needsSource =
-    componentType !== 'routeInset' && componentType !== 'progress' && componentType !== 'shape' && !stillOnly;
+    componentType !== 'routeInset' &&
+    componentType !== 'progress' &&
+    componentType !== 'elevationProfile' &&
+    componentType !== 'shape' &&
+    !stillOnly;
   if (componentType === 'shape') {
     const kind = isRecord(value.shape) ? value.shape.kind : undefined;
     if (!SHAPE_KINDS.includes(kind as ShapeKind)) return `unknown shape "${String(kind)}"`;
@@ -642,6 +649,11 @@ export function resolveOverlayComponent(
     return sample.position
       ? { status: 'ready', componentId, component, style }
       : { status: 'hidden', reason: 'no_position', componentId };
+  }
+  if (component.type === 'elevationProfile') {
+    return sample.progress === undefined || !timeline.available.has('metric:elevation')
+      ? { status: 'hidden', reason: 'no_data', componentId }
+      : { status: 'ready', componentId, component, style, fraction: sample.progress };
   }
   if (component.type === 'progress') {
     return sample.progress === undefined
