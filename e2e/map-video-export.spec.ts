@@ -535,8 +535,15 @@ test('makes a 60-second 1080p video in steady memory (AV-1210)', async ({ page }
  * #12 and #13: what an export asks of OpenFreeMap, counted. The ride, at 1080p for 10 s, with the tilt and
  * zoom given; returns the panel's estimate before it starts and every tile URL asked while it runs.
  */
-async function countTiles(page: Page, ride: string, { pitch, zoom }: { pitch: number; zoom: number }) {
+async function countTiles(page: Page, ride: string, { pitch, zoom, terrain = false }: { pitch: number; zoom: number; terrain?: boolean }) {
   const asked = await serveVectorFixture(page);
+  // Flat terrain, served here: elevation 0 everywhere (Terrarium red 128).
+  const dem: string[] = [];
+  const flat = solidPng(256, [128, 0, 0]);
+  await page.route('https://elevation-tiles-prod.s3.amazonaws.com/**', (route) => {
+    dem.push(route.request().url());
+    return route.fulfill({ contentType: 'image/png', body: flat, headers: { 'access-control-allow-origin': '*' } });
+  });
   await page.goto('./#/map-video');
   await page.getByTestId('map-video-activity-input').setInputFiles(ride);
   const video = page.getByRole('region', { name: 'Video settings' });
@@ -545,6 +552,7 @@ async function countTiles(page: Page, ride: string, { pitch, zoom }: { pitch: nu
     await video.getByRole('spinbutton', { name, exact: true }).fill(String(value));
     await video.getByRole('spinbutton', { name, exact: true }).blur();
   }
+  if (terrain) await page.getByRole('checkbox', { name: /3D terrain/ }).check();
   const panel = page.getByRole('region', { name: 'Make the video' });
   await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
   const refusal = await panel.getByRole('alert').allTextContents();
@@ -554,9 +562,10 @@ async function countTiles(page: Page, ride: string, { pitch, zoom }: { pitch: nu
   // The preview's own map has settled: from here, what is asked is the export's.
   await page.waitForTimeout(1500);
   const from = asked.length;
+  const demFrom = dem.length;
   await panel.getByRole('button', { name: 'Make the video' }).click();
   await expect(panel.getByRole('link', { name: /\.mp4/ })).toBeVisible({ timeout: 180_000 });
-  return { estimate, tiles: asked.slice(from) };
+  return { estimate, tiles: asked.slice(from), dem: dem.slice(demFrom) };
 }
 
 for (const pitch of [0, 30, 45, 60]) {
@@ -590,5 +599,63 @@ test('asks for each OpenFreeMap tile once, on a route that comes back on itself 
   expect(unique).toBeGreaterThan(10);
   expect(tiles.filter((url, index) => tiles.indexOf(url) !== index)).toEqual([]);
   expect(estimate).toBeGreaterThanOrEqual(unique);
+});
+
+test('estimates at least the OpenFreeMap tiles an export asks for with terrain on, and asks for each terrain tile once (TD-078)', async ({ page }, testInfo) => {
+  test.setTimeout(240_000);
+  // With terrain, MapLibre takes coarser tiles further off; terrain tiles come as images, and past zoom 15
+  // (the terrain's last) each is asked for again for each zoom it is drawn larger at, as vector tiles were (TD-076).
+  const ride = testInfo.outputPath('long-ride.gpx');
+  writeFileSync(ride, longRideGpx(1));
+  const { estimate, tiles, dem } = await countTiles(page, ride, { pitch: 60, zoom: 16, terrain: true });
+  const unique = new Set(tiles).size;
+  testInfo.annotations.push({ type: 'tiles', description: JSON.stringify({ estimate, unique, dem: dem.length }) });
+  expect(new Set(tiles.map((url) => /planet\/(\d+)\//.exec(url)![1])).size).toBeGreaterThan(2);
+  expect(estimate).toBeGreaterThanOrEqual(unique);
+  expect(dem.length).toBeGreaterThan(5);
+  expect(dem.filter((url, index) => dem.indexOf(url) !== index)).toEqual([]);
+});
+
+test('asks nothing more once stopped: a tile waiting its turn is not asked (TD-078)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
+  // Every tile takes a second to come, so most wait their turn when the export is stopped.
+  const started: number[] = [];
+  const ride = testInfo.outputPath('long-ride.gpx');
+  writeFileSync(ride, longRideGpx(1));
+  // The vector fixture's style, and slow tiles registered after it, so the slow route answers the tiles.
+  await serveVectorFixture(page);
+  await page.route('https://tiles.openfreemap.org/planet/**', async (route) => {
+    started.push(Date.now());
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return route.fulfill({ contentType: 'application/x-protobuf', body: Buffer.alloc(0), headers: { 'access-control-allow-origin': '*' } }).catch(() => undefined);
+  });
+  await page.goto('./#/map-video');
+  await page.getByTestId('map-video-activity-input').setInputFiles(ride);
+  // A first frame that asks for many tiles: 4K, steeply tilted at zoom 14, with no overview first.
+  const video = page.getByRole('region', { name: 'Video settings' });
+  await video.getByRole('combobox', { name: 'Size' }).selectOption('4K, 3840 × 2160');
+  await video.getByRole('spinbutton', { name: 'Length', exact: true }).fill('10');
+  await video.getByRole('checkbox', { name: 'Fly in from the whole route' }).uncheck();
+  for (const [name, value] of [['Tilt', 60], ['Zoom', 14]] as const) {
+    await video.getByRole('spinbutton', { name, exact: true }).fill(String(value));
+    await video.getByRole('spinbutton', { name, exact: true }).blur();
+  }
+  const panel = page.getByRole('region', { name: 'Make the video' });
+  await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+  await expect(panel).toContainText(/About [\d,]+ map tiles from OpenFreeMap/, { timeout: 30_000 });
+  await page.waitForTimeout(3000);
+  const before = started.length;
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  // Stopped while the first tiles are still on their way, with more waiting behind them.
+  await expect.poll(() => started.length - before, { timeout: 30_000 }).toBeGreaterThanOrEqual(4);
+  await page.waitForTimeout(300);
+  await panel.getByRole('button', { name: 'Stop' }).click();
+  const stoppedAt = Date.now();
+  await expect(panel.getByRole('button', { name: /Make (the video|it again)/ })).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(4000);
+  // Those on their way when it stopped may finish; none is started after.
+  expect(started.filter((at) => at > stoppedAt + 250)).toEqual([]);
 });
 

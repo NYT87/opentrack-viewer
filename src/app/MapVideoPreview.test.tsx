@@ -639,6 +639,10 @@ describe('the export panel after the M10 review (TD-073)', () => {
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Tilt' }), { target: { value: '20' } });
     expect(counting()).toBeInTheDocument();
     await waitFor(() => expect(counting()).not.toBeInTheDocument(), { timeout: 5000 });
+    // So does terrain: with it, MapLibre takes coarser tiles further off (TD-078).
+    await userEvent.click(screen.getByRole('checkbox', { name: /3D terrain/ }));
+    expect(counting()).toBeInTheDocument();
+    await waitFor(() => expect(counting()).not.toBeInTheDocument(), { timeout: 5000 });
   });
 
   it('does not make the video until the tiles are counted (TD-077)', async () => {

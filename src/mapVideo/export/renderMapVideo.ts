@@ -31,9 +31,30 @@ let asked = 0;
 
 type Fetched = GetResourceResponse<AddProtocolResponseData>;
 
-/** One request through the queue: it waits for one of the four places, then asks. */
+const aborted = () => new DOMException('Aborted', 'AbortError');
+
+/**
+ * One request through the queue: it waits for one of the four places, then
+ * asks. Aborted while it waits, it leaves the line and asks nothing, so a
+ * stopped render leaves nothing behind it to be asked (TD-078).
+ */
 async function fetchQueued(url: string, type: string | undefined, signal?: AbortSignal): Promise<Fetched> {
-  if (running >= MAX_PARALLEL_REQUESTS) await new Promise<void>((go) => waiting.push(go));
+  if (signal?.aborted) throw aborted();
+  if (running >= MAX_PARALLEL_REQUESTS) {
+    await new Promise<void>((go, stop) => {
+      const turn = () => {
+        signal?.removeEventListener('abort', leave);
+        go();
+      };
+      const leave = () => {
+        const place = waiting.indexOf(turn);
+        if (place >= 0) waiting.splice(place, 1);
+        stop(aborted());
+      };
+      waiting.push(turn);
+      signal?.addEventListener('abort', leave, { once: true });
+    });
+  }
   running += 1;
   asked += 1;
   try {
@@ -56,16 +77,25 @@ async function fetchQueued(url: string, type: string | undefined, signal?: Abort
  * same zoom-14 tile once for each zoom it is drawn larger at; a provider's
  * caching headers would spare it those in a browser that keeps its HTTP cache,
  * and this spares it in one that does not. A tile on its way is waited for,
- * not asked again. Nothing is written anywhere, and all of it is let go when
- * the render ends (`forgetKeptTiles`).
+ * not asked again, and given up only when everyone waiting for it has given
+ * up (TD-078). Nothing is written anywhere, and all of it is let go when the
+ * render ends (`forgetKeptTiles`).
  */
-const kept = new Map<string, Promise<Fetched>>();
+interface KeptTile {
+  fetched: Promise<Fetched>;
+  /** Stops the fetch: once every requester waiting for it has aborted, or the render has ended. */
+  controller: AbortController;
+  waiters: number;
+  settled: boolean;
+}
+const kept = new Map<string, KeptTile>();
 const keptBytes = new Map<string, number>();
 let keptTotal = 0;
 /** The most kept at once: past it, the tile used longest ago goes first. */
 const MAX_KEPT_BYTES = 256 * 1024 * 1024;
 
 function forgetKeptTiles(): void {
+  for (const tile of kept.values()) if (!tile.settled) tile.controller.abort();
   kept.clear();
   keptBytes.clear();
   keptTotal = 0;
@@ -73,9 +103,9 @@ function forgetKeptTiles(): void {
 
 /** `promise`, unless `signal` aborts first: one requester's abort does not stop a fetch others wait for. */
 function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  if (signal.aborted) return Promise.reject(aborted());
   return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+    const abort = () => reject(aborted());
     signal.addEventListener('abort', abort, { once: true });
     promise.then(
       (value) => (signal.removeEventListener('abort', abort), resolve(value)),
@@ -84,43 +114,61 @@ function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
   });
 }
 
+/** A tile, fetched once, its size counted, and the tiles used longest ago let go past the limit. */
+function keepTile(url: string, type: string): KeptTile {
+  const controller = new AbortController();
+  const tile: KeptTile = { fetched: fetchQueued(url, type, controller.signal), controller, waiters: 0, settled: false };
+  tile.fetched.then(
+    ({ data }) => {
+      tile.settled = true;
+      if (kept.get(url) !== tile) return;
+      const bytes = (data as ArrayBuffer).byteLength;
+      keptBytes.set(url, bytes);
+      keptTotal += bytes;
+      for (const [oldest] of kept) {
+        if (keptTotal <= MAX_KEPT_BYTES) break;
+        const size = keptBytes.get(oldest);
+        // Not yet in, or the one just in: neither is let go.
+        if (size === undefined || oldest === url) continue;
+        kept.delete(oldest);
+        keptBytes.delete(oldest);
+        keptTotal -= size;
+      }
+    },
+    // A failure is not kept: asked again, it is fetched again.
+    () => {
+      if (kept.get(url) === tile) kept.delete(url);
+    },
+  );
+  return tile;
+}
+
 addProtocol(QUEUED, async (params, abort) => {
   const url = `https://${params.url.slice(QUEUED.length + 3)}`;
-  // A style or a description of a source is asked once anyway; tiles and images are kept.
-  if (params.type !== 'arrayBuffer') return fetchQueued(url, params.type, abort.signal);
-  let entry = kept.get(url);
-  if (entry) {
+  // A style or a description of a source is asked once anyway; tiles, vector or raster or terrain, are kept.
+  if (params.type !== 'arrayBuffer' && params.type !== 'image') return fetchQueued(url, params.type, abort.signal);
+  let tile = kept.get(url);
+  if (tile) {
     // Used now: it goes to the back of the line to be let go.
     kept.delete(url);
-    kept.set(url, entry);
+    kept.set(url, tile);
   } else {
-    const fetching = fetchQueued(url, params.type);
-    entry = fetching;
-    kept.set(url, fetching);
-    fetching.then(
-      ({ data }) => {
-        if (kept.get(url) !== fetching) return;
-        const bytes = (data as ArrayBuffer).byteLength;
-        keptBytes.set(url, bytes);
-        keptTotal += bytes;
-        for (const [oldest] of kept) {
-          if (keptTotal <= MAX_KEPT_BYTES || oldest === url) break;
-          const size = keptBytes.get(oldest);
-          if (size === undefined) continue;
-          kept.delete(oldest);
-          keptBytes.delete(oldest);
-          keptTotal -= size;
-        }
-      },
-      // A failure is not kept: asked again, it is fetched again.
-      () => {
-        if (kept.get(url) === fetching) kept.delete(url);
-      },
-    );
+    tile = keepTile(url, params.type);
+    kept.set(url, tile);
   }
-  const fetched = await unlessAborted(entry, abort.signal);
-  // A copy each time: MapLibre hands a tile's buffer to its worker, and a buffer handed on is gone.
-  return { ...fetched, data: (fetched.data as ArrayBuffer).slice(0) };
+  tile.waiters += 1;
+  try {
+    const fetched = await unlessAborted(tile.fetched, abort.signal);
+    // A copy each time: MapLibre hands a tile's buffer to its worker, and a buffer handed on is gone.
+    return { ...fetched, data: (fetched.data as ArrayBuffer).slice(0) };
+  } finally {
+    tile.waiters -= 1;
+    // Nobody waits for it any more, and it is not in: it is not asked for at all, nor kept half-asked.
+    if (tile.waiters === 0 && !tile.settled && abort.signal.aborted) {
+      tile.controller.abort();
+      if (kept.get(url) === tile) kept.delete(url);
+    }
+  }
 });
 /** An outside URL, sent through the queue. */
 const queued = (url: string) => (url.startsWith('https://') ? { url: `${QUEUED}://${url.slice('https://'.length)}` } : { url });

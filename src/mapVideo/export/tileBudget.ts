@@ -20,8 +20,9 @@ const MARGIN = 1.25;
 const FOV = 0.6435011087932844;
 /**
  * How much further than the centre a part of the view may be before MapLibre
- * may draw it from coarser tiles: `1 / cos(FOV / 2)`, its own threshold. An
- * untilted view never reaches it.
+ * draws it from coarser tiles: `1 / cos(FOV / 2)`, its own threshold. It does
+ * so only with terrain on: without, it keeps one zoom up to a 60° tilt, the
+ * app's steepest (TD-078).
  */
 const COARSER_FROM = 1 / Math.cos(FOV / 2);
 /** Bands a tilted view is cut into, near to far, each counted with what MapLibre may load there. */
@@ -89,7 +90,7 @@ function eachTile(polygon: Corner[], n: number, visit: (x: number, y: number) =>
  * the coarser tiles it may load there instead are counted as well, since a
  * place seen far off and later near is asked for at both.
  */
-function addView(tiles: Set<number>, camera: MapVideoCamera, width: number, height: number): void {
+function addView(tiles: Set<number>, camera: MapVideoCamera, width: number, height: number, terrain: boolean): void {
   const z = Math.max(0, Math.min(VECTOR_MAX_ZOOM, Math.floor(camera.zoom)));
   const n = 2 ** z;
   // Tiles per pixel at this camera's zoom, and the untilted frame's half sides in tiles.
@@ -121,15 +122,14 @@ function addView(tiles: Set<number>, camera: MapVideoCamera, width: number, heig
 
   // The whole footprint at the view's zoom.
   eachTile(quad(ray(-FOV / 2), ray(FOV / 2)), n, (x, y) => tiles.add(key(z, x, y)));
-  if (camera.pitch <= 0) return;
-  // And, band by band, the coarser tiles where MapLibre may go coarser.
+  if (!terrain || camera.pitch <= 0) return;
+  // With terrain, band by band, the coarser tiles MapLibre draws there: tilted, it may take even the centre a
+  // level coarser, so every band one level, and one more for each doubling (or part of one) past its threshold.
   for (let band = 0; band < BANDS; band += 1) {
     const near = ray(-FOV / 2 + (FOV * band) / BANDS);
     const far = ray(-FOV / 2 + (FOV * (band + 1)) / BANDS);
-    if (far.ratio <= COARSER_FROM) continue;
-    // A level for each doubling (or part of one) past the threshold. The coarse tiles a band overlaps are
-    // the parents of the fine ones it does, and fewer to walk.
-    const coarser = Math.min(z, Math.ceil(Math.log2(far.ratio / COARSER_FROM)));
+    // The coarse tiles a band overlaps are the parents of the fine ones it does, and fewer to walk.
+    const coarser = Math.min(z, 1 + Math.max(0, Math.ceil(Math.log2(far.ratio / COARSER_FROM))));
     const footprint = quad(near, far);
     for (let level = 1; level <= coarser; level += 1) {
       const shrink = 2 ** level;
@@ -146,15 +146,16 @@ const sameView = (a: MapVideoCamera, b: MapVideoCamera) =>
  * the camera alone (no line is built), so a fast camera on a long route
  * leaves no stretch uncounted between two looks.
  */
-export function estimateBasemapTiles(model: MapVideoModel, settings: Pick<MapVideoSettings, 'output'>): number {
+export function estimateBasemapTiles(model: MapVideoModel, settings: Pick<MapVideoSettings, 'output' | 'terrain'>): number {
   const { width, height } = settings.output;
+  const terrain = settings.terrain.enabled;
   const tiles = new Set<number>();
   let last: MapVideoCamera | undefined;
   for (let frame = 0; frame < model.frameCount; frame += 1) {
     const camera = model.camera.atSeconds(model.timeline.frameSeconds(frame, model.frameCount));
     // A frame that does not move (a stop, a photo's wait) sees what the last one did.
     if (last && sameView(last, camera)) continue;
-    addView(tiles, camera, width, height);
+    addView(tiles, camera, width, height, terrain);
     last = camera;
   }
   return tiles.size;

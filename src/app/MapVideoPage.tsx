@@ -364,6 +364,7 @@ export function MapVideoPage() {
                 units={unitSystem}
                 maptilerKey={maptilerKey}
                 photoImages={photoImages}
+                photos={photoInputs}
                 pausedAt={pausedAt}
               />
             )}

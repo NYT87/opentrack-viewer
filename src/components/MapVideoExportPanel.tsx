@@ -8,6 +8,7 @@ import { isLikelyMobile } from '../overlay/export/burnSupport';
 import type { PhotoImage } from '../mapVideo/figures';
 import { buildMapVideoModel, type MapVideoModel } from '../mapVideo/model';
 import { OPENFREEMAP_TILE_BUDGET, estimateBasemapTiles } from '../mapVideo/export/tileBudget';
+import type { PhotoInput } from '../mapVideo/photos';
 import type { MapVideoSettings } from '../mapVideo/project';
 import { decodeAudioFile, fitAudio } from '../mapVideo/export/audio';
 import { planMapVideoExport, posterFileName, type MapVideoFormat } from '../mapVideo/export/plan';
@@ -22,15 +23,17 @@ export interface MapVideoExportPanelProps {
   units: UnitSystem;
   maptilerKey: string;
   photoImages: ReadonlyMap<string, PhotoImage>;
+  /** The photos placed along the route, so a zoom suggested is counted with their waits, as the video has them. */
+  photos?: PhotoInput[];
   /** The preview's moment, for the poster. */
   pausedAt: number;
 }
 
 /** The highest follow zoom, half a step at a time, at which a video over the tile budget would fit, or undefined for none. */
-function zoomThatFits(activity: Activity, settings: MapVideoSettings) {
+function zoomThatFits(activity: Activity, settings: MapVideoSettings, photos: PhotoInput[]) {
   for (let zoom = Math.floor(settings.camera.zoom * 2) / 2 - 0.5; zoom >= 10; zoom -= 0.5) {
     const lower = { ...settings, camera: { ...settings.camera, zoom } };
-    const built = buildMapVideoModel(activity, lower);
+    const built = buildMapVideoModel(activity, lower, photos);
     if (!built.ok) continue;
     const fits = estimateBasemapTiles(built.model, lower);
     if (fits <= OPENFREEMAP_TILE_BUDGET) return { zoom, count: fits };
@@ -47,15 +50,17 @@ function zoomThatFits(activity: Activity, settings: MapVideoSettings) {
 const COUNT_DELAY_MS = 400;
 
 /**
- * What the tile count depends on: what moves the camera or makes more frames.
- * The route's or marker's colour, a figure, a style or the terrain does not
- * change which OpenFreeMap tiles are seen, so changing one does not count
- * again. A photo's wait is read from the model, as photos are not settings.
+ * What the tile count depends on: what moves the camera or makes more frames,
+ * and the terrain, which changes the zoom MapLibre takes far off. The route's
+ * or marker's colour, a figure or a style does not change which OpenFreeMap
+ * tiles are seen, so changing one does not count again. A photo's wait is
+ * read from the model, as photos are not settings.
  */
 function tileCountKey(settings: MapVideoSettings, model: MapVideoModel): string {
-  const { output, lengthSeconds, timing, intro, outro, camera, privacyTrim, keyframes } = settings;
+  const { output, lengthSeconds, timing, intro, outro, camera, privacyTrim, keyframes, terrain } = settings;
   const holds = model.timeline.holds.map((hold) => [hold.startSeconds, hold.endSeconds]);
-  return JSON.stringify([output, lengthSeconds, timing, intro, outro, camera, privacyTrim, keyframes, holds]);
+  // Terrain is in it: with terrain on, MapLibre takes coarser tiles where it sees further (TD-078).
+  return JSON.stringify([output, lengthSeconds, timing, intro, outro, camera, privacyTrim, keyframes, terrain, holds]);
 }
 
 interface TileCount {
@@ -87,7 +92,7 @@ type Phase =
  * reader's own sound if they add one, and written to the origin-private file
  * system until it is downloaded. A still of any moment can be saved as a PNG.
  */
-export function MapVideoExportPanel({ activity, model, settings, units, maptilerKey, photoImages, pausedAt }: MapVideoExportPanelProps) {
+export function MapVideoExportPanel({ activity, model, settings, units, maptilerKey, photoImages, pausedAt, photos = [] }: MapVideoExportPanelProps) {
   const ids = { format: useId(), audio: useId() };
   // Answered by the encoders themselves, for this size; kept with the size it was asked for.
   const [checked, setChecked] = useState<Support & { key: string }>();
@@ -156,7 +161,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
     if (!counting) return undefined;
     const timer = setTimeout(() => {
       const count = estimateBasemapTiles(model, settings);
-      setCounted({ key: countKey, activity, count, ...(count > OPENFREEMAP_TILE_BUDGET ? { fits: zoomThatFits(activity, settings) } : {}) });
+      setCounted({ key: countKey, activity, count, ...(count > OPENFREEMAP_TILE_BUDGET ? { fits: zoomThatFits(activity, settings, photos) } : {}) });
     }, COUNT_DELAY_MS);
     return () => clearTimeout(timer);
     // The count reads the model and settings it was keyed on: a change that does not move the key starts no new count.

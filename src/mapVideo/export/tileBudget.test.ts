@@ -34,7 +34,15 @@ describe('the basemap tile budget (AV-1209)', () => {
     expect(estimate(28, { camera: { ...DEFAULT_MAP_VIDEO_SETTINGS.camera, zoom: 12 } })).toBeLessThan(estimate(28));
   });
 
-  it('counts more the steeper the tilt, as the camera sees further and MapLibre asks for coarser tiles there too (#13)', () => {
+  it('counts coarser tiles with terrain on alone, where MapLibre takes them, and none for an untilted view (TD-078)', () => {
+    const at = (pitch: number, terrain: boolean) =>
+      estimate(28, { camera: { ...DEFAULT_MAP_VIDEO_SETTINGS.camera, zoom: 14, pitch }, terrain: { ...DEFAULT_MAP_VIDEO_SETTINGS.terrain, enabled: terrain } });
+    expect(at(0, true)).toBe(at(0, false));
+    expect(at(45, true)).toBeGreaterThan(at(45, false));
+    expect(at(60, true)).toBeGreaterThan(at(60, false));
+  });
+
+  it('counts more the steeper the tilt, as the camera sees further (#13)', () => {
     const at = (pitch: number) => estimate(28, { camera: { ...DEFAULT_MAP_VIDEO_SETTINGS.camera, zoom: 14, pitch } });
     const counts = [0, 30, 45, 60].map(at);
     for (let i = 1; i < counts.length; i += 1) expect(counts[i]!).toBeGreaterThan(counts[i - 1]!);
