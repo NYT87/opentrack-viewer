@@ -1,7 +1,12 @@
 import { expect, test, type Page, type Request } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readMp4 } from './helpers/mp4';
-import { countPixelsNear, decodePng, solidPng } from './helpers/png';
+import { countPixelsNear, decodePng, solidPng, withExif, type DecodedPng } from './helpers/png';
+import { tiffBlock } from '../src/test/helpers/exifFixture';
+import { longRideGpx } from './helpers/overlayFixtures';
+import { TILE_RGB, forbidLiveProviders, serveFixtureTiles } from './helpers/mapVideoTiles';
 
 /**
  * AV-1209. The map video made into a file, in a real browser with its own
@@ -14,6 +19,15 @@ import { countPixelsNear, decodePng, solidPng } from './helpers/png';
 const ORIGIN = 'http://localhost:4173';
 const FIXTURE_DIR = join(process.cwd(), 'src/test/fixtures');
 test.use({ serviceWorkers: 'block' });
+
+// AV-1210: no live map provider is ever asked. OpenFreeMap is answered with fixture tiles unless a test
+// answers it itself, and any other request leaving the page is stopped, and fails the test.
+let live: string[] = [];
+test.beforeEach(async ({ page }) => {
+  live = await forbidLiveProviders(page);
+  await serveFixtureTiles(page);
+});
+test.afterEach(() => expect(live, 'a request reached past the page to a live provider').toEqual([]));
 
 /** A short, small video of the formula ride on route only: 5 s at 640 × 360, 150 frames. */
 async function openSmall(page: Page) {
@@ -223,4 +237,296 @@ test('asks for map tiles at most four at a time (TD-073)', async ({ page }) => {
   expect(answered).toBeGreaterThan(4);
   expect(most).toBeGreaterThan(1);
   expect(most).toBeLessThanOrEqual(4);
+});
+
+/** The frame of a made video showing at `seconds`, decoded by the browser's own player, as pixels. */
+async function frameAt(page: Page, href: string, seconds: number): Promise<DecodedPng> {
+  const dataUrl = await page.evaluate(
+    async ({ href, seconds }) => {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.preload = 'auto';
+      video.src = href;
+      await new Promise<void>((resolve, reject) => {
+        video.onloadeddata = () => resolve();
+        video.onerror = () => reject(new Error(`the browser cannot play the video: ${video.error?.message ?? video.error?.code}`));
+      });
+      video.currentTime = seconds;
+      await new Promise<void>((resolve) => (video.onseeked = () => resolve()));
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d')!.drawImage(video, 0, 0);
+      return canvas.toDataURL('image/png');
+    },
+    { href, seconds },
+  );
+  return decodePng(Buffer.from(dataUrl.split(',')[1]!, 'base64'));
+}
+
+/** Pixels within `tolerance` of `rgb` in a box given as shares of the frame: [left, top, right, bottom]. */
+function countIn(png: DecodedPng, rgb: [number, number, number], tolerance: number, [left, top, right, bottom]: [number, number, number, number]) {
+  let count = 0;
+  for (let y = Math.floor(png.height * top); y < png.height * bottom; y += 1) {
+    for (let x = Math.floor(png.width * left); x < png.width * right; x += 1) {
+      const i = (y * png.width + x) * 4;
+      if (Math.abs(png.pixels[i]! - rgb[0]) <= tolerance && Math.abs(png.pixels[i + 1]! - rgb[1]) <= tolerance && Math.abs(png.pixels[i + 2]! - rgb[2]) <= tolerance) count += 1;
+    }
+  }
+  return count;
+}
+const WHITE: [number, number, number] = [0xff, 0xff, 0xff];
+
+test('the whole journey: a fixture ride, a size, a style, a figure, a preview, and an MP4 checked at known frames (AV-1210)', async ({ page }) => {
+  test.setTimeout(240_000);
+  const asked = await serveFixtureTiles(page);
+  const requests: Request[] = [];
+  page.on('request', (request) => requests.push(request));
+  await page.goto('./#/map-video');
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'overlay-ride.gpx'));
+
+  // A size and a style: 640 × 360 for five seconds, OpenFreeMap's Positron, a green marker, nothing of the route ahead.
+  const video = page.getByRole('region', { name: 'Video settings' });
+  await video.getByRole('combobox', { name: 'Size' }).selectOption('Custom');
+  await video.getByRole('spinbutton', { name: 'Width', exact: true }).fill('640');
+  await video.getByRole('spinbutton', { name: 'Height', exact: true }).fill('360');
+  await video.getByRole('spinbutton', { name: 'Length', exact: true }).fill('5');
+  await video.getByRole('checkbox', { name: 'Fly in from the whole route' }).uncheck();
+  await video.getByRole('checkbox', { name: 'Pull back to the whole route' }).uncheck();
+  await page.getByRole('combobox', { name: 'Style' }).selectOption('positron');
+  await video.getByLabel('Marker colour').fill('#33cc33');
+  await video.getByRole('checkbox', { name: 'Show the route still to come, dimmed' }).uncheck();
+  await expect.poll(() => asked.some((url) => url.endsWith('/styles/positron'))).toBe(true);
+
+  // A figure, placed by the editor: a new element goes in the top-left.
+  const editor = page.getByRole('region', { name: 'Figures over the map' });
+  await editor.getByRole('combobox', { name: 'Add' }).selectOption('metric:heartRate');
+  await editor.getByRole('button', { name: 'Add to the canvas' }).click();
+
+  // Previewed: played, then paused.
+  const time = page.getByRole('region', { name: 'Preview' }).locator('.map-video-preview__time');
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect(time).not.toHaveText('0:00.0 / 0:05.0');
+  await page.getByRole('button', { name: 'Pause' }).click();
+
+  const panel = page.getByRole('region', { name: 'Make the video' });
+  await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+  await panel.getByRole('combobox', { name: 'Format' }).selectOption('mp4');
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  const link = panel.getByRole('link', { name: /overlay-ride-map-video-640x360\.mp4/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const href = (await link.getAttribute('href'))!;
+
+  // The file: its length, its size, every frame.
+  const made = await readMp4(await fetchBytes(page, href));
+  const track = made.tracks.find((t) => t.type === 'video')!;
+  expect(track.codec).toMatch(/^avc1/);
+  expect([track.width, track.height]).toEqual([640, 360]);
+  expect(track.sampleCount).toBe(150);
+  expect(Math.abs(track.durationSeconds - 5)).toBeLessThan(0.1);
+
+  // Known frames, as the plan puts them: the camera follows the marker, heading up, so the marker is at the
+  // centre, the route it has drawn runs down behind it, and nothing of the route is ahead.
+  for (const seconds of [1.0, 2.5, 4.0]) {
+    const frame = await frameAt(page, href, seconds);
+    const at = `at ${seconds} s`;
+    expect(countIn(frame, [0x33, 0xcc, 0x33], 45, [0.48, 0.47, 0.52, 0.53]), `the marker is at the centre ${at}`).toBeGreaterThan(20);
+    expect(countIn(frame, [0xff, 0x55, 0x33], 45, [0.4, 0.54, 0.6, 0.9]), `the route is drawn behind the marker ${at}`).toBeGreaterThan(40);
+    expect(countIn(frame, [0xff, 0x55, 0x33], 45, [0.4, 0.1, 0.6, 0.46]), `nothing of the route is ahead ${at}`).toBeLessThan(5);
+    // The map is the fixture's tiles, away from the figure and the credit.
+    const box: [number, number, number, number] = [0.65, 0.1, 0.95, 0.3];
+    expect(countIn(frame, TILE_RGB, 25, box), `the basemap fills the frame ${at}`).toBeGreaterThan(0.9 * 640 * 0.3 * 360 * 0.2);
+    // The figure's type in the top-left, and white nowhere else at the top.
+    expect(countIn(frame, WHITE, 60, [0.03, 0.04, 0.3, 0.25]), `the figure is drawn ${at}`).toBeGreaterThan(30);
+    expect(countIn(frame, WHITE, 60, [0.65, 0.04, 0.97, 0.25]), `the figure is only where it was placed ${at}`).toBe(0);
+  }
+
+  // Only the fixture basemap was asked, and only ever read from.
+  const outside = requests.map((request) => request.url()).filter((url) => !/^(blob:|data:)/.test(url) && !url.startsWith(ORIGIN));
+  expect(outside.length).toBeGreaterThan(0);
+  expect(outside.filter((url) => !url.startsWith('https://tiles.openfreemap.org/'))).toEqual([]);
+  expect(requests.filter((request) => request.method() !== 'GET').map((request) => request.url())).toEqual([]);
+});
+
+test('makes a video on route only with no request leaving the page at all, from opening it to the file (AV-1210)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const requests: Request[] = [];
+  page.on('request', (request) => requests.push(request));
+  // Basemap tiles off in Settings first: the page then opens on route only, and never asks for a style either.
+  await page.goto('./');
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Basemap tiles').uncheck();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await page.goto('./#/map-video');
+  await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'overlay-ride.gpx'));
+  await expect(page.getByRole('radio', { name: /^Route only/ })).toBeChecked();
+
+  const video = page.getByRole('region', { name: 'Video settings' });
+  await video.getByRole('combobox', { name: 'Size' }).selectOption('Custom');
+  await video.getByRole('spinbutton', { name: 'Width', exact: true }).fill('640');
+  await video.getByRole('spinbutton', { name: 'Height', exact: true }).fill('360');
+  await video.getByRole('spinbutton', { name: 'Length', exact: true }).fill('5');
+  await video.getByRole('checkbox', { name: 'Fly in from the whole route' }).uncheck();
+  await video.getByRole('checkbox', { name: 'Pull back to the whole route' }).uncheck();
+  const panel = page.getByRole('region', { name: 'Make the video' });
+  await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  await expect(panel.getByRole('link', { name: /overlay-ride-map-video-640x360\.mp4/ })).toBeVisible({ timeout: 150_000 });
+  await expect(panel).not.toContainText(/map requests so far/);
+
+  const outside = requests.map((request) => request.url()).filter((url) => !/^(blob:|data:)/.test(url) && !url.startsWith(ORIGIN));
+  expect(outside).toEqual([]);
+  expect(requests.filter((request) => request.method() !== 'GET').map((request) => request.url())).toEqual([]);
+});
+
+/**
+ * AV-1210's privacy check, after AV-1008's for the overlay: the ride, the photo
+ * and every file carry a canary, a token found nowhere else, in their names, the
+ * activity's name and its coordinates. Every feature is used, and then no
+ * request, header, body or outbound browser API may carry any of it.
+ */
+const CANARY = '5519canary';
+
+test('nothing of the ride, a photo, the project or the video leaves the page; only the chosen map is asked (AV-1210)', async ({ page, context }, testInfo) => {
+  test.setTimeout(240_000);
+  const requests: Request[] = [];
+  context.on('request', (request) => requests.push(request));
+  const sockets: string[] = [];
+  page.on('websocket', (socket) => sockets.push(socket.url()));
+  await page.addInitScript(() => {
+    const sent: { api: string; url: string }[] = [];
+    (window as unknown as { __outbound: typeof sent }).__outbound = sent;
+    const realFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      sent.push({ api: `fetch ${init?.method ?? 'GET'} ${init?.body === undefined ? '' : 'with a body'}`, url: input instanceof Request ? input.url : String(input) });
+      return realFetch(input, init);
+    };
+    const open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: unknown[]) {
+      sent.push({ api: `xhr ${method}`, url: String(url) });
+      return (open as (...args: unknown[]) => void).call(this, method, url, ...rest);
+    };
+    navigator.sendBeacon = (url) => (sent.push({ api: 'beacon', url: String(url) }), false);
+  });
+
+  // The ride, moved to a place nobody else's is, and named with the canary.
+  const gpx = readFileSync(join(FIXTURE_DIR, 'overlay-ride.gpx'), 'utf8')
+    .replace(/<name>[^<]*<\/name>/, `<name>Secret ride ${CANARY}</name>`)
+    .replace(/lat="51\.(\d+)" lon="0\.0000000"/g, (_m, rest) => `lat="47.${rest}" lon="8.7731000"`);
+  const needles = [CANARY, 'Secret ride', '47.5000', '8.7731', '.gpx', 'IMG_', 'map-video-project', 'ftyp', 'IHDR'];
+  expect(gpx).toContain('lat="47.5000000" lon="8.7731000"');
+
+  await page.goto('./#/map-video');
+  await page.getByTestId('map-video-activity-input').setInputFiles({ name: `${CANARY}-ride.gpx`, mimeType: 'application/gpx+xml', buffer: Buffer.from(gpx) });
+  await expect(page.getByRole('region', { name: 'Activity' })).toContainText(`${CANARY}-ride.gpx`);
+  const video = page.getByRole('region', { name: 'Video settings' });
+  await video.getByRole('combobox', { name: 'Size' }).selectOption('Custom');
+  await video.getByRole('spinbutton', { name: 'Width', exact: true }).fill('640');
+  await video.getByRole('spinbutton', { name: 'Height', exact: true }).fill('360');
+  await video.getByRole('spinbutton', { name: 'Length', exact: true }).fill('5');
+  await video.getByRole('checkbox', { name: 'Fly in from the whole route' }).uncheck();
+  await video.getByRole('checkbox', { name: 'Pull back to the whole route' }).uncheck();
+
+  // A photo with the canary in its name, and a time and a place in its EXIF.
+  const photo = withExif(solidPng(200, [255, 0, 255]), tiffBlock({ dateTimeOriginal: '2024:01:01 10:00:30', offsetTimeOriginal: '+00:00', lat: 47.501, lon: 8.7731 }));
+  await page.getByTestId('map-video-photo-input').setInputFiles({ name: `IMG_${CANARY}.png`, mimeType: 'image/png', buffer: photo });
+  await expect(page.getByRole('region', { name: 'Photos' }).getByRole('listitem', { name: `IMG_${CANARY}.png` })).toContainText(/Shown at/);
+
+  // A figure, a keyframe, a project saved and opened again.
+  const editor = page.getByRole('region', { name: 'Figures over the map' });
+  await editor.getByRole('combobox', { name: 'Add' }).selectOption('metric:heartRate');
+  await editor.getByRole('button', { name: 'Add to the canvas' }).click();
+  await page.getByRole('slider', { name: 'Position in the video' }).fill('2');
+  await page.getByRole('button', { name: 'Add keyframe here' }).click();
+  const project = page.getByRole('region', { name: 'Project' });
+  const saving = page.waitForEvent('download');
+  await project.getByRole('button', { name: 'Save project' }).click();
+  const projectPath = testInfo.outputPath('map-video-project.json');
+  await (await saving).saveAs(projectPath);
+  await page.getByTestId('map-video-project-input').setInputFiles(projectPath);
+
+  // The video and its poster.
+  const panel = page.getByRole('region', { name: 'Make the video' });
+  await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+  const posting = page.waitForEvent('download');
+  await panel.getByRole('button', { name: /^Save a still/ }).click();
+  await posting;
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  await expect(panel.getByRole('link', { name: new RegExp(`${CANARY}-ride-map-video-640x360\\.mp4`) })).toBeVisible({ timeout: 180_000 });
+
+  // 1. Every request was this page's own, or the chosen map's, and the map was asked.
+  const hosts = new Set(requests.map((request) => request.url()).filter((url) => !/^(blob:|data:)/.test(url) && !url.startsWith(ORIGIN)).map((url) => new URL(url).host));
+  expect([...hosts]).toEqual(['tiles.openfreemap.org']);
+  // 2. Nothing was sent: GET only, no body.
+  expect(requests.filter((request) => request.method() !== 'GET' || request.postDataBuffer() !== null).map((request) => request.url())).toEqual([]);
+  // 3. Nothing of the ride, the photo, the project or the video in any URL, header or body.
+  const described = requests.map((request) => [request.method(), request.url(), JSON.stringify(request.headers()), request.postDataBuffer()?.toString('latin1') ?? ''].join('\n')).join('\n');
+  for (const needle of needles) expect(described, `a request mentions "${needle}"`).not.toContain(needle);
+  // 4. And no API that sends was handed anything but a read of this page or the map.
+  const outbound = await page.evaluate(() => (window as unknown as { __outbound: { api: string; url: string }[] }).__outbound);
+  expect(outbound.filter(({ api, url }) => !api.startsWith('fetch GET ') || !(url.startsWith(ORIGIN) || /^(blob:|data:)/.test(url) || url.startsWith('https://tiles.openfreemap.org/')))).toEqual([]);
+  for (const needle of needles) expect(outbound.map(({ url }) => url).join('\n')).not.toContain(needle);
+  expect(sockets).toEqual([]);
+  // 5. Nothing of it kept in the page's storage either.
+  const stored = await page.evaluate(() => JSON.stringify([{ ...localStorage }, { ...sessionStorage }]));
+  for (const needle of [CANARY, '47.5000', '8.7731']) expect(stored).not.toContain(needle);
+});
+
+/** The browser's processes together, resident, in megabytes: the browser, its GPU process and its pages, as TD-064 measured. */
+async function browserMegabytes(page: Page): Promise<number> {
+  const cdp = await page.context().browser()!.newBrowserCDPSession();
+  const { processInfo } = (await cdp.send('SystemInfo.getProcessInfo')) as { processInfo: { id: number }[] };
+  await cdp.detach();
+  const pids = processInfo.map((process) => process.id).filter((id) => id > 0);
+  const kilobytes = execFileSync('ps', ['-o', 'rss=', '-p', pids.join(',')], { encoding: 'utf8' })
+    .split('\n')
+    .map((line) => Number(line.trim()) || 0);
+  return kilobytes.reduce((sum, value) => sum + value, 0) / 1024;
+}
+
+test('makes a 60-second 1080p video in steady memory (AV-1210)', async ({ page }, testInfo) => {
+  test.setTimeout(480_000);
+  // An hour round a 22 km circle, a point a second: the camera crosses fresh map all the way.
+  const ride = testInfo.outputPath('long-ride.gpx');
+  writeFileSync(ride, longRideGpx(1));
+  await page.goto('./#/map-video');
+  await page.getByTestId('map-video-activity-input').setInputFiles(ride);
+  // The default size, 1920 × 1080 at 30 fps, over the fixture basemap: 1,800 frames, with the intro and outro.
+  const video = page.getByRole('region', { name: 'Video settings' });
+  await expect(video.getByRole('combobox', { name: 'Size' }).locator('option:checked')).toHaveText(/1920 × 1080/);
+  await video.getByRole('spinbutton', { name: 'Length', exact: true }).fill('60');
+  const panel = page.getByRole('region', { name: 'Make the video' });
+  await expect(panel).toContainText('1800 frames at 1920 × 1080');
+  await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await panel.getByRole('alert').allTextContents();
+  test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+
+  const before = await browserMegabytes(page);
+  const samples: number[] = [];
+  const started = Date.now();
+  await panel.getByRole('button', { name: 'Make the video' }).click();
+  const link = panel.getByRole('link', { name: /long-ride-map-video-1920x1080\.mp4/ });
+  while (!(await link.isVisible())) {
+    samples.push(await browserMegabytes(page));
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await page.waitForTimeout(1000);
+    expect(Date.now() - started, 'the export finished').toBeLessThan(420_000);
+  }
+  const seconds = (Date.now() - started) / 1000;
+  const peak = Math.max(...samples);
+  const third = Math.floor(samples.length / 3);
+  const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const middle = mean(samples.slice(third, 2 * third));
+  const last = mean(samples.slice(2 * third));
+  testInfo.annotations.push({ type: 'memory (MB)', description: JSON.stringify({ before: Math.round(before), peak: Math.round(peak), middle: Math.round(middle), last: Math.round(last), seconds: Math.round(seconds) }) });
+  // Measured on an M1, alone: 860 MB before, a peak of 1,010 MB, 940 MB through the middle third and 943 MB
+  // through the last, in 150 s. A frame or a tile kept per frame would climb by megabytes a second.
+  expect(peak - before, 'what the export adds').toBeLessThan(1024);
+  expect(last - middle, 'no climb from the middle third to the last').toBeLessThan(200);
 });

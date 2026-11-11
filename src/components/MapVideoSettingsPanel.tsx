@@ -3,6 +3,7 @@ import type { UnitSystem } from '../domain/units';
 import { MAP_VIDEO_LIMITS, outputProblem, type MapVideoColorBy, type MapVideoMarkerShape, type MapVideoSettings } from '../mapVideo/project';
 import type { ColorByChoice } from '../mapVideo/style';
 import type { MapVideoSettingsPatch } from '../state/mapVideoStore';
+import { useNumberDraft } from './useNumberDraft';
 
 const FEET_PER_METER = 3.280839895;
 
@@ -24,8 +25,6 @@ export interface MapVideoSettingsPanelProps {
   colorBy?: ColorByChoice[];
 }
 
-const clamp = (value: number, [min, max]: readonly [number, number]) => Math.min(max, Math.max(min, value));
-
 /** A number field that only reports finite values, held to its range. */
 function NumberField({
   label,
@@ -43,6 +42,7 @@ function NumberField({
   onChange: (value: number) => void;
 }) {
   const id = useId();
+  const draft = useNumberDraft(value, 2, onChange, range);
   // The label names the field and the unit describes it, so "Length" is found as "Length".
   return (
     <div className="map-video-settings__field">
@@ -54,12 +54,8 @@ function NumberField({
           min={range[0]}
           max={range[1]}
           step={step}
-          value={Number(value.toFixed(2))}
           aria-describedby={unit ? `${id}-unit` : undefined}
-          onChange={(event) => {
-            const next = event.target.valueAsNumber;
-            if (Number.isFinite(next)) onChange(clamp(next, range));
-          }}
+          {...draft}
         />
         {unit && <span id={`${id}-unit`}>{unit}</span>}
       </span>

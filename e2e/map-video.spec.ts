@@ -2,6 +2,7 @@ import { expect, test, type Page, type Request } from '@playwright/test';
 import { join } from 'node:path';
 import { countPixelsNear, decodePng, solidPng, withExif } from './helpers/png';
 import { tiffBlock } from '../src/test/helpers/exifFixture';
+import { forbidLiveProviders, serveFixtureTiles } from './helpers/mapVideoTiles';
 
 /**
  * AV-1202. The map video page in a real browser: reached from Tools, opened
@@ -14,6 +15,15 @@ const ORIGIN = 'http://localhost:4173';
 // The service worker would answer fetches itself, out of sight of `page.route`
 // and of the request log: blocked, every request the page makes is seen.
 test.use({ serviceWorkers: 'block' });
+
+// AV-1210: no live map provider is ever asked. OpenFreeMap is answered with fixture tiles unless a test
+// answers it itself, and any other request leaving the page is stopped, and fails the test.
+let live: string[] = [];
+test.beforeEach(async ({ page }) => {
+  live = await forbidLiveProviders(page);
+  await serveFixtureTiles(page);
+});
+test.afterEach(() => expect(live, 'a request reached past the page to a live provider').toEqual([]));
 const FIXTURE_DIR = join(process.cwd(), 'src/test/fixtures');
 
 function recordRequests(page: Page): Request[] {
@@ -312,4 +322,18 @@ test('places a photo by the time in its EXIF, and shows it while the marker wait
   await page.getByRole('slider', { name: 'Position in the video' }).fill(String(Number(shownAt) + 6));
   await expect.poll(magenta, { timeout: 5000 }).toBe(0);
   expect(offOrigin(requests)).toEqual([]);
+});
+
+test('the guard against live providers stops a request to one, and sees it (AV-1210)', async ({ page }) => {
+  await page.goto('./#/map-video');
+  const failed = await page.evaluate(() =>
+    fetch('https://api.maptiler.com/maps/satellite/style.json').then(
+      () => false,
+      () => true,
+    ),
+  );
+  expect(failed).toBe(true);
+  expect(live).toEqual(['https://api.maptiler.com/maps/satellite/style.json']);
+  // Seen, and so cleared: the check after each test is for requests nobody meant to make.
+  live.length = 0;
 });

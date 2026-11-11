@@ -1,6 +1,8 @@
 import { useId, type KeyboardEvent } from 'react';
 import type { CameraKeyframe } from '../mapVideo/keyframes';
+import { MAP_VIDEO_LIMITS } from '../mapVideo/project';
 import { formatVideoTime } from '../mapVideo/timing';
+import { useNumberDraft } from './useNumberDraft';
 
 export interface MapVideoKeyframesProps {
   keyframes: CameraKeyframe[];
@@ -15,8 +17,9 @@ export interface MapVideoKeyframesProps {
   note?: string;
 }
 
-function Field({ label, value, step, onChange, unit }: { label: string; value: number; step: number; onChange: (value: number) => void; unit?: string }) {
+function Field({ label, value, step, onChange, unit, range }: { label: string; value: number; step: number; onChange: (value: number) => void; unit?: string; range?: readonly [number, number] }) {
   const id = useId();
+  const draft = useNumberDraft(value, 3, onChange, range);
   return (
     <span className="map-video-keyframe__field">
       <label htmlFor={id}>{label}</label>
@@ -24,12 +27,8 @@ function Field({ label, value, step, onChange, unit }: { label: string; value: n
         id={id}
         type="number"
         step={step}
-        value={Number(value.toFixed(3))}
         aria-describedby={unit ? `${id}-unit` : undefined}
-        onChange={(event) => {
-          const next = event.target.valueAsNumber;
-          if (Number.isFinite(next)) onChange(next);
-        }}
+        {...draft}
       />
       {unit && <span id={`${id}-unit`}>{unit}</span>}
     </span>
@@ -102,8 +101,8 @@ export function MapVideoKeyframes({ keyframes, frameSeconds, onChange, onSeek, o
                   />
                   <span>Stays put</span>
                 </label>
-                <Field label="Zoom" step={0.1} value={keyframe.zoom} onChange={(zoom) => update(keyframe.id, { zoom })} />
-                <Field label="Tilt" unit="°" step={1} value={keyframe.pitch} onChange={(pitch) => update(keyframe.id, { pitch })} />
+                <Field label="Zoom" step={0.1} range={MAP_VIDEO_LIMITS.zoom} value={keyframe.zoom} onChange={(zoom) => update(keyframe.id, { zoom })} />
+                <Field label="Tilt" unit="°" step={1} range={MAP_VIDEO_LIMITS.pitch} value={keyframe.pitch} onChange={(pitch) => update(keyframe.id, { pitch })} />
                 <label className="overlay-controls__choice">
                   <input
                     type="checkbox"
@@ -113,7 +112,7 @@ export function MapVideoKeyframes({ keyframes, frameSeconds, onChange, onSeek, o
                   <span>Turns with the route</span>
                 </label>
                 {keyframe.bearing !== null && (
-                  <Field label="Heading" unit="°" step={1} value={keyframe.bearing} onChange={(bearing) => update(keyframe.id, { bearing })} />
+                  <Field label="Heading" unit="°" step={1} range={[0, 359]} value={keyframe.bearing} onChange={(bearing) => update(keyframe.id, { bearing })} />
                 )}
                 <Field label="East of the marker" unit="m" step={10} value={keyframe.offset.east} onChange={(east) => update(keyframe.id, { offset: { ...keyframe.offset, east } })} />
                 <Field label="North of the marker" unit="m" step={10} value={keyframe.offset.north} onChange={(north) => update(keyframe.id, { offset: { ...keyframe.offset, north } })} />

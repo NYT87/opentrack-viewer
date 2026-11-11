@@ -129,6 +129,31 @@ describe('the map video preview (AV-1204)', () => {
     expect(screen.getByRole('option', { name: '60 a second (up to 1080p)' })).toBeDisabled();
   });
 
+  it('takes a number typed a digit at a time, and holds one beyond its limits only once the field is left (AV-1210)', async () => {
+    await openWithRoute();
+    const zoom = screen.getByRole('spinbutton', { name: 'Zoom' });
+    // "1" is below the zoom's 10–17 on the way to "12": the field keeps it as typed, and the 12 arrives.
+    await userEvent.clear(zoom);
+    await userEvent.type(zoom, '12');
+    expect(zoom).toHaveValue(12);
+    expect(useMapVideoStore.getState().settings.camera.zoom).toBe(12);
+    // Beyond the limit, it is held to it when the field is left.
+    await userEvent.clear(zoom);
+    await userEvent.type(zoom, '30');
+    expect(useMapVideoStore.getState().settings.camera.zoom).toBe(12);
+    await userEvent.tab();
+    expect(useMapVideoStore.getState().settings.camera.zoom).toBe(17);
+    expect(zoom).toHaveValue(17);
+
+    // The same in a keyframe's fields.
+    await userEvent.click(screen.getByRole('button', { name: 'Add keyframe here' }));
+    const keyframeZoom = within(screen.getByRole('region', { name: 'Camera keyframes' })).getByRole('spinbutton', { name: 'Zoom' });
+    await userEvent.clear(keyframeZoom);
+    await userEvent.type(keyframeZoom, '13');
+    await userEvent.tab();
+    expect(useMapVideoStore.getState().settings.keyframes[0]!.zoom).toBe(13);
+  });
+
   it('says why, instead of a preview, when the privacy trim leaves too little', async () => {
     await openWithRoute();
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Hide the first' }), { target: { value: '5000' } });
