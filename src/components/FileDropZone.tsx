@@ -16,6 +16,15 @@ export interface FileDropZoneProps {
    * named together.
    */
   multiple?: boolean;
+  /** AV-1014. What the page says it wants, in place of the formats' own wording. */
+  title?: string;
+  subtitle?: string;
+  /**
+   * AV-1014. Hears why files were refused, or `undefined` when none were, on
+   * every pick or drop, in place of showing it here: a page that may remove
+   * the zone shows the reason where it stays.
+   */
+  onRefused?: (message: string | undefined) => void;
 }
 
 /**
@@ -30,6 +39,9 @@ export function FileDropZone({
   disabled = false,
   testId = 'file-input',
   multiple = false,
+  title,
+  subtitle,
+  onRefused,
 }: FileDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
@@ -45,17 +57,18 @@ export function FileDropZone({
       const accepted = (file: File) =>
         acceptedExtensions.includes(file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase());
       const refused = files.filter((file) => !accepted(file));
-      setRejection(
+      const reason =
         refused.length === 0
           ? undefined
-          : `${refused.map((file) => `"${file.name}"`).join(', ')} ${refused.length === 1 ? 'is' : 'are'} not supported. Choose ${describeFormats(acceptedExtensions)}.`,
-      );
+          : `${refused.map((file) => `"${file.name}"`).join(', ')} ${refused.length === 1 ? 'is' : 'are'} not supported. Choose ${describeFormats(acceptedExtensions)}.`;
+      if (onRefused) onRefused(reason);
+      else setRejection(reason);
       const taken = files.filter(accepted);
       if (taken.length === 0) return;
       if (onFiles) onFiles(taken);
       else taken.forEach((file) => onFile?.(file));
     },
-    [acceptedExtensions, onFile, onFiles, multiple],
+    [acceptedExtensions, onFile, onFiles, onRefused, multiple],
   );
 
   const onDrop = useCallback(
@@ -91,14 +104,22 @@ export function FileDropZone({
         aria-describedby={`${inputId}-hint`}
       >
         <span className="dropzone__title">
-          Drop{' '}
-          {multiple
-            ? describeFormats(acceptedExtensions).replace(/^an? /, '').replace(/ file$/, ' files')
-            : describeFormats(acceptedExtensions)}{' '}
-          here
+          {title ?? (
+            <>
+              Drop{' '}
+              {multiple
+                ? describeFormats(acceptedExtensions)
+                    .replace(/^an? /, '')
+                    .replace(/ file$/, ' files')
+                : describeFormats(acceptedExtensions)}{' '}
+              here
+            </>
+          )}
         </span>
         {/* "Choose", not "click": it is pressed, tapped or chosen with Enter. */}
-        <span className="dropzone__subtitle">{multiple ? 'or choose them' : 'or choose one'}</span>
+        <span className="dropzone__subtitle">
+          {subtitle ?? (multiple ? 'or choose them' : 'or choose one')}
+        </span>
         <input
           ref={inputRef}
           id={inputId}

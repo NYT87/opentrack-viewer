@@ -14,7 +14,7 @@ import { readZip } from '../src/test/helpers/zipReader';
 
 async function openCanvas(page: Page) {
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  await page.getByTestId('overlay-file-input').setInputFiles(RIDE_PATH);
   await page.getByRole('radio', { name: 'A custom video overlay, with no video' }).check();
   const canvas = page.getByRole('region', { name: 'Custom canvas' });
   await expect(canvas).toBeVisible();

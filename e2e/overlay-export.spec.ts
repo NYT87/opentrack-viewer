@@ -18,11 +18,11 @@ async function openWithFiles(page: Page, outputDir: string) {
   writeFileSync(gpx, widestGpx());
 
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-video-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('hero8.mp4', {
+  await page.getByTestId('overlay-file-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText('hero8.mp4', {
     timeout: 30_000,
   });
-  await page.getByTestId('overlay-activity-input').setInputFiles(gpx);
+  await page.getByTestId('overlay-file-input').setInputFiles(gpx);
   return page.getByRole('region', { name: 'Export overlay' });
 }
 
@@ -165,11 +165,11 @@ test('reports an export engine that cannot start, instead of waiting on it', asy
 
 test('exports a short overlay-only asset from the committed clip and ride, fast and exactly sized', async ({ page }) => {
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
+  await page.getByTestId('overlay-file-input').setInputFiles(CLIP_PATH);
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
     timeout: 30_000,
   });
-  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  await page.getByTestId('overlay-file-input').setInputFiles(RIDE_PATH);
   const panel = page.getByRole('region', { name: 'Export overlay' });
   await panel.getByLabel('Frame rate').selectOption('10');
   await expect(panel.getByTestId('export-plan')).toContainText('60 frames, 256 × 144');
@@ -208,11 +208,11 @@ test('exports a short overlay-only asset from the committed clip and ride, fast 
 
 test('exports only the part of the video kept, each frame as at that moment of the whole (TD-081)', async ({ page }) => {
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
+  await page.getByTestId('overlay-file-input').setInputFiles(CLIP_PATH);
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
     timeout: 30_000,
   });
-  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  await page.getByTestId('overlay-file-input').setInputFiles(RIDE_PATH);
   const panel = page.getByRole('region', { name: 'Export overlay' });
   await panel.getByLabel('Frame rate').selectOption('10');
   const exportZip = async (name: RegExp) => {

@@ -17,11 +17,11 @@ async function openOverlays(page: Page) {
 }
 
 async function chooseFiles(page: Page, ridePath = RIDE_PATH) {
-  await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
+  await page.getByTestId('overlay-file-input').setInputFiles(CLIP_PATH);
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
     timeout: 30_000,
   });
-  await page.getByTestId('overlay-activity-input').setInputFiles(ridePath);
+  await page.getByTestId('overlay-file-input').setInputFiles(ridePath);
   await expect(page.getByRole('region', { name: 'Preview' })).toBeVisible();
   // The browser has read the clip: its length is known and the scrubber is live.
   await expect(page.getByRole('slider', { name: 'Video position' })).toBeEnabled({ timeout: 30_000 });
@@ -233,11 +233,11 @@ test('stays responsive with a four-hour activity, and draws its route thinned to
   writeFileSync(longRide, longRideGpx(4)); // 14,401 points, over two megabytes, never committed
 
   await openOverlays(page);
-  await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
+  await page.getByTestId('overlay-file-input').setInputFiles(CLIP_PATH);
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4', {
     timeout: 30_000,
   });
-  await page.getByTestId('overlay-activity-input').setInputFiles(longRide);
+  await page.getByTestId('overlay-file-input').setInputFiles(longRide);
   await expect(page.getByRole('slider', { name: 'Video position' })).toBeEnabled({ timeout: 60_000 });
   await expect(item(page, 'speed')).toBeVisible({ timeout: 60_000 });
 

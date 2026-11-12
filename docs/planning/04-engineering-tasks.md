@@ -1201,6 +1201,27 @@ Acceptance criteria:
 - **Privacy and requests:** the privacy trim hides the start and end from the fit, the route and the profile. Rendering waits for every tile; a failed tile is tried again and then the export stops rather than save a picture with a hole. Requests go through the export's queue, four at a time and each tile once (TD-076). Nothing is uploaded, and a route-only image asks for nothing.
 - **Tests:** unit tests for the panel's layout (its height for each set of details and each image shape), the fit, and the framing at a heading; a browser test over fixture tiles that exports each layout and checks pixels (the basemap, the route's colour, the panel's colour and its text, the credit); privacy: only the chosen map host is asked, by GET, nothing of the activity is sent, and route only asks for nothing.
 
+#### AV-1014: One File Input on the Overlay Page, Opening in the Mode That Fits
+
+Dependencies: AV-1002, AV-1009, AV-1011, AV-1013, TD-059, TD-081
+
+GitHub issue #16. The overlay page has a slot for the video and another for the activity, each with its own drop zone, so the reader has to know which file goes where. This task replaces them with **one input** that takes either kind, or both at once, works out what each file is, and opens the page in the mode that fits.
+
+Acceptance criteria:
+- **One input:** a single labelled drop zone and picker, *Files*, taking MP4 and MOV videos and GPX, FIT, TCX and KML activities, one or several at a time. It says what it wants from what the page holds: a video or an activity, or both, when empty; the activity when a video without telemetry is held; a video when only an activity is (and *Add a video* was asked for). Its test id is `overlay-file-input`.
+- **What a file is:** decided from its first bytes where they say (an ISO base media box is a video; the FIT signature or a GPX, TCX or KML root is an activity), else from its extension. A file that is neither is refused with the reason, as the drop zone refuses one now. The video's telemetry and the activity's format are then read exactly as before (`useVideoTelemetryRead`, `parseActivityFile`).
+- **Several files at once:** one pick or drop may hold one video and one activity. Two or more of one kind are all refused with a reason naming them ("Choose one video at a time: a.mp4 and b.mp4 are both videos."); a file of the other kind in the same drop is still taken. A video dropped while another is being read is refused with the reason, until that read finishes or is cancelled.
+- **Opens in the mode that fits:**
+  - A video with telemetry: the template overlay over the video, with its own activity, and Sync first.
+  - A video without telemetry: the video held, its note beside it, and the input asking for its activity.
+  - An activity only: the still image, or the mode last chosen this session under *What to make*, as now.
+  - A video and an activity, together or one after the other: the template overlay (or the custom canvas, if chosen), with Sync first.
+- **Each file held keeps its own line:** under the input, the video's line and the activity's line, each with its name, the details it shows now, *Choose another video* / *Choose another activity* (a picker of that kind only, test ids `overlay-video-replace` and `overlay-activity-replace`) and *Remove*, so one can be changed without the other. A new video replaces the video and keeps an activity chosen by hand; a new activity replaces the activity and keeps the video; a video's telemetry never replaces a hand-picked activity (TD-040). With both held, the drop zone gives way to the two lines.
+- **Status:** a video being read shows its progress and Cancel; an activity being read says so; a failure is shown with its file's name and reason, and takes nothing else down; focus moves to what went wrong. Each is announced as the slots announce it now.
+- **Handoffs unchanged:** the viewer's *Create route overlay*, *Create a map image* and *Create custom track*, and the extraction page's *Create overlays*, open in the mode they ask for.
+- **Layout (TD-059):** the input never moves or is drawn anew while a file is read, so a file dropped mid-read is never lost. In the still image and map image, *Add a video* brings back the input, taking videos only; the activity is changed by Start over, as now.
+- **Tests:** unit tests for what a file is (by content, by extension, neither); component tests for each row of *Opens in the mode that fits*, several files in one drop (one of each, two of a kind, a refused one), replacing and removing each, a video dropped while one is read, the input's wording in each state, and focus on a failure; the browser tests moved from `overlay-video-input` and `overlay-activity-input` to the one input.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

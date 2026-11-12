@@ -14,9 +14,9 @@ async function openCanvas(page: Page, outputDir: string) {
   const gpx = join(outputDir, 'ride.gpx');
   writeFileSync(gpx, widestGpx());
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-video-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('hero8.mp4', { timeout: 30_000 });
-  await page.getByTestId('overlay-activity-input').setInputFiles(gpx);
+  await page.getByTestId('overlay-file-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText('hero8.mp4', { timeout: 30_000 });
+  await page.getByTestId('overlay-file-input').setInputFiles(gpx);
   await page.getByRole('radio', { name: 'A custom canvas over the video' }).check();
   const canvas = page.getByRole('region', { name: 'Custom canvas' });
   await expect(canvas).toBeVisible();

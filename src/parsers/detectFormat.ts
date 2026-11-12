@@ -105,12 +105,12 @@ function unsupportedMessage(format: ActivitySourceFormat): string {
   );
 }
 
-async function readHead(file: File): Promise<Uint8Array> {
+export async function readHead(file: File): Promise<Uint8Array> {
   const slice = file.slice(0, SIGNATURE_BYTES);
   return new Uint8Array(await slice.arrayBuffer());
 }
 
-function isFitSignature(head: Uint8Array): boolean {
+export function isFitSignature(head: Uint8Array): boolean {
   if (head.length < 12) return false;
   return (
     head[8] === 0x2e && head[9] === 0x46 && head[10] === 0x49 && head[11] === 0x54 // ".FIT"
@@ -121,7 +121,7 @@ function isFitSignature(head: Uint8Array): boolean {
  * An ISO base media file (MP4, MOV) opens with a box whose type is `ftyp`,
  * four bytes in — after the box's own length.
  */
-function isIsoBaseMediaSignature(head: Uint8Array): boolean {
+export function isIsoBaseMediaSignature(head: Uint8Array): boolean {
   if (head.length < 12) return false;
   return (
     head[4] === 0x66 && head[5] === 0x74 && head[6] === 0x79 && head[7] === 0x70 // "ftyp"
@@ -157,7 +157,7 @@ function containsGoProMarker(bytes: Uint8Array): boolean {
   return /gpmd|GoPro|GPRO|HERO|FIRM|GPS[59]/.test(text);
 }
 
-function detectXmlRoot(head: Uint8Array): ActivitySourceFormat | undefined {
+export function detectXmlRoot(head: Uint8Array): ActivitySourceFormat | undefined {
   const text = new TextDecoder('utf-8', { fatal: false }).decode(head).toLowerCase();
   if (!text.includes('<')) return undefined;
   if (text.includes('<gpx')) return 'gpx';

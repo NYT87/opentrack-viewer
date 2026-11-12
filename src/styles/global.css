@@ -1408,6 +1408,7 @@ input[type='color']:focus-visible {
 .overlay-slot__actions, .overlay-files__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
 /* Under the still image: clear of the slot that Add a video brings back. */
 .overlay-still__start-over .overlay-files__actions { margin-top: 12px; }
+.overlay-files__file { margin-top: 12px; }
 .overlay-slot .prose__title:focus { outline: none; }
 .overlay-slot .prose__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .overlay-undo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }

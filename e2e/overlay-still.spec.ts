@@ -38,7 +38,7 @@ async function download(page: Page, panel: Locator) {
 
 async function open(page: Page) {
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  await page.getByTestId('overlay-file-input').setInputFiles(RIDE_PATH);
   const panel = page.getByRole('region', { name: 'Overlay image' });
   await expect(panel).toBeVisible();
   return panel;

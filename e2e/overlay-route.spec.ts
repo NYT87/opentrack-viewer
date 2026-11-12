@@ -69,7 +69,7 @@ async function downloadPng(page: Page) {
 
 async function openOverlaysWith(page: Page, gpxPath: string) {
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-activity-input').setInputFiles(gpxPath);
+  await page.getByTestId('overlay-file-input').setInputFiles(gpxPath);
   const panel = page.getByRole('region', { name: 'Overlay image' });
   await expect(panel).toBeVisible();
   return panel;
@@ -205,7 +205,7 @@ test('draws a route across the antimeridian as one line, not across the whole pi
 test('draws a single place as a dot, and says so', async ({ page }, testInfo) => {
   const path = writeGpx(testInfo.outputDir, 'one.gpx', [{ lat: 10, lon: 20 }]);
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-activity-input').setInputFiles(path);
+  await page.getByTestId('overlay-file-input').setInputFiles(path);
   const panel = page.getByRole('region', { name: 'Overlay image' });
   // A one-point file may be refused at intake; if it is read, it must be drawn as a dot.
   const refused = page.getByRole('region', { name: 'File not read' });
@@ -233,7 +233,7 @@ test('takes the activity from the viewer, whole by default and the focused secti
   await expect(panel.getByTestId('route-image-preview')).toBeVisible();
   // The still image takes the file slots' place, and names the file below it.
   await expect(page.getByText(/Made from overlay-ride\.gpx/)).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Activity' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Files' })).toHaveCount(0);
 
   const { png, name } = await downloadPng(page);
   expect(name).toBe('route-overlay-1920x1080.png');

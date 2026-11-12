@@ -708,11 +708,11 @@ test('offers overlays in the Tools menu, and takes files by hand after a reload 
   await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Activity charts' })).toHaveCount(0);
 
-  // A reload loses the memory-only handoff: the page opens on its two empty file slots.
+  // A reload loses the memory-only handoff: the page opens on its one empty input.
   await page.reload();
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Files', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start over' })).toHaveCount(0);
-  await page.getByTestId('overlay-activity-input').setInputFiles('src/test/fixtures/simple-route.gpx');
+  await page.getByTestId('overlay-file-input').setInputFiles('src/test/fixtures/simple-route.gpx');
   // An activity alone makes the still image, which takes the file slots' place.
   await expect(page.getByText(/Made from simple-route\.gpx/)).toBeVisible();
   await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
@@ -721,12 +721,12 @@ test('offers overlays in the Tools menu, and takes files by hand after a reload 
   // so it cannot supply the activity — but it is still a video, and the
   // GPX chosen a moment ago is what gets drawn over it. The page says why.
   await page.getByRole('button', { name: 'Add a video' }).click();
-  await page.getByTestId('overlay-video-input').setInputFiles('src/test/fixtures/hero8.mp4');
-  const video = page.getByRole('region', { name: 'Video', exact: true });
+  await page.getByTestId('overlay-file-input').setInputFiles('src/test/fixtures/hero8.mp4');
+  const video = page.getByRole('group', { name: 'Video', exact: true });
   await expect(video).toContainText('hero8.mp4', { timeout: 60_000 });
   await expect(video).toContainText('0:13');
   await expect(video).toContainText(/usable satellite fix/i);
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('simple-route.gpx');
+  await expect(page.getByRole('group', { name: 'Activity', exact: true })).toContainText('simple-route.gpx');
   await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
 
   // Nothing left the device, whatever the outcome. The preview (AV-1004) plays

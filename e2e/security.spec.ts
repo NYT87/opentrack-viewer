@@ -3,9 +3,9 @@ import { CLIP_PATH, RIDE_PATH, fetchBlobBytes } from './helpers/overlayFixtures'
 
 async function exportedOverlay(page: Page) {
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-video-input').setInputFiles(CLIP_PATH);
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4');
-  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  await page.getByTestId('overlay-file-input').setInputFiles(CLIP_PATH);
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText('overlay-test-clip.mp4');
+  await page.getByTestId('overlay-file-input').setInputFiles(RIDE_PATH);
   const panel = page.getByRole('region', { name: 'Export overlay' });
   await panel.getByLabel('Frame rate').selectOption('10');
   await panel.getByRole('button', { name: 'Export PNG sequence' }).click();

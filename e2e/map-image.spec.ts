@@ -46,7 +46,7 @@ function panelTop(png: DecodedPng): number {
 
 async function open(page: Page) {
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-activity-input').setInputFiles(RIDE_PATH);
+  await page.getByTestId('overlay-file-input').setInputFiles(RIDE_PATH);
   await page.getByRole('radio', { name: 'A map image, with the activity’s details' }).check();
   const panel = page.getByRole('region', { name: 'Map image' });
   await expect(panel).toBeVisible();

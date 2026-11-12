@@ -131,21 +131,21 @@ test('no request carries the video, the telemetry, a frame, a file name or the e
   expect(needles.lat.startsWith('47.')).toBe(true);
 
   await page.goto('./#/overlays');
-  await page.getByTestId('overlay-video-input').setInputFiles({
+  await page.getByTestId('overlay-file-input').setInputFiles({
     name: `${CANARY}-clip.mp4`,
     mimeType: 'video/mp4',
     buffer: readFileSync(CLIP_PATH),
   });
-  await expect(page.getByRole('region', { name: 'Video', exact: true })).toContainText(`${CANARY}-clip.mp4`, {
+  await expect(page.getByRole('group', { name: 'Video', exact: true })).toContainText(`${CANARY}-clip.mp4`, {
     timeout: 30_000,
   });
-  await page.getByTestId('overlay-activity-input').setInputFiles({
+  await page.getByTestId('overlay-file-input').setInputFiles({
     name: `${CANARY}-ride.gpx`,
     mimeType: 'application/gpx+xml',
     buffer: Buffer.from(gpx),
   });
   // The canary reached the page: it is the activity's file name, and its values are drawn.
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText(`${CANARY}-ride.gpx`);
+  await expect(page.getByRole('group', { name: 'Activity', exact: true })).toContainText(`${CANARY}-ride.gpx`);
   await expect(page.getByTestId('overlay-layer').locator('[data-component="speed"]')).toBeVisible();
   await expect(page.getByRole('slider', { name: 'Video position' })).toBeEnabled({ timeout: 30_000 });
 
