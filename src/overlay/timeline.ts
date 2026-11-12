@@ -391,9 +391,11 @@ export function buildOverlayTimeline(
     // Interpolate only inside a single recorded segment and a short gap.
     const sameSegment = (a.point.segmentIndex ?? 0) === (b.point.segmentIndex ?? 0);
     const bridges = !exact && gap <= maxGap && sameSegment;
-    // TD-080. A gap that is not bridged is a stop (a pause, or a long gap the
-    // activity did not move across, by the moving-time rule), unless the
-    // distance says it moved: then it is a dropout, and nothing is known there.
+    // TD-080. A gap that is not bridged is a stop. A new segment always is:
+    // the recorder was paused, and moving time and distance count nothing
+    // across it either. A long gap inside a segment is a stop unless the
+    // distance says the activity moved across it, by the moving-time rule:
+    // then it is a dropout, and nothing is known there.
     const da = finite(derived.distance[a.index]);
     const db = finite(derived.distance[b.index]);
     const movedAcross = sameSegment && da !== undefined && db !== undefined && (db - da) / gap >= MOVING_SPEED_THRESHOLD_MPS;

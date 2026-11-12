@@ -188,6 +188,19 @@ describe('the export panel (AV-1006)', () => {
     expect(start.mock.calls[0]![0]).toMatchObject({ frameCount: 135, trimStartSeconds: 2, videoDurationSeconds: 10 });
   });
 
+  it('blocks a cut the activity covers none of, though it covers the rest of the video (TD-081)', () => {
+    // The activity starts 5 s into the video; the cut keeps only the first 4 s.
+    setup({ offsetSeconds: 5, trim: { startSeconds: 0, endSeconds: 4 } });
+    expect(within(panel()).getByText(/covers none of the part of the video exported, so nothing would be drawn\. Change where the video starts, or its cut, in Sync\./)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export PNG sequence' })).toBeDisabled();
+  });
+
+  it('lets a cut the activity reaches be exported', () => {
+    setup({ offsetSeconds: 5, trim: { startSeconds: 3, endSeconds: 8 } });
+    expect(within(panel()).queryByText(/covers none/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export PNG sequence' })).toBeEnabled();
+  });
+
   it('shows progress, and stops on request without saving anything', async () => {
     const { jobs, progress } = setup();
     await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MapImagePanel } from './MapImagePanel';
 import { useMapImageStore } from '../state/mapImageStore';
@@ -9,8 +9,8 @@ import type { MapImageRenderInput } from '../mapImage/render';
 
 // MapLibre is not drawn here: the browser test draws it. The stub says what the preview was given.
 vi.mock('./MapImagePreview', () => ({
-  default: ({ plan }: { plan: { width: number; height: number; mapHeight: number; camera: { bearing: number } } }) => (
-    <p data-testid="preview">
+  default: ({ plan }: { plan: { width: number; height: number; mapHeight: number; camera: { bearing: number; zoom: number } } }) => (
+    <p data-testid="preview" data-zoom={plan.camera.zoom}>
       {plan.width}×{plan.height}, map {plan.mapHeight}, heading {plan.camera.bearing}
     </p>
   ),
@@ -105,6 +105,26 @@ describe('MapImagePanel (AV-1013)', () => {
     expect(within(panel).getByRole('button', { name: 'Save the image' })).toBeDisabled();
     // The preview keeps the last size it could draw.
     expect(screen.getByTestId('preview').textContent).not.toContain('4096×4096');
+  });
+
+  it('keeps the camera where it is while a size past the limits is typed, and moves it from there', async () => {
+    const { panel } = setup();
+    const zoom = () => Number(screen.getByTestId('preview').getAttribute('data-zoom'));
+    const height = within(panel).getByRole('spinbutton', { name: 'Height' });
+    await userEvent.clear(height);
+    await userEvent.type(height, '3000');
+    await userEvent.click(within(panel).getByRole('button', { name: 'Zoom in' }));
+    const before = zoom();
+    // At once, so no width on the way (384) is drawn.
+    fireEvent.change(within(panel).getByRole('spinbutton', { name: 'Width' }), { target: { value: '3840' } });
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('at most 4K’s pixels');
+    expect(zoom()).toBeCloseTo(before, 6);
+    // Each press is one step (half a level) from where the map is, not from a width that cannot be drawn.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Zoom in' }));
+    expect(zoom()).toBeCloseTo(before + 0.5, 6);
+    await userEvent.click(within(panel).getByRole('button', { name: 'Zoom out' }));
+    expect(zoom()).toBeCloseTo(before, 6);
+    expect(useMapImageStore.getState().view?.width).toBe(1080);
   });
 
   it('places elements over the map with the canvas editor, as a still: no clock and no live figures', async () => {

@@ -27,8 +27,12 @@ interface MapImageState {
   setChosen: (chosen: boolean) => void;
   setBasemap: (source: MapVideoBasemap) => void;
   updateSettings: (patch: MapImageSettingsPatch) => void;
-  /** The reader moved the map; undefined fits it to the route again. */
-  setCamera: (activity: Activity, camera: MapImageCamera | undefined) => void;
+  /**
+   * The reader moved the map; undefined fits it to the route again. `width` is
+   * the width the map was drawn at when it was moved: the preview's, which is
+   * the last size that could be drawn, not a size still being typed.
+   */
+  setCamera: (activity: Activity, camera: MapImageCamera | undefined, width: number) => void;
 }
 
 /**
@@ -54,23 +58,24 @@ export const useMapImageStore = create<MapImageState>((set) => ({
       }
       return { settings: settings as unknown as MapImageSettings };
     }),
-  setCamera: (activity, camera) =>
-    set((state) => ({ view: camera ? { activity, camera, width: state.settings.output.width } : undefined })),
+  setCamera: (activity, camera, width) => set({ view: camera ? { activity, camera, width } : undefined }),
 }));
 
 /**
  * The settings as the image is drawn with: the basemap following the app's
  * setting until chosen here, and the reader's camera only for the activity it
- * was set on, at the image's width now.
+ * was set on, at the width it is drawn at (`atWidth`, the image's own unless
+ * the preview is holding an earlier size while another is typed).
  */
 export function effectiveMapImageSettings(
   state: Pick<MapImageState, 'settings' | 'basemapChosen' | 'view'>,
   activity: Activity,
   basemapEnabled: boolean,
+  atWidth: number = state.settings.output.width,
 ): MapImageSettings {
   const { settings, basemapChosen, view } = state;
   const source = imageBasemap(basemapChosen ? settings.basemap : { ...settings.basemap, source: basemapEnabled ? 'online' : 'route-only' }).source;
-  const camera = view && view.activity === activity ? cameraAtWidth(view.camera, view.width, settings.output.width) : undefined;
+  const camera = view && view.activity === activity ? cameraAtWidth(view.camera, view.width, atWidth) : undefined;
   return {
     ...settings,
     basemap: source === settings.basemap.source ? settings.basemap : { ...settings.basemap, source },

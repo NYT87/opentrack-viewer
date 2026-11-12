@@ -81,14 +81,15 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   const setBasemap = useMapImageStore((state) => state.setBasemap);
   const setCamera = useMapImageStore((state) => state.setCamera);
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
-  const settings = useMemo(
-    () => effectiveMapImageSettings({ settings: stored, basemapChosen, view }, activity, basemapEnabled),
-    [stored, basemapChosen, view, activity, basemapEnabled],
-  );
-  const sizeProblem = mapImageSizeProblem(settings.output);
+  const sizeProblem = mapImageSizeProblem(stored.output);
   /** The last size that could be drawn: the preview keeps it while another is typed. */
-  const [drawable, setDrawable] = useState(settings.output);
-  if (!sizeProblem && (drawable.width !== settings.output.width || drawable.height !== settings.output.height)) setDrawable(settings.output);
+  const [drawable, setDrawable] = useState(stored.output);
+  if (!sizeProblem && (drawable.width !== stored.output.width || drawable.height !== stored.output.height)) setDrawable(stored.output);
+  // The camera at the width the preview draws, so a size still being typed never rescales it.
+  const settings = useMemo(
+    () => effectiveMapImageSettings({ settings: stored, basemapChosen, view }, activity, basemapEnabled, drawable.width),
+    [stored, basemapChosen, view, activity, basemapEnabled, drawable.width],
+  );
   const shownSettings = useMemo<MapImageSettings>(() => ({ ...settings, output: drawable }), [settings, drawable]);
   const planned = useMemo(
     () => planMapImage({ activity, settings: shownSettings, units, measure: measureText, readerTimeZone }),
@@ -101,9 +102,9 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   );
   const colorBy = useMemo(() => (plan ? colorByChoices(activity, plan.route) : undefined), [activity, plan]);
 
-  const onCamera = useCallback((camera: MapImageCamera) => setCamera(activity, camera), [setCamera, activity]);
+  const onCamera = useCallback((camera: MapImageCamera) => setCamera(activity, camera, drawable.width), [setCamera, activity, drawable.width]);
   const moveCamera = (patch: Partial<MapImageCamera>) => {
-    if (plan) setCamera(activity, { ...plan.camera, ...patch });
+    if (plan) setCamera(activity, { ...plan.camera, ...patch }, plan.width);
   };
 
   // The free canvas's editor: its frame is the image, its clock the activity's end.
@@ -215,7 +216,7 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
                 <button
                   type="button"
                   className="button"
-                  onClick={() => setCamera(activity, fitCamera(plan.route, { width: plan.width, height: plan.mapHeight }, plan.camera.bearing))}
+                  onClick={() => setCamera(activity, fitCamera(plan.route, { width: plan.width, height: plan.mapHeight }, plan.camera.bearing), plan.width)}
                 >
                   Fit to the route
                 </button>

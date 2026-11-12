@@ -16,7 +16,7 @@ import type { ArchiveStorage, BurnSourceInfo } from '../overlay/export/protocol'
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
 import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
 import { buildOverlayTimeline } from '../overlay/timeline';
-import { trimRange, type VideoTrim } from '../overlay/trim';
+import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 
 interface BurnedInExportPanelProps {
@@ -221,9 +221,10 @@ export function BurnedInExportPanel({
 
   /*
    * TD-059. A video the activity covers none of would export an empty overlay:
-   * blocked like "nothing switched on", with the way out named.
+   * blocked like "nothing switched on", with the way out named. Asked of the
+   * part exported, not the whole video (TD-081).
    */
-  const outsideActivity = timeline.alignment?.overlaps === false;
+  const outsideActivity = activityCoversPart(timeline.alignment, range) === false;
   // AV-1011. Shapes and texts for the whole activity are drawn on every frame, covered or not.
   const drawnAnyway = built.template.components.some((component) => component.visible && drawnWithoutTelemetry(component));
   const noOverlap = outsideActivity && !drawnAnyway;
@@ -402,13 +403,7 @@ export function BurnedInExportPanel({
           {nothingOn && (
             <p role="status">No component is switched on, so there is nothing to draw.</p>
           )}
-          {noOverlap && <p role="status">The activity covers none of this video, so nothing would be drawn. Change where the video starts, in Sync.</p>}
-          {outsideActivity && drawnAnyway && (
-            <p role="status">
-              The activity covers none of this video, so only the shapes and texts for the whole activity are drawn. Change
-              where the video starts, in Sync, for the rest.
-            </p>
-          )}
+          {outsideActivity && <p role="status">{uncoveredNotice(range, drawnAnyway)}</p>}
 
           <p className="video__actions">
             {running ? (

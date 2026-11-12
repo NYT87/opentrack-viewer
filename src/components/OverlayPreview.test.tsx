@@ -340,6 +340,33 @@ describe('cutting the video to the part exported (TD-081)', () => {
     expect(line()).toHaveTextContent('Exporting the whole video.');
   });
 
+  it('puts no slider inside another, so each is read out, and groups the lanes', () => {
+    render(<Harness />);
+    for (const slider of screen.getAllByRole('slider')) expect(slider.parentElement!.closest('[role="slider"]')).toBeNull();
+    const lanes = screen.getByRole('group', { name: 'Timeline: the activity and the video' });
+    expect(within(lanes).getAllByRole('slider').map((slider) => slider.getAttribute('aria-label'))).toEqual([
+      'Where the video starts in the activity',
+      'Export starts at',
+      'Export ends at',
+    ]);
+  });
+
+  it('says each end’s real bounds: a second short of the other end', async () => {
+    render(<Harness />);
+    seekTo(3);
+    await userEvent.click(screen.getByRole('button', { name: 'Start the export here' }));
+    seekTo(8);
+    await userEvent.click(screen.getByRole('button', { name: 'End the export here' }));
+    const start = screen.getByRole('slider', { name: 'Export starts at' });
+    const end = screen.getByRole('slider', { name: 'Export ends at' });
+    expect([start.getAttribute('aria-valuemin'), start.getAttribute('aria-valuemax')]).toEqual(['0', '7']);
+    expect([end.getAttribute('aria-valuemin'), end.getAttribute('aria-valuemax')]).toEqual(['4', '10']);
+    // Home takes an end to its own bound, not past the other.
+    end.focus();
+    await userEvent.keyboard('{Home}');
+    expect(end).toHaveAttribute('aria-valuenow', '4');
+  });
+
   it('keeps the ends apart', async () => {
     render(<Harness />);
     seekTo(6);

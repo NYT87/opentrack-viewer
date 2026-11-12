@@ -1,3 +1,5 @@
+import type { OverlayAlignment } from './timeline';
+
 /**
  * TD-081. The part of the video that is exported, in the video's own seconds.
  * The preview still plays the whole video; the exports draw from `start` to
@@ -27,6 +29,30 @@ export function trimRange(trim: VideoTrim | undefined, durationSeconds: number):
   const end = Math.min(duration, Math.max(shortest, trim?.endSeconds ?? duration));
   const start = Math.min(Math.max(0, trim?.startSeconds ?? 0), end - shortest);
   return { start, end, length: end - start, trimmed: start > 0 || end < duration };
+}
+
+/**
+ * Whether the activity reaches any of the part exported: the video's own
+ * overlap (TD-059) asked of the kept part only, so a cut wholly outside the
+ * activity is not taken for one inside it. Undefined where nothing is lined up.
+ */
+export function activityCoversPart(
+  alignment: Pick<OverlayAlignment, 'videoStartInActivity' | 'activitySpanSeconds'> | undefined,
+  range: TrimRange,
+): boolean | undefined {
+  if (!alignment) return undefined;
+  const from = alignment.videoStartInActivity + range.start;
+  const to = alignment.videoStartInActivity + range.end;
+  return to >= 0 && from <= alignment.activitySpanSeconds;
+}
+
+/** What the export panels say when the activity reaches none of what is exported. */
+export function uncoveredNotice(range: TrimRange | undefined, drawnAnyway: boolean): string {
+  const part = range?.trimmed ? 'the part of the video exported' : 'this video';
+  const change = range?.trimmed ? 'Change where the video starts, or its cut, in Sync' : 'Change where the video starts, in Sync';
+  return drawnAnyway
+    ? `The activity covers none of ${part}, so only the shapes and texts for the whole activity are drawn. ${change}, for the rest.`
+    : `The activity covers none of ${part}, so nothing would be drawn. ${change}.`;
 }
 
 /** A trim with its start moved, kept short of its end. */

@@ -1374,6 +1374,10 @@ input[type='color']:focus-visible {
   border-radius: 3px;
   background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 30%, transparent) 0 4px, transparent 4px 8px);
 }
+/* The handles lie over the video's lane, the bar's last row, beside the bar's slider rather than in it. */
+.overlay-sync__lanes { position: relative; }
+.overlay-sync__handles { position: absolute; left: 0; right: 0; bottom: 0; height: 18px; pointer-events: none; }
+.overlay-sync__handle { pointer-events: auto; }
 .overlay-sync__handle {
   position: absolute;
   top: -1px;
@@ -1530,6 +1534,7 @@ main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline
   summary { padding-block: 13px; }
   input[type='color'] { min-width: 44px; min-height: 44px; }
   .overlay-sync__scale { padding-block: 4px; }
+  .overlay-sync__handles { bottom: 4px; }
   .maplibregl-ctrl-attrib a { display: inline-block; padding: 8px 2px; }
 }
 

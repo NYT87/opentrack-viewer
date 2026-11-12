@@ -4,7 +4,7 @@ import type { Activity } from '../domain/activity';
 import { formatDateTime, formatDuration, type UnitSystem } from '../domain/units';
 import { buildOverlay, type OverlayControls as Controls } from '../overlay/presets';
 import { buildOverlayTimeline, type OverlayAlignment } from '../overlay/timeline';
-import { trimRange, withTrimEnd, withTrimStart, type TrimRange, type VideoTrim } from '../overlay/trim';
+import { MIN_TRIM_SECONDS, trimRange, withTrimEnd, withTrimStart, type TrimRange, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { OverlayControls } from './OverlayControls';
 import { OverlayLayer } from './OverlayLayer';
@@ -571,88 +571,100 @@ function SyncBar({
 
   const keySteps: Record<string, number> = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -60, PageUp: 60 };
 
+  // The least part kept, as the trim's own rules hold it (TD-081).
+  const shortest = Math.min(MIN_TRIM_SECONDS, videoDuration);
+
   return (
     <div className="overlay-sync__track">
-      <div
-        ref={bar}
-        className="overlay-sync__scale"
-        role="slider"
-        tabIndex={0}
-        aria-label="Where the video starts in the activity"
-        aria-valuemin={Math.floor(-videoDuration)}
-        aria-valuemax={Math.ceil(span)}
-        aria-valuenow={Math.round(Math.min(Math.max(start, -videoDuration), span) * 10) / 10}
-        aria-valuetext={`Video at ${signedDuration(start)} to ${signedDuration(end)} of ${formatDuration(span)}`}
-        onKeyDown={(event) => {
-          const step = keySteps[event.key];
-          if (event.key === 'Home') onVideoStart(0);
-          else if (step !== undefined) onVideoStart(start + (Math.abs(step) === 1 && event.shiftKey ? step * 10 : step));
-          else return;
-          event.preventDefault();
-        }}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          drag.current = { x: event.clientX, start, low, high, moved: false };
-        }}
-        onPointerMove={(event) => {
-          const press = drag.current;
-          if (!press) return;
-          const dx = event.clientX - press.x;
-          if (!press.moved && Math.abs(dx) < 4) return;
-          press.moved = true;
-          const shift = Math.round(((dx / barWidth()) * (press.high - press.low)) * 10) / 10;
-          onVideoStart(press.start + shift);
-        }}
-        onPointerUp={(event) => {
-          const press = drag.current;
-          drag.current = null;
-          if (!press || press.moved) return;
-          // A click: the video's frame at that moment of the activity, if it has one.
-          const rect = event.currentTarget.getBoundingClientRect();
-          const moment = press.low + ((event.clientX - rect.left) / (rect.width || 1)) * (press.high - press.low);
-          const seconds = moment - start;
-          if (seconds >= 0 && seconds <= videoDuration) onSeek(seconds);
-        }}
-        onPointerCancel={() => {
-          drag.current = null;
-        }}
-      >
-        {points && (
-          <svg className="overlay-sync__trace" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
-            <polyline points={points} />
-          </svg>
+      <div className="overlay-sync__lanes" role="group" aria-label="Timeline: the activity and the video">
+        <div
+          ref={bar}
+          className="overlay-sync__scale"
+          role="slider"
+          tabIndex={0}
+          aria-label="Where the video starts in the activity"
+          aria-valuemin={Math.floor(-videoDuration)}
+          aria-valuemax={Math.ceil(span)}
+          aria-valuenow={Math.round(Math.min(Math.max(start, -videoDuration), span) * 10) / 10}
+          aria-valuetext={`Video at ${signedDuration(start)} to ${signedDuration(end)} of ${formatDuration(span)}`}
+          onKeyDown={(event) => {
+            const step = keySteps[event.key];
+            if (event.key === 'Home') onVideoStart(0);
+            else if (step !== undefined) onVideoStart(start + (Math.abs(step) === 1 && event.shiftKey ? step * 10 : step));
+            else return;
+            event.preventDefault();
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            drag.current = { x: event.clientX, start, low, high, moved: false };
+          }}
+          onPointerMove={(event) => {
+            const press = drag.current;
+            if (!press) return;
+            const dx = event.clientX - press.x;
+            if (!press.moved && Math.abs(dx) < 4) return;
+            press.moved = true;
+            const shift = Math.round(((dx / barWidth()) * (press.high - press.low)) * 10) / 10;
+            onVideoStart(press.start + shift);
+          }}
+          onPointerUp={(event) => {
+            const press = drag.current;
+            drag.current = null;
+            if (!press || press.moved) return;
+            // A click: the video's frame at that moment of the activity, if it has one.
+            const rect = event.currentTarget.getBoundingClientRect();
+            const moment = press.low + ((event.clientX - rect.left) / (rect.width || 1)) * (press.high - press.low);
+            const seconds = moment - start;
+            if (seconds >= 0 && seconds <= videoDuration) onSeek(seconds);
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+          }}
+        >
+          {points && (
+            <svg className="overlay-sync__trace" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+              <polyline points={points} />
+            </svg>
+          )}
+          <div className="overlay-sync__bar">
+            <span className="overlay-sync__activity" style={{ left: at(0), width: width(span) }} />
+          </div>
+          <div className="overlay-sync__bar overlay-sync__bar--video">
+            <span className="overlay-sync__clip" style={{ left: at(start), width: width(end - start) }} />
+            <span className="overlay-sync__video" style={{ left: at(start + kept.start), width: width(kept.length) }} />
+          </div>
+          <span className="overlay-sync__playhead" style={{ left: at(start + videoTime) }} />
+        </div>
+        {/* Beside the bar's slider, not in it: a slider's children are only drawn, never read out. */}
+        {(onTrimStart || onTrimEnd) && (
+          <div className="overlay-sync__handles">
+            {onTrimStart && (
+              <TrimHandle
+                label="Export starts at"
+                side="start"
+                value={kept.start}
+                min={0}
+                max={Math.max(0, kept.end - shortest)}
+                left={at(start + kept.start)}
+                secondsPerPixel={() => (high - low) / barWidth()}
+                onChange={onTrimStart}
+              />
+            )}
+            {onTrimEnd && (
+              <TrimHandle
+                label="Export ends at"
+                side="end"
+                value={kept.end}
+                min={Math.min(videoDuration, kept.start + shortest)}
+                max={videoDuration}
+                left={at(start + kept.end)}
+                secondsPerPixel={() => (high - low) / barWidth()}
+                onChange={onTrimEnd}
+              />
+            )}
+          </div>
         )}
-        <div className="overlay-sync__bar">
-          <span className="overlay-sync__activity" style={{ left: at(0), width: width(span) }} />
-        </div>
-        <div className="overlay-sync__bar overlay-sync__bar--video">
-          <span className="overlay-sync__clip" style={{ left: at(start), width: width(end - start) }} />
-          <span className="overlay-sync__video" style={{ left: at(start + kept.start), width: width(kept.length) }} />
-          {onTrimStart && (
-            <TrimHandle
-              label="Export starts at"
-              side="start"
-              value={kept.start}
-              max={videoDuration}
-              left={at(start + kept.start)}
-              secondsPerPixel={() => (high - low) / barWidth()}
-              onChange={onTrimStart}
-            />
-          )}
-          {onTrimEnd && (
-            <TrimHandle
-              label="Export ends at"
-              side="end"
-              value={kept.end}
-              max={videoDuration}
-              left={at(start + kept.end)}
-              secondsPerPixel={() => (high - low) / barWidth()}
-              onChange={onTrimEnd}
-            />
-          )}
-        </div>
-        <span className="overlay-sync__playhead" style={{ left: at(start + videoTime) }} />
       </div>
       <p className="overlay-sync__legend" aria-hidden="true">
         <span className="overlay-sync__key overlay-sync__key--activity" /> Activity{' '}
@@ -684,6 +696,7 @@ function TrimHandle({
   label,
   side,
   value,
+  min,
   max,
   left,
   secondsPerPixel,
@@ -692,6 +705,7 @@ function TrimHandle({
   label: string;
   side: 'start' | 'end';
   value: number;
+  min: number;
   max: number;
   left: string;
   secondsPerPixel: () => number;
@@ -706,13 +720,13 @@ function TrimHandle({
       role="slider"
       tabIndex={0}
       aria-label={label}
-      aria-valuemin={0}
+      aria-valuemin={Math.round(min * 10) / 10}
       aria-valuemax={Math.round(max * 10) / 10}
       aria-valuenow={Math.round(value * 10) / 10}
       aria-valuetext={`${formatDuration(value)} of the video`}
       onKeyDown={(event) => {
         const step = keySteps[event.key];
-        if (event.key === 'Home') onChange(0);
+        if (event.key === 'Home') onChange(min);
         else if (event.key === 'End') onChange(max);
         else if (step !== undefined) onChange(value + (event.shiftKey ? step * 10 : step));
         else return;

@@ -184,6 +184,12 @@ describe('the burned-in export panel (AV-1007)', () => {
     expect(start.mock.calls[0]![0]).not.toHaveProperty('trim');
   });
 
+  it('blocks a cut the activity covers none of (TD-081)', async () => {
+    setup({ offsetSeconds: 5, trim: { startSeconds: 0, endSeconds: 4 } });
+    expect(await screen.findByText(/covers none of the part of the video exported/)).toBeInTheDocument();
+    expect(renderButton()).toBeDisabled();
+  });
+
   it('starts the render with the file, the size, the template, the offset and the units', async () => {
     const { start } = setup({ offsetSeconds: 1.5, units: 'imperial' });
     await userEvent.click(renderButton());
