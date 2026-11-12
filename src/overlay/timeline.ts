@@ -2,6 +2,7 @@ import type { Activity, ActivityPoint, Coordinate } from '../domain/activity';
 import { toValidCoordinate } from '../domain/activity';
 import { deriveSpeed } from '../domain/series';
 import { computeDistance, elevationClimb } from '../domain/stats';
+import { zoneIndex, type ZoneTimes } from './zones';
 
 /**
  * AV-1003. The overlay timeline: video time in, normalized activity values out.
@@ -127,6 +128,15 @@ export interface OverlayTimeline {
    */
   sensorLabels: ReadonlyMap<string, OverlaySensorInfo>;
   sampleAt: (videoTimeSeconds: number) => OverlaySample | undefined;
+  /**
+   * AV-1018 (TD-086). The seconds spent moving in each zone, up to a moment:
+   * one pass over the activity's points, counting each step the way moving time
+   * is counted (TD-058), in the zone of the unsmoothed value at the step's
+   * start. `bounds` are the zones' lower bounds in the source's own unit. Absent
+   * on a timeline that cannot sample; `undefined` for a source with no values.
+   * Callers go through `zoneTimesFor`, which keeps the answer.
+   */
+  zoneTimes?: (source: OverlayDataSource, bounds: readonly number[]) => ZoneTimes | undefined;
   /**
    * TD-059. How the video was laid against the activity, so the page can say
    * so: by the camera's own clock, or at the activity's first point because
@@ -509,6 +519,69 @@ export function buildOverlayTimeline(
 
   const hasRoute = points.some(({ point }) => toValidCoordinate(point.lat, point.lon) !== undefined);
 
+  /*
+   * AV-1018. Moving seconds per zone. The steps are the ones `movingSoFar`
+   * counts (between a point with a distance and the last one before it, in the
+   * same segment, at 0.5 m/s or more), so the zones' times add up to the moving
+   * time. A step's seconds go to the zone of the value at its start; a step
+   * whose start has no value counts in no zone. `totals` holds the running
+   * totals after each step, so a moment costs a search and the part of the step
+   * it falls in.
+   */
+  const zoneTimes = (source: OverlayDataSource, bounds: readonly number[]): ZoneTimes | undefined => {
+    const read = sources.find((entry) => entry.id === dataSourceId(source))?.read;
+    if (!read || bounds.length === 0) return undefined;
+    const zones = bounds.length;
+    interface Step {
+      from: number;
+      to: number;
+      zone: number;
+    }
+    const steps: Step[] = [];
+    let previous: { position: number; meters: number; segment: number } | undefined;
+    points.forEach((timedPoint, position) => {
+      const meters = finite(distance[timedPoint.index]);
+      if (meters === undefined) return;
+      const segment = timedPoint.point.segmentIndex ?? 0;
+      if (previous && previous.segment === segment) {
+        const seconds = timedPoint.seconds - pointAt(previous.position).seconds;
+        const value = read(pointAt(previous.position));
+        if (seconds > 0 && (meters - previous.meters) / seconds >= MOVING_SPEED_THRESHOLD_MPS && value !== undefined) {
+          steps.push({ from: previous.position, to: position, zone: zoneIndex(value, bounds) });
+        }
+      }
+      previous = { position, meters, segment };
+    });
+    // Nothing moving with a value: the activity cannot say, so there is no time to show.
+    if (steps.length === 0) return undefined;
+    const totals = new Float64Array((steps.length + 1) * zones);
+    steps.forEach((step, k) => {
+      for (let z = 0; z < zones; z += 1) totals[(k + 1) * zones + z] = totals[k * zones + z]!;
+      totals[(k + 1) * zones + step.zone]! += pointAt(step.to).seconds - pointAt(step.from).seconds;
+    });
+    return {
+      at: (activitySeconds) => {
+        const result = new Array<number>(zones).fill(0);
+        if (!Number.isFinite(activitySeconds) || steps.length === 0) return result;
+        // The steps that have ended by now: the last whose end is at or before the moment.
+        let lo = 0;
+        let hi = steps.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (pointAt(steps[mid]!.to).seconds <= activitySeconds) lo = mid + 1;
+          else hi = mid;
+        }
+        for (let z = 0; z < zones; z += 1) result[z] = totals[lo * zones + z]!;
+        const open = steps[lo];
+        if (open) {
+          const started = pointAt(open.from).seconds;
+          if (activitySeconds > started) result[open.zone]! += activitySeconds - started;
+        }
+        return result;
+      },
+    };
+  };
+
   const traceId = available.has('metric:speed')
     ? 'metric:speed'
     : available.has('metric:elevation')
@@ -550,6 +623,7 @@ export function buildOverlayTimeline(
     ...(distanceSpan > 0 && endDistance !== undefined ? { distanceTotalMeters: endDistance } : {}),
     sensorLabels,
     sampleAt,
+    zoneTimes,
     alignment,
   };
 }

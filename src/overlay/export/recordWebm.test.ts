@@ -5,6 +5,7 @@ import type { OverlayContext2D } from './drawOverlay';
 import { DEFAULT_OVERLAY_CONTROLS, buildOverlay } from '../presets';
 import { buildOverlayTimeline } from '../timeline';
 import { makeActivity } from '../../test/helpers/activity';
+import { canvasTemplate, newZonesComponent } from '../customCanvas';
 
 /**
  * AV-1012. The recording loop with a clock, a canvas and a recorder that are
@@ -203,5 +204,36 @@ describe('a WebM export job (AV-1012)', () => {
     job.cancel();
     await expect(job.done).rejects.toBeInstanceOf(OverlayExportError);
     await expect(job.done).rejects.toMatchObject({ code: 'cancelled' });
+  });
+});
+
+describe('zones in the transparent video (AV-1018)', () => {
+  it('draws them with the reader’s figure that came with the request, and not without it', async () => {
+    const rider = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: new Date(i * 100), distanceMeters: i, heartRateBpm: 100 + 10 * i })));
+    const zones = newZonesComponent(canvasTemplate([]), 'heartRate', { width: 32, height: 18 });
+    const base = {
+      width: 32,
+      height: 18,
+      fps: 10,
+      frameCount: 2,
+      videoDurationSeconds: 1,
+      offsetSeconds: 0,
+      units: 'metric' as const,
+      template: canvasTemplate([zones]),
+      activity: rider,
+    };
+    const texts = async (personal?: { maxHeartRate: number }) => {
+      const written: string[] = [];
+      const ctx = new Proxy({} as Record<string, unknown>, {
+        get: (target, key: string) => (key in target ? target[key] : (...args: unknown[]) => void (key === 'fillText' && written.push(String(args[0])))),
+        set: (target, key: string, value) => ((target[key] = value), true),
+      }) as unknown as OverlayContext2D;
+      const fake = fakes();
+      const job = startWebmExport({ ...base, ...(personal ? { personal } : {}) }, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) });
+      await job.done;
+      return written;
+    };
+    expect((await texts({ maxHeartRate: 200 })).slice(0, 2)).toEqual(['Z1 Recovery', '100 bpm']);
+    expect(await texts()).toEqual([]);
   });
 });

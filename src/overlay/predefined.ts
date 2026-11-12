@@ -1,4 +1,4 @@
-import { newCanvasComponent, canvasTemplate, type CanvasElementKey } from './customCanvas';
+import { newCanvasComponent, newZonesComponent, canvasTemplate, type CanvasElementKey } from './customCanvas';
 import { METRIC_MISSING, NO_ROUTE, ELEVATION_MISSING } from './missingData';
 import { OVERLAY_PRESETS, type OverlayPresetId } from './presets';
 import { SMOOTHING_LIMITS, canSmooth, type OverlayTimeline } from './timeline';
@@ -13,9 +13,9 @@ import { normalizeRect, type OverlayComponent, type OverlayTemplate } from './te
  * is plain data: a sport is added by adding entries here, and the editor, which
  * only reads `PREDEFINED_ENTRIES`, does not change.
  *
- * Dials, charts, the gradient glyph, the compass, zones, splits and
- * average-so-far figures wait for their own drawing pieces (#20, #21, #22,
- * #39) and have no entry until those land.
+ * Zones came with AV-1018 (TD-086). Dials, charts, the gradient glyph, the
+ * compass, splits and average-so-far figures wait for their own drawing pieces
+ * (#21, #22, #39) and have no entry until those land.
  */
 
 export type PredefinedSport = 'cycling' | 'running' | 'any';
@@ -71,6 +71,11 @@ function figure(
   };
 }
 
+/** AV-1018. A zones component with its source's default zones; power is smoothed over 3 s. */
+const zones =
+  (source: 'heartRate' | 'power'): Build =>
+  (template, size) => [newZonesComponent(template, source, size)];
+
 const plain =
   (key: CanvasElementKey): Build =>
   (template, size, timeline) => [newCanvasComponent(template, key, size, timeline)];
@@ -83,11 +88,14 @@ export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
   { id: 'cycling.power-3s', name: 'Power, 3 s average', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: figure('metric:power', { smoothing: 3, label: 'Power 3s' }) },
   { id: 'cycling.cadence', name: 'Cadence', sport: 'cycling', needs: ['metric:cyclingCadence'], missing: METRIC_MISSING.cyclingCadence, build: figure('metric:cyclingCadence', { smoothing: 3, label: 'Cadence' }) },
   { id: 'cycling.gradient', name: 'Gradient', sport: 'cycling', needs: ['metric:grade'], missing: METRIC_MISSING.grade, build: figure('metric:grade', { smoothing: 5, decimals: 0 }) },
+  { id: 'cycling.power-zones', name: 'Power zones', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: zones('power') },
+  { id: 'cycling.heart-rate-zones', name: 'Heart rate zones', sport: 'cycling', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
   { id: 'cycling.climb', name: 'Climb so far', sport: 'cycling', needs: ['metric:climb'], missing: METRIC_MISSING.climb, build: plain('metric:climb') },
   { id: 'cycling.elevation-profile', name: 'Elevation profile', sport: 'cycling', needs: ['metric:elevation'], missing: ELEVATION_MISSING, build: plain('elevationProfile') },
   // Running
   { id: 'running.pace', name: 'Pace', sport: 'running', needs: ['metric:pace'], missing: METRIC_MISSING.pace, build: figure('metric:pace', { smoothing: 5 }) },
   { id: 'running.heart-rate', name: 'Heart rate', sport: 'running', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: plain('metric:heartRate') },
+  { id: 'running.heart-rate-zones', name: 'Heart rate zones', sport: 'running', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
   { id: 'running.cadence', name: 'Running cadence', sport: 'running', needs: ['metric:runningCadence'], missing: METRIC_MISSING.runningCadence, build: figure('metric:runningCadence', { smoothing: 3 }) },
   { id: 'running.distance-total', name: 'Distance of the total', sport: 'running', needs: ['metric:distance'], missing: METRIC_MISSING.distance, build: figure('metric:distance', { ofTotal: true }) },
   // Any sport

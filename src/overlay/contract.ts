@@ -4,6 +4,7 @@ import { BASE_FONT_CQW } from './presets';
 import { projectProfile } from './elevationProfile';
 import { projectRoute } from './routeProjection';
 import { extractRoute } from './routeImage';
+import { zoneTimesFor } from './zones';
 import { layoutStillText, stillFontPx, stillValue } from './staticImage';
 import {
   DEFAULT_OVERLAY_STYLE,
@@ -13,6 +14,7 @@ import {
   type OverlayFigureSetting,
   type OverlayStyle,
   type OverlayTemplate,
+  type PersonalFigures,
   type ResolvedOverlayComponent,
   type SummaryStatKey,
   type TextAlign,
@@ -298,15 +300,46 @@ export interface WholeActivityProps extends ContractBase {
 }
 
 // ---------------------------------------------------------------------------
-// Section: zones (reserved)
+// Section: zones
 
-/*
- * Zones (the bounds and the zone now, #20) are reserved: there is no props
- * type, no adapter and no section for them until #20 decides what a zone is,
- * so nothing here promises a shape that would then change. `docs/components/zones.md` says so.
+/**
+ * AV-1018 (TD-086). Heart rate or power zones: which zone the activity is in
+ * now, and the zones' bounds. Props change on every frame, and `zoneIndex`
+ * only when the value crosses a bound. A set measured in percent of a figure
+ * the reader has not entered is not drawn, so it is not given: the props
+ * always carry the bounds in absolute units.
  */
+export interface ZoneProps extends ContractMoment {
+  section: 'zones';
+  /** What the zones are measured on. */
+  source: 'heartRate' | 'power';
+  /** The value in the STORED unit (`unit`): bpm or W. It is the smoothed value when `smoothingWindowSeconds` is present. */
+  value: number;
+  /** `'bpm'` for heart rate, `'W'` for power. */
+  unit: 'bpm' | 'W';
+  /** The figure's name as the reader sees it ("Heart rate", or their own wording). */
+  label: string;
+  /** `value` formatted for reading, with the unit ("152 bpm"). */
+  text: string;
+  /** 0-based position of the zone the value is in: the last whose lower bound is at or under the value, and 0 for a value under every bound. */
+  zoneIndex: number;
+  /** Where `value` falls in its zone, 0..1: 0 at the zone's lower bound, 1 at the next one's. The last zone is as wide as the one before it. */
+  fractionInZone: number;
+  /** The zones, lowest first: 2 to 10. `lowerBound` is in `unit`, ascending: always absolute, whatever the reader measured them in. */
+  zones: { name: string; color: string; lowerBound: number }[];
+  /** How the reader asked for it to be drawn. The built-ins draw each as the documentation says; a component may draw its own. */
+  shape: 'horizontal' | 'vertical' | 'arc' | 'figure';
+  /** What the reader asked to be shown. */
+  show: { number: boolean; name: boolean; value: boolean; timeInZone: boolean };
+  /** Seconds spent moving in each zone so far, one per zone, from the unsmoothed values, counted as moving time is. Present only when `show.timeInZone` and the activity can say. */
+  timeInZoneSeconds?: number[];
+  /** Seconds, above 0 and up to 30. Present only when `value` is a trailing mean over that window. */
+  smoothingWindowSeconds?: number;
+  /** The reader's styling of the label and the value; absent members are the built-in look. Absent when the reader set none. */
+  figure?: OverlayFigureSetting;
+}
 
-export type ContractProps = FigureProps | GaugeProps | RouteProps | WholeActivityProps;
+export type ContractProps = FigureProps | GaugeProps | RouteProps | WholeActivityProps | ZoneProps;
 export type ContractSection = ContractProps['section'];
 
 // ---------------------------------------------------------------------------
@@ -324,6 +357,8 @@ export interface ContractContext {
   activity?: Activity;
   /** IANA zone for a date set to the reader's own; the browser's by default. */
   readerTimeZone?: string;
+  /** AV-1018. The reader's own maximum heart rate and FTP, which a zones component in percent is measured against. */
+  personal?: PersonalFigures;
   /**
    * Width in pixels of a text in a CSS font, as the canvas that draws it measures it. A whole-activity
    * component is drawn in the box its words take, so its `box` is only exact when this is given; without
@@ -349,6 +384,8 @@ export function contractSectionOf(component: OverlayComponent): ContractSection 
     case 'summary':
     case 'date':
       return 'wholeActivity';
+    case 'zones':
+      return 'zones';
     case 'shape':
       return undefined;
   }
@@ -386,7 +423,7 @@ export function contractProps(
   sample: OverlaySample,
   timeline: OverlayTimeline,
   context: ContractContext,
-): FigureProps | GaugeProps | RouteProps {
+): FigureProps | GaugeProps | RouteProps | ZoneProps {
   const { component, style } = ready;
   const { frame } = context;
   const base = {
@@ -422,6 +459,32 @@ export function contractProps(
         const cursor = profile.at(progress ?? 0);
         if (cursor) props.profile.cursor = [cursor[0], cursor[1]];
       }
+    }
+    return props;
+  }
+
+  if (component.type === 'zones' && ready.zones) {
+    const { setting, bounds, index, within, value } = ready.zones;
+    const windowSeconds = component.smoothing?.windowSeconds;
+    const props: ZoneProps = {
+      section: 'zones',
+      ...base,
+      source: setting.source,
+      value,
+      unit: ready.zones.unit,
+      label: ready.label as string,
+      text: ready.text as string,
+      zoneIndex: index,
+      fractionInZone: within,
+      zones: setting.zones.map((zone, i) => ({ name: zone.name, color: zone.color, lowerBound: bounds[i]! })),
+      shape: setting.shape,
+      show: { ...setting.show },
+    };
+    const times = setting.show.timeInZone && component.source ? zoneTimesFor(timeline, component.source, bounds) : undefined;
+    if (times) props.timeInZoneSeconds = times.at(sample.activityElapsedSeconds);
+    if (component.figure) props.figure = structuredClone(component.figure);
+    if (windowSeconds && smoothedValueAt(timeline, component.source as OverlayDataSource, sample.videoTimeSeconds, windowSeconds) !== undefined) {
+      props.smoothingWindowSeconds = Math.min(windowSeconds, SMOOTHING_LIMITS.max);
     }
     return props;
   }
@@ -556,6 +619,6 @@ export function contractPropsFor(
   if (section === undefined) return undefined;
   if (section === 'wholeActivity') return wholeActivityProps(component, context);
   if (!sample) return undefined;
-  const ready = resolveOverlayComponent(template, component, sample, timeline, context.units);
+  const ready = resolveOverlayComponent(template, component, sample, timeline, context.units, context.personal);
   return ready.status === 'ready' ? contractProps(ready, sample, timeline, context) : undefined;
 }

@@ -1,5 +1,5 @@
 import type { Activity } from '../domain/activity';
-import { parseOverlayTemplate, type OverlayTemplate } from '../overlay/template';
+import { componentsForLayoutFile, parseOverlayTemplate, type OverlayTemplate } from '../overlay/template';
 import type { MapVideoCameraSettings } from './camera';
 import { MAX_FIXED_OFFSET_METERS, MAX_KEYFRAMES, type CameraKeyframe } from './keyframes';
 import { DEFAULT_PHOTOS_SETTINGS, PHOTO_LIMITS, PHOTO_PLACEMENT_METHODS, type PhotoPlacementMethod, type PhotosSettings } from './photos';
@@ -158,8 +158,11 @@ export function outputProblem(settings: Pick<MapVideoSettings, 'output' | 'lengt
 }
 
 export function serializeMapVideoProject(project: MapVideoProject): string {
+  // AV-1018 (TD-086). A project file never holds the reader's own maximum heart rate or FTP.
+  const { overlay } = project.settings;
+  const settings = overlay ? { ...project.settings, overlay: { ...overlay, components: componentsForLayoutFile(overlay.components, { include: false }) } } : project.settings;
   return JSON.stringify(
-    { kind: MAP_VIDEO_PROJECT_KIND, version: MAP_VIDEO_PROJECT_VERSION, activity: project.activity, settings: project.settings },
+    { kind: MAP_VIDEO_PROJECT_KIND, version: MAP_VIDEO_PROJECT_VERSION, activity: project.activity, settings },
     null,
     2,
   );

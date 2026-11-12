@@ -196,6 +196,7 @@ export function startWebmExport(
     units: request.units,
     width: request.width,
     height: request.height,
+    personal: request.personal,
   });
 
   const done = recordWebm({

@@ -12,6 +12,7 @@ import { clampKeyframe, offsetBetween, type CameraKeyframe } from '../mapVideo/k
 import { MapVideoKeyframes, freshKeyframeId } from './MapVideoKeyframes';
 import { createMapVideoFigures, type MapVideoFigures, type PhotoImage } from '../mapVideo/figures';
 import type { MapVideoSettings } from '../mapVideo/project';
+import { usePersonalStore } from '../state/personalStore';
 import { COLOR_BY_PALETTE, mapVideoAttribution } from '../mapVideo/style';
 import {
   ROUTE_ONLY_BACKGROUND,
@@ -132,9 +133,10 @@ export function MapVideoPreview({
   );
 
   // What the drawing reads, without making a new map for each change; updated before the effects below run.
-  const latest = useRef({ model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages });
+  const personal = usePersonalStore((state) => state.personal);
+  const latest = useRef({ model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages, personal });
   useLayoutEffect(() => {
-    latest.current = { model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages };
+    latest.current = { model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages, personal };
   });
 
   // Make the map once; the parent makes a new component for another basemap or terrain.
@@ -192,7 +194,7 @@ export function MapVideoPreview({
     const canvas = figuresRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const { model: current, settings: now, activity: active, units: shown, photoImages: images } = latest.current;
+    const { model: current, settings: now, activity: active, units: shown, photoImages: images, personal: owner } = latest.current;
     const ratio = window.devicePixelRatio || 1;
     const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
@@ -200,12 +202,12 @@ export function MapVideoPreview({
       canvas.width = width;
       canvas.height = height;
     }
-    const key = [current, now.overlay, now.summaryCard.enabled, now.terrain, now.basemap.source, active, shown, images, width, height];
+    const key = [current, now.overlay, now.summaryCard.enabled, now.terrain, now.basemap.source, active, shown, images, owner, width, height];
     const cached = figuresCache.current;
     const figures =
       cached && cached.key.every((value, i) => value === key[i])
         ? cached.figures
-        : createMapVideoFigures({ activity: active, model: current, settings: now, units: shown, width, height, photoImages: images });
+        : createMapVideoFigures({ activity: active, model: current, settings: now, units: shown, width, height, photoImages: images, personal: owner });
     figuresCache.current = { key, figures };
     ctx.clearRect(0, 0, width, height);
     figures.drawFrame(ctx, at);
@@ -229,7 +231,7 @@ export function MapVideoPreview({
     styleVideoMap(map, activity, model, settings, colors);
     if (latest.current.seconds > length) setSeconds(length);
     draw(Math.min(latest.current.seconds, length));
-  }, [activity, model, settings, colors, ready, draw, length]);
+  }, [activity, model, settings, colors, ready, draw, length, personal]);
 
   // A preview resized while paused is drawn again at its new size, so its framing (and a keyframe taken from it) stays the video's.
   useEffect(() => {

@@ -1317,6 +1317,52 @@ Acceptance criteria:
 - **Documentation:** in `docs/components/`, a README covering what a component is, the rules (no network, no storage, nothing outside the box, the same picture for the same props) and the status (loading readers' components is not built yet, and why). Then a page per section with a props table, units, how often props change, and a minimal example draw function. The examples are real files that a test typechecks and runs against a recording context. The canvas editor links to the README.
 - **Tests:** the adapter for every built-in; props that survive `structuredClone`; absent rather than placeholder data; the examples run.
 
+#### AV-1018: A Customisable Zones Component for Heart Rate and Power
+
+Dependencies: AV-1015, AV-1016, AV-1017, TD-080
+
+GitHub issue #20. A component showing which heart rate or power zone the activity is in at each moment. Its zones can be customised, and it is drawn by the one renderer everywhere. It also fills #18's zone entries and the reserved zones section of the contract (#19).
+
+Acceptance criteria:
+- **Sources:** heart rate (bpm) and power (W). The model allows other bounded figures later.
+- **Zones:**
+  - 2 to 10 zones, 5 by default for heart rate and 7 for power.
+  - Each zone has a name, a colour and a lower bound. The bounds are absolute values, or a % of a reference: the maximum heart rate for heart rate, the FTP for power.
+  - **Default heart rate zones:** 50–60, 60–70, 70–80, 80–90 and 90–100 % of the maximum.
+  - **Default power zones:** Coggan's seven zones of FTP. The bounds start at 0, 56, 76, 91, 106, 121 and 151 %.
+  - A value under the first zone's lower bound counts in zone 1, and one over the top counts in the last zone.
+- **Shapes:** a horizontal bar, a vertical bar, a segmented arc, and a single coloured figure. Each can also show:
+  - the zone's number and name;
+  - the value, in bpm or W;
+  - the time in each zone so far, counted as moving time is (TD-058), from the unsmoothed values.
+- **Smoothing:** AV-1016's smoothing window applies to the value the zone is read from. The default is 3 s for power and 0 s for heart rate.
+- **Through a stop:** the zone holds as the figure does (TD-080), so power at zero falls in zone 1. Missing data is not drawn.
+- **Personal figures:**
+  - The maximum heart rate and FTP are the reader's own. They are kept **in memory for the session only**, as the overlay settings are (TD-040), and never written to device storage: the theme stays the only thing this app stores.
+  - A layout file includes them only if the reader ticks *Include my maximum heart rate and FTP*; the box is unticked by default.
+  - A layout file that holds them offers to use them when it is opened.
+- **Needs your figures:**
+  - A zone set measured in % of a reference the reader hasn't entered isn't drawn. The editor says which figure it needs and offers the activity's highest value as a starting point, labelled as such.
+  - Absolute bounds need no reference.
+- **Editor:**
+  - the source, the reference and its value, the number of zones, and each zone's name, colour and bound;
+  - the shape, what to show, and smoothing;
+  - the usual position, size, colours, text sizes and halo (AV-1015).
+- **Everywhere:** the canvas preview, the PNG sequence, the transparent WebM, the burned-in video, the map video and the map image draw it through the one renderer. The personal figures go to the export workers with the request, and nowhere else.
+- **Registry and contract:**
+  - *Heart rate zones* (cycling and running) and *Power zones* (cycling) are added to AV-1016's registry.
+  - The contract's zones section and `docs/components/zones.md` are written, with an example.
+- **Layout files:** a new optional field within version 2. Older layouts open unchanged.
+- **Tests:**
+  - zone lookup at the bounds, for each source and custom bounds;
+  - defaults from the maximum heart rate and FTP, and the needs-your-figures state;
+  - smoothing;
+  - time in zone, counted as moving time is;
+  - layout round trips, with and without the personal figures;
+  - a renderer test per shape;
+  - the privacy guard: no storage;
+  - a browser test reading an exported frame's zone colours.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

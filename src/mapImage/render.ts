@@ -6,6 +6,7 @@ import { canvasTemplate } from '../overlay/customCanvas';
 import { createOverlayRenderer, type OverlayContext2D } from '../overlay/export/drawOverlay';
 import { OverlayExportError } from '../overlay/export/errors';
 import { measureText } from '../overlay/measureText';
+import type { PersonalFigures } from '../overlay/template';
 import { drawMapImage } from './draw';
 import { drawnAtZoom } from './geometry';
 import { planMapImage, stillOverlayClock } from './plan';
@@ -25,6 +26,8 @@ export interface MapImageRenderInput {
   settings: MapImageSettings;
   units: UnitSystem;
   readerTimeZone?: string;
+  /** AV-1018. The reader's own figures for a zones component, from the session. */
+  personal?: PersonalFigures;
 }
 
 export interface MapImageRenderResult {
@@ -40,7 +43,7 @@ export async function renderMapImage(
   input: MapImageRenderInput,
   options: { signal?: AbortSignal; onWaiting?: (waiting: RenderWaiting) => void } = {},
 ): Promise<MapImageRenderResult> {
-  const { activity, settings, units, readerTimeZone } = input;
+  const { activity, settings, units, readerTimeZone, personal } = input;
   const planned = planMapImage({ activity, settings, units, measure: measureText, readerTimeZone });
   if (!planned.ok) throw new OverlayExportError('render_failed', planned.error);
   const { plan } = planned;
@@ -68,7 +71,7 @@ export async function renderMapImage(
       settings.layout === 'canvas' && settings.overlay.length > 0
         ? (() => {
             const clock = stillOverlayClock(plan.shown);
-            const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone });
+            const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone, personal });
             return (target: OverlayContext2D) => renderer.drawFrame(target, clock.seconds, { clear: false });
           })()
         : undefined;

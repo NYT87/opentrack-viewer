@@ -53,6 +53,7 @@ async function run(request: ExportRequest, controller: AbortController): Promise
       units: request.units,
       width: request.width,
       height: request.height,
+      personal: request.personal,
     });
 
     let lastPosted = 0;

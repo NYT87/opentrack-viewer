@@ -11,6 +11,8 @@ import { DEFAULT_SHAPE, DEFAULT_OVERLAY_STYLE as DEFAULT_OVERLAY_TEMPLATE_STYLE 
 import { DEFAULT_OVERLAY_CONTROLS, type OverlayControls } from '../overlay/presets';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { makeActivity } from '../test/helpers/activity';
+import { usePersonalStore } from '../state/personalStore';
+import { canvasTemplate, newZonesComponent } from '../overlay/customCanvas';
 
 const T0 = new Date('2024-01-01T10:00:00Z');
 const at = (s: number) => new Date(T0.getTime() + s * 1000);
@@ -575,5 +577,42 @@ describe('a transparent WebM (AV-1012)', () => {
     // Choosing the other format leaves this file standing, made with earlier settings.
     await userEvent.click(within(panel()).getByRole('radio', { name: 'PNG sequence (ZIP)' }));
     expect(screen.getByRole('alert')).toHaveTextContent(/made with earlier settings/);
+  });
+});
+
+describe('the reader’s figures go with the request (AV-1018, TD-086)', () => {
+  const withZones = canvasTemplate([newZonesComponent(canvasTemplate([]), 'heartRate', { width: 1920, height: 1080 })]);
+  const withoutZones = canvasTemplate([{ ...newZonesComponent(canvasTemplate([]), 'heartRate', { width: 1920, height: 1080 }), type: 'text', zones: undefined }]);
+  beforeEach(() => usePersonalStore.getState().clear());
+  afterEach(() => usePersonalStore.getState().clear());
+
+  it('sends them with a PNG sequence that has zones in it, and with a WebM', async () => {
+    usePersonalStore.getState().adopt({ maxHeartRate: 187, ftp: 260 });
+    const { start } = setup({ template: withZones });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]![0]).toMatchObject({ personal: { maxHeartRate: 187, ftp: 260 } });
+  });
+
+  it('sends them with a transparent WebM too', async () => {
+    usePersonalStore.getState().adopt({ maxHeartRate: 187 });
+    const startWebm = vi.fn((_request: unknown, _onProgress: unknown) => controlledJob().job);
+    setup({ template: withZones, startWebm: startWebm as never, probeWebm: (() => ({ then: (ok: (value: { supported: boolean }) => void) => ok({ supported: true }) })) as never });
+    await userEvent.click(within(panel()).getByRole('radio', { name: /Transparent video \(WebM\)/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Export transparent video' }));
+    expect(startWebm.mock.calls[0]![0]).toMatchObject({ personal: { maxHeartRate: 187 } });
+  });
+
+  it('sends none with an overlay that has no zones in it, however many the session holds', async () => {
+    usePersonalStore.getState().adopt({ maxHeartRate: 187, ftp: 260 });
+    const { start } = setup({ template: withoutZones });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]![0]).not.toHaveProperty('personal');
+    expect(JSON.stringify(start.mock.calls[0]![0])).not.toMatch(/187|260/);
+  });
+
+  it('sends none when the reader has entered none', async () => {
+    const { start } = setup({ template: withZones });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]![0]).not.toHaveProperty('personal');
   });
 });

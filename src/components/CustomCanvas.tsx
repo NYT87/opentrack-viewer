@@ -54,16 +54,22 @@ import {
   SHAPE_KINDS,
   STILL_IMAGE_COMPONENT_TYPES,
   SUMMARY_STAT_KEYS,
+  ZONES_SHAPES,
+  componentsForLayoutFile,
   needsHalo,
   normalizeRect,
+  personalHeldBy,
   sanitizeLabel,
   type OverlayComponent,
   type OverlayFigureSetting,
   type OverlayShapeSetting,
   type OverlayUnitMode,
+  type PersonalFigures,
   type ShapeKind,
   type SummaryStatKey,
   type TextAlign,
+  type ZonesShape,
+  type ZonesSource,
 } from '../overlay/template';
 import { SMOOTHING_LIMITS, buildOverlayTimeline, canSmooth, type OverlayTimeline } from '../overlay/timeline';
 import type { VideoTrim } from '../overlay/trim';
@@ -72,6 +78,25 @@ import { GITHUB_URL } from './SiteFooter';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { DateSettings, PercentField } from './RouteOverlayPanel';
+import { usePersonalStore } from '../state/personalStore';
+import {
+  PERSONAL_LIMITS,
+  REFERENCE_KEY,
+  REFERENCE_LABEL,
+  ZONES_UNIT,
+  ZONE_FROM_MAX,
+  ZONE_LIMITS,
+  ZONE_NAME_MAX,
+  activityHighest,
+  addZone,
+  changeBasis,
+  cleanFigure,
+  defaultZonesSetting,
+  effectivePersonal,
+  removeLastZone,
+  setZone,
+  DEFAULT_ZONES_SMOOTHING_SECONDS,
+} from '../overlay/zones';
 import { ElementRows } from './ElementRows';
 
 /** The long side of the preview, in pixels: the overlay is drawn at this size by the export's renderer. */
@@ -182,6 +207,15 @@ export function CustomCanvas({
   const [preset, setPreset] = useState<StartLayoutId>('compact-hud');
   const loadInput = useRef<HTMLInputElement>(null);
   const { components, selectedId } = state;
+  // AV-1018 (TD-086). The reader's own figures are in a layout file only if this is ticked: it starts, and stays, unticked.
+  const personal = usePersonalStore((store) => store.personal);
+  const adoptPersonal = usePersonalStore((store) => store.adopt);
+  const [includePersonal, setIncludePersonal] = useState(false);
+  const hasZones = components.some((component) => component.type === 'zones');
+  const heldFigures = useMemo(() => personalHeldBy(components), [components]);
+  const offerHeld =
+    (heldFigures.maxHeartRate !== undefined && heldFigures.maxHeartRate !== personal.maxHeartRate) ||
+    (heldFigures.ftp !== undefined && heldFigures.ftp !== personal.ftp);
 
   const w = Number(width);
   const h = Number(height);
@@ -231,7 +265,7 @@ export function CustomCanvas({
     () =>
       still
         ? canvasElementChoices(timeline, stillContext)
-            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && !choice.key.startsWith('predefined:') && choice.key !== 'progress')
+            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && !choice.key.startsWith('predefined:') && !choice.key.startsWith('zones:') && choice.key !== 'progress')
             .map((choice) => (choice.group === 'Live figures' ? { ...choice, group: 'Along the route' as const } : choice))
         : canvasElementChoices(timeline, stillContext),
     [timeline, stillContext, still],
@@ -267,9 +301,18 @@ export function CustomCanvas({
 
   const saveLayout = () => {
     if (!size) return;
-    const json = serializeStillLayout({ ...size, template });
+    // AV-1018. Each zones component carries the figures only when asked; otherwise none is written, even one the layout held.
+    const filed = { ...template, components: componentsForLayoutFile(template.components, { include: includePersonal, session: personal }) };
+    const json = serializeStillLayout({ ...size, template: filed });
     downloadBlob(new Blob([json], { type: 'application/json' }), 'overlay-layout.json');
-    setNotice({ kind: 'status', message: 'Saved overlay-layout.json: the layout and its texts, and nothing of the activity.' });
+    const written = includePersonal && personalHeldBy(filed.components);
+    const withFigures = written && (written.maxHeartRate !== undefined || written.ftp !== undefined);
+    setNotice({
+      kind: 'status',
+      message: `Saved overlay-layout.json: the layout and its texts, and nothing of the activity.${
+        hasZones ? (withFigures ? ' It holds the maximum heart rate and FTP you asked to include (the layout’s own where this tab has none).' : ' Your maximum heart rate and FTP are not in it.') : ''
+      }`,
+    });
   };
 
   const loadLayout = async (file: File) => {
@@ -284,8 +327,11 @@ export function CustomCanvas({
     }
     const fitted = fitCanvasSize(parsed.layout.width, parsed.layout.height);
     setSize(String(fitted.width), String(fitted.height));
-    commit({ components: parsed.layout.template.components, selectedId: undefined });
+    // A still (the map image) shows no moment, so a layout's zones are left out of it, as the still image leaves out a video's figures.
+    const opened = host?.still ? parsed.layout.template.components.filter((component) => component.type !== 'zones') : parsed.layout.template.components;
+    commit({ components: opened, selectedId: undefined });
     const warnings = [...parsed.warnings];
+    if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones were left out: this picture shows no moment of the activity.');
     if (fitted.width !== parsed.layout.width || fitted.height !== parsed.layout.height) {
       warnings.push(
         `The layout was made at ${parsed.layout.width} × ${parsed.layout.height}; the canvas is ${fitted.width} × ${fitted.height}, the nearest size it can be. The layout keeps its proportions.`,
@@ -327,6 +373,7 @@ export function CustomCanvas({
         timeline={timeline}
         units={units}
         readerTimeZone={readerTimeZone}
+        personal={personal}
         stillContext={stillContext}
         selectedId={selectedId}
         onSelect={select}
@@ -452,6 +499,35 @@ export function CustomCanvas({
           A layout keeps the resolution, every element and how it is set. It opens here and in the
           still image, and holds nothing of the activity.
         </p>
+        {hasZones && (
+          <label className="overlay-controls__choice">
+            <input type="checkbox" checked={includePersonal} onChange={(event) => setIncludePersonal(event.target.checked)} />
+            <span>Include my maximum heart rate and FTP</span>
+          </label>
+        )}
+        {hasZones && (
+          <p className="overlay-controls__hint">
+            Your maximum heart rate and FTP stay in this tab. They go into the layout file only if you tick this, for
+            example to share a layout.
+          </p>
+        )}
+        {offerHeld && (
+          <div className="video__actions" role="group" aria-label="Figures in this layout">
+            <span>
+              This layout holds{' '}
+              {[
+                heldFigures.maxHeartRate !== undefined ? `a maximum heart rate of ${heldFigures.maxHeartRate} bpm` : undefined,
+                heldFigures.ftp !== undefined ? `an FTP of ${heldFigures.ftp} W` : undefined,
+              ]
+                .filter(Boolean)
+                .join(' and ')}
+              .
+            </span>
+            <button type="button" className="button" onClick={() => adoptPersonal(heldFigures)}>
+              Use the figures in this layout
+            </button>
+          </div>
+        )}
         <p className="video__actions">
           <button type="button" className="button" onClick={saveLayout} disabled={!size}>
             Save layout
@@ -544,6 +620,11 @@ export function describeCanvasComponent(component: OverlayComponent): string {
       return component.type === 'gauge' ? `${base} gauge` : base;
     }
     return source?.kind === 'sensor' ? source.key : 'Figure';
+  }
+  if (component.type === 'zones') {
+    const name = component.display?.label?.trim();
+    const power = component.zones ? component.zones.source === 'power' : component.source?.kind === 'metric' && component.source.metric === 'power';
+    return name || (power ? 'Power zones' : 'Heart rate zones');
   }
   if (component.type === 'routeInset') return 'Route with position';
   if (component.type === 'progress') return 'Progress bar';
@@ -661,6 +742,7 @@ function CanvasPreview({
   timeline,
   units,
   readerTimeZone,
+  personal,
   stillContext,
   selectedId,
   onSelect,
@@ -684,6 +766,8 @@ function CanvasPreview({
   timeline: ReturnType<typeof buildOverlayTimeline>;
   units: UnitSystem;
   readerTimeZone?: string;
+  /** AV-1018. The reader's own figures for a zones component, drawn with and kept nowhere. */
+  personal: PersonalFigures;
   stillContext: StillImageContext;
   selectedId: string | undefined;
   onSelect: (id: string | undefined) => void;
@@ -706,8 +790,8 @@ function CanvasPreview({
   const pw = Math.max(1, Math.round(frame.width * factor));
   const ph = Math.max(1, Math.round(frame.height * factor));
   const renderer = useMemo(
-    () => createOverlayRenderer({ template, timeline, activity, units, width: pw, height: ph, readerTimeZone }),
-    [template, timeline, activity, units, pw, ph, readerTimeZone],
+    () => createOverlayRenderer({ template, timeline, activity, units, width: pw, height: ph, readerTimeZone, personal }),
+    [template, timeline, activity, units, pw, ph, readerTimeZone, personal],
   );
   const boxes = useMemo(() => boxesOf(template.components, stillContext, pw, ph), [template, stillContext, pw, ph]);
 
@@ -979,6 +1063,9 @@ function ComponentEditor({
     (grow ? updateFigure : update)((current) => withFigure(current, patch));
   const holders = components.filter((entry) => entry.type === 'shape' && entry.id !== component.id);
   const isData = component.type === 'text' || component.type === 'gauge';
+  // AV-1018. Zones are laid out and styled as a figure is: label colour, sizes, spacing, alignment and halo.
+  const isZones = component.type === 'zones';
+  const isFigureLike = isData || isZones;
   const isStill = STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
   const isLine = component.type === 'routeInset' || component.type === 'elevationProfile';
   const shape: OverlayShapeSetting | undefined = component.type === 'shape' ? (component.shape ?? DEFAULT_SHAPE) : undefined;
@@ -992,7 +1079,7 @@ function ComponentEditor({
     const scale = Math.min(TEXT_SCALE_LIMITS.max, Math.max(TEXT_SCALE_LIMITS.min, value / 100 / fontScale));
     return Math.abs(scale - 1) < 1e-9 ? undefined : scale;
   };
-  const spacing = isData
+  const spacing = isFigureLike
     ? (() => {
         const laid = figureLayout({
           em: BASE_FONT_FRACTION * frame.width * fontScale,
@@ -1006,6 +1093,27 @@ function ComponentEditor({
       })()
     : 0;
   const numeric = component.source?.kind === 'metric' && !['pace', 'elapsed', 'moving'].includes(component.source.metric);
+
+  const smoothingField = canSmooth(component.source) && (
+    <PercentField
+      id={`${id}-smoothing`}
+      label="Smoothing (s)"
+      hint="0 turns it off"
+      value={String(component.smoothing?.windowSeconds ?? 0)}
+      min={SMOOTHING_LIMITS.min}
+      max={SMOOTHING_LIMITS.max}
+      step={0.5}
+      onCommit={(value) =>
+        update((current) => {
+          const next = { ...current };
+          const seconds = Math.min(SMOOTHING_LIMITS.max, Math.max(0, Math.round(value * 100) / 100));
+          if (seconds > 0) next.smoothing = { windowSeconds: seconds };
+          else delete next.smoothing;
+          return next;
+        })
+      }
+    />
+  );
 
   return (
     <fieldset className="overlay-controls__group still-image__editor" aria-label={`Selected: ${name}`}>
@@ -1159,26 +1267,7 @@ function ComponentEditor({
               </select>
             </div>
           )}
-          {canSmooth(component.source) && (
-            <PercentField
-              id={`${id}-smoothing`}
-              label="Smoothing (s)"
-              hint="0 turns it off"
-              value={String(component.smoothing?.windowSeconds ?? 0)}
-              min={SMOOTHING_LIMITS.min}
-              max={SMOOTHING_LIMITS.max}
-              step={0.5}
-              onCommit={(value) =>
-                update((current) => {
-                  const next = { ...current };
-                  const seconds = Math.min(SMOOTHING_LIMITS.max, Math.max(0, Math.round(value * 100) / 100));
-                  if (seconds > 0) next.smoothing = { windowSeconds: seconds };
-                  else delete next.smoothing;
-                  return next;
-                })
-              }
-            />
-          )}
+          {smoothingField}
           {numeric && (
             <div className="overlay-controls__field">
               <label htmlFor={`${id}-decimals`}>Decimal places</label>
@@ -1205,6 +1294,16 @@ function ComponentEditor({
         </>
       )}
 
+      {isZones && (
+        <ZonesEditor
+          id={id}
+          component={component}
+          activity={stillContext.activity}
+          smoothingField={smoothingField}
+          onChange={(patch) => update(patch)}
+        />
+      )}
+
       {component.type === 'label' && (
         <div className="overlay-controls__field still-image__text">
           <label htmlFor={`${id}-content`}>Text</label>
@@ -1225,17 +1324,17 @@ function ComponentEditor({
       )}
       {component.type === 'date' && <DateSettings id={id} component={component} context={stillContext} onChange={(change) => update(change)} />}
 
-      {(isData || isStill || isLine || component.type === 'progress') && (
+      {(isFigureLike || isStill || isLine || component.type === 'progress') && (
         <>
-          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : isData ? 'Value colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
-          {isData && <ColorField id={`${id}-label-colour`} label="Label colour" value={figure?.labelColor ?? style.textColor} onChange={(labelColor) => setFigure({ labelColor }, false)} />}
+          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : isFigureLike ? 'Value colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
+          {isFigureLike && <ColorField id={`${id}-label-colour`} label="Label colour" value={figure?.labelColor ?? style.textColor} onChange={(labelColor) => setFigure({ labelColor }, false)} />}
           {!isStill && (
             <>
               <ColorField id={`${id}-accent`} label="Accent colour" value={style.accentColor} onChange={(accentColor) => update((current) => ({ ...current, style: { ...current.style, accentColor } }))} />
               <PercentField id={`${id}-bg`} label="Background (%)" value={percent(style.backgroundOpacity)} onCommit={(value) => update((current) => ({ ...current, style: { ...current.style, backgroundOpacity: Math.min(1, Math.max(0, value / 100)) } }))} />
             </>
           )}
-          {isData && (
+          {isFigureLike && (
             <>
               <PercentField id={`${id}-label-size`} label="Label size (%)" value={lineScale(figure?.labelScale)} max={fontScale * TEXT_SCALE_LIMITS.max * 100} onCommit={(value) => setFigure({ labelScale: lineSetting(value) })} />
               <PercentField id={`${id}-value-size`} label="Value size (%)" value={lineScale(figure?.valueScale)} max={fontScale * TEXT_SCALE_LIMITS.max * 100} onCommit={(value) => setFigure({ valueScale: lineSetting(value) })} />
@@ -1295,6 +1394,230 @@ function ComponentEditor({
         </button>
       </p>
     </fieldset>
+  );
+}
+
+const ZONES_SOURCE_LABELS: Record<ZonesSource, string> = { heartRate: 'Heart rate', power: 'Power' };
+const ZONES_SHAPE_LABELS: Record<ZonesShape, string> = {
+  horizontal: 'Horizontal bar',
+  vertical: 'Vertical bar',
+  arc: 'Segmented arc',
+  figure: 'A single coloured figure',
+};
+
+/**
+ * AV-1018 (TD-086). The zones' own settings: the source, what the bounds are
+ * measured in and the figure they are measured against, each zone's name,
+ * colour and bound, the shape, and what is shown. The reader's figure lives in
+ * the session (`usePersonalStore`) and nowhere else; a zones component that
+ * needs it and has none is not drawn, and says so here.
+ */
+function ZonesEditor({
+  id,
+  component,
+  activity,
+  smoothingField,
+  onChange,
+}: {
+  id: string;
+  component: OverlayComponent;
+  activity: Activity;
+  smoothingField: React.ReactNode;
+  onChange: (patch: (current: OverlayComponent) => OverlayComponent) => void;
+}) {
+  const session = usePersonalStore((store) => store.personal);
+  const setFigure = usePersonalStore((store) => store.setFigure);
+  const setting = component.zones;
+  const highestSource = setting?.source;
+  const activityHighestOf = useMemo(() => (highestSource ? activityHighest(activity, highestSource) : undefined), [activity, highestSource]);
+  const withZones = (change: (current: NonNullable<OverlayComponent['zones']>) => NonNullable<OverlayComponent['zones']>) =>
+    onChange((current) => (current.zones ? { ...current, zones: change(current.zones) } : current));
+
+  if (!setting) {
+    return (
+      <div className="overlay-controls__field">
+        <p className="overlay-controls__note" role="status">
+          These zones could not be read, so nothing is drawn.
+        </p>
+        <button
+          type="button"
+          className="button"
+          onClick={() =>
+            onChange((current) => {
+              const source: ZonesSource = current.source?.kind === 'metric' && current.source.metric === 'power' ? 'power' : 'heartRate';
+              return { ...current, source: { kind: 'metric', metric: source }, zones: defaultZonesSetting(source) };
+            })
+          }
+        >
+          Use the default zones
+        </button>
+      </div>
+    );
+  }
+
+  const { source } = setting;
+  const unit = ZONES_UNIT[source];
+  const key = REFERENCE_KEY[source];
+  const reference = effectivePersonal(session, setting)[key];
+  const highest = activityHighestOf;
+  // Offered only as it is: a highest outside what the field takes is not shown as another number.
+  const highestShown = highest !== undefined && cleanFigure(key, highest) === highest ? highest : undefined;
+  const limits = PERSONAL_LIMITS[key];
+  const bound = setting.basis === 'percent' ? '%' : unit;
+  const needs = setting.basis === 'percent' && reference === undefined;
+
+  return (
+    <>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-zones-source`}>Zones of</label>
+        <select
+          id={`${id}-zones-source`}
+          className="select"
+          value={source}
+          onChange={(event) => {
+            const next = event.target.value as ZonesSource;
+            if (next === source) return;
+            // The other source's own zones, and its own usual smoothing.
+            onChange((current) => {
+              const changed: OverlayComponent = { ...current, source: { kind: 'metric', metric: next }, zones: { ...defaultZonesSetting(next), shape: setting.shape, show: setting.show } };
+              if (DEFAULT_ZONES_SMOOTHING_SECONDS[next] > 0) changed.smoothing = { windowSeconds: DEFAULT_ZONES_SMOOTHING_SECONDS[next] };
+              else delete changed.smoothing;
+              delete changed.display;
+              return changed;
+            });
+          }}
+        >
+          {(['heartRate', 'power'] as const).map((value) => (
+            <option key={value} value={value}>
+              {ZONES_SOURCE_LABELS[value]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-zones-basis`}>Bounds are</label>
+        <select
+          id={`${id}-zones-basis`}
+          className="select"
+          value={setting.basis}
+          onChange={(event) => withZones((current) => changeBasis(current, event.target.value as 'percent' | 'value', session))}
+        >
+          <option value="percent">A percentage of my {REFERENCE_LABEL[source]}</option>
+          <option value="value">Absolute values ({unit})</option>
+        </select>
+      </div>
+      {setting.basis === 'percent' && (
+        <>
+          {needs && (
+            <p className="overlay-controls__note" role="status">
+              Enter your {REFERENCE_LABEL[source]} to draw these zones. They are not drawn until you do, and it stays in this tab.
+            </p>
+          )}
+          <PercentField
+            id={`${id}-zones-reference`}
+            label={`My ${REFERENCE_LABEL[source]} (${unit})`}
+            hint={`${limits.min} to ${limits.max}. Kept in this tab for the session only; it is not saved.${
+              session[key] === undefined && reference !== undefined ? ' This one is from the layout you opened, and is not yet yours.' : ''
+            }`}
+            value={reference === undefined ? '' : String(reference)}
+            min={limits.min}
+            max={limits.max}
+            onCommit={(value) => setFigure(key, value)}
+          />
+          <p className="video__actions">
+            {highestShown !== undefined && (
+              <button type="button" className="button" onClick={() => setFigure(key, highestShown)}>
+                Use this activity’s highest: {highestShown} {unit}
+              </button>
+            )}
+            {session[key] !== undefined && (
+              <button type="button" className="button" onClick={() => setFigure(key, undefined)}>
+                Forget my {REFERENCE_LABEL[source]}
+              </button>
+            )}
+          </p>
+        </>
+      )}
+
+      <div role="group" aria-label="Zones" className="zones-editor">
+        {setting.zones.map((zone, i) => (
+          <div key={i} role="group" aria-label={`Zone ${i + 1}`} className="overlay-controls__field">
+            <label htmlFor={`${id}-zone-${i}-name`}>Zone {i + 1} name</label>
+            <input
+              id={`${id}-zone-${i}-name`}
+              className="input"
+              type="text"
+              maxLength={ZONE_NAME_MAX}
+              value={zone.name}
+              onChange={(event) => {
+                const name = sanitizeLabel(event.target.value).split('\n')[0]!.slice(0, ZONE_NAME_MAX);
+                withZones((current) => setZone(current, i, { name }));
+              }}
+            />
+            <ColorField id={`${id}-zone-${i}-color`} label={`Zone ${i + 1} colour`} value={zone.color} onChange={(color) => withZones((current) => setZone(current, i, { color }))} />
+            <PercentField
+              id={`${id}-zone-${i}-from`}
+              label={`Zone ${i + 1} starts at (${bound})`}
+              value={String(zone.from)}
+              min={0}
+              max={ZONE_FROM_MAX[setting.basis]}
+              onCommit={(value) => withZones((current) => setZone(current, i, { from: Math.round(value * 10) / 10 }))}
+            />
+          </div>
+        ))}
+      </div>
+      <p className="video__actions">
+        <button type="button" className="button" disabled={addZone(setting) === setting} onClick={() => withZones(addZone)}>
+          Add a zone
+        </button>
+        <button type="button" className="button" disabled={setting.zones.length <= ZONE_LIMITS.min} onClick={() => withZones(removeLastZone)}>
+          Remove the last zone
+        </button>
+        <button type="button" className="button" onClick={() => withZones((current) => ({ ...defaultZonesSetting(current.source), shape: current.shape, show: current.show, ...(current.personal ? { personal: current.personal } : {}) }))}>
+          Reset the zones
+        </button>
+      </p>
+      <p className="overlay-controls__hint">
+        {ZONE_LIMITS.min} to {ZONE_LIMITS.max} zones. A value under the first zone’s start counts in the first zone, and one over the last zone’s start in the last.
+      </p>
+
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-zones-shape`}>Shape</label>
+        <select
+          id={`${id}-zones-shape`}
+          className="select"
+          value={setting.shape}
+          onChange={(event) => withZones((current) => ({ ...current, shape: event.target.value as ZonesShape }))}
+        >
+          {ZONES_SHAPES.map((shape) => (
+            <option key={shape} value={shape}>
+              {ZONES_SHAPE_LABELS[shape]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <fieldset className="overlay-controls__group">
+        <legend>Show</legend>
+        {(
+          [
+            ['number', 'The zone’s number'],
+            ['name', 'The zone’s name'],
+            ['value', `The value (${unit})`],
+            ['timeInZone', 'The time in each zone so far'],
+          ] as const
+        ).map(([part, text]) => (
+          <label key={part} className="overlay-controls__choice">
+            <input
+              type="checkbox"
+              checked={setting.show[part]}
+              onChange={(event) => withZones((current) => ({ ...current, show: { ...current.show, [part]: event.target.checked } }))}
+            />
+            <span>{text}</span>
+          </label>
+        ))}
+      </fieldset>
+      {smoothingField}
+    </>
   );
 }
 

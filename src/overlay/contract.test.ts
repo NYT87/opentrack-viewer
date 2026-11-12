@@ -16,7 +16,9 @@ import {
   type GaugeProps,
   type RouteProps,
   type WholeActivityProps,
+  type ZoneProps,
 } from './contract';
+import { defaultZonesSetting, zoneBounds } from './zones';
 import {
   DEFAULT_OVERLAY_STYLE,
   OVERLAY_COMPONENT_TYPES,
@@ -35,6 +37,7 @@ import { draw as drawGauge } from '../../docs/components/examples/gauge';
 import { draw as drawRoute } from '../../docs/components/examples/route';
 import { draw as drawProfile } from '../../docs/components/examples/elevation-profile';
 import { draw as drawWhole } from '../../docs/components/examples/whole-activity';
+import { draw as drawZones } from '../../docs/components/examples/zones';
 
 const T0 = Date.parse('2026-09-24T08:00:00Z');
 const FRAME = { width: 1920, height: 1080 };
@@ -88,6 +91,19 @@ const templateOf = (components: OverlayComponent[]): OverlayTemplate => ({
 const metric = (id: string, key: (typeof OVERLAY_METRIC_KEYS)[number], extra: Partial<OverlayComponent> = {}) =>
   component(id, 'text', { source: { kind: 'metric', metric: key }, ...extra });
 
+/** A zones component with its default zones (in percent of the reader's figure unless `setting` says otherwise). */
+const zones = (
+  id: string,
+  source: 'heartRate' | 'power',
+  extra: Partial<OverlayComponent> = {},
+  setting: Partial<NonNullable<OverlayComponent['zones']>> = {},
+) =>
+  component(id, 'zones', {
+    source: { kind: 'metric', metric: source },
+    zones: { ...defaultZonesSetting(source), ...setting },
+    ...extra,
+  });
+
 /** Every kind of built-in component, in the states the renderer draws them in. */
 function builtIns(): OverlayComponent[] {
   const list: OverlayComponent[] = [];
@@ -119,6 +135,11 @@ function builtIns(): OverlayComponent[] {
     component('date-iso', 'date', { date: { format: 'iso', withTime: true, timeZone: 'reader' } }),
     component('date-activity', 'date', { date: { format: 'long', withTime: false, timeZone: 'activity' } }),
     component('card', 'shape'),
+    // AV-1018. Zones: both sources, each shape, with and without time in zone and smoothing.
+    zones('zones-hr', 'heartRate'),
+    zones('zones-power', 'power', { smoothing: { windowSeconds: 3 } }),
+    zones('zones-arc', 'heartRate', {}, { shape: 'arc', show: { number: true, name: false, value: true, timeInZone: true } }),
+    zones('zones-values', 'power', {}, { basis: 'value', zones: [{ name: 'Low', color: '#00ff00', from: 0 }, { name: 'High', color: '#ff0000', from: 200 }] }),
   );
   for (const stat of ['speed', 'pace', 'distance', 'elapsed', 'moving', 'climb'] as SummaryStatKey[]) {
     list.push(component(`summary-${stat}`, 'summary', { summary: { stat }, text: { align: 'left', weight: 'bold', caption: stat !== 'pace' } }));
@@ -130,6 +151,7 @@ function builtIns(): OverlayComponent[] {
 const measureText = (text: string, font: string) => text.length * 0.6 * Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 10);
 const context = (activity: Activity | undefined, extra: Partial<ContractContext> = {}): ContractContext => ({
   frame: FRAME,
+  personal: { maxHeartRate: 190, ftp: 250 },
   measureText,
   units: 'metric',
   activity,
@@ -173,6 +195,19 @@ function checkValid(props: ContractProps): void {
     expect(props.progress).toBeLessThanOrEqual(1);
   }
   if (props.section === 'wholeActivity') expect(props.text).not.toBe('');
+  if (props.section === 'zones') {
+    expect(props.zones.length).toBeGreaterThanOrEqual(2);
+    expect(props.zones.length).toBeLessThanOrEqual(10);
+    expect(props.zoneIndex).toBeGreaterThanOrEqual(0);
+    expect(props.zoneIndex).toBeLessThan(props.zones.length);
+    expect(props.fractionInZone).toBeGreaterThanOrEqual(0);
+    expect(props.fractionInZone).toBeLessThanOrEqual(1);
+    const bounds = props.zones.map((zone) => zone.lowerBound);
+    expect([...bounds].sort((a, b) => a - b)).toEqual(bounds);
+    for (const zone of props.zones) expect(zone.color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(props.unit).toBe(props.source === 'heartRate' ? 'bpm' : 'W');
+    if (props.timeInZoneSeconds) expect(props.timeInZoneSeconds).toHaveLength(props.zones.length);
+  }
 }
 
 describe('the contract adapter (AV-1017)', () => {
@@ -195,7 +230,7 @@ describe('the contract adapter (AV-1017)', () => {
           continue;
         }
         // Whatever the renderer draws has props, and what it does not draw has none.
-        const ready = sample ? resolveOverlayComponent(template, item, sample, timeline, 'metric') : undefined;
+        const ready = sample ? resolveOverlayComponent(template, item, sample, timeline, 'metric', context(activity).personal) : undefined;
         const drawn = section === 'wholeActivity' ? true : ready?.status === 'ready';
         expect(props !== undefined, `${item.id} at ${t}`).toBe(drawn);
         if (!props) continue;
@@ -406,6 +441,58 @@ describe('the contract adapter (AV-1017)', () => {
     expect('route' in noActivity).toBe(false);
   });
 
+  it('gives zones the zone, the bounds in absolute units and the zones’ names and colours (AV-1018)', () => {
+    const sample = timeline.sampleAt(30)!;
+    const hr = contractPropsFor(template, template.components.find((c) => c.id === 'zones-hr')!, sample, timeline, context(activity)) as ZoneProps;
+    expect(hr.section).toBe('zones');
+    expect(hr.source).toBe('heartRate');
+    expect(hr.unit).toBe('bpm');
+    // 150 bpm at 30 s, of a maximum of 190: bounds 95, 114, 133, 152, 171, so the third zone, nearly at the fourth.
+    expect(hr.value).toBeCloseTo(135, 5);
+    expect(hr.zoneIndex).toBe(2);
+    expect(hr.zones.map((zone) => zone.lowerBound)).toEqual([95, 114, 133, 152, 171]);
+    expect(hr.zones.map((zone) => zone.name)).toEqual(['Recovery', 'Endurance', 'Tempo', 'Threshold', 'Maximum']);
+    expect(hr.fractionInZone).toBeCloseTo((135 - 133) / (152 - 133), 5);
+    expect(hr.text).toBe('135 bpm');
+    expect(hr.timeInZoneSeconds).toBeUndefined();
+    expect(hr.smoothingWindowSeconds).toBeUndefined();
+
+    const power = contractPropsFor(template, template.components.find((c) => c.id === 'zones-power')!, sample, timeline, context(activity)) as ZoneProps;
+    expect(power.unit).toBe('W');
+    expect(power.smoothingWindowSeconds).toBe(3);
+    expect(power.zones).toHaveLength(7);
+    expect(power.zones[1]!.lowerBound).toBeCloseTo(140);
+
+    // Bounds in values are given as they are, and need no figure.
+    const values = contractPropsFor(template, template.components.find((c) => c.id === 'zones-values')!, sample, timeline, context(activity, { personal: undefined })) as ZoneProps;
+    expect(values.zones.map((zone) => zone.lowerBound)).toEqual([0, 200]);
+    expect(values.zoneIndex).toBe(1);
+  });
+
+  it('gives the time in each zone only when asked, and it adds up to the moving time (AV-1018)', () => {
+    const arc = template.components.find((c) => c.id === 'zones-arc')!;
+    for (const t of [0, 10, 30, 59]) {
+      const props = contractPropsFor(template, arc, timeline.sampleAt(t), timeline, context(activity)) as ZoneProps;
+      expect(props.timeInZoneSeconds, `at ${t}`).toHaveLength(5);
+      const sum = props.timeInZoneSeconds!.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(timeline.sampleAt(t)!.values['metric:moving']!, 6);
+    }
+  });
+
+  it('gives no props for zones that are not drawn: a figure the reader has not entered, or no data (AV-1018)', () => {
+    const hr = template.components.find((c) => c.id === 'zones-hr')!;
+    const sample = timeline.sampleAt(30);
+    expect(contractPropsFor(template, hr, sample, timeline, context(activity, { personal: undefined }))).toBeUndefined();
+    expect(contractPropsFor(template, hr, sample, timeline, context(activity, { personal: { ftp: 250 } }))).toBeUndefined();
+    const noHr = ride(['heartRateBpm']);
+    const bare = buildOverlayTimeline(noHr, { video: { durationSeconds: 60 } });
+    expect(contractPropsFor(template, hr, bare.sampleAt(30), bare, context(noHr))).toBeUndefined();
+    // Never the reader's figure itself: the props carry the bounds, which are all a component needs.
+    const props = contractPropsFor(template, hr, sample, timeline, context(activity))!;
+    expect(JSON.stringify(props)).not.toContain('maxHeartRate');
+    expect(zoneBounds(hr.zones!, { maxHeartRate: 190 })).toEqual((props as ZoneProps).zones.map((zone) => zone.lowerBound));
+  });
+
   it('is a section for every built-in type, and the shape is the one without', () => {
     for (const type of OVERLAY_COMPONENT_TYPES) {
       const section = contractSectionOf(component('x', type, { range: { min: 0, max: 1 } }));
@@ -555,6 +642,20 @@ describe('the examples in docs/components (AV-1017)', () => {
     }
   });
 
+  it('the zones example draws every zone in its colour, the current one bright, inside its box (AV-1018)', () => {
+    for (const t of [0, 20, 40, 60]) {
+      const zone = propsBig('zones-hr', t) as ZoneProps;
+      const { points, log } = drawsInside(drawZones, zone);
+      expect(points.length).toBeGreaterThan(5);
+      expect(log).toEqual([`${zone.zones[zone.zoneIndex]!.name} ${zone.text}`]);
+    }
+    const seven = propsBig('zones-power') as ZoneProps;
+    expect(seven.zones).toHaveLength(7);
+    drawsInside(drawZones, seven);
+    // The ends of every zone set the marker inside the box.
+    for (const fractionInZone of [0, 1]) for (const zoneIndex of [0, 4]) drawsInside(drawZones, { ...(propsBig('zones-hr') as ZoneProps), fractionInZone, zoneIndex });
+  });
+
   it('a component that reaches beyond the contract is stopped by the recording context', () => {
     const { ctx } = recordingContext();
     expect(() => (ctx as unknown as { getImageData: () => void }).getImageData()).toThrow(/getImageData/);
@@ -597,6 +698,7 @@ describe('the documentation says what the contract holds (AV-1017)', () => {
     { page: 'gauges.md', ids: ['gauge-speed'] },
     { page: 'along-the-route.md', ids: ['route', 'profile', 'progress'] },
     { page: 'whole-activity.md', ids: ['summary-speed', 'date-activity', 'text'] },
+    { page: 'zones.md', ids: ['zones-hr', 'zones-power', 'zones-arc', 'zones-values'] },
   ];
 
   for (const { page, ids } of sections) {

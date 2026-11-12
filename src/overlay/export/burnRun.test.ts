@@ -4,6 +4,7 @@ import type { BurnRequest } from './protocol';
 import { DEFAULT_OVERLAY_CONTROLS, buildOverlay } from '../presets';
 import { buildOverlayTimeline } from '../timeline';
 import { makeActivity } from '../../test/helpers/activity';
+import { canvasTemplate, newZonesComponent } from '../customCanvas';
 
 const T0 = new Date('2024-01-01T10:00:00Z');
 const at = (s: number) => new Date(T0.getTime() + s * 1000);
@@ -288,6 +289,20 @@ describe('the burned-in render (AV-1007)', () => {
     await promise;
     const values = events.filter((event) => event.startsWith('text:') && event.endsWith('km/h'));
     expect(values).toEqual(['text:0.0 km/h', 'text:18.0 km/h']);
+  });
+
+  it('draws a zones component with the reader’s figure that came with the request, and nothing without it (AV-1018)', async () => {
+    // A ride with a heart rate, which the test's own has not.
+    const rider = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: at(i), distanceMeters: i * 10, heartRateBpm: 100 + 10 * i })));
+    const zones = newZonesComponent(canvasTemplate([]), 'heartRate', { width: 1280, height: 720 });
+    const withZones = request({ activity: rider, template: canvasTemplate([zones]) });
+    events.length = 0;
+    await run({ frames: [5] }, { request: { ...withZones, personal: { maxHeartRate: 200 } } }).promise;
+    expect(events).toContain('text:Z3 Tempo');
+    expect(events).toContain('text:150 bpm');
+    events.length = 0;
+    await run({ frames: [5] }, { request: withZones }).promise;
+    expect(events.filter((event) => event.startsWith('text:'))).toEqual([]);
   });
 
   it('applies the telemetry offset it was given', async () => {

@@ -10,6 +10,17 @@ import {
   paceUnitLabel,
 } from '../domain/units';
 import {
+  ZONE_FROM_MAX,
+  ZONE_LIMITS,
+  ZONE_NAME_MAX,
+  ZONES_UNIT,
+  cleanPersonal,
+  effectivePersonal,
+  zoneBounds,
+  zoneIndex,
+  withinZone,
+} from './zones';
+import {
   OVERLAY_METRIC_KEYS,
   SMOOTHING_LIMITS,
   canSmooth,
@@ -48,7 +59,9 @@ export type OverlayComponentType =
   | 'summary'
   | 'date'
   /** AV-1011. A card, a frame or a rule behind or in front of the figures. */
-  | 'shape';
+  | 'shape'
+  /** AV-1018. The heart rate or power zone the activity is in, as a bar, an arc or a figure. */
+  | 'zones';
 
 export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'text',
@@ -61,6 +74,7 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'summary',
   'date',
   'shape',
+  'zones',
 ];
 
 /** AV-1011. What a shape is. */
@@ -120,6 +134,42 @@ export interface OverlayFigureSetting {
   align?: TextAlign;
   /** The halo under the type on a clear background; absent is black at 0.8, opacity 0 is none. */
   halo?: { color: string; opacity: number };
+}
+
+/** AV-1018. What zones are measured on. Other bounded figures (pace) can join this later. */
+export type ZonesSource = 'heartRate' | 'power';
+export const ZONES_SOURCES: readonly ZonesSource[] = ['heartRate', 'power'];
+
+/** AV-1018. One zone: its name, its colour (`#rrggbb`) and its lower bound. */
+export interface OverlayZone {
+  name: string;
+  color: string;
+  from: number;
+}
+
+export type ZonesShape = 'horizontal' | 'vertical' | 'arc' | 'figure';
+export const ZONES_SHAPES: readonly ZonesShape[] = ['horizontal', 'vertical', 'arc', 'figure'];
+
+/** AV-1018. The reader's own figures, in bpm and W. In memory for the session; in a layout file only when asked for (TD-086). */
+export interface PersonalFigures {
+  maxHeartRate?: number;
+  ftp?: number;
+}
+
+/**
+ * AV-1018 (TD-086). A zones component's zones and how they are drawn. The
+ * bounds are in percent of the reader's figure (`basis: 'percent'`: maximum
+ * heart rate, or FTP) or absolute bpm and W. `personal` is present only when
+ * the reader chose to put their figures in the layout file.
+ */
+export interface OverlayZonesSetting {
+  source: ZonesSource;
+  basis: 'percent' | 'value';
+  /** 2 to 10, ascending by `from`; the first is the floor, and anything under it counts in it. */
+  zones: OverlayZone[];
+  shape: ZonesShape;
+  show: { number: boolean; name: boolean; value: boolean; timeInZone: boolean };
+  personal?: PersonalFigures;
 }
 
 /**
@@ -265,6 +315,8 @@ export interface OverlayComponent {
    * value over this many seconds, 0 to 30. Absent is off, as 0 is.
    */
   smoothing?: { windowSeconds: number };
+  /** AV-1018. `zones`: the zones and how they are drawn. `source` is the zones' source. */
+  zones?: OverlayZonesSetting;
 }
 
 export interface OverlayTemplate {
@@ -372,7 +424,15 @@ function parseComponent(value: unknown): OverlayComponent | string {
     const kind = isRecord(value.shape) ? value.shape.kind : undefined;
     if (!SHAPE_KINDS.includes(kind as ShapeKind)) return `unknown shape "${String(kind)}"`;
   }
-  const source = parseSource(value.source);
+  let source = parseSource(value.source);
+  // AV-1018. Zones read heart rate or power, and the zones' own source is the one that counts: they are measured on it.
+  const zones = componentType === 'zones' && isRecord(value.zones) ? parseZonesSetting(value.zones) : undefined;
+  if (componentType === 'zones') {
+    if (zones) source = { kind: 'metric', metric: zones.source };
+    else if (!(source?.kind === 'metric' && (source.metric === 'heartRate' || source.metric === 'power'))) {
+      return 'missing or invalid data source';
+    }
+  }
   if (needsSource && !source) return 'missing or invalid data source';
   if (componentType === 'label' && typeof value.content !== 'string') return 'a text with no content';
   if (componentType === 'summary') {
@@ -437,11 +497,13 @@ function parseComponent(value: unknown): OverlayComponent | string {
     if (value.display.ofTotal === true) display.ofTotal = true;
     if (display.label !== undefined || display.decimals !== undefined || display.ofTotal) component.display = display;
   }
-  if ((componentType === 'text' || componentType === 'gauge') && isRecord(value.figure)) {
+  // AV-1018. Zones that cannot be read are dropped, and the component stays, drawn as nothing (TD-086): the editor offers the defaults.
+  if (zones) component.zones = zones;
+  if ((componentType === 'text' || componentType === 'gauge' || componentType === 'zones') && isRecord(value.figure)) {
     const figure = parseFigure(value.figure);
     if (figure) component.figure = figure;
   }
-  if ((componentType === 'text' || componentType === 'gauge') && isRecord(value.smoothing) && canSmooth(source)) {
+  if ((componentType === 'text' || componentType === 'gauge' || componentType === 'zones') && isRecord(value.smoothing) && canSmooth(source)) {
     const seconds = value.smoothing.windowSeconds;
     if (isNumber(seconds) && seconds > 0) {
       component.smoothing = { windowSeconds: Math.min(SMOOTHING_LIMITS.max, seconds) };
@@ -480,6 +542,82 @@ function parseFigure(raw: Record<string, unknown>): OverlayFigureSetting | undef
     figure.halo = { color: raw.halo.color.toLowerCase(), opacity: clamp01(raw.halo.opacity) };
   }
   return Object.keys(figure).length > 0 ? figure : undefined;
+}
+
+// eslint-disable-next-line no-control-regex
+const SAFE_NAME = /[\u0000-\u001F\u007F]/g;
+
+/**
+ * AV-1018 (TD-086). A zones setting as it may be drawn, or `undefined` when it
+ * cannot be: not 2 to 10 zones, a bound that is not a number or does not rise,
+ * or a source that is not heart rate or power. Names are one short line,
+ * colours `#rrggbb`, bounds kept inside their limits, the shape and what is
+ * shown by their defaults where unknown, and the personal figures inside
+ * theirs. Nothing here throws on any input.
+ */
+export function parseZonesSetting(raw: Record<string, unknown>): OverlayZonesSetting | undefined {
+  const source = raw.source;
+  if (source !== 'heartRate' && source !== 'power') return undefined;
+  const basis = raw.basis === 'value' ? 'value' : 'percent';
+  if (!Array.isArray(raw.zones) || raw.zones.length < ZONE_LIMITS.min || raw.zones.length > ZONE_LIMITS.max) return undefined;
+  const zones: OverlayZone[] = [];
+  for (const entry of raw.zones) {
+    if (!isRecord(entry) || !isNumber(entry.from)) return undefined;
+    const from = Math.min(ZONE_FROM_MAX[basis], Math.max(0, entry.from));
+    if (zones.length > 0 && !(from > zones[zones.length - 1]!.from)) return undefined;
+    const name = typeof entry.name === 'string' ? entry.name.replace(SAFE_NAME, '').trim().slice(0, ZONE_NAME_MAX) : '';
+    const color = typeof entry.color === 'string' && HEX6.test(entry.color) ? entry.color.toLowerCase() : '#ffffff';
+    zones.push({ name, color, from });
+  }
+  const show = isRecord(raw.show) ? raw.show : {};
+  const setting: OverlayZonesSetting = {
+    source,
+    basis,
+    zones,
+    shape: ZONES_SHAPES.includes(raw.shape as ZonesShape) ? (raw.shape as ZonesShape) : 'horizontal',
+    show: {
+      number: show.number !== false,
+      name: show.name !== false,
+      value: show.value !== false,
+      timeInZone: show.timeInZone === true,
+    },
+  };
+  if (isRecord(raw.personal)) {
+    const personal = cleanPersonal(raw.personal);
+    if (Object.keys(personal).length > 0) setting.personal = personal;
+  }
+  return setting;
+}
+
+/**
+ * AV-1018 (TD-086). The components as a layout file may hold them: no zones
+ * component carries the reader's figures unless `include` is given, and then
+ * each carries the ones it is measured with (the session's, else what it
+ * already held), so the file holds them only because the reader asked.
+ * Everything else is returned as it is; nothing is mutated.
+ */
+export function componentsForLayoutFile(
+  components: OverlayComponent[],
+  options: { include: boolean; session?: PersonalFigures },
+): OverlayComponent[] {
+  return components.map((component) => {
+    if (!component.zones) return component;
+    const { personal: held, ...rest } = component.zones;
+    const effective = effectivePersonal(options.session, { personal: held });
+    const zones: OverlayZonesSetting = options.include && Object.keys(effective).length > 0 ? { ...rest, personal: effective } : rest;
+    return { ...component, zones };
+  });
+}
+
+/** AV-1018. The figures a set of components holds from a layout file, the first of each kind found; empty when none. */
+export function personalHeldBy(components: OverlayComponent[]): PersonalFigures {
+  const held: PersonalFigures = {};
+  for (const component of components) {
+    const personal = component.zones?.personal;
+    if (personal?.maxHeartRate !== undefined) held.maxHeartRate ??= personal.maxHeartRate;
+    if (personal?.ftp !== undefined) held.ftp ??= personal.ftp;
+  }
+  return held;
 }
 
 /** The default shape: a dark rounded card, as a figure's tile is. */
@@ -618,7 +756,15 @@ export type ResolvedOverlayComponent =
   | {
       status: 'hidden';
       /** `still_image_only`: a text, figure or date, which a video frame does not show (AV-1010). */
-      reason: 'disabled' | 'no_data' | 'no_position' | 'still_image_only';
+      reason:
+        | 'disabled'
+        | 'no_data'
+        | 'no_position'
+        | 'still_image_only'
+        /** AV-1018. Zones measured in percent of a figure the reader has not entered. */
+        | 'needs_reference'
+        /** AV-1018. A zones component whose zones could not be read. */
+        | 'no_zones';
       componentId: string;
     }
   | {
@@ -631,7 +777,25 @@ export type ResolvedOverlayComponent =
       text?: string;
       /** Gauge/progress position, 0..1. */
       fraction?: number;
+      /** AV-1018. `zones`: where the value falls among the zones. */
+      zones?: ResolvedZones;
     };
+
+/**
+ * AV-1018. A zones component at one moment: the value (smoothed where it is
+ * set to be), its zone and the zones' bounds, in bpm or W.
+ */
+export interface ResolvedZones {
+  setting: OverlayZonesSetting;
+  value: number;
+  unit: 'bpm' | 'W';
+  /** 0-based. */
+  index: number;
+  /** Lower bounds in the value's own unit, one per zone, ascending. */
+  bounds: number[];
+  /** Where in its zone the value is, 0..1. */
+  within: number;
+}
 
 function effectiveUnits(component: OverlayComponent, units: UnitSystem): UnitSystem {
   return component.unitMode === 'auto' ? units : component.unitMode;
@@ -724,6 +888,8 @@ export function resolveOverlayComponent(
   sample: OverlaySample | undefined,
   timeline: OverlayTimeline,
   units: UnitSystem,
+  /** AV-1018. The reader's own figures for this session: the zones' reference. Never read from anywhere else. */
+  personal?: PersonalFigures,
 ): ResolvedOverlayComponent {
   const componentId = component.id;
   if (!component.visible) return { status: 'hidden', reason: 'disabled', componentId };
@@ -759,6 +925,23 @@ export function resolveOverlayComponent(
   const windowSeconds = component.smoothing?.windowSeconds;
   const shown = (windowSeconds ? smoothedValueAt(timeline, source, sample.videoTimeSeconds, windowSeconds) : undefined) ?? value;
   const label = component.display?.label?.trim() || describeSource(source, timeline);
+  if (component.type === 'zones') {
+    // AV-1018. A set that cannot be read, or that needs a figure the reader has not given, draws nothing.
+    const setting = component.zones;
+    if (!setting || source.kind !== 'metric' || source.metric !== setting.source) return { status: 'hidden', reason: 'no_zones', componentId };
+    const bounds = zoneBounds(setting, effectivePersonal(personal, setting));
+    if (!bounds) return { status: 'hidden', reason: 'needs_reference', componentId };
+    const index = zoneIndex(shown, bounds);
+    return {
+      status: 'ready',
+      componentId,
+      component,
+      style,
+      label,
+      text: formatMetric(source.metric, shown, unitSystem),
+      zones: { setting, value: shown, unit: ZONES_UNIT[setting.source], index, bounds, within: withinZone(shown, index, bounds) },
+    };
+  }
   let text: string;
   const total = timeline.distanceTotalMeters;
   if (source.kind === 'metric' && source.metric === 'distance' && component.display?.ofTotal && total !== undefined) {

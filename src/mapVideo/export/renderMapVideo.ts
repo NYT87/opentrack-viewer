@@ -6,6 +6,7 @@ import type { UnitSystem } from '../../domain/units';
 import type { ExportOutput } from '../../overlay/export/client';
 import { OverlayExportError } from '../../overlay/export/errors';
 import { createMapVideoFigures, drawAttribution, type PhotoImage } from '../figures';
+import type { PersonalFigures } from '../../overlay/template';
 import type { MapVideoModel } from '../model';
 import type { MapVideoSettings } from '../project';
 import { mapVideoAttribution } from '../style';
@@ -187,6 +188,8 @@ export interface MapVideoRenderInput {
   units: UnitSystem;
   maptilerKey: string;
   photoImages?: ReadonlyMap<string, PhotoImage>;
+  /** AV-1018. The reader's own figures for a zones component, from the session; they are drawn with, not stored. */
+  personal?: PersonalFigures;
 }
 
 /** Why the render is waiting, for the panel to say: tiles still coming, or a hidden tab. */
@@ -357,7 +360,7 @@ export async function openMapVideoRenderer(
   input: MapVideoRenderInput,
   options: { signal?: AbortSignal; onWaiting?: (waiting: RenderWaiting) => void } = {},
 ): Promise<MapVideoRenderer> {
-  const { activity, model, settings, units, maptilerKey, photoImages } = input;
+  const { activity, model, settings, units, maptilerKey, photoImages, personal } = input;
   const { width, height } = settings.output;
   const exportMap = await openExportMap({ width, height, styleUrl: basemapStyleUrl(settings, maptilerKey), what: 'a frame', ...options });
   const { map, close } = exportMap;
@@ -372,7 +375,7 @@ export async function openMapVideoRenderer(
     close();
     throw new OverlayExportError('unsupported_browser', 'This browser cannot draw the video’s frames.');
   }
-  const figures = createMapVideoFigures({ activity, model, settings, units, width, height, photoImages });
+  const figures = createMapVideoFigures({ activity, model, settings, units, width, height, photoImages, personal });
   const credit = mapVideoAttribution(settings);
 
   return {

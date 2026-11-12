@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OverlayContext2D } from '../overlay/export/drawOverlay';
-import { canvasTemplate, newCanvasComponent } from '../overlay/customCanvas';
+import { canvasTemplate, newCanvasComponent, newZonesComponent } from '../overlay/customCanvas';
 import { DEFAULT_OVERLAY_STYLE, OVERLAY_TEMPLATE_VERSION, type OverlayTemplate } from '../overlay/template';
 import { smoothedValueAt } from '../overlay/timeline';
 import { parseGpx } from '../parsers/gpx/parseGpx';
@@ -160,6 +160,22 @@ describe('the summary card (AV-1207)', () => {
   it('reads pace for a run', () => {
     const template = summaryCardTemplate('running', { width: 1920, height: 1080 });
     expect(template.components.map((component) => component.summary?.stat).filter(Boolean)).toEqual(['distance', 'moving', 'climb', 'pace']);
+  });
+});
+
+describe('zones over the map video (AV-1018)', () => {
+  it('are drawn with the reader’s figure it is given, and left out without it', () => {
+    const model = modelOf(ride);
+    const size = { width: 1280, height: 720 };
+    const zones = newZonesComponent(canvasTemplate([]), 'heartRate', size);
+    const overlay = canvasTemplate([zones]);
+    const draw = (personal?: { maxHeartRate: number }) => {
+      const figures = createMapVideoFigures({ activity: ride, model, settings: settings({ overlay, summaryCard: { enabled: false } }), units: 'metric', ...size, ...(personal ? { personal } : {}) });
+      return displayList((ctx) => figures.drawFrame(ctx, 5));
+    };
+    expect(draw({ maxHeartRate: 190 })).toMatch(/fillText\("Z\d [A-Za-z ]+", /);
+    expect(draw({ maxHeartRate: 190 })).toMatch(/fillText\("\d+ bpm"/);
+    expect(draw()).toBe('\n');
   });
 });
 

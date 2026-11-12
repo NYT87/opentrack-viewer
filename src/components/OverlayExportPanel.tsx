@@ -30,6 +30,7 @@ import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template
 import { buildOverlayTimeline } from '../overlay/timeline';
 import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
+import { usePersonalStore } from '../state/personalStore';
 
 interface OverlayExportPanelProps {
   /**
@@ -225,8 +226,11 @@ export function OverlayExportPanel({
     () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, exportWidth / exportHeight)),
     [customTemplate, controls, timeline, exportWidth, exportHeight],
   );
+  // AV-1018 (TD-086). The reader's figures go with the request only when a zones component can use them.
+  const sessionFigures = usePersonalStore((state) => state.personal);
+  const personal = built.template.components.some((component) => component.type === 'zones') ? sessionFigures : {};
   // Everything that changes the picture. A finished export is compared with it.
-  const signature = JSON.stringify([built.template, units, effectiveOffset, range?.start, range?.end, plan.fps, plan.width, plan.height, asWebm]);
+  const signature = JSON.stringify([built.template, personal, units, effectiveOffset, range?.start, range?.end, plan.fps, plan.width, plan.height, asWebm]);
   const fallbackFps = plan.fitsArchive || asWebm
     ? undefined
     : highestFittingFrameRate({
@@ -303,6 +307,7 @@ export function OverlayExportPanel({
           units,
           template: built.template,
           activity,
+          ...(Object.keys(personal).length > 0 ? { personal } : {}),
         },
         (done, total) => setPhase({ status: 'running', done, total }),
       );

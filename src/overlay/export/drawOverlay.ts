@@ -14,9 +14,12 @@ import {
   resolveOverlayComponent,
   type OverlayComponent,
   type OverlayTemplate,
+  type PersonalFigures,
   type ResolvedOverlayComponent,
 } from '../template';
 import type { OverlayTimeline } from '../timeline';
+import { drawZones } from './drawZones';
+import { zoneTimesFor } from '../zones';
 
 /**
  * AV-1006. Draws a template on a canvas, at any resolution, on a transparent
@@ -46,6 +49,12 @@ export interface OverlayRendererInput {
    * own by default (a worker's is the same as its page's).
    */
   readerTimeZone?: string;
+  /**
+   * AV-1018 (TD-086). The reader's own maximum heart rate and FTP, which a zones
+   * component measured in percent needs. Held in memory for the session and
+   * given to the renderer by every caller; never stored, logged or sent.
+   */
+  personal?: PersonalFigures;
 }
 
 export interface OverlayRenderer {
@@ -59,7 +68,7 @@ export interface OverlayRenderer {
 
 type Ready = Extract<ResolvedOverlayComponent, { status: 'ready' }>;
 
-interface Box {
+export interface Box {
   x: number;
   y: number;
   w: number;
@@ -280,7 +289,7 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
           continue;
         }
         if (!sample) continue;
-        const ready = resolveOverlayComponent(template, component, sample, timeline, units);
+        const ready = resolveOverlayComponent(template, component, sample, timeline, units, input.personal);
         if (ready.status !== 'ready') continue;
 
         const box = boxOf(component);
@@ -296,6 +305,14 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
           drawRoute(ctx, box, ready, sample);
         } else if (component.type === 'elevationProfile') {
           drawProfile(ctx, box, ready);
+        } else if (component.type === 'zones') {
+          // The time in each zone is a pass over the activity, made once for these bounds and then looked up (zoneTimesFor).
+          const resolved = ready.zones;
+          const times =
+            resolved?.setting.show.timeInZone && component.source
+              ? zoneTimesFor(timeline, component.source, resolved.bounds)?.at(sample.activityElapsedSeconds)
+              : undefined;
+          drawZones(ctx, box, ready, em, width, times);
         } else if (component.type === 'progress') {
           ctx.fillStyle = 'rgb(255 255 255 / 0.25)';
           ctx.fillRect(box.x, box.y, box.w, box.h);

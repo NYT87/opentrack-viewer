@@ -18,6 +18,7 @@ import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template
 import { buildOverlayTimeline } from '../overlay/timeline';
 import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
+import { usePersonalStore } from '../state/personalStore';
 
 interface BurnedInExportPanelProps {
   video: OverlayVideo;
@@ -142,6 +143,9 @@ export function BurnedInExportPanel({
     () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, outWidth / outHeight)),
     [customTemplate, controls, timeline, outWidth, outHeight],
   );
+  // AV-1018 (TD-086). The reader's figures go with the request only when a zones component can use them.
+  const sessionFigures = usePersonalStore((state) => state.personal);
+  const personal = built.template.components.some((component) => component.type === 'zones') ? sessionFigures : {};
   // The answer belongs to the file and size it was asked for: any other is a question not yet answered.
   const inspectKey = `${video.file.name}:${video.file.size}:${video.file.lastModified}:${outWidth}x${outHeight}:${frameRate}`;
   const source: Source =
@@ -229,7 +233,7 @@ export function BurnedInExportPanel({
   const drawnAnyway = built.template.components.some((component) => component.visible && drawnWithoutTelemetry(component));
   const noOverlap = outsideActivity && !drawnAnyway;
 
-  const signature = JSON.stringify([built.template, units, offsetSeconds, range.start, range.end, outWidth, outHeight]);
+  const signature = JSON.stringify([built.template, personal, units, offsetSeconds, range.start, range.end, outWidth, outHeight]);
   const running = phase.status === 'running';
   const nothingOn = built.template.components.length === 0;
   const readiness =
@@ -266,6 +270,7 @@ export function BurnedInExportPanel({
           units,
           template: built.template,
           activity,
+          ...(Object.keys(personal).length > 0 ? { personal } : {}),
         },
         (fraction, seconds) => setPhase({ status: 'running', fraction, seconds }),
       );

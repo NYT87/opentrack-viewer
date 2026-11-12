@@ -51,6 +51,8 @@ function sourceFiles(dir: string): string[] {
 const overlayFiles = [
   ...sourceFiles(join(SRC, 'overlay')),
   join(SRC, 'state/overlayStore.ts'),
+  // AV-1018 (TD-086). The reader's own maximum heart rate and FTP: in memory, never in storage.
+  join(SRC, 'state/personalStore.ts'),
   join(SRC, 'app/OverlayPage.tsx'),
   join(SRC, 'components/OverlayControls.tsx'),
   join(SRC, 'components/OverlayExportPanel.tsx'),
@@ -76,6 +78,9 @@ describe('the overlay code can send nothing anywhere and keeps nothing (AV-1008)
         'overlay/export/drawRouteImage.ts',
         'overlay/routeImage.ts',
         'app/OverlayPage.tsx',
+        'state/personalStore.ts',
+        'overlay/zones.ts',
+        'overlay/export/drawZones.ts',
       ]),
     );
     expect(overlayFiles.length).toBeGreaterThan(20);

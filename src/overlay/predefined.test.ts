@@ -65,12 +65,15 @@ describe('the registry of predefined components (AV-1016)', () => {
       'Power, 3 s average',
       'Cadence',
       'Gradient',
+      'Power zones',
+      'Heart rate zones',
       'Climb so far',
       'Elevation profile',
     ]);
     expect(PREDEFINED_ENTRIES.filter((entry) => entry.sport === 'running').map((entry) => entry.name)).toEqual([
       'Pace',
       'Heart rate',
+      'Heart rate zones',
       'Running cadence',
       'Distance of the total',
     ]);
@@ -123,6 +126,13 @@ describe('the registry of predefined components (AV-1016)', () => {
     expect(one('cycling.speed-gauge')).toMatchObject({ type: 'gauge', source: { metric: 'speed' } });
     // The gauge's range comes from the activity's top speed, as a plain gauge's does.
     expect(one('cycling.speed-gauge').range).toEqual(newCanvasComponent(canvasTemplate([]), 'gauge:speed', SIZES[0]!, timeline).range);
+    // AV-1018. Zones: their own zones, power smoothed over 3 s and heart rate not at all.
+    expect(window('cycling.power-zones')).toBe(3);
+    expect(window('cycling.heart-rate-zones')).toBeUndefined();
+    expect(window('running.heart-rate-zones')).toBeUndefined();
+    expect(one('cycling.power-zones')).toMatchObject({ type: 'zones', source: { metric: 'power' }, zones: { source: 'power', basis: 'percent', shape: 'horizontal' } });
+    expect(one('cycling.power-zones').zones!.zones).toHaveLength(7);
+    expect(one('running.heart-rate-zones').zones!.zones).toHaveLength(5);
     expect(one('cycling.climb').source).toEqual({ kind: 'metric', metric: 'climb' });
     expect(one('any.elevation-profile').type).toBe('elevationProfile');
   });
@@ -140,8 +150,8 @@ describe('the registry of predefined components (AV-1016)', () => {
     const activity = full(['powerWatts', 'gradePercent', 'elevationMeters']);
     const choices = canvasElementChoices(timelineOf(activity), still(activity));
     const of = (id: string) => choices.find((choice) => choice.key === `predefined:${id}`)!;
-    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(8);
-    expect(choices.filter((choice) => choice.group === 'Running')).toHaveLength(4);
+    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(10);
+    expect(choices.filter((choice) => choice.group === 'Running')).toHaveLength(5);
     expect(choices.filter((choice) => choice.group === 'Any sport')).toHaveLength(3);
     expect(of('cycling.speed')).toMatchObject({ available: true, group: 'Cycling' });
     expect(of('cycling.power-3s')).toMatchObject({ available: false, reason: 'This activity has no power.' });
@@ -156,6 +166,12 @@ describe('the registry of predefined components (AV-1016)', () => {
     const labels = choices.map((choice) => choice.label);
     expect(new Set(labels).size).toBe(labels.length);
     expect(of('cycling.speed').label).toBe('Speed (Cycling)');
+    // AV-1018. Zones are in the registry and in the plain list; the registry's are told apart by sport.
+    expect(of('cycling.heart-rate-zones')).toMatchObject({ available: true, label: 'Heart rate zones (Cycling)' });
+    expect(of('running.heart-rate-zones').label).toBe('Heart rate zones (Running)');
+    expect(of('cycling.power-zones')).toMatchObject({ available: false, reason: 'This activity has no power.' });
+    expect(choices.find((choice) => choice.key === 'zones:heartRate')).toMatchObject({ available: true, label: 'Heart rate zones', group: 'Live figures' });
+    expect(choices.find((choice) => choice.key === 'zones:power')).toMatchObject({ available: false, reason: 'This activity has no power.' });
     expect(of('cycling.power-3s').label).toBe('Power, 3 s average');
   });
 

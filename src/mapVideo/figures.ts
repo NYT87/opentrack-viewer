@@ -1,7 +1,7 @@
 import type { Activity, ActivitySport } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
 import { createOverlayRenderer, type OverlayContext2D } from '../overlay/export/drawOverlay';
-import { DEFAULT_OVERLAY_STYLE, DEFAULT_SHAPE, OVERLAY_TEMPLATE_VERSION, type OverlayComponent, type OverlayTemplate, type SummaryStatKey } from '../overlay/template';
+import { DEFAULT_OVERLAY_STYLE, DEFAULT_SHAPE, OVERLAY_TEMPLATE_VERSION, type OverlayComponent, type OverlayTemplate, type PersonalFigures, type SummaryStatKey } from '../overlay/template';
 import { buildOverlayTimeline, dataSourceId, type OverlaySample, type OverlayTimeline } from '../overlay/timeline';
 import type { MapVideoModel } from './model';
 import type { MapVideoSettings } from './project';
@@ -146,6 +146,8 @@ export interface MapVideoFiguresInput {
   width: number;
   height: number;
   readerTimeZone?: string;
+  /** AV-1018. The reader's own maximum heart rate and FTP, for a zones component; session memory only. */
+  personal?: PersonalFigures;
   /** AV-1208. The photos' pixels, decoded in the page: drawn as pixels, so nothing of their EXIF goes with them. */
   photoImages?: ReadonlyMap<string, PhotoImage>;
 }
@@ -189,11 +191,11 @@ export function drawPhoto(ctx: OverlayContext2D, photo: PhotoImage, shown: { ela
 
 /** The figures of a map video, ready to draw at any moment. */
 export function createMapVideoFigures(input: MapVideoFiguresInput): MapVideoFigures {
-  const { activity, model, settings, units, width, height, readerTimeZone, photoImages } = input;
+  const { activity, model, settings, units, width, height, readerTimeZone, photoImages, personal } = input;
   const timeline = mapVideoOverlayTimeline(activity, model);
   const shown = shownActivity(activity, model, settings);
   const overlay = settings.overlay && settings.overlay.components.length > 0
-    ? createOverlayRenderer({ template: settings.overlay, timeline, activity: shown, units, width, height, readerTimeZone })
+    ? createOverlayRenderer({ template: settings.overlay, timeline, activity: shown, units, width, height, readerTimeZone, personal })
     : undefined;
   const card = settings.summaryCard.enabled
     ? createOverlayRenderer({ template: summaryCardTemplate(activity.metadata.sport, { width, height }), timeline, activity: shown, units, width, height, readerTimeZone })

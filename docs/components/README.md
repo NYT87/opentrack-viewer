@@ -42,7 +42,7 @@ There is one kind of component per **section**, each with its own props:
 | `gauge` | `GaugeProps` | [gauges.md](gauges.md) | A figure, plus its range and where the value falls in it |
 | `route` | `RouteProps` | [along-the-route.md](along-the-route.md) | The route and the position, the progress bar, the elevation profile |
 | `wholeActivity` | `WholeActivityProps` | [whole-activity.md](whole-activity.md) | A text, a figure from the summary, the date, the activity's name |
-| zones | reserved | [zones.md](zones.md) | Waits for #20 |
+| `zones` | `ZoneProps` | [zones.md](zones.md) | The heart rate or power zone now, the zones' bounds, and the time in each zone so far |
 
 ## The rules
 
@@ -77,7 +77,7 @@ Every component's props hold these, besides its section's (the tables below say 
 | `fontPx` | px | never | The base type size: 2.2 % of the frame's width times `style.fontScale` (smaller only for a whole-activity text that would not fit the frame). |
 | `style` | | never | The look chosen. `textColor` and `accentColor` are `#rrggbb`; `backgroundOpacity` is 0 to 1 and the host paints it behind a figure, gauge or route (not a whole-activity component); `fontScale` is a multiplier, already in `fontPx`. |
 
-A component that reads a moment (`figure`, `gauge`, `route`) also has:
+A component that reads a moment (`figure`, `gauge`, `route`, `zones`) also has:
 
 | Prop | Unit | Changes | Meaning |
 | --- | --- | --- | --- |

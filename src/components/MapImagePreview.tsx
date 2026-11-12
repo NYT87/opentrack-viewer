@@ -22,6 +22,7 @@ import {
 } from '../mapVideo/videoMap';
 import { canvasTemplate } from '../overlay/customCanvas';
 import { createOverlayRenderer } from '../overlay/export/drawOverlay';
+import { usePersonalStore } from '../state/personalStore';
 
 setWorkerUrl(maplibreWorkerUrl);
 
@@ -60,6 +61,7 @@ const sameCamera = (a: MapImageCamera, b: MapImageCamera) =>
  * The map is made once; the page makes a new preview for another basemap.
  */
 export default function MapImagePreview({ activity, plan, settings, units, onCamera, onSnapshot, readerTimeZone }: MapImagePreviewProps) {
+  const personal = usePersonalStore((state) => state.personal);
   const frameRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLCanvasElement>(null);
@@ -207,14 +209,14 @@ export default function MapImagePreview({ activity, plan, settings, units, onCam
     if (settings.layout === 'canvas' && settings.overlay.length > 0) {
       const width = Math.round(plan.width * scale);
       const height = Math.round(plan.height * scale);
-      const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone });
+      const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone, personal });
       renderer.drawFrame(ctx, clock.seconds, { clear: false });
     }
     if (plan.credit) {
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
       drawAttribution(ctx, plan.credit, plan.width, plan.mapHeight);
     }
-  }, [prepare, plan, settings.layout, settings.overlay, clock, units, readerTimeZone, previewWidth]);
+  }, [prepare, plan, settings.layout, settings.overlay, clock, units, readerTimeZone, personal, previewWidth]);
 
   return (
     <div className="map-image-preview">

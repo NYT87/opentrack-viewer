@@ -11,6 +11,7 @@ import {
 } from './project';
 import { activityThrough, straightNorth } from '../test/helpers/mapVideoRoutes';
 import { DEFAULT_OVERLAY_STYLE, OVERLAY_TEMPLATE_VERSION } from '../overlay/template';
+import { canvasTemplate, newZonesComponent } from '../overlay/customCanvas';
 
 const activity = () => {
   const made = activityThrough(straightNorth(1000).map((point) => ({ ...point, elevation: 432.5 })));
@@ -111,5 +112,18 @@ describe('the map video project file (AV-1203)', () => {
     });
     expect(parseMapVideoProject('not json').ok).toBe(false);
     expect(parseMapVideoProject(' '.repeat(300 * 1024)).ok).toBe(false);
+  });
+});
+
+describe('the reader’s own figures (AV-1018, TD-086)', () => {
+  it('are never written into a project file, even when a component holds them', () => {
+    const zones = newZonesComponent(canvasTemplate([]), 'heartRate', { width: 1920, height: 1080 });
+    zones.zones = { ...zones.zones!, personal: { maxHeartRate: 217, ftp: 347 } };
+    const saved = project();
+    saved.settings = { ...saved.settings, overlay: canvasTemplate([zones]) };
+    const json = serializeMapVideoProject(saved);
+    expect(json).not.toMatch(/personal|217|347/);
+    expect(zones.zones.personal).toEqual({ maxHeartRate: 217, ftp: 347 });
+    expect(JSON.parse(json).settings.overlay.components[0].zones.shape).toBe('horizontal');
   });
 });

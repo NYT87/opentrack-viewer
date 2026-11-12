@@ -107,6 +107,7 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
     units: request.units,
     width: request.width,
     height: request.height,
+    personal: request.personal,
   });
 
   const input = openInput(mb, request.file);

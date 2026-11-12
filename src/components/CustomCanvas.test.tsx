@@ -5,6 +5,8 @@ import { CustomCanvas } from './CustomCanvas';
 import { makeActivity } from '../test/helpers/activity';
 import type { Activity } from '../domain/activity';
 import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
+import { usePersonalStore } from '../state/personalStore';
+import { buildOverlayTimeline } from '../overlay/timeline';
 
 const T0 = Date.parse('2026-09-24T08:00:00Z');
 const ride = (extra: (i: number) => object = () => ({})): Activity =>
@@ -14,6 +16,7 @@ let saved: Blob[] = [];
 
 beforeEach(() => {
   saved = [];
+  usePersonalStore.getState().clear();
   // jsdom draws nothing: a context that answers every call, so the renderer runs,
   // and measures a text in proportion to its font, as a browser does.
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() => {
@@ -502,5 +505,233 @@ describe('the custom canvas (AV-1011)', () => {
     expect(region()).toHaveTextContent('A video with the overlay burned in needs a source video');
     // AV-1012. The export panel offers the transparent video itself, where the browser can record one.
     expect(region()).not.toHaveTextContent(/Transparent WebM is not made by this app yet/);
+  });
+
+  describe('zones (AV-1018, TD-086)', () => {
+    const athlete = () => ride((i) => ({ heartRateBpm: 110 + i, powerWatts: 120 + 4 * i, distanceMeters: i * 5 }));
+    const fresh = async () => {
+      setup(athlete());
+      await add('Heart rate zones');
+    };
+    const saveWithFigures = async () => {
+      await userEvent.click(within(region()).getByLabelText('Include my maximum heart rate and FTP'));
+      return layoutJson();
+    };
+
+    it('adds heart rate zones and power zones with their defaults, and the registry’s own, from the Add list', async () => {
+      setup(athlete());
+      await add('Heart rate zones');
+      await add('Power zones');
+      await add('Heart rate zones (Cycling)');
+      expect(names()).toEqual(['Heart rate zones', 'Power zones', 'Heart rate zones']);
+      const components = (await layoutJson()).template.components as { type: string; zones: { source: string; zones: unknown[] }; smoothing?: unknown }[];
+      expect(components.map((component) => [component.type, component.zones.source, component.zones.zones.length, component.smoothing])).toEqual([
+        ['zones', 'heartRate', 5, undefined],
+        ['zones', 'power', 7, { windowSeconds: 3 }],
+        ['zones', 'heartRate', 5, undefined],
+      ]);
+    });
+
+    it('is not offered for an activity without heart rate or power, and says why', () => {
+      setup();
+      expect(within(region()).getByRole('option', { name: 'Heart rate zones (not in this activity)' })).toBeDisabled();
+      expect(within(region()).getByRole('list', { name: 'Not in this activity' })).toHaveTextContent('Power zones: This activity has no power.');
+    });
+
+    it('says it needs the maximum heart rate, offers the activity’s highest as such, and then stops asking', async () => {
+      await fresh();
+      expect(within(editor()).getByRole('status')).toHaveTextContent('Enter your maximum heart rate to draw these zones');
+      expect(field('My maximum heart rate (bpm)').value).toBe('');
+      // The ride's highest heart rate is 170 bpm; it is offered as that, not guessed.
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Use this activity’s highest: 170 bpm' }));
+      expect(usePersonalStore.getState().personal).toEqual({ maxHeartRate: 170 });
+      expect(within(editor()).queryByRole('status')).not.toBeInTheDocument();
+      expect(field('My maximum heart rate (bpm)').value).toBe('170');
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Forget my maximum heart rate' }));
+      expect(usePersonalStore.getState().personal).toEqual({});
+      expect(within(editor()).getByRole('status')).toBeInTheDocument();
+    });
+
+    it('takes a figure typed in, keeps it inside its limits, and asks for the FTP of power zones', async () => {
+      await fresh();
+      fireEvent.change(field('My maximum heart rate (bpm)'), { target: { value: '188' } });
+      expect(usePersonalStore.getState().personal).toEqual({ maxHeartRate: 188 });
+      fireEvent.change(field('My maximum heart rate (bpm)'), { target: { value: '900' } });
+      expect(usePersonalStore.getState().personal.maxHeartRate).toBe(230);
+      await add('Power zones');
+      expect(within(editor()).getByRole('status')).toHaveTextContent('Enter your FTP to draw these zones');
+      expect(field('My FTP (W)')).toHaveAccessibleDescription(/50 to 600/);
+      fireEvent.change(field('My FTP (W)'), { target: { value: '250' } });
+      expect(usePersonalStore.getState().personal).toEqual({ maxHeartRate: 230, ftp: 250 });
+    });
+
+    it('needs no figure for bounds in absolute values', async () => {
+      await fresh();
+      await userEvent.selectOptions(field('Bounds are') as unknown as HTMLElement, 'value');
+      expect(within(editor()).queryByRole('status')).not.toBeInTheDocument();
+      expect(within(editor()).queryByLabelText('My maximum heart rate (bpm)')).not.toBeInTheDocument();
+      expect((await layoutJson()).template.components[0]).toMatchObject({ zones: { basis: 'value' } });
+    });
+
+    it('edits each zone’s name, colour and bound, adds and removes zones, and resets them', async () => {
+      await fresh();
+      expect(field('Zone 1 name').value).toBe('Recovery');
+      fireEvent.change(field('Zone 1 name'), { target: { value: 'Easy' } });
+      fireEvent.change(field('Zone 2 colour'), { target: { value: '#123456' } });
+      fireEvent.change(field('Zone 3 starts at (%)'), { target: { value: '72' } });
+      let zones = ((await layoutJson()).template.components[0] as { zones: { zones: { name: string; color: string; from: number }[] } }).zones.zones;
+      expect(zones[0]).toMatchObject({ name: 'Easy', from: 50 });
+      expect(zones[1]!.color).toBe('#123456');
+      expect(zones[2]!.from).toBe(72);
+
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Add a zone' }));
+      expect(field('Zone 6 name').value).toBe('Zone 6');
+      expect(field('Zone 6 starts at (%)').value).toBe('100');
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Remove the last zone' }));
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Remove the last zone' }));
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Remove the last zone' }));
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Remove the last zone' }));
+      expect(within(editor()).getByRole('button', { name: 'Remove the last zone' })).toBeDisabled();
+      zones = ((await layoutJson()).template.components[0] as { zones: { zones: typeof zones } }).zones.zones;
+      expect(zones.map((zone) => zone.name)).toEqual(['Easy', 'Endurance']);
+      for (let i = 0; i < 8; i += 1) await userEvent.click(within(editor()).getByRole('button', { name: 'Add a zone' }));
+      expect(within(editor()).getByRole('button', { name: 'Add a zone' })).toBeDisabled();
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Reset the zones' }));
+      expect(field('Zone 1 name').value).toBe('Recovery');
+      expect(within(editor()).queryByLabelText('Zone 6 name')).not.toBeInTheDocument();
+    });
+
+    it('keeps a typed bound above the zone before it, and gives every control a name', async () => {
+      await fresh();
+      fireEvent.change(field('Zone 3 starts at (%)'), { target: { value: '10' } });
+      const from = (((await layoutJson()).template.components[0] as { zones: { zones: { from: number }[] } }).zones.zones.map((zone) => zone.from));
+      expect(from).toEqual([50, 60, 61, 80, 90]);
+      // Each zone is a group of named fields.
+      expect(within(editor()).getByRole('group', { name: 'Zone 4' })).toContainElement(field('Zone 4 name'));
+      for (const control of within(editor()).getAllByRole('textbox')) expect(control).toHaveAccessibleName();
+      for (const control of within(editor()).getAllByRole('spinbutton')) expect(control).toHaveAccessibleName();
+      for (const control of within(editor()).getAllByRole('combobox')) expect(control).toHaveAccessibleName();
+      for (const control of within(editor()).getAllByRole('checkbox')) expect(control).toHaveAccessibleName();
+    });
+
+    it('sets the shape and what is shown, and the smoothing, and keeps them in the layout', async () => {
+      await fresh();
+      await userEvent.selectOptions(within(editor()).getByLabelText('Shape'), 'arc');
+      await userEvent.click(within(editor()).getByLabelText('The zone’s name'));
+      await userEvent.click(within(editor()).getByLabelText('The time in each zone so far'));
+      fireEvent.change(field('Smoothing (s)'), { target: { value: '4' } });
+      expect((await layoutJson()).template.components[0]).toMatchObject({
+        zones: { shape: 'arc', show: { number: true, name: false, value: true, timeInZone: true } },
+        smoothing: { windowSeconds: 4 },
+      });
+    });
+
+    it('offers the usual position, size, colours, text sizes and halo', async () => {
+      await fresh();
+      for (const label of ['From the left (%)', 'From the top (%)', 'Width (%)', 'Height (%)', 'Value colour', 'Label colour', 'Accent colour', 'Background (%)', 'Label size (%)', 'Value size (%)', 'Spacing (% of width)', 'Alignment', 'Halo colour', 'Halo (%)']) {
+        expect(within(editor()).getByLabelText(label), label).toBeInTheDocument();
+      }
+    });
+
+    it('switches the source, giving it its own zones and smoothing', async () => {
+      await fresh();
+      await userEvent.selectOptions(within(editor()).getByLabelText('Zones of'), 'power');
+      expect(editor()).toHaveAccessibleName('Selected: Power zones');
+      expect(field('Zone 7 name').value).toBe('Neuromuscular');
+      expect(field('Smoothing (s)').value).toBe('3');
+      expect((await layoutJson()).template.components[0]).toMatchObject({ source: { metric: 'power' }, zones: { source: 'power' } });
+    });
+
+    it('leaves the reader’s figures out of a saved layout unless the box is ticked, which it is not by default', async () => {
+      await fresh();
+      fireEvent.change(field('My maximum heart rate (bpm)'), { target: { value: '187' } });
+      const box = within(region()).getByLabelText('Include my maximum heart rate and FTP') as HTMLInputElement;
+      expect(box.checked).toBe(false);
+      const plain = await layoutJson();
+      expect(JSON.stringify(plain)).not.toContain('187');
+      expect(JSON.stringify(plain)).not.toContain('personal');
+      expect(within(region()).getByRole('status', { name: 'Layout file result' })).toHaveTextContent('Your maximum heart rate and FTP are not in it.');
+      const included = await saveWithFigures();
+      expect(included.template.components[0]).toMatchObject({ zones: { personal: { maxHeartRate: 187 } } });
+      expect(within(region()).getByRole('status', { name: 'Layout file result' })).toHaveTextContent('It holds the maximum heart rate and FTP you asked to include');
+    });
+
+    it('shows the box only when there are zones to hold the figures', async () => {
+      setup(athlete());
+      expect(within(region()).queryByLabelText('Include my maximum heart rate and FTP')).not.toBeInTheDocument();
+      await add('Speed');
+      expect(within(region()).queryByLabelText('Include my maximum heart rate and FTP')).not.toBeInTheDocument();
+      await add('Heart rate zones');
+      expect(within(region()).getByLabelText('Include my maximum heart rate and FTP')).toBeInTheDocument();
+    });
+
+    it('opens a layout with figures in it, offers to use them, and uses them only when told to', async () => {
+      await fresh();
+      fireEvent.change(field('My maximum heart rate (bpm)'), { target: { value: '187' } });
+      const json = await saveWithFigures();
+      usePersonalStore.getState().clear();
+      await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'shared.json', { type: 'application/json' }));
+      expect(await within(region()).findByText('Opened the layout in shared.json.')).toBeInTheDocument();
+      // Not taken on its own: the session stays as the reader had it.
+      expect(usePersonalStore.getState().personal).toEqual({});
+      const offer = within(region()).getByRole('group', { name: 'Figures in this layout' });
+      expect(offer).toHaveTextContent('a maximum heart rate of 187 bpm');
+      await userEvent.click(within(offer).getByRole('button', { name: 'Use the figures in this layout' }));
+      expect(usePersonalStore.getState().personal).toEqual({ maxHeartRate: 187 });
+      expect(within(region()).queryByRole('group', { name: 'Figures in this layout' })).not.toBeInTheDocument();
+    });
+
+    it('opens a layout without figures as it opens any, with nothing to offer', async () => {
+      await fresh();
+      const json = await layoutJson();
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'plain.json', { type: 'application/json' }));
+      expect(await within(region()).findByText('Opened the layout in plain.json.')).toBeInTheDocument();
+      expect(within(region()).queryByRole('group', { name: 'Figures in this layout' })).not.toBeInTheDocument();
+    });
+
+    it('a layout that held the figures does not keep them when saved again unticked', async () => {
+      await fresh();
+      fireEvent.change(field('My maximum heart rate (bpm)'), { target: { value: '187' } });
+      const json = await saveWithFigures();
+      usePersonalStore.getState().clear();
+      await userEvent.click(within(region()).getByLabelText('Include my maximum heart rate and FTP'));
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'shared.json', { type: 'application/json' }));
+      await within(region()).findByText('Opened the layout in shared.json.');
+      expect(JSON.stringify(await layoutJson())).not.toContain('187');
+    });
+
+    it('opens a layout whose zones cannot be read, with the component kept and the defaults offered', async () => {
+      await fresh();
+      const json = await layoutJson();
+      (json.template.components[0] as { zones: { zones: unknown[] } }).zones.zones = [];
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'broken.json', { type: 'application/json' }));
+      expect(await within(region()).findByText('Opened the layout in broken.json.')).toBeInTheDocument();
+      expect(names()).toEqual(['Heart rate zones']);
+      await userEvent.click(within(elements()!).getByRole('button', { name: 'Heart rate zones' }));
+      expect(within(editor()).getByRole('status')).toHaveTextContent('These zones could not be read');
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Use the default zones' }));
+      expect(field('Zone 1 name').value).toBe('Recovery');
+    });
+
+    it('leaves zones out of a layout opened in a still, such as the map image, and says so', async () => {
+      const activity = athlete();
+      const host = { title: 'Figures', intro: 'x', frame: { width: 1280, height: 720 }, timeline: buildOverlayTimeline(activity, { video: { durationSeconds: 60 } }), seconds: 0, onSeek: () => {}, onComponentsChange: () => {}, still: true };
+      render(<CustomCanvas activity={activity} offsetSeconds={0} units="metric" readerTimeZone="UTC" host={host} />);
+      expect(within(screen.getByRole('region', { name: 'Figures' })).queryByRole('option', { name: 'Heart rate zones' })).not.toBeInTheDocument();
+      const json = { kind: 'opentrack-overlay-layout', version: 1, image: { width: 1280, height: 720 }, template: { version: 2, name: 'x', style: {}, components: [{ id: 'z', type: 'zones', visible: true, rect: { x: 0, y: 0, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, source: { kind: 'metric', metric: 'heartRate' } }] } };
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'z.json', { type: 'application/json' }));
+      expect(await screen.findByText('Zones were left out: this picture shows no moment of the activity.')).toBeInTheDocument();
+    });
+
+    it('stores nothing on the device: the figures are in memory for the session, and not in any storage', async () => {
+      await fresh();
+      fireEvent.change(field('My maximum heart rate (bpm)'), { target: { value: '187' } });
+      await saveWithFigures();
+      expect(usePersonalStore.getState().personal).toEqual({ maxHeartRate: 187 });
+      const everything = [...Object.keys(localStorage), ...Object.keys(sessionStorage)].map((key) => `${key}=${localStorage.getItem(key) ?? sessionStorage.getItem(key)}`);
+      expect(everything.filter((entry) => !entry.startsWith('opentrack-viewer:theme'))).toEqual([]);
+      expect(JSON.stringify(everything)).not.toContain('187');
+    });
   });
 });

@@ -18,7 +18,9 @@ import {
   type OverlayRect,
   type OverlayTemplate,
   type ShapeKind,
+  type ZonesSource,
 } from './template';
+import { DEFAULT_ZONES_SMOOTHING_SECONDS, defaultZonesSetting } from './zones';
 import { dataSourceId, type OverlayMetricKey, type OverlayTimeline } from './timeline';
 import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
 import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
@@ -74,6 +76,9 @@ export type CanvasElementKey =
   | `metric:${OverlayMetricKey}`
   | 'gauge:speed'
   | 'gauge:heartRate'
+  /** AV-1018. A zones component, with its source's default zones. */
+  | 'zones:heartRate'
+  | 'zones:power'
   | 'route'
   | 'progress'
   | 'elevationProfile'
@@ -140,6 +145,9 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
       available: !timeline.unavailable && timeline.hasRoute,
       ...(!timeline.unavailable && timeline.hasRoute ? {} : { reason: NO_ROUTE }),
     },
+    // AV-1018. Zones, in the sport's own defaults; their reference is asked for in the editor.
+    { key: 'zones:heartRate', label: 'Heart rate zones', group: 'Live figures', available: has('metric:heartRate'), ...(has('metric:heartRate') ? {} : { reason: METRIC_MISSING.heartRate }) },
+    { key: 'zones:power', label: 'Power zones', group: 'Live figures', available: has('metric:power'), ...(has('metric:power') ? {} : { reason: METRIC_MISSING.power }) },
     { key: 'progress', label: 'Progress bar', group: 'Live figures', available: !timeline.unavailable },
     {
       key: 'elevationProfile',
@@ -216,6 +224,9 @@ export function newCanvasComponent(
     const component = newStillComponent(template, key.slice('still:'.length) as never, size);
     return { ...component, style: { ...component.style, fontScale: 1.5 } };
   }
+  if (key === 'zones:heartRate' || key === 'zones:power') {
+    return newZonesComponent(template, key === 'zones:heartRate' ? 'heartRate' : 'power', size);
+  }
   if (key.startsWith('shape:')) {
     const kind = key.slice('shape:'.length) as ShapeKind;
     return {
@@ -258,6 +269,32 @@ export function newCanvasComponent(
     rect: at(tileW, tileH),
     source: { kind: 'metric', metric },
   };
+}
+
+/**
+ * AV-1018 (TD-086). A zones component for a source: its default zones as a
+ * horizontal bar with the zone and the value above it, power smoothed over 3 s.
+ * It starts a wide strip in the top-left, sized for the header and the bar.
+ */
+export function newZonesComponent(
+  template: OverlayTemplate,
+  source: ZonesSource,
+  size: { width: number; height: number },
+): OverlayComponent {
+  const aspect = size.width / size.height;
+  const component: OverlayComponent = {
+    id: freshComponentId(template, `${source === 'heartRate' ? 'heart-rate' : 'power'}-zones`),
+    type: 'zones',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width: 0.34, height: Math.min(0.5, 0.09 * aspect) }),
+    source: { kind: 'metric', metric: source },
+    zones: defaultZonesSetting(source),
+  };
+  const seconds = DEFAULT_ZONES_SMOOTHING_SECONDS[source];
+  if (seconds > 0) component.smoothing = { windowSeconds: seconds };
+  return component;
 }
 
 /**

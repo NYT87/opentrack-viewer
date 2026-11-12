@@ -15,6 +15,8 @@ import { planMapVideoExport, posterFileName, type MapVideoFormat } from '../mapV
 import type { MapVideoExportProgress } from '../mapVideo/export/renderMapVideo';
 import { formatVideoTime } from '../mapVideo/timing';
 import { download } from './ExportPanel';
+import { usePersonalStore } from '../state/personalStore';
+import type { PersonalFigures } from '../overlay/template';
 
 export interface MapVideoExportPanelProps {
   activity: Activity;
@@ -81,7 +83,7 @@ interface Support {
 type Phase =
   | { status: 'idle' }
   | { status: 'running'; progress: MapVideoExportProgress }
-  | { status: 'done'; output: ExportOutput; url: string; fileName: string; notes: string[]; settings: MapVideoSettings; model: MapVideoModel }
+  | { status: 'done'; output: ExportOutput; url: string; fileName: string; notes: string[]; settings: MapVideoSettings; model: MapVideoModel; personal: PersonalFigures }
   | { status: 'stopped' }
   | { status: 'discarded' }
   | { status: 'error'; message: string };
@@ -174,8 +176,9 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
   const planProblem = plan && 'problem' in plan ? plan.problem : undefined;
   const keyMissing = settings.basemap.source === 'maptiler' && !maptilerKey.trim();
   const running = phase.status === 'running';
-  const stale = phase.status === 'done' && (phase.settings !== settings || phase.model !== model);
-  const input = { activity, model, settings, units, maptilerKey, photoImages };
+  const personal = usePersonalStore((state) => state.personal);
+  const stale = phase.status === 'done' && (phase.settings !== settings || phase.model !== model || phase.personal !== personal);
+  const input = { activity, model, settings, units, maptilerKey, photoImages, personal };
 
   const begin = async () => {
     if (!plan || 'problem' in plan) return;
@@ -208,7 +211,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
         return;
       }
       output.current = result;
-      setPhase({ status: 'done', output: result, url: URL.createObjectURL(result.file), fileName: plan.fileName, notes: [...notes, ...(result.notes ?? [])], settings, model });
+      setPhase({ status: 'done', output: result, url: URL.createObjectURL(result.file), fileName: plan.fileName, notes: [...notes, ...(result.notes ?? [])], settings, model, personal });
     } catch (error) {
       if (controller.current !== active) return;
       if (isOverlayExportError(error) && error.code === 'cancelled') setPhase({ status: 'stopped' });

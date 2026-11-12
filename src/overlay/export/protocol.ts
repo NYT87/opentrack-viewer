@@ -1,7 +1,7 @@
 import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import type { OverlayExportErrorCode } from './errors';
-import type { OverlayTemplate } from '../template';
+import type { OverlayTemplate, PersonalFigures } from '../template';
 
 /** Everything the worker needs, structured-cloneable: data, never functions. */
 export interface ExportRequest {
@@ -18,6 +18,12 @@ export interface ExportRequest {
   units: UnitSystem;
   template: OverlayTemplate;
   activity: Activity;
+  /**
+   * AV-1018 (TD-086). The reader's own maximum heart rate and FTP for a zones
+   * component, from the session. They go to the worker with the request and
+   * nowhere else; the worker keeps nothing.
+   */
+  personal?: PersonalFigures;
   /**
    * Chosen by the page, so the page can delete the file even if the worker is
    * stopped mid-write and never reports it.
@@ -47,6 +53,8 @@ export interface BurnRequest {
   units: UnitSystem;
   template: OverlayTemplate;
   activity: Activity;
+  /** AV-1018 (TD-086). As in `ExportRequest`. */
+  personal?: PersonalFigures;
   archiveName: string;
 }
 

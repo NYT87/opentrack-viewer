@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type Request } from '@playwright
 import { RIDE_PATH, fetchBlobBytes } from './helpers/overlayFixtures';
 import { decodePng, type DecodedPng } from './helpers/png';
 import { readZip } from '../src/test/helpers/zipReader';
+import { defaultZones } from '../src/overlay/zones';
 
 /**
  * AV-1011. The custom canvas in a real browser: a resolution chosen, a shape
@@ -250,4 +251,81 @@ test('a predefined power figure averaged over 3 s reads, in an exported frame, a
   // The same elsewhere in the ride, and the frame before it is the average a tenth earlier.
   expect(smoothed(45).equals(plain(43.5))).toBe(true);
   expect(smoothed(20).equals(plain(18.5))).toBe(true);
+});
+
+test('zones draw the zone the ride is in, in its colour, once the reader has given a figure: read from exported frames (AV-1018)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');
+  await expect(canvas.getByRole('group', { name: /^Canvas preview, 1280 by 720 pixels/ })).toBeVisible();
+  const preview = canvas.getByTestId('canvas-preview');
+  const previewAlpha = () =>
+    preview.evaluate((element: HTMLCanvasElement) => {
+      const data = element.getContext('2d')!.getImageData(0, 0, element.width, element.height).data;
+      let drawn = 0;
+      for (let i = 3; i < data.length; i += 4) if (data[i]! > 0) drawn += 1;
+      return drawn;
+    });
+
+  // Heart rate zones, top left, on a clear background. They need the maximum heart rate, and say so.
+  await add(canvas, 'Heart rate zones');
+  await canvas.getByLabel('Background (%)').fill('0');
+  await canvas.getByRole('button', { name: 'Snap to top left' }).click();
+  const heartBox = await rectOf(canvas);
+  await expect(canvas.getByRole('status').filter({ hasText: 'Enter your maximum heart rate to draw these zones' })).toBeVisible();
+  // (The preview outlines the selected element, which is all that is drawn of it yet.)
+  const outlineOnly = await previewAlpha();
+  // The activity's own highest is offered, as that; the reader then types their own.
+  await canvas.getByRole('button', { name: 'Use this activity’s highest: 160 bpm' }).click();
+  await expect(canvas.getByLabel('My maximum heart rate (bpm)')).toHaveValue('160');
+  await canvas.getByLabel('My maximum heart rate (bpm)').fill('200');
+  await expect(canvas.getByRole('status').filter({ hasText: 'Enter your maximum heart rate' })).toHaveCount(0);
+  await expect.poll(previewAlpha).toBeGreaterThan(outlineOnly + 500);
+
+  // Power zones, bottom right, against an FTP of 300 W.
+  await add(canvas, 'Power zones');
+  await canvas.getByLabel('Background (%)').fill('0');
+  await canvas.getByRole('button', { name: 'Snap to bottom right' }).click();
+  const powerBox = await rectOf(canvas);
+  await expect(canvas.getByRole('status').filter({ hasText: 'Enter your FTP to draw these zones' })).toBeVisible();
+  await canvas.getByLabel('My FTP (W)').fill('300');
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-1280x720-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+
+  const hex = (color: string) => [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16));
+  const colors = (source: 'heartRate' | 'power') => defaultZones(source).map((zone) => hex(zone.color));
+  /** How many pixels in a box are exactly this colour, fully opaque: the current zone's segment (the others are dimmed). */
+  const solid = (png: DecodedPng, box: { x: number; y: number; width: number; height: number }, [r, g, b]: number[]) => {
+    let found = 0;
+    for (let y = Math.floor(box.y * png.height); y < Math.ceil((box.y + box.height) * png.height); y += 1) {
+      for (let x = Math.floor(box.x * png.width); x < Math.ceil((box.x + box.width) * png.width); x += 1) {
+        const at = (y * png.width + x) * 4;
+        if (png.pixels[at] === r && png.pixels[at + 1] === g && png.pixels[at + 2] === b && png.pixels[at + 3] === 255) found += 1;
+      }
+    }
+    return found;
+  };
+  // Heart rate is 100 + t bpm of a maximum of 200 (zones from 100, 120, 140, 160, 180), power 150 + 2t W against 300 W
+  // (zones from 0, 168, 228, 273, ...), smoothed over 3 s: the zone follows the ride, frame by frame.
+  const expected: [number, number, number][] = [
+    [0, 0, 0],
+    [300, 1, 1],
+    [500, 2, 2],
+  ];
+  for (const [index, heart, power] of expected) {
+    const png = decodePng(Buffer.from(frames[index]!.data));
+    for (const [source, box, current] of [['heartRate', heartBox, heart], ['power', powerBox, power]] as const) {
+      colors(source).forEach((color, zone) => {
+        const count = solid(png, box, color);
+        if (zone === current) expect(count, `${source} frame ${index}: zone ${zone + 1} is current`).toBeGreaterThan(200);
+        else expect(count, `${source} frame ${index}: zone ${zone + 1} is not`).toBe(0);
+      });
+    }
+    // Transparent where nothing was placed.
+    expect(pixel(png, 640, 360)[3]).toBe(0);
+  }
 });

@@ -8,6 +8,7 @@ import { DEFAULT_MAP_IMAGE_SETTINGS, MAP_IMAGE_LIMITS, MAP_IMAGE_SIZE_PRESETS, m
 import { MAP_VIDEO_LIMITS, type MapVideoColorBy } from '../mapVideo/project';
 import { colorByChoices } from '../mapVideo/style';
 import type { RenderWaiting } from '../mapVideo/export/renderMapVideo';
+import { usePersonalStore } from '../state/personalStore';
 import { canvasTemplate, type CanvasDraft } from '../overlay/customCanvas';
 import { OverlayExportError } from '../overlay/export/errors';
 import { measureText } from '../overlay/measureText';
@@ -73,6 +74,7 @@ function Group({ legend, children }: { legend: string; children: ReactNode }) {
  * request through the export's queue; nothing is uploaded.
  */
 export function MapImagePanel({ activity, units, readerTimeZone, render, save = downloadBlob }: MapImagePanelProps) {
+  const personal = usePersonalStore((state) => state.personal);
   const ids = { layout: useId(), size: useId(), colorBy: useId(), routeColor: useId(), casingColor: useId(), background: useId(), heading: useId() };
   const stored = useMapImageStore((state) => state.settings);
   const basemapChosen = useMapImageStore((state) => state.basemapChosen);
@@ -139,7 +141,7 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
     try {
       const renderImage = render ?? (await import('../mapImage/render')).renderMapImage;
       const { blob, requests } = await renderImage(
-        { activity, settings, units, readerTimeZone },
+        { activity, settings, units, readerTimeZone, personal },
         { signal: controller.signal, onWaiting: (waiting) => setPhase({ status: 'rendering', waiting }) },
       );
       const fileName = `map-image.${settings.format === 'jpeg' ? 'jpg' : 'png'}`;
