@@ -3,6 +3,7 @@ import { toValidCoordinate } from '../domain/activity';
 import { deriveSpeed } from '../domain/series';
 import { computeDistance, elevationClimb } from '../domain/stats';
 import { zoneIndex, type ZoneTimes } from './zones';
+import { circularMeanDegrees, deriveGrade, deriveHeading, lerpDegrees } from './derivedSeries';
 
 /**
  * AV-1003. The overlay timeline: video time in, normalized activity values out.
@@ -32,7 +33,9 @@ export type OverlayMetricKey =
   /** AV-1011. Time spent moving so far, by the viewer's own rule (TD-058). */
   | 'moving'
   /** AV-1016. Elevation gained so far, by the summary's own rule (TD-084). */
-  | 'climb';
+  | 'climb'
+  /** AV-1019. The direction of travel in degrees, 0 north, 90 east (TD-087). */
+  | 'heading';
 
 export const OVERLAY_METRIC_KEYS: readonly OverlayMetricKey[] = [
   'speed',
@@ -48,6 +51,7 @@ export const OVERLAY_METRIC_KEYS: readonly OverlayMetricKey[] = [
   'elapsed',
   'moving',
   'climb',
+  'heading',
 ];
 
 /** Where a value comes from: a built-in metric, or a named camera stream. */
@@ -129,6 +133,20 @@ export interface OverlayTimeline {
   sensorLabels: ReadonlyMap<string, OverlaySensorInfo>;
   sampleAt: (videoTimeSeconds: number) => OverlaySample | undefined;
   /**
+   * AV-1019 (TD-087). The lowest and highest value a source takes across the
+   * whole activity, by its own readings (moving pace only, for pace): what a dial's
+   * default range is rounded from. `undefined` for a source with no values; absent
+   * on a timeline that cannot sample.
+   */
+  rangeOf?: (source: OverlayDataSource) => { min: number; max: number } | undefined;
+  /**
+   * AV-1019 (TD-087). When the activity's first timed point was, in milliseconds
+   * since the epoch: `activityElapsedSeconds` counts from here, so a chart on a
+   * time axis can place its cursor on the activity's own clock. Absent on a
+   * timeline that cannot sample.
+   */
+  activityStartMs?: number;
+  /**
    * AV-1018 (TD-086). The seconds spent moving in each zone, up to a moment:
    * one pass over the activity's points, counting each step the way moving time
    * is counted (TD-058), in the zone of the unsmoothed value at the step's
@@ -194,6 +212,10 @@ interface DerivedStreams {
   moving: (number | undefined)[];
   /** AV-1016. Elevation gained up to each point, by point index; see `elevationClimb`. */
   climb: (number | undefined)[];
+  /** AV-1019. The recorded grade where there is one, else the derived one; see `deriveGrade`. */
+  grade: (number | undefined)[];
+  /** AV-1019. The bearing of the last 20 m of the route; see `deriveHeading`. */
+  heading: (number | undefined)[];
 }
 
 /** A step is moving at or above this, as the stats count moving time (TD-058). */
@@ -233,7 +255,7 @@ function movingSoFar(
   return moving;
 }
 
-function metricReaders({ distance, speed, moving, climb }: DerivedStreams): Record<OverlayMetricKey, Reader> {
+function metricReaders({ distance, speed, moving, climb, grade, heading }: DerivedStreams): Record<OverlayMetricKey, Reader> {
   return {
     speed: ({ index }) => finite(speed[index]),
     // Pace is derived from the interpolated speed, not stored per point.
@@ -245,10 +267,12 @@ function metricReaders({ distance, speed, moving, climb }: DerivedStreams): Reco
     cyclingCadence: ({ point }) => finite(point.cyclingCadenceRpm),
     power: ({ point }) => finite(point.powerWatts),
     temperature: ({ point }) => finite(point.temperatureCelsius),
-    grade: ({ point }) => finite(point.gradePercent),
+    // AV-1019. The file's own grade where it has one, else the elevation over the last 50 m (TD-087).
+    grade: ({ index }) => finite(grade[index]),
     elapsed: ({ seconds }) => seconds,
     moving: ({ index }) => finite(moving[index]),
     climb: ({ index }) => finite(climb[index]),
+    heading: ({ index }) => finite(heading[index]),
   };
 }
 
@@ -270,6 +294,8 @@ export const SMOOTHING_LIMITS = { min: 0, max: 30 } as const;
 const SMOOTHING_STEP_SECONDS = 0.25;
 /** Totals so far: a running mean of a total is not a number the activity ever had. */
 const NEVER_SMOOTHED: readonly OverlayMetricKey[] = ['distance', 'elapsed', 'moving', 'climb'];
+/** AV-1019. A heading is an angle: its mean is the direction of the sum of its unit vectors, never the mean of its degrees. */
+const isHeading = (source: OverlayDataSource) => source.kind === 'metric' && source.metric === 'heading';
 
 /** Whether a source's value is a reading that can be averaged over a window. */
 export function canSmooth(source: OverlayDataSource | undefined): boolean {
@@ -292,18 +318,27 @@ export function smoothedValueAt(
   if (!(windowSeconds > 0) || !canSmooth(source)) return undefined;
   const window = Math.min(windowSeconds, SMOOTHING_LIMITS.max);
   const pace = source.kind === 'metric' && source.metric === 'pace';
+  const heading = isHeading(source);
   const id = pace ? 'metric:speed' : dataSourceId(source);
   const steps = Math.ceil(window / SMOOTHING_STEP_SECONDS);
   const step = window / steps;
   let sum = 0;
   let count = 0;
+  let sumSin = 0;
+  let sumCos = 0;
   for (let k = 0; k <= steps; k += 1) {
     const value = timeline.sampleAt(videoTimeSeconds - k * step)?.values[id];
     if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    if (heading) {
+      const radians = (value * Math.PI) / 180;
+      sumSin += Math.sin(radians);
+      sumCos += Math.cos(radians);
+    }
     sum += value;
     count += 1;
   }
   if (count === 0) return undefined;
+  if (heading) return circularMeanDegrees(sumSin, sumCos, count);
   const mean = sum / count;
   // A mean speed under the moving threshold is standing still: through a stop the mean decays towards 0, and
   // its reciprocal would read an hour a kilometre before it read 0 (AV-1016).
@@ -317,6 +352,78 @@ function lerpLongitude(a: number, b: number, fraction: number): number {
   else if (delta < -180) delta += 360;
   const value = a + delta * fraction;
   return value > 180 ? value - 360 : value < -180 ? value + 360 : value;
+}
+
+/**
+ * The activity's points that have a time, in time order (stably), each with its
+ * seconds from the first, and the first and last times in milliseconds; absent
+ * when none has one. Order is trusted from the parsers but not assumed.
+ */
+function timedPointsOf(activity: Activity): { points: TimedPoint[]; firstMs: number; lastMs: number } | undefined {
+  const timed = activity.points
+    .map((point, index) => ({ point, index, ms: point.time?.getTime() }))
+    .filter((entry): entry is { point: ActivityPoint; index: number; ms: number } => Number.isFinite(entry.ms))
+    .sort((a, b) => a.ms - b.ms || a.index - b.index);
+  if (timed.length === 0) return undefined;
+  const firstMs = (timed[0] as { ms: number }).ms;
+  const lastMs = (timed[timed.length - 1] as { ms: number }).ms;
+  return { points: timed.map(({ point, index, ms }) => ({ point, index, seconds: (ms - firstMs) / 1000 })), firstMs, lastMs };
+}
+
+/** Every stream the timeline reads that is derived from the points, by point index. */
+function deriveStreams(activity: Activity, points: TimedPoint[]): { derived: DerivedStreams; distance: (number | undefined)[] } {
+  const distance = computeDistance(activity.points).cumulativeMeters;
+  return {
+    distance,
+    derived: {
+      distance,
+      speed: deriveSpeed(activity),
+      moving: movingSoFar(points, distance, activity.points.length),
+      climb: elevationClimb(activity.points).gainSoFar,
+      grade: deriveGrade(activity.points, distance),
+      heading: deriveHeading(activity.points, distance),
+    },
+  };
+}
+
+/** Each built-in metric's reader, and then each charted camera stream's. */
+function sourceReaders(activity: Activity, derived: DerivedStreams): { id: string; read: Reader }[] {
+  const readers = metricReaders(derived);
+  const sources: { id: string; read: Reader }[] = OVERLAY_METRIC_KEYS.map((metric) => ({
+    id: dataSourceId({ kind: 'metric', metric }),
+    read: readers[metric],
+  }));
+  for (const stream of activity.sensorStreams ?? []) {
+    if (stream.display !== 'chart' || !stream.valuesByPoint) continue;
+    const values = stream.valuesByPoint;
+    sources.push({ id: dataSourceId({ kind: 'sensor', key: stream.key }), read: ({ index }) => finite(values[index]) });
+  }
+  return sources;
+}
+
+/**
+ * AV-1019 (TD-087). A source's value at each of an activity's points, by point
+ * index, read as the timeline reads it (the derived speed, grade and heading
+ * included): what a chart draws its line from. Pace is read for the moving
+ * points only. Absent for a source the activity has no values of.
+ */
+export function pointValuesOf(activity: Activity, source: OverlayDataSource): (number | undefined)[] | undefined {
+  const placed = timedPointsOf(activity);
+  if (!placed) return undefined;
+  const pace = source.kind === 'metric' && source.metric === 'pace';
+  const wanted = pace ? 'metric:speed' : dataSourceId(source);
+  const read = sourceReaders(activity, deriveStreams(activity, placed.points).derived).find((entry) => entry.id === wanted)?.read;
+  if (!read) return undefined;
+  const values: (number | undefined)[] = new Array(activity.points.length).fill(undefined);
+  let any = false;
+  for (const timedPoint of placed.points) {
+    let value = read(timedPoint);
+    if (pace && value !== undefined) value = value >= MOVING_SPEED_THRESHOLD_MPS ? 1000 / value : undefined;
+    if (value === undefined) continue;
+    values[timedPoint.index] = value;
+    any = true;
+  }
+  return any ? values : undefined;
 }
 
 /**
@@ -347,23 +454,9 @@ export function buildOverlayTimeline(
 
   if (!activity) return empty('no_activity');
 
-  // Points without a usable time cannot be placed against a clock. Order is
-  // trusted from the parsers but not assumed: sort by time, stably.
-  const timed = activity.points
-    .map((point, index) => ({ point, index, ms: point.time?.getTime() }))
-    .filter((entry): entry is { point: ActivityPoint; index: number; ms: number } =>
-      Number.isFinite(entry.ms),
-    )
-    .sort((a, b) => a.ms - b.ms || a.index - b.index);
-  if (timed.length === 0) return empty('no_timestamps');
-
-  const firstMs = (timed[0] as { ms: number }).ms;
-  const lastMs = (timed[timed.length - 1] as { ms: number }).ms;
-  const points: TimedPoint[] = timed.map(({ point, index, ms }) => ({
-    point,
-    index,
-    seconds: (ms - firstMs) / 1000,
-  }));
+  const placed = timedPointsOf(activity);
+  if (!placed) return empty('no_timestamps');
+  const { points, firstMs, lastMs } = placed;
   const spanSeconds = (lastMs - firstMs) / 1000;
 
   // Video time `t` is `anchor + t` on the wall clock; the activity then shows
@@ -373,24 +466,13 @@ export function buildOverlayTimeline(
     typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? (anchorMs - firstMs) / 1000 : 0;
   const toActivitySeconds = (videoTime: number) => anchorSeconds + videoTime - offsetSeconds;
 
-  const distance = computeDistance(activity.points).cumulativeMeters;
-  const derived: DerivedStreams = {
-    distance,
-    speed: deriveSpeed(activity),
-    moving: movingSoFar(points, distance, activity.points.length),
-    climb: elevationClimb(activity.points).gainSoFar,
-  };
-  const readers = metricReaders(derived);
-  const sources: { id: string; read: Reader }[] = OVERLAY_METRIC_KEYS.map((metric) => ({
-    id: dataSourceId({ kind: 'metric', metric }),
-    read: readers[metric],
-  }));
+  const { derived, distance } = deriveStreams(activity, points);
+  const sources = sourceReaders(activity, derived);
   const sensorLabels = new Map<string, OverlaySensorInfo>();
   for (const stream of activity.sensorStreams ?? []) {
     if (stream.display !== 'chart' || !stream.valuesByPoint) continue;
     const id = dataSourceId({ kind: 'sensor', key: stream.key });
     const values = stream.valuesByPoint;
-    sources.push({ id, read: ({ index }) => finite(values[index]) });
     // By iteration: spreading a long recording into Math.min would overflow.
     let min = Infinity;
     let max = -Infinity;
@@ -475,7 +557,8 @@ export function buildOverlayTimeline(
       const vb = read(b);
       let value: number | undefined;
       if (exact) value = va;
-      else if (bridges && va !== undefined && vb !== undefined) value = va + (vb - va) * fraction;
+      // A heading turns the short way round: 350 to 10 passes through north, not through south (AV-1019).
+      else if (bridges && va !== undefined && vb !== undefined) value = id === 'metric:heading' ? lerpDegrees(va, vb, fraction) : va + (vb - va) * fraction;
       else if (stopped) value = va;
       else value = undefined;
       if (value !== undefined) values[id] = value;
@@ -582,6 +665,36 @@ export function buildOverlayTimeline(
     };
   };
 
+  /*
+   * AV-1019 (TD-087). The range of a source across the whole activity, found once and kept: a dial's default range
+   * is rounded from it. Pace is taken over the moving points only, so a stop's slow speed does not make the
+   * slowest pace an hour a kilometre. Found by iteration, never by spreading a long recording into Math.min.
+   */
+  const ranges = new Map<string, { min: number; max: number } | undefined>();
+  const rangeOf = (source: OverlayDataSource) => {
+    const id = dataSourceId(source);
+    if (ranges.has(id)) return ranges.get(id);
+    const pace = id === 'metric:pace';
+    const read = sources.find((entry) => entry.id === (pace ? 'metric:speed' : id))?.read;
+    let min = Infinity;
+    let max = -Infinity;
+    if (read) {
+      for (const timedPoint of points) {
+        let value = read(timedPoint);
+        if (value === undefined) continue;
+        if (pace) {
+          if (value < MOVING_SPEED_THRESHOLD_MPS) continue;
+          value = 1000 / value;
+        }
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
+    }
+    const range = min <= max ? { min, max } : undefined;
+    ranges.set(id, range);
+    return range;
+  };
+
   const traceId = available.has('metric:speed')
     ? 'metric:speed'
     : available.has('metric:elevation')
@@ -623,6 +736,8 @@ export function buildOverlayTimeline(
     ...(distanceSpan > 0 && endDistance !== undefined ? { distanceTotalMeters: endDistance } : {}),
     sensorLabels,
     sampleAt,
+    rangeOf,
+    activityStartMs: firstMs,
     zoneTimes,
     alignment,
   };

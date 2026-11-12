@@ -24,6 +24,7 @@ export const METRIC_MISSING: Record<OverlayMetricKey, string> = {
   cyclingCadence: 'This activity has no cycling cadence.',
   runningCadence: 'This activity has no running cadence.',
   temperature: 'This activity has no temperature.',
-  grade: 'This activity has no gradient.',
+  grade: 'This activity has no gradient: it needs a recorded grade, or elevation and 50 m of distance.',
   climb: ELEVATION_MISSING,
+  heading: 'This activity has no heading: it needs positions, and 20 m of movement.',
 };

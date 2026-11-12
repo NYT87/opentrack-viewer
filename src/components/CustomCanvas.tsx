@@ -51,6 +51,7 @@ import {
   DEFAULT_OVERLAY_STYLE,
   DEFAULT_SHAPE,
   FIGURE_GAP_MAX,
+  MOMENT_COMPONENT_TYPES,
   SHAPE_KINDS,
   STILL_IMAGE_COMPONENT_TYPES,
   SUMMARY_STAT_KEYS,
@@ -98,6 +99,8 @@ import {
   DEFAULT_ZONES_SMOOTHING_SECONDS,
 } from '../overlay/zones';
 import { ElementRows } from './ElementRows';
+import { ColorField } from './ColorField';
+import { ChartEditor, CompassEditor, DialEditor, GradientEditor } from './MomentEditors';
 
 /** The long side of the preview, in pixels: the overlay is drawn at this size by the export's renderer. */
 const PREVIEW_LONG_SIDE = 720;
@@ -265,7 +268,7 @@ export function CustomCanvas({
     () =>
       still
         ? canvasElementChoices(timeline, stillContext)
-            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && !choice.key.startsWith('predefined:') && !choice.key.startsWith('zones:') && choice.key !== 'progress')
+            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && !choice.key.startsWith('predefined:') && !choice.key.startsWith('zones:') && !choice.key.startsWith('dial:') && !choice.key.startsWith('chart:') && choice.key !== 'gradient' && choice.key !== 'compass' && choice.key !== 'progress')
             .map((choice) => (choice.group === 'Live figures' ? { ...choice, group: 'Along the route' as const } : choice))
         : canvasElementChoices(timeline, stillContext),
     [timeline, stillContext, still],
@@ -327,11 +330,13 @@ export function CustomCanvas({
     }
     const fitted = fitCanvasSize(parsed.layout.width, parsed.layout.height);
     setSize(String(fitted.width), String(fitted.height));
-    // A still (the map image) shows no moment, so a layout's zones are left out of it, as the still image leaves out a video's figures.
-    const opened = host?.still ? parsed.layout.template.components.filter((component) => component.type !== 'zones') : parsed.layout.template.components;
+    // A still (the map image) shows no moment, so what only means something at one (zones, dials, charts, the gradient indicator and the compass: AV-1018, AV-1019) is left out of it, as the still image leaves out a video's figures.
+    const opened = host?.still
+      ? parsed.layout.template.components.filter((component) => !MOMENT_COMPONENT_TYPES.includes(component.type))
+      : parsed.layout.template.components;
     commit({ components: opened, selectedId: undefined });
     const warnings = [...parsed.warnings];
-    if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones were left out: this picture shows no moment of the activity.');
+    if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones, dials, charts, gradient indicators and compasses were left out: this picture shows no moment of the activity.');
     if (fitted.width !== parsed.layout.width || fitted.height !== parsed.layout.height) {
       warnings.push(
         `The layout was made at ${parsed.layout.width} × ${parsed.layout.height}; the canvas is ${fitted.width} × ${fitted.height}, the nearest size it can be. The layout keeps its proportions.`,
@@ -616,7 +621,7 @@ export function describeCanvasComponent(component: OverlayComponent): string {
     const name = component.display?.label?.trim();
     if (name) return name;
     if (source?.kind === 'metric') {
-      const base = { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade', climb: 'Climb so far' }[source.metric];
+      const base = { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade', climb: 'Climb so far', heading: 'Heading' }[source.metric];
       return component.type === 'gauge' ? `${base} gauge` : base;
     }
     return source?.kind === 'sensor' ? source.key : 'Figure';
@@ -626,6 +631,16 @@ export function describeCanvasComponent(component: OverlayComponent): string {
     const power = component.zones ? component.zones.source === 'power' : component.source?.kind === 'metric' && component.source.metric === 'power';
     return name || (power ? 'Power zones' : 'Heart rate zones');
   }
+  // AV-1019. A dial and a chart are named for their figure, as a gauge is; a gradient indicator and a compass by what they are.
+  if (component.type === 'dial' || component.type === 'chart') {
+    const name = component.display?.label?.trim();
+    if (name) return name;
+    const source = component.source;
+    const base = source?.kind === 'metric' ? { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade', climb: 'Climb so far', heading: 'Heading' }[source.metric] : source?.kind === 'sensor' ? source.key : 'Figure';
+    return `${base} ${component.type}`;
+  }
+  if (component.type === 'gradient') return component.display?.label?.trim() || 'Gradient indicator';
+  if (component.type === 'compass') return component.display?.label?.trim() || 'Compass';
   if (component.type === 'routeInset') return 'Route with position';
   if (component.type === 'progress') return 'Progress bar';
   if (component.type === 'elevationProfile') return 'Elevation profile';
@@ -1065,7 +1080,11 @@ function ComponentEditor({
   const isData = component.type === 'text' || component.type === 'gauge';
   // AV-1018. Zones are laid out and styled as a figure is: label colour, sizes, spacing, alignment and halo.
   const isZones = component.type === 'zones';
-  const isFigureLike = isData || isZones;
+  // AV-1019. A dial, a chart, a gradient indicator and a compass are laid out and styled as a figure is, each with settings of its own.
+  const isMoment = component.type === 'dial' || component.type === 'chart' || component.type === 'gradient' || component.type === 'compass';
+  const isFigureLike = isData || isZones || isMoment;
+  // The text of a dial, a chart and a compass sits where the picture puts it; only a gradient indicator's follows the alignment.
+  const honoursAlign = !(component.type === 'dial' || component.type === 'chart' || component.type === 'compass');
   const isStill = STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
   const isLine = component.type === 'routeInset' || component.type === 'elevationProfile';
   const shape: OverlayShapeSetting | undefined = component.type === 'shape' ? (component.shape ?? DEFAULT_SHAPE) : undefined;
@@ -1092,7 +1111,7 @@ function ComponentEditor({
         return (laid.labelAdvance - laid.labelSize) / frame.width;
       })()
     : 0;
-  const numeric = component.source?.kind === 'metric' && !['pace', 'elapsed', 'moving'].includes(component.source.metric);
+  const numeric = component.source?.kind === 'metric' && !['pace', 'elapsed', 'moving', 'heading'].includes(component.source.metric);
 
   const smoothingField = canSmooth(component.source) && (
     <PercentField
@@ -1218,19 +1237,22 @@ function ComponentEditor({
         </>
       )}
 
-      {isData && (
+      {(isData || isMoment) && (
         <>
+          {component.type !== 'chart' && (
           <label className="overlay-controls__choice">
             <input type="checkbox" checked={figure?.showLabel !== false} onChange={(event) => setFigure({ showLabel: event.target.checked ? undefined : false })} />
             <span>Show the label</span>
           </label>
+          )}
+          {component.type !== 'chart' && (
           <div className="overlay-controls__field">
             <label htmlFor={`${id}-label`}>Label</label>
             <input
               id={`${id}-label`}
               className="input"
               type="text"
-              placeholder={describeCanvasComponent({ ...component, display: undefined }).replace(/ gauge$/, '')}
+              placeholder={component.type === 'gradient' ? 'Grade' : component.type === 'compass' ? 'Heading' : describeCanvasComponent({ ...component, display: undefined }).replace(/ (gauge|dial|chart)$/, '')}
               value={component.display?.label ?? ''}
               onChange={(event) => {
                 const label = sanitizeLabel(event.target.value).split('\n')[0]!.slice(0, 40);
@@ -1238,6 +1260,8 @@ function ComponentEditor({
               }}
             />
           </div>
+          )}
+          {component.type !== 'gradient' && component.type !== 'compass' && (
           <div className="overlay-controls__field">
             <label htmlFor={`${id}-units`}>Units</label>
             <select id={`${id}-units`} className="select" value={component.unitMode} onChange={(event) => updateFigure((current) => ({ ...current, unitMode: event.target.value as OverlayUnitMode }))}>
@@ -1246,6 +1270,7 @@ function ComponentEditor({
               <option value="imperial">Imperial</option>
             </select>
           </div>
+          )}
           {component.source?.kind === 'metric' && component.source.metric === 'distance' && (
             <div className="overlay-controls__field">
               <label htmlFor={`${id}-of-total`}>Show</label>
@@ -1267,8 +1292,8 @@ function ComponentEditor({
               </select>
             </div>
           )}
-          {smoothingField}
-          {numeric && (
+          {isData && smoothingField}
+          {numeric && component.type !== 'compass' && (
             <div className="overlay-controls__field">
               <label htmlFor={`${id}-decimals`}>Decimal places</label>
               <select
@@ -1304,6 +1329,11 @@ function ComponentEditor({
         />
       )}
 
+      {component.type === 'dial' && <DialEditor id={id} component={component} timeline={timeline} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
+      {component.type === 'chart' && <ChartEditor id={id} component={component} timeline={timeline} onChange={(patch) => update(patch)} />}
+      {component.type === 'gradient' && <GradientEditor id={id} component={component} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
+      {component.type === 'compass' && <CompassEditor id={id} component={component} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
+
       {component.type === 'label' && (
         <div className="overlay-controls__field still-image__text">
           <label htmlFor={`${id}-content`}>Text</label>
@@ -1326,7 +1356,7 @@ function ComponentEditor({
 
       {(isFigureLike || isStill || isLine || component.type === 'progress') && (
         <>
-          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : isFigureLike ? 'Value colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
+          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : isFigureLike && component.type !== 'chart' && component.type !== 'gradient' ? 'Value colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
           {isFigureLike && <ColorField id={`${id}-label-colour`} label="Label colour" value={figure?.labelColor ?? style.textColor} onChange={(labelColor) => setFigure({ labelColor }, false)} />}
           {!isStill && (
             <>
@@ -1337,8 +1367,13 @@ function ComponentEditor({
           {isFigureLike && (
             <>
               <PercentField id={`${id}-label-size`} label="Label size (%)" value={lineScale(figure?.labelScale)} max={fontScale * TEXT_SCALE_LIMITS.max * 100} onCommit={(value) => setFigure({ labelScale: lineSetting(value) })} />
-              <PercentField id={`${id}-value-size`} label="Value size (%)" value={lineScale(figure?.valueScale)} max={fontScale * TEXT_SCALE_LIMITS.max * 100} onCommit={(value) => setFigure({ valueScale: lineSetting(value) })} />
-              <PercentField id={`${id}-spacing`} label="Spacing (% of width)" value={String(Math.round(spacing * 1000) / 10)} max={FIGURE_GAP_MAX * 100} step={0.1} onCommit={(value) => setFigure({ gap: Math.min(FIGURE_GAP_MAX, Math.max(0, value / 100)) })} />
+              {component.type !== 'chart' && (
+                <>
+                  <PercentField id={`${id}-value-size`} label="Value size (%)" value={lineScale(figure?.valueScale)} max={fontScale * TEXT_SCALE_LIMITS.max * 100} onCommit={(value) => setFigure({ valueScale: lineSetting(value) })} />
+                  <PercentField id={`${id}-spacing`} label="Spacing (% of width)" value={String(Math.round(spacing * 1000) / 10)} max={FIGURE_GAP_MAX * 100} step={0.1} onCommit={(value) => setFigure({ gap: Math.min(FIGURE_GAP_MAX, Math.max(0, value / 100)) })} />
+                </>
+              )}
+              {honoursAlign && (
               <div className="overlay-controls__field">
                 <label htmlFor={`${id}-figure-align`}>Alignment</label>
                 <select id={`${id}-figure-align`} className="select" value={figure?.align ?? 'left'} onChange={(event) => setFigure({ align: event.target.value === 'left' ? undefined : (event.target.value as TextAlign) }, false)}>
@@ -1347,6 +1382,7 @@ function ComponentEditor({
                   <option value="right">Right</option>
                 </select>
               </div>
+              )}
               <ColorField id={`${id}-halo-colour`} label="Halo colour" value={figure?.halo?.color ?? '#000000'} onChange={(color) => setFigure({ halo: { color, opacity: figure?.halo?.opacity ?? 0.8 } }, false)} />
               <PercentField id={`${id}-halo-opacity`} label="Halo (%)" value={percent(figure?.halo?.opacity ?? 0.8)} onCommit={(value) => setFigure({ halo: { color: figure?.halo?.color ?? '#000000', opacity: Math.min(1, Math.max(0, value / 100)) } }, false)} />
               {!needsHalo(style) && <p className="overlay-controls__hint">The halo is drawn under the text when the background is under 30 %.</p>}
@@ -1618,15 +1654,6 @@ function ZonesEditor({
       </fieldset>
       {smoothingField}
     </>
-  );
-}
-
-function ColorField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <div className="overlay-controls__field">
-      <label htmlFor={id}>{label}</label>
-      <input id={id} type="color" value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#ffffff'} onChange={(event) => onChange(event.target.value)} />
-    </div>
   );
 }
 

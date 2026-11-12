@@ -2,11 +2,18 @@ import type { Activity } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
 import { projectProfile } from './elevationProfile';
+import type { ProjectedSeries } from './series';
+import { chartLabels, chartMoment, chartSeriesOf, chartView } from './chart';
+import { DEFAULT_DIAL, dialTicks } from './dial';
+import { DEFAULT_GRADIENT, gradientBand, gradientGlyph } from './gradient';
+import { DEFAULT_COMPASS } from './compass';
+import { cardinalLetters, normalizeDegrees } from './derivedSeries';
 import { projectRoute } from './routeProjection';
 import { extractRoute } from './routeImage';
 import { zoneTimesFor } from './zones';
 import { layoutStillText, stillFontPx, stillValue } from './staticImage';
 import {
+  DEFAULT_CHART,
   DEFAULT_OVERLAY_STYLE,
   STILL_IMAGE_COMPONENT_TYPES,
   resolveOverlayComponent,
@@ -183,6 +190,8 @@ export const STORED_UNITS: Readonly<Record<OverlayMetricKey, string>> = {
   elapsed: 's',
   moving: 's',
   climb: 'm',
+  /** AV-1019. Degrees clockwise from north, 0 up to just under 360. */
+  heading: '°',
 };
 
 /**
@@ -339,7 +348,123 @@ export interface ZoneProps extends ContractMoment {
   figure?: OverlayFigureSetting;
 }
 
-export type ContractProps = FigureProps | GaugeProps | RouteProps | WholeActivityProps | ZoneProps;
+// ---------------------------------------------------------------------------
+// Section: dials, charts, the gradient indicator and the compass
+
+/**
+ * AV-1019 (TD-087). A dial: a gauge on an arc. It has everything a gauge has
+ * (the value, `range`, `fraction`) and the arc, the ticks and the pointer.
+ */
+export interface DialProps extends Omit<GaugeProps, 'section'> {
+  section: 'dial';
+  /** The arc's opening, 180 to 300 degrees, centred at the top. */
+  sweepDegrees: number;
+  /**
+   * Where the pointer points, in degrees clockwise from straight up: -sweepDegrees / 2 at the range's start,
+   * 0 at its middle, +sweepDegrees / 2 at its end, so a value beyond the range is at an end. A component turns
+   * it into a canvas angle with `(angleDegrees - 90) * Math.PI / 180`.
+   */
+  angleDegrees: number;
+  /** The ticks, worked out for the range: `fraction` 0..1 along the arc, ascending, and whether it is a major one. */
+  ticks: { fraction: number; major: boolean }[];
+  pointer: 'needle' | 'marker';
+  /** `#rrggbb`. */
+  trackColor: string;
+  fillColor: string;
+  needleColor: string;
+}
+
+/**
+ * AV-1019 (TD-087). A chart: a figure against time or distance, whole or through
+ * a window, with a cursor. The geometry is in 0..1 of the box, as a profile's is.
+ * Missing data is a gap in a run, and no cursor value.
+ */
+export interface ChartProps extends ContractMoment {
+  section: 'chart';
+  source: ContractSource;
+  /** The figure's name as the reader sees it. */
+  label: string;
+  /** What the x axis is: seconds of the activity, or metres along it. */
+  axis: 'time' | 'distance';
+  /** Seconds or metres either side of now, with the cursor in the middle. Absent: the whole activity, and the cursor moves along it. */
+  window?: number;
+  /** `#rrggbb`. */
+  lineColor: string;
+  fillColor: string;
+  /** 0..1: how much of its colour the fill under the line has. */
+  fillOpacity: number;
+  /** Whether the reader asked for the axis labels; `labels` below holds what they say. */
+  showLabels: boolean;
+  /** The runs of the line, in 0..1 of the box, y down, the highest value near the top. A gap in the data ends a run. For a window, only the window, with x 0..1 across it. */
+  runs: ContractPoint[][];
+  /** The cursor: `x` in 0..1 of the box (its share of the activity, or 0.5 in a window), and `y`, the figure's value on the line, absent where it has none. */
+  cursor: { x: number; y?: number };
+  /** The figure now in the STORED unit, absent where the activity has no value at this moment. */
+  value?: number;
+  /** The unit of `value` and of `yRange`; absent for a camera stream that states none. */
+  unit?: string;
+  /** The lowest and highest value drawn, in the stored unit; absent when a window has no data. */
+  yRange?: { low: number; high: number };
+  /** The axis labels, already written in the reader's units; present only when `showLabels`. `yLow` and `yHigh` are absent with `yRange`. */
+  labels?: { yHigh?: string; yLow?: string; xStart: string; xEnd: string };
+  /** The reader's styling of the labels; absent members are the built-in look. Absent when the reader set none. */
+  figure?: OverlayFigureSetting;
+}
+
+/**
+ * AV-1019 (TD-087). The gradient indicator: the grade, written, with a glyph and
+ * a colour by steepness. The band and the glyph are already worked out.
+ */
+export interface GradientProps extends ContractMoment {
+  section: 'gradient';
+  /** The grade in percent: positive uphill. The trailing mean when `smoothingWindowSeconds` is present. */
+  value: number;
+  label: string;
+  /** `value` formatted for reading ("6.5 %"). Draw this. */
+  text: string;
+  /** The bands, lowest first, 2 to 10: each starts at `from` percent, with `color` `#rrggbb`. */
+  bands: { from: number; color: string }[];
+  /** 0-based: the last band whose `from` is at or under `value`, and 0 for a value under every band. */
+  bandIndex: number;
+  /** The colour of the band `value` is in, `#rrggbb`. */
+  color: string;
+  /** Which glyph: `up` from 1 % up, `down` from 1 % down, `flat` between. Absent when the reader turned the glyph off. */
+  glyph?: 'up' | 'down' | 'flat';
+  /** Seconds, above 0 and up to 30. Present only when `value` is a trailing mean over that window. */
+  smoothingWindowSeconds?: number;
+  figure?: OverlayFigureSetting;
+}
+
+/**
+ * AV-1019 (TD-087). The compass: the direction of travel. The angles of the rose
+ * and the needle are already worked out, so the heading wraps correctly at 0 and 360.
+ */
+export interface HeadingProps extends ContractMoment {
+  section: 'compass';
+  /** The heading in degrees, 0 (north) up to just under 360, 90 east. The circular mean when `smoothingWindowSeconds` is present. */
+  value: number;
+  label: string;
+  /** `value` formatted for reading ("123° SE"). Draw this. */
+  text: string;
+  /** The 8-point letter for `value`: `N`, `NE`, `E`, `SE`, `S`, `SW`, `W` or `NW`. */
+  cardinal: string;
+  /** `rose`: the rose turns so the heading is up, under a fixed marker. `needle`: a fixed north-up rose with a needle along the heading. */
+  compassStyle: 'rose' | 'needle';
+  /** Whether the reader asked for the cardinal points to be labelled. */
+  showLabels: boolean;
+  /** `#rrggbb`. */
+  roseColor: string;
+  needleColor: string;
+  /** Where north is drawn on the rose, in degrees clockwise from straight up: 360 - `value` (mod 360) for `rose`, 0 for `needle`. The other points follow 90 degrees apart. */
+  northAngleDegrees: number;
+  /** Where the needle (or, for `rose`, the marker) points, in degrees clockwise from straight up: `value` for `needle`, 0 for `rose`. */
+  needleAngleDegrees: number;
+  /** Seconds, above 0 and up to 30. Present only when `value` is a circular mean over that window. */
+  smoothingWindowSeconds?: number;
+  figure?: OverlayFigureSetting;
+}
+
+export type ContractProps = FigureProps | GaugeProps | RouteProps | WholeActivityProps | ZoneProps | DialProps | ChartProps | GradientProps | HeadingProps;
 export type ContractSection = ContractProps['section'];
 
 // ---------------------------------------------------------------------------
@@ -386,6 +511,14 @@ export function contractSectionOf(component: OverlayComponent): ContractSection 
       return 'wholeActivity';
     case 'zones':
       return 'zones';
+    case 'dial':
+      return 'dial';
+    case 'chart':
+      return 'chart';
+    case 'gradient':
+      return 'gradient';
+    case 'compass':
+      return 'compass';
     case 'shape':
       return undefined;
   }
@@ -423,7 +556,7 @@ export function contractProps(
   sample: OverlaySample,
   timeline: OverlayTimeline,
   context: ContractContext,
-): FigureProps | GaugeProps | RouteProps | ZoneProps {
+): FigureProps | GaugeProps | RouteProps | ZoneProps | DialProps | ChartProps | GradientProps | HeadingProps {
   const { component, style } = ready;
   const { frame } = context;
   const base = {
@@ -489,6 +622,9 @@ export function contractProps(
     return props;
   }
 
+  if (component.type === 'chart') return chartProps(ready, sample, timeline, context, base);
+  if (component.type === 'dial' || component.type === 'gradient' || component.type === 'compass') return momentProps(ready, timeline, context, base, sample);
+
   // A figure or a gauge: the value is read as `resolveOverlayComponent` reads it.
   const source = component.source as OverlayDataSource;
   const id = dataSourceId(source);
@@ -521,6 +657,120 @@ export function contractProps(
     return { ...props, section: 'gauge', range: { min: component.range.min, max: component.range.max }, fraction: ready.fraction };
   }
   return props;
+}
+
+type MomentBase = Omit<ContractMoment, never>;
+
+/** The series a chart draws, from the points the renderer was given; `undefined` when the activity has none for the source. */
+function chartSeries(component: OverlayComponent, activity: Activity | undefined): ProjectedSeries | undefined {
+  const source = component.source;
+  return activity && source ? chartSeriesOf(activity, source, (component.chart ?? DEFAULT_CHART).axis) : undefined;
+}
+
+/** AV-1019. A chart's props: the line, the cursor, the range and the labels, as the renderer draws them. */
+function chartProps(ready: Ready, sample: OverlaySample, timeline: OverlayTimeline, context: ContractContext, base: MomentBase): ChartProps {
+  const { component } = ready;
+  const source = component.source as OverlayDataSource;
+  const setting = component.chart ?? DEFAULT_CHART;
+  const series = chartSeries(component, context.activity);
+  const view = series ? chartView(series, setting, chartMoment(series, source, sample, timeline)) : undefined;
+  const id = dataSourceId(source);
+  const unit = source.kind === 'metric' ? STORED_UNITS[source.metric] : timeline.sensorLabels.get(id)?.unit;
+  const value = sample.values[id];
+  const props: ChartProps = {
+    section: 'chart',
+    ...base,
+    source: source.kind === 'metric' ? { kind: 'metric', metric: source.metric } : { kind: 'sensor', key: source.key },
+    label: ready.label as string,
+    axis: setting.axis,
+    lineColor: setting.lineColor,
+    fillColor: setting.fillColor,
+    fillOpacity: setting.fillOpacity,
+    showLabels: setting.labels,
+    runs: view ? view.runs.map((run) => run.map(([x, y]) => [x, y] as ContractPoint)) : [],
+    cursor: { x: view?.cursorX ?? 0 },
+  };
+  if (setting.window !== undefined) props.window = setting.window;
+  if (view?.cursorY !== undefined) props.cursor.y = view.cursorY;
+  if (value !== undefined) props.value = value;
+  if (unit !== undefined) props.unit = unit;
+  if (view?.low !== undefined && view.high !== undefined) props.yRange = { low: view.low, high: view.high };
+  if (setting.labels && series && view) {
+    const units = component.unitMode === 'auto' ? context.units : component.unitMode;
+    const written = chartLabels(view, series, setting, source, units, timeline, component.display?.decimals);
+    props.labels = {
+      ...(written.high !== undefined ? { yHigh: written.high } : {}),
+      ...(written.low !== undefined ? { yLow: written.low } : {}),
+      xStart: written.start,
+      xEnd: written.end,
+    };
+  }
+  if (component.figure) props.figure = structuredClone(component.figure);
+  return props;
+}
+
+/** AV-1019. A dial's, a gradient indicator's or a compass' props: the value as a figure has it, and what each draws it with. */
+function momentProps(ready: Ready, timeline: OverlayTimeline, context: ContractContext, base: MomentBase, sample: OverlaySample): DialProps | GradientProps | HeadingProps {
+  const { component } = ready;
+  const source = component.source as OverlayDataSource;
+  const value = ready.value as number;
+  const windowSeconds = component.smoothing?.windowSeconds;
+  const smoothed = windowSeconds && smoothedValueAt(timeline, source, sample.videoTimeSeconds, windowSeconds) !== undefined;
+  const common = {
+    ...base,
+    value,
+    label: ready.label as string,
+    text: ready.text as string,
+    ...(smoothed ? { smoothingWindowSeconds: Math.min(windowSeconds as number, SMOOTHING_LIMITS.max) } : {}),
+    ...(component.figure ? { figure: structuredClone(component.figure) } : {}),
+  };
+  if (component.type === 'gradient') {
+    const setting = component.gradient ?? DEFAULT_GRADIENT;
+    const bandIndex = gradientBand(value, setting.bands);
+    return {
+      section: 'gradient',
+      ...common,
+      bands: setting.bands.map((band) => ({ from: band.from, color: band.color })),
+      bandIndex,
+      color: setting.bands[bandIndex]!.color,
+      ...(setting.glyph ? { glyph: gradientGlyph(value) } : {}),
+    };
+  }
+  if (component.type === 'compass') {
+    const setting = component.compass ?? DEFAULT_COMPASS;
+    return {
+      section: 'compass',
+      ...common,
+      value: normalizeDegrees(value),
+      cardinal: cardinalLetters(value),
+      compassStyle: setting.style,
+      showLabels: setting.labels,
+      roseColor: setting.roseColor,
+      needleColor: setting.needleColor,
+      northAngleDegrees: setting.style === 'rose' ? normalizeDegrees(-value) : 0,
+      needleAngleDegrees: setting.style === 'needle' ? normalizeDegrees(value) : 0,
+    };
+  }
+  const setting = component.dial ?? DEFAULT_DIAL;
+  const range = ready.range as { min: number; max: number };
+  const fraction = ready.fraction as number;
+  const unit = source.kind === 'metric' ? STORED_UNITS[source.metric] : timeline.sensorLabels.get(dataSourceId(source))?.unit;
+  return {
+    section: 'dial',
+    ...common,
+    source: source.kind === 'metric' ? { kind: 'metric', metric: source.metric } : { kind: 'sensor', key: source.key },
+    ...(unit !== undefined ? { unit } : {}),
+    unitSystem: component.unitMode === 'auto' ? context.units : component.unitMode,
+    range: { min: range.min, max: range.max },
+    fraction,
+    sweepDegrees: setting.sweep,
+    angleDegrees: (fraction - 0.5) * setting.sweep,
+    ticks: dialTicks(range, setting).map((tick) => ({ fraction: tick.fraction, major: tick.major })),
+    pointer: setting.pointer,
+    trackColor: setting.trackColor,
+    fillColor: setting.fillColor,
+    needleColor: setting.needleColor,
+  };
 }
 
 /**
@@ -620,5 +870,11 @@ export function contractPropsFor(
   if (section === 'wholeActivity') return wholeActivityProps(component, context);
   if (!sample) return undefined;
   const ready = resolveOverlayComponent(template, component, sample, timeline, context.units, context.personal);
-  return ready.status === 'ready' ? contractProps(ready, sample, timeline, context) : undefined;
+  if (ready.status !== 'ready') return undefined;
+  // A chart the renderer draws nothing for (no activity to draw it from, or no place on its axis) has no props either.
+  if (component.type === 'chart') {
+    const series = chartSeries(component, context.activity);
+    if (!series || !component.source || chartMoment(series, component.source, sample, timeline).centre === undefined) return undefined;
+  }
+  return contractProps(ready, sample, timeline, context);
 }

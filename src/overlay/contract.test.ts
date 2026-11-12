@@ -11,15 +11,23 @@ import {
   type ComponentDraw,
   type ContractContext,
   type ContractContext2D,
+  type ChartProps,
   type ContractProps,
+  type DialProps,
   type FigureProps,
   type GaugeProps,
+  type GradientProps,
+  type HeadingProps,
   type RouteProps,
   type WholeActivityProps,
   type ZoneProps,
 } from './contract';
+import { DEFAULT_COMPASS } from './compass';
+import { DEFAULT_DIAL, dialAngle } from './dial';
+import { DEFAULT_GRADIENT } from './gradient';
 import { defaultZonesSetting, zoneBounds } from './zones';
 import {
+  DEFAULT_CHART,
   DEFAULT_OVERLAY_STYLE,
   OVERLAY_COMPONENT_TYPES,
   OVERLAY_TEMPLATE_VERSION,
@@ -38,6 +46,10 @@ import { draw as drawRoute } from '../../docs/components/examples/route';
 import { draw as drawProfile } from '../../docs/components/examples/elevation-profile';
 import { draw as drawWhole } from '../../docs/components/examples/whole-activity';
 import { draw as drawZones } from '../../docs/components/examples/zones';
+import { draw as drawDial } from '../../docs/components/examples/dial';
+import { draw as drawChart } from '../../docs/components/examples/chart';
+import { draw as drawGradient } from '../../docs/components/examples/gradient';
+import { draw as drawCompass } from '../../docs/components/examples/compass';
 
 const T0 = Date.parse('2026-09-24T08:00:00Z');
 const FRAME = { width: 1920, height: 1080 };
@@ -141,6 +153,32 @@ function builtIns(): OverlayComponent[] {
     zones('zones-arc', 'heartRate', {}, { shape: 'arc', show: { number: true, name: false, value: true, timeInZone: true } }),
     zones('zones-values', 'power', {}, { basis: 'value', zones: [{ name: 'Low', color: '#00ff00', from: 0 }, { name: 'High', color: '#ff0000', from: 200 }] }),
   );
+  // AV-1019. Dials, charts, the gradient indicator and the compass, in the states the renderer draws them in.
+  const speed = { kind: 'metric', metric: 'speed' } as const;
+  list.push(
+    component('dial', 'dial', { source: speed, range: { min: 0, max: 20 }, dial: { ...DEFAULT_DIAL } }),
+    component('dial-smoothed', 'dial', {
+      source: { kind: 'metric', metric: 'heartRate' },
+      range: { min: 100, max: 160 },
+      smoothing: { windowSeconds: 3 },
+      figure: { labelScale: 1.2 },
+      unitMode: 'imperial',
+      dial: { ...DEFAULT_DIAL, majorStep: 20, pointer: 'marker', sweep: 300 },
+    }),
+    component('dial-own-range', 'dial', { source: { kind: 'metric', metric: 'power' } }),
+    component('dial-beyond', 'dial', { source: speed, range: { min: 0, max: 3 } }),
+    component('chart-time', 'chart', { source: speed, chart: { ...DEFAULT_CHART } }),
+    component('chart-window', 'chart', {
+      source: { kind: 'metric', metric: 'heartRate' },
+      chart: { ...DEFAULT_CHART, axis: 'distance', window: 100, labels: true },
+      figure: { labelScale: 1.5 },
+    }),
+    component('chart-sensor', 'chart', { source: { kind: 'sensor', key: 'ACCL' }, chart: { ...DEFAULT_CHART, labels: false } }),
+    component('gradient', 'gradient', { source: { kind: 'metric', metric: 'grade' }, gradient: { ...DEFAULT_GRADIENT }, smoothing: { windowSeconds: 5 }, figure: { align: 'right' } }),
+    component('gradient-no-glyph', 'gradient', { source: { kind: 'metric', metric: 'grade' }, gradient: { ...DEFAULT_GRADIENT, glyph: false } }),
+    component('compass', 'compass', { source: { kind: 'metric', metric: 'heading' }, compass: { ...DEFAULT_COMPASS }, smoothing: { windowSeconds: 3 } }),
+    component('compass-needle', 'compass', { source: { kind: 'metric', metric: 'heading' }, compass: { ...DEFAULT_COMPASS, style: 'needle' } }),
+  );
   for (const stat of ['speed', 'pace', 'distance', 'elapsed', 'moving', 'climb'] as SummaryStatKey[]) {
     list.push(component(`summary-${stat}`, 'summary', { summary: { stat }, text: { align: 'left', weight: 'bold', caption: stat !== 'pace' } }));
   }
@@ -195,6 +233,41 @@ function checkValid(props: ContractProps): void {
     expect(props.progress).toBeLessThanOrEqual(1);
   }
   if (props.section === 'wholeActivity') expect(props.text).not.toBe('');
+  if (props.section === 'dial') {
+    expect(props.range.min).toBeLessThan(props.range.max);
+    expect(props.fraction).toBeGreaterThanOrEqual(0);
+    expect(props.fraction).toBeLessThanOrEqual(1);
+    expect(Math.abs(props.angleDegrees)).toBeLessThanOrEqual(props.sweepDegrees / 2 + 1e-9);
+    expect(props.ticks.length).toBeGreaterThan(0);
+    expect(props.ticks.every((tick, i) => i === 0 || tick.fraction > props.ticks[i - 1]!.fraction)).toBe(true);
+    for (const color of [props.trackColor, props.fillColor, props.needleColor]) expect(color).toMatch(/^#[0-9a-f]{6}$/);
+  }
+  if (props.section === 'chart') {
+    expect(props.cursor.x).toBeGreaterThanOrEqual(0);
+    expect(props.cursor.x).toBeLessThanOrEqual(1);
+    if (props.cursor.y !== undefined) expect(props.value).toBeDefined();
+    for (const run of props.runs) {
+      for (const point of run) for (const v of point) expect(v >= -1e-9 && v <= 1 + 1e-9).toBe(true);
+    }
+    if (props.showLabels) expect(props.labels).toBeDefined();
+    else expect(props.labels).toBeUndefined();
+  }
+  if (props.section === 'gradient') {
+    expect(props.bandIndex).toBeGreaterThanOrEqual(0);
+    expect(props.bandIndex).toBeLessThan(props.bands.length);
+    expect(props.color).toBe(props.bands[props.bandIndex]!.color);
+    expect(props.text).not.toBe('');
+  }
+  if (props.section === 'compass') {
+    expect(props.value).toBeGreaterThanOrEqual(0);
+    expect(props.value).toBeLessThan(360);
+    expect(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']).toContain(props.cardinal);
+    expect(props.text).toMatch(/^\d+° (N|NE|E|SE|S|SW|W|NW)$/);
+    expect(props.northAngleDegrees).toBeGreaterThanOrEqual(0);
+    expect(props.northAngleDegrees).toBeLessThan(360);
+    expect(props.needleAngleDegrees).toBeGreaterThanOrEqual(0);
+    expect(props.needleAngleDegrees).toBeLessThan(360);
+  }
   if (props.section === 'zones') {
     expect(props.zones.length).toBeGreaterThanOrEqual(2);
     expect(props.zones.length).toBeLessThanOrEqual(10);
@@ -493,6 +566,118 @@ describe('the contract adapter (AV-1017)', () => {
     expect(zoneBounds(hr.zones!, { maxHeartRate: 190 })).toEqual((props as ZoneProps).zones.map((zone) => zone.lowerBound));
   });
 
+  describe('the dial, the chart, the gradient indicator and the compass (AV-1019)', () => {
+    const at = (id: string, t = 30, from: Activity = activity) =>
+      contractPropsFor(template, template.components.find((c) => c.id === id)!, timeline.sampleAt(t), timeline, context(from));
+
+    it('gives a dial everything a gauge has, the pointer’s angle for the fraction, and the ticks worked out', () => {
+      const dial = at('dial', 30) as DialProps;
+      expect(dial.section).toBe('dial');
+      const gauge = contractPropsFor(template, { ...template.components.find((c) => c.id === 'dial')!, type: 'gauge' }, timeline.sampleAt(30), timeline, context(activity)) as GaugeProps;
+      const { section: _a, ...fromDial } = dial;
+      const { section: _b, ...fromGauge } = gauge;
+      void _a;
+      void _b;
+      expect({ ...fromDial, sweepDegrees: undefined, angleDegrees: undefined, ticks: undefined, pointer: undefined, trackColor: undefined, fillColor: undefined, needleColor: undefined }).toEqual({
+        ...fromGauge,
+        sweepDegrees: undefined,
+        angleDegrees: undefined,
+        ticks: undefined,
+        pointer: undefined,
+        trackColor: undefined,
+        fillColor: undefined,
+        needleColor: undefined,
+      });
+      expect(dial.sweepDegrees).toBe(240);
+      expect(dial.angleDegrees).toBeCloseTo((dial.fraction - 0.5) * 240, 9);
+      // The angle is the renderer's: the canvas angle of the same fraction.
+      expect(((dial.angleDegrees - 90) * Math.PI) / 180).toBeCloseTo(dialAngle(240, dial.fraction), 9);
+      expect(dial.ticks[0]).toEqual({ fraction: 0, major: true });
+      expect(dial.pointer).toBe('needle');
+    });
+
+    it('pins a value beyond a dial’s range at its end, and gives the activity’s own range where none is set', () => {
+      const beyond = at('dial-beyond', 60) as DialProps;
+      expect(beyond.fraction).toBe(1);
+      expect(beyond.angleDegrees).toBe(120);
+      expect(beyond.value).toBeGreaterThan(beyond.range.max);
+      const own = at('dial-own-range') as DialProps;
+      expect(own.range).toEqual({ min: 140, max: 280 });
+      expect(own.range.min).toBeLessThan(own.range.max);
+    });
+
+    it('carries a dial’s smoothing and styling, and its settings', () => {
+      const dial = at('dial-smoothed') as DialProps;
+      expect(dial).toMatchObject({ smoothingWindowSeconds: 3, figure: { labelScale: 1.2 }, pointer: 'marker', sweepDegrees: 300, unitSystem: 'imperial' });
+      expect(dial.ticks.filter((tick) => tick.major).map((tick) => tick.fraction)).toEqual([0, 1 / 3, 2 / 3, 1].map((v) => expect.closeTo(v, 9)));
+    });
+
+    it('gives a chart the line in 0..1 of the box, the cursor, the value and the labels as the renderer draws them', () => {
+      const chart = at('chart-time', 15) as ChartProps;
+      expect(chart.section).toBe('chart');
+      expect(chart.axis).toBe('time');
+      expect(chart.window).toBeUndefined();
+      expect(chart.cursor.x).toBeCloseTo(0.25, 6);
+      expect(chart.cursor.y).toBeDefined();
+      expect(chart.value).toBeCloseTo(5.5, 6);
+      expect(chart.unit).toBe('m/s');
+      expect(chart.yRange).toEqual({ low: 4, high: 10 });
+      // A chart's labels are on unless the reader turned them off: the ends of the range and of the activity.
+      expect(chart.labels).toEqual({ yHigh: '36.0 km/h', yLow: '14.4 km/h', xStart: '0:00', xEnd: '1:00' });
+      expect((at('chart-sensor') as ChartProps).labels).toBeUndefined();
+      expect(chart.runs).toHaveLength(1);
+      expect(chart.runs[0]![0]![0]).toBe(0);
+      const windowed = at('chart-window', 30) as ChartProps;
+      expect(windowed).toMatchObject({ axis: 'distance', window: 100, showLabels: true, cursor: { x: 0.5 } });
+      expect(windowed.labels).toMatchObject({ xStart: '−100 m', xEnd: '+100 m' });
+      expect(windowed.labels!.yHigh).toMatch(/bpm$/);
+      expect(windowed.figure).toEqual({ labelScale: 1.5 });
+      // A camera stream has its own unit.
+      expect((at('chart-sensor') as ChartProps).unit).toBe('m/s²');
+    });
+
+    it('gives a chart no props where the renderer draws nothing for it: no activity, or a figure the ride lacks', () => {
+      const chart = template.components.find((c) => c.id === 'chart-time')!;
+      expect(contractPropsFor(template, chart, timeline.sampleAt(30), timeline, context(undefined))).toBeUndefined();
+      const bare = ride(['cyclingCadenceRpm']);
+      const bareTimeline = buildOverlayTimeline(bare, { video: { durationSeconds: 60 } });
+      const cadence: OverlayComponent = { ...chart, source: { kind: 'metric', metric: 'cyclingCadence' } };
+      expect(contractPropsFor(template, cadence, bareTimeline.sampleAt(30), bareTimeline, context(bare))).toBeUndefined();
+    });
+
+    it('gives the gradient indicator its band, colour and glyph worked out, the glyph absent when off', () => {
+      const props = at('gradient', 20) as GradientProps;
+      expect(props.section).toBe('gradient');
+      expect(props.bands).toEqual(DEFAULT_GRADIENT.bands);
+      expect(props.bandIndex).toBe(2);
+      expect(props.color).toBe(DEFAULT_GRADIENT.bands[2]!.color);
+      expect(props.glyph).toBe('up');
+      expect(props.smoothingWindowSeconds).toBe(5);
+      expect(props.text).toBe(`${props.value.toFixed(1)} %`);
+      expect('glyph' in (at('gradient-no-glyph', 20) as GradientProps)).toBe(false);
+    });
+
+    it('gives the compass its heading as degrees and a letter, and the angles of the rose and the needle worked out', () => {
+      const rose = at('compass') as HeadingProps;
+      expect(rose.section).toBe('compass');
+      expect(rose.compassStyle).toBe('rose');
+      expect(rose.northAngleDegrees).toBeCloseTo((360 - rose.value) % 360, 9);
+      expect(rose.needleAngleDegrees).toBe(0);
+      expect(rose.text).toBe(`${Math.round(rose.value) % 360}° ${rose.cardinal}`);
+      const needle = at('compass-needle') as HeadingProps;
+      expect(needle.northAngleDegrees).toBe(0);
+      expect(needle.needleAngleDegrees).toBeCloseTo(needle.value, 9);
+      expect(needle.smoothingWindowSeconds).toBeUndefined();
+      expect(rose.smoothingWindowSeconds).toBe(3);
+    });
+
+    it('is a section of its own for each', () => {
+      for (const [type, section] of [['dial', 'dial'], ['chart', 'chart'], ['gradient', 'gradient'], ['compass', 'compass']] as const) {
+        expect(contractSectionOf(component('x', type))).toBe(section);
+      }
+    });
+  });
+
   it('is a section for every built-in type, and the shape is the one without', () => {
     for (const type of OVERLAY_COMPONENT_TYPES) {
       const section = contractSectionOf(component('x', type, { range: { min: 0, max: 1 } }));
@@ -656,6 +841,55 @@ describe('the examples in docs/components (AV-1017)', () => {
     for (const fractionInZone of [0, 1]) for (const zoneIndex of [0, 4]) drawsInside(drawZones, { ...(propsBig('zones-hr') as ZoneProps), fractionInZone, zoneIndex });
   });
 
+  it('the dial example draws the track, the fill, the ticks, a needle and the value, inside its box, at the ends of the range and beyond (AV-1019)', () => {
+    for (const id of ['dial', 'dial-smoothed', 'dial-own-range', 'dial-beyond']) {
+      for (const t of [0, 20, 60]) {
+        const dial = propsBig(id, t) as DialProps;
+        const { points, log } = drawsInside(drawDial, dial);
+        expect(points.length, id).toBeGreaterThan(10);
+        expect(log).toEqual([dial.text]);
+      }
+    }
+    const dial = propsBig('dial') as DialProps;
+    for (const fraction of [0, 1]) drawsInside(drawDial, { ...dial, fraction, angleDegrees: (fraction - 0.5) * dial.sweepDegrees });
+  });
+
+  it('the chart example draws its runs, the cursor and its labels inside its box, with nothing across a gap (AV-1019)', () => {
+    for (const id of ['chart-time', 'chart-window', 'chart-sensor']) {
+      for (const t of [0, 30, 60]) {
+        const chart = propsBig(id, t) as ChartProps;
+        const { points, log } = drawsInside(drawChart, chart);
+        expect(points.length, id).toBeGreaterThan(5);
+        if (chart.labels) expect(log).toEqual([chart.labels.yHigh, chart.labels.xStart, chart.labels.xEnd].filter(Boolean));
+        else expect(log).toEqual([]);
+      }
+    }
+    const without = structuredClone(propsBig('chart-time') as ChartProps);
+    without.runs = [];
+    delete without.cursor.y;
+    expect(drawsInside(drawChart, without).points.length).toBeGreaterThan(0);
+  });
+
+  it('the gradient example draws its glyph and its text in the band’s colour, inside its box (AV-1019)', () => {
+    for (const id of ['gradient', 'gradient-no-glyph']) {
+      const props = propsBig(id) as GradientProps;
+      const { log } = drawsInside(drawGradient, props);
+      expect(log).toEqual([props.text]);
+    }
+    for (const glyph of ['up', 'down', 'flat'] as const) drawsInside(drawGradient, { ...(propsBig('gradient') as GradientProps), glyph });
+  });
+
+  it('the compass example draws its ring, its letters, its needle and the heading, inside its box, at every heading (AV-1019)', () => {
+    for (const id of ['compass', 'compass-needle']) {
+      const props = propsBig(id) as HeadingProps;
+      const { log } = drawsInside(drawCompass, props);
+      expect(log).toEqual(['N', 'E', 'S', 'W', props.text]);
+      for (const value of [0, 90, 179.9, 270, 359.9]) {
+        drawsInside(drawCompass, { ...props, value, northAngleDegrees: (360 - value) % 360, needleAngleDegrees: value });
+      }
+    }
+  });
+
   it('a component that reaches beyond the contract is stopped by the recording context', () => {
     const { ctx } = recordingContext();
     expect(() => (ctx as unknown as { getImageData: () => void }).getImageData()).toThrow(/getImageData/);
@@ -699,6 +933,10 @@ describe('the documentation says what the contract holds (AV-1017)', () => {
     { page: 'along-the-route.md', ids: ['route', 'profile', 'progress'] },
     { page: 'whole-activity.md', ids: ['summary-speed', 'date-activity', 'text'] },
     { page: 'zones.md', ids: ['zones-hr', 'zones-power', 'zones-arc', 'zones-values'] },
+    { page: 'dials.md', ids: ['dial', 'dial-smoothed', 'dial-own-range'] },
+    { page: 'charts.md', ids: ['chart-time', 'chart-window', 'chart-sensor'] },
+    { page: 'gradient.md', ids: ['gradient', 'gradient-no-glyph'] },
+    { page: 'compass.md', ids: ['compass', 'compass-needle'] },
   ];
 
   for (const { page, ids } of sections) {
@@ -727,9 +965,11 @@ describe('the documentation says what the contract holds (AV-1017)', () => {
     expect(readme).toContain('TD-085');
     expect(readme).toContain('/issues/19');
     expect(readme).toMatch(/not built/i);
-    for (const page of ['figures.md', 'gauges.md', 'along-the-route.md', 'whole-activity.md', 'zones.md']) {
+    for (const page of ['figures.md', 'gauges.md', 'along-the-route.md', 'whole-activity.md', 'zones.md', 'dials.md', 'charts.md', 'gradient.md', 'compass.md']) {
       expect(readme).toContain(page);
     }
+    expect(readme).toContain('/issues/21');
+    expect(readme).toContain('TD-087');
   });
 });
 

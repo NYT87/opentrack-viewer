@@ -20,6 +20,10 @@ import {
   zoneIndex,
   withinZone,
 } from './zones';
+import { formatHeading } from './derivedSeries';
+import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial';
+import { DEFAULT_GRADIENT, GRADIENT_BAND_LIMITS, GRADIENT_FROM_LIMITS } from './gradient';
+import { DEFAULT_COMPASS } from './compass';
 import {
   OVERLAY_METRIC_KEYS,
   SMOOTHING_LIMITS,
@@ -61,7 +65,15 @@ export type OverlayComponentType =
   /** AV-1011. A card, a frame or a rule behind or in front of the figures. */
   | 'shape'
   /** AV-1018. The heart rate or power zone the activity is in, as a bar, an arc or a figure. */
-  | 'zones';
+  | 'zones'
+  /** AV-1019. A figure on an arc of ticks with a needle or a marker. */
+  | 'dial'
+  /** AV-1019. A figure against time or distance, with a cursor at the moment shown. */
+  | 'chart'
+  /** AV-1019. The slope in percent, with an up or down glyph and a colour by steepness. */
+  | 'gradient'
+  /** AV-1019. The direction of travel, as a rose that turns or a needle on a fixed rose. */
+  | 'compass';
 
 export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'text',
@@ -75,6 +87,10 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'date',
   'shape',
   'zones',
+  'dial',
+  'chart',
+  'gradient',
+  'compass',
 ];
 
 /** AV-1011. What a shape is. */
@@ -171,6 +187,75 @@ export interface OverlayZonesSetting {
   show: { number: boolean; name: boolean; value: boolean; timeInZone: boolean };
   personal?: PersonalFigures;
 }
+
+/** AV-1019 (TD-087). A dial's arc, ticks, pointer and colours. Colours are `#rrggbb`. */
+export interface OverlayDialSetting {
+  /** The arc's opening in degrees, 180 to 300, centred at the top. */
+  sweep: number;
+  /** A major tick every this much of the range, in the source's stored unit; absent finds a step for the range. */
+  majorStep?: number;
+  /** Minor ticks between two major ones, 0 to 9. */
+  minorTicks: number;
+  pointer: 'needle' | 'marker';
+  trackColor: string;
+  fillColor: string;
+  needleColor: string;
+}
+
+/** AV-1019. What a chart is measured along: seconds of the activity, or metres along it. */
+export type ChartAxis = 'time' | 'distance';
+export const CHART_AXES: readonly ChartAxis[] = ['time', 'distance'];
+
+/** The most a chart's window reaches either side of now: a day of seconds, or a thousand kilometres. */
+export const CHART_WINDOW_MAX = 1_000_000;
+
+/** AV-1019 (TD-087). A chart's axis, window, colours and labels. Colours are `#rrggbb`. */
+export interface OverlayChartSetting {
+  axis: ChartAxis;
+  /** Seconds or metres either side of now, with the cursor in the middle; absent is the whole activity. */
+  window?: number;
+  lineColor: string;
+  fillColor: string;
+  /** 0..1. */
+  fillOpacity: number;
+  /** The y range's ends and the x window, written on the chart. */
+  labels: boolean;
+}
+
+export const DEFAULT_CHART: OverlayChartSetting = {
+  axis: 'time',
+  lineColor: '#ffffff',
+  fillColor: '#ffffff',
+  fillOpacity: 0.25,
+  labels: true,
+};
+
+/** AV-1019 (TD-087). A band of the gradient indicator: its colour from this grade up, in percent. */
+export interface OverlayGradientBand {
+  from: number;
+  color: string;
+}
+
+export interface OverlayGradientSetting {
+  /** 2 to 10, ascending by `from`; the first is the floor, and anything under it counts in it. */
+  bands: OverlayGradientBand[];
+  glyph: boolean;
+}
+
+/** AV-1019 (TD-087). A compass's style, whether it labels the cardinal points, and its colours. */
+export interface OverlayCompassSetting {
+  /** `rose`: the rose turns so the heading is up. `needle`: a fixed north-up rose with a needle along the heading. */
+  style: 'rose' | 'needle';
+  labels: boolean;
+  roseColor: string;
+  needleColor: string;
+}
+
+/**
+ * AV-1019. The types that read one moment of the activity and mean nothing
+ * without it: a picture that shows none (the map image) leaves them out.
+ */
+export const MOMENT_COMPONENT_TYPES: readonly OverlayComponentType[] = ['zones', 'dial', 'chart', 'gradient', 'compass'];
 
 /**
  * AV-1010. Components that describe the whole activity rather than a moment of
@@ -317,6 +402,14 @@ export interface OverlayComponent {
   smoothing?: { windowSeconds: number };
   /** AV-1018. `zones`: the zones and how they are drawn. `source` is the zones' source. */
   zones?: OverlayZonesSetting;
+  /** AV-1019. `dial`: the arc, the ticks, the pointer and the colours. The range is `range`. */
+  dial?: OverlayDialSetting;
+  /** AV-1019. `chart`: the axis, the window, the colours and the labels. */
+  chart?: OverlayChartSetting;
+  /** AV-1019. `gradient`: the colour bands and the glyph. The source is always the grade. */
+  gradient?: OverlayGradientSetting;
+  /** AV-1019. `compass`: the style, the labels and the colours. The source is always the heading. */
+  compass?: OverlayCompassSetting;
 }
 
 export interface OverlayTemplate {
@@ -414,8 +507,13 @@ function parseComponent(value: unknown): OverlayComponent | string {
   }
   const componentType = type as OverlayComponentType;
   const stillOnly = STILL_IMAGE_COMPONENT_TYPES.includes(componentType);
+  // AV-1019. A gradient indicator always reads the grade and a compass the heading, whatever the file says.
+  const fixedSource: OverlayDataSource | undefined =
+    componentType === 'gradient' ? { kind: 'metric', metric: 'grade' } : componentType === 'compass' ? { kind: 'metric', metric: 'heading' } : undefined;
   const needsSource =
     componentType !== 'routeInset' &&
+    componentType !== 'gradient' &&
+    componentType !== 'compass' &&
     componentType !== 'progress' &&
     componentType !== 'elevationProfile' &&
     componentType !== 'shape' &&
@@ -424,7 +522,7 @@ function parseComponent(value: unknown): OverlayComponent | string {
     const kind = isRecord(value.shape) ? value.shape.kind : undefined;
     if (!SHAPE_KINDS.includes(kind as ShapeKind)) return `unknown shape "${String(kind)}"`;
   }
-  let source = parseSource(value.source);
+  let source = fixedSource ?? parseSource(value.source);
   // AV-1018. Zones read heart rate or power, and the zones' own source is the one that counts: they are measured on it.
   const zones = componentType === 'zones' && isRecord(value.zones) ? parseZonesSetting(value.zones) : undefined;
   if (componentType === 'zones') {
@@ -453,7 +551,7 @@ function parseComponent(value: unknown): OverlayComponent | string {
     unitMode: unitMode === 'metric' || unitMode === 'imperial' ? unitMode : 'auto',
     style: parseStyle(value.style),
   };
-  if (needsSource && source) component.source = source;
+  if ((needsSource || fixedSource) && source) component.source = source;
   if (
     isRecord(value.range) &&
     isNumber(value.range.min) &&
@@ -499,11 +597,16 @@ function parseComponent(value: unknown): OverlayComponent | string {
   }
   // AV-1018. Zones that cannot be read are dropped, and the component stays, drawn as nothing (TD-086): the editor offers the defaults.
   if (zones) component.zones = zones;
-  if ((componentType === 'text' || componentType === 'gauge' || componentType === 'zones') && isRecord(value.figure)) {
+  // AV-1019. A dial, a chart, a gradient indicator and a compass carry their own settings, each read as it may be drawn and by its defaults where it cannot be.
+  if (componentType === 'dial') component.dial = parseDialSetting(value.dial);
+  if (componentType === 'chart') component.chart = parseChartSetting(value.chart);
+  if (componentType === 'gradient') component.gradient = parseGradientSetting(value.gradient);
+  if (componentType === 'compass') component.compass = parseCompassSetting(value.compass);
+  if (LABELLED_TYPES.includes(componentType) && isRecord(value.figure)) {
     const figure = parseFigure(value.figure);
     if (figure) component.figure = figure;
   }
-  if ((componentType === 'text' || componentType === 'gauge' || componentType === 'zones') && isRecord(value.smoothing) && canSmooth(source)) {
+  if (SMOOTHED_TYPES.includes(componentType) && isRecord(value.smoothing) && canSmooth(source)) {
     const seconds = value.smoothing.windowSeconds;
     if (isNumber(seconds) && seconds > 0) {
       component.smoothing = { windowSeconds: Math.min(SMOOTHING_LIMITS.max, seconds) };
@@ -524,6 +627,86 @@ function parseComponent(value: unknown): OverlayComponent | string {
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const HEX6 = /^#[0-9a-f]{6}$/i;
+
+/** The types that style a label over a value (AV-1015), and the ones whose value may be smoothed (AV-1016). */
+const LABELLED_TYPES: readonly OverlayComponentType[] = ['text', 'gauge', 'zones', 'dial', 'chart', 'gradient', 'compass'];
+const SMOOTHED_TYPES: readonly OverlayComponentType[] = ['text', 'gauge', 'zones', 'dial', 'gradient', 'compass'];
+
+const hex6 = (value: unknown, fallback: string): string => (typeof value === 'string' && HEX6.test(value) ? value.toLowerCase() : fallback);
+
+/**
+ * AV-1019 (TD-087). A dial's settings as they may be drawn: the sweep and the
+ * minor ticks kept inside their limits, a major step that is a positive number
+ * or left to the range, the pointer and the colours by their defaults where they
+ * do not read. Nothing here throws on any input.
+ */
+export function parseDialSetting(raw: unknown): OverlayDialSetting {
+  const record = isRecord(raw) ? raw : {};
+  const dial: OverlayDialSetting = {
+    sweep: isNumber(record.sweep) ? Math.min(DIAL_LIMITS.sweep.max, Math.max(DIAL_LIMITS.sweep.min, record.sweep)) : DEFAULT_DIAL.sweep,
+    minorTicks: isNumber(record.minorTicks)
+      ? Math.min(DIAL_LIMITS.minorTicks.max, Math.max(DIAL_LIMITS.minorTicks.min, Math.round(record.minorTicks)))
+      : DEFAULT_DIAL.minorTicks,
+    pointer: record.pointer === 'marker' ? 'marker' : 'needle',
+    trackColor: hex6(record.trackColor, DEFAULT_DIAL.trackColor),
+    fillColor: hex6(record.fillColor, DEFAULT_DIAL.fillColor),
+    needleColor: hex6(record.needleColor, DEFAULT_DIAL.needleColor),
+  };
+  if (isNumber(record.majorStep) && record.majorStep > 0) dial.majorStep = record.majorStep;
+  return dial;
+}
+
+/** AV-1019 (TD-087). A chart's settings as they may be drawn; the window is a positive number up to a million or absent (the whole activity). */
+export function parseChartSetting(raw: unknown): OverlayChartSetting {
+  const record = isRecord(raw) ? raw : {};
+  const chart: OverlayChartSetting = {
+    axis: record.axis === 'distance' ? 'distance' : 'time',
+    lineColor: hex6(record.lineColor, DEFAULT_CHART.lineColor),
+    fillColor: hex6(record.fillColor, DEFAULT_CHART.fillColor),
+    fillOpacity: isNumber(record.fillOpacity) ? clamp01(record.fillOpacity) : DEFAULT_CHART.fillOpacity,
+    labels: record.labels === undefined ? DEFAULT_CHART.labels : record.labels === true,
+  };
+  if (isNumber(record.window) && record.window > 0) chart.window = Math.min(CHART_WINDOW_MAX, record.window);
+  return chart;
+}
+
+/**
+ * AV-1019 (TD-087). A gradient indicator's settings: the bands as they are when
+ * there are two to ten, each with a start inside the scale and a `#rrggbb`
+ * colour, and the starts rise; the default bands otherwise, as a set (a band
+ * mended in a set of nine would be a scale nobody chose).
+ */
+export function parseGradientSetting(raw: unknown): OverlayGradientSetting {
+  const record = isRecord(raw) ? raw : {};
+  const glyph = record.glyph !== false;
+  const entries = Array.isArray(record.bands) ? record.bands : [];
+  const bands: OverlayGradientBand[] = [];
+  let valid = entries.length >= GRADIENT_BAND_LIMITS.min && entries.length <= GRADIENT_BAND_LIMITS.max;
+  for (const entry of valid ? entries : []) {
+    if (!isRecord(entry) || !isNumber(entry.from) || typeof entry.color !== 'string' || !HEX6.test(entry.color)) {
+      valid = false;
+      break;
+    }
+    const from = Math.min(GRADIENT_FROM_LIMITS.max, Math.max(GRADIENT_FROM_LIMITS.min, entry.from));
+    if (bands.length > 0 && !(from > bands[bands.length - 1]!.from)) {
+      valid = false;
+      break;
+    }
+    bands.push({ from, color: entry.color.toLowerCase() });
+  }
+  return { bands: valid ? bands : DEFAULT_GRADIENT.bands.map((band) => ({ ...band })), glyph };
+}
+
+/** AV-1019 (TD-087). A compass's settings, by their defaults where they do not read. */
+export function parseCompassSetting(raw: unknown): OverlayCompassSetting {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    style: record.style === 'needle' ? 'needle' : 'rose',
+    labels: record.labels !== false,
+    roseColor: hex6(record.roseColor, DEFAULT_COMPASS.roseColor),
+    needleColor: hex6(record.needleColor, DEFAULT_COMPASS.needleColor),
+  };
+}
 
 /** AV-1015. A figure's settings, each kept only when it reads; `undefined` when none does. */
 function parseFigure(raw: Record<string, unknown>): OverlayFigureSetting | undefined {
@@ -743,6 +926,7 @@ const METRIC_LABELS: Record<OverlayMetricKey, string> = {
   elapsed: 'Time',
   moving: 'Moving time',
   climb: 'Climb so far',
+  heading: 'Heading',
 };
 
 function describeSource(source: OverlayDataSource, timeline: OverlayTimeline): string {
@@ -777,6 +961,10 @@ export type ResolvedOverlayComponent =
       text?: string;
       /** Gauge/progress position, 0..1. */
       fraction?: number;
+      /** AV-1019. A dial, a gradient indicator or a compass: the value shown, smoothed where it is set to be, in the stored unit. */
+      value?: number;
+      /** AV-1019. A dial: the range its fraction is of, the component's own or the activity's rounded to a step. */
+      range?: { min: number; max: number };
       /** AV-1018. `zones`: where the value falls among the zones. */
       zones?: ResolvedZones;
     };
@@ -828,6 +1016,8 @@ function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem
       return `${Math.round(value)} W`;
     case 'grade':
       return `${value.toFixed(1)} %`;
+    case 'heading':
+      return formatHeading(value);
   }
 }
 
@@ -861,6 +1051,8 @@ export function formatMetricWith(metric: OverlayMetricKey, value: number, units:
     case 'pace':
     case 'elapsed':
     case 'moving':
+    case 'heading':
+      // Times and pace are clocks, and a heading is degrees and a letter (AV-1019), whatever the decimals.
       return formatMetric(metric, value, units);
   }
 }
@@ -911,6 +1103,22 @@ export function resolveOverlayComponent(
       ? { status: 'hidden', reason: 'no_data', componentId }
       : { status: 'ready', componentId, component, style, fraction: sample.progress };
   }
+  if (component.type === 'chart') {
+    // AV-1019. A chart is drawn from the source's whole series and the sample's place on it; only a source with no values, or a distance axis with no distance, leaves it nothing to draw.
+    const chartSource = component.source;
+    const axis = (component.chart ?? DEFAULT_CHART).axis;
+    if (!chartSource || !timeline.available.has(dataSourceId(chartSource)) || (axis === 'distance' && !timeline.available.has('metric:distance'))) {
+      return { status: 'hidden', reason: 'no_data', componentId };
+    }
+    return {
+      status: 'ready',
+      componentId,
+      component,
+      style,
+      label: component.display?.label?.trim() || describeSource(chartSource, timeline),
+      fraction: sample.progress,
+    };
+  }
   if (component.type === 'progress') {
     return sample.progress === undefined
       ? { status: 'hidden', reason: 'no_data', componentId }
@@ -942,25 +1150,44 @@ export function resolveOverlayComponent(
       zones: { setting, value: shown, unit: ZONES_UNIT[setting.source], index, bounds, within: withinZone(shown, index, bounds) },
     };
   }
-  let text: string;
   const total = timeline.distanceTotalMeters;
-  if (source.kind === 'metric' && source.metric === 'distance' && component.display?.ofTotal && total !== undefined) {
-    text = distanceOfTotal(shown, total, unitSystem, component.display.decimals);
-  } else if (source.kind === 'metric') {
-    text =
-      component.display?.decimals !== undefined
-        ? formatMetricWith(source.metric, shown, unitSystem, component.display.decimals)
-        : formatMetric(source.metric, shown, unitSystem);
-  }
-  else {
-    const unit = timeline.sensorLabels.get(dataSourceId(source))?.unit;
-    text = `${Number(shown.toFixed(2))}${unit ? ` ${unit}` : ''}`;
-  }
+  const text =
+    source.kind === 'metric' && source.metric === 'distance' && component.display?.ofTotal && total !== undefined
+      ? distanceOfTotal(shown, total, unitSystem, component.display.decimals)
+      : formatSourceValue(source, shown, unitSystem, timeline, component.display?.decimals);
 
   let fraction: number | undefined;
   if (component.type === 'gauge' && component.range) {
     const { min, max } = component.range;
     fraction = clamp01((shown - min) / (max - min));
   }
+  if (component.type === 'dial') {
+    // AV-1019. The range the reader set, or the activity's own rounded to a step; a value beyond it pins at its end.
+    const range = component.range ?? activityRange(timeline, source);
+    if (!range) return { status: 'hidden', reason: 'no_data', componentId };
+    return { status: 'ready', componentId, component, style, label, text, fraction: rangeFraction(shown, range), value: shown, range };
+  }
+  if (component.type === 'gradient' || component.type === 'compass') {
+    return { status: 'ready', componentId, component, style, label, text, value: shown };
+  }
   return { status: 'ready', componentId, component, style, label, text, fraction };
+}
+
+/**
+ * A value as a figure writes it, in the unit system and with the decimals chosen:
+ * a metric by its own rule, a camera stream in its own unit. AV-1019 shares it with
+ * the chart's labels, so an axis reads as the figure does.
+ */
+export function formatSourceValue(
+  source: OverlayDataSource,
+  value: number,
+  units: UnitSystem,
+  timeline: Pick<OverlayTimeline, 'sensorLabels'>,
+  decimals?: 0 | 1 | 2,
+): string {
+  if (source.kind === 'metric') {
+    return decimals !== undefined ? formatMetricWith(source.metric, value, units, decimals) : formatMetric(source.metric, value, units);
+  }
+  const unit = timeline.sensorLabels.get(dataSourceId(source))?.unit;
+  return `${Number(value.toFixed(2))}${unit ? ` ${unit}` : ''}`;
 }

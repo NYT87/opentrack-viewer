@@ -33,6 +33,9 @@ Geometry is in 0..1 of the box, so multiply by `box.width` and `box.height`, the
 A progress bar needs only `progress`. A route inset is not drawn where the activity has no position at
 the moment shown, and an elevation profile not where it has no elevation.
 
+The elevation profile is a case of the [chart](charts.md) (AV-1019): both are made by one projection of a series along the activity,
+and a profile's `runs` are the ones a chart of elevation along distance has, over the whole activity.
+
 ## What it must draw
 
 The route and a marker at `position`, or the profile and a cursor at `progress`, or a bar filled to

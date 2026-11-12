@@ -1363,6 +1363,47 @@ Acceptance criteria:
   - the privacy guard: no storage;
   - a browser test reading an exported frame's zone colours.
 
+#### AV-1019: Dial Gauge, Line Chart With a Cursor, Gradient Indicator and Compass
+
+Dependencies: AV-1015, AV-1016, AV-1017, AV-1018, AV-1211, TD-080
+
+GitHub issue #21. Four new component types, drawn by the one renderer, so the canvas preview, the PNG sequence, the transparent WebM, the burned-in video and the map video all show them alike. Each is placed, sized and saved like any other, with AV-1015's colours, text sizes and halo where it draws text.
+
+Acceptance criteria:
+- **Dial gauge** (`dial`): an arc of ticks with a needle or a marker, and the value and label in the middle.
+  - For speed, pace, cadence, power, heart rate or any figure with a range.
+  - **Settings:** the sweep (180° to 300°, default 240°); the range, which defaults to the activity's own range for that figure rounded to a sensible step, or can be set by hand; the major tick step and the minor ticks per major; needle or marker; the track, fill and needle colours.
+  - Values beyond the range pin at its ends.
+  - Smoothing (AV-1016) applies.
+- **Line chart with a cursor** (`chart`): a figure against time or distance, with a cursor at the moment shown.
+  - **Sources:** any live metric or camera stream with values.
+  - **Settings:** the x axis (time or distance); the window (the whole activity, or N seconds or metres either side of now, with the cursor in the middle); the line and fill colours; axis labels on or off (the y range's ends, and the x window).
+  - A gap in the data is a gap in the line.
+  - **The elevation profile becomes a case of the chart.** Both are projected by one series projection, extended from `projectProfile`. Existing `elevationProfile` components keep their type and draw the same pixels.
+- **Gradient indicator** (`gradient`): the current slope in %, with an up or down glyph and a colour by steepness.
+  - **Settings:** the colour bands (editable, with defaults for descents, flat, and four climbing bands) and the glyph on or off.
+  - **Grade source:** the file's recorded grade where it has one. Otherwise it is derived from elevation over the last 50 m of distance, so most GPX and FIT files have a gradient. The plain *Gradient* figure gains the derived grade too.
+- **Compass / heading** (`compass`): the direction of travel.
+  - **Rose style:** a rose that turns so the heading is up, with a fixed marker.
+  - **Needle style:** a fixed north-up rose with a needle pointing along the heading.
+  - **Settings:** the style, labelled cardinal points on or off, and the colours.
+  - **The heading:** a new live metric, `heading`, the bearing from the point about 20 m back along the route to the current position.
+    - It is smoothed with a circular mean (never a plain average across 0°/360°).
+    - It holds through a stop (TD-080), and is absent until the activity has moved 20 m.
+  - **Display:** written as a figure, in degrees with a cardinal letter.
+- **Missing data is not drawn**, as for other figures.
+- **Registry and contract:**
+  - **AV-1016's registry gains:** *Speedometer* (cycling, a dial); *Cadence dial* (cycling); *Speed against time* (any sport, a chart); *Heart rate against time* (any sport, a chart); *Gradient indicator* (cycling, replacing the plain gradient entry); *Compass* (any sport).
+  - **AV-1017's contract gains** sections or props for the four types, with docs pages and examples.
+- **Layout files:** new optional fields within version 2. Older layouts open unchanged, with the elevation profile's pixels unchanged.
+- **Tests:**
+  - **Renderer:** the needle's angle at the range's ends and beyond; the chart cursor's position for each axis and window; a gap in the chart; the gradient's colour bands at their bounds; the compass at the four cardinal headings and across 359°/1°.
+  - **Heading:** the bearing, the circular smoothing, holding through a stop, and absent before 20 m.
+  - **Derived grade:** up, down, flat, and none without elevation.
+  - **Editor:** each control.
+  - **Layout files:** round trips.
+  - **Browser:** an exported frame read for a dial and a chart.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

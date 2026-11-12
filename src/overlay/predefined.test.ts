@@ -64,7 +64,9 @@ describe('the registry of predefined components (AV-1016)', () => {
       'Power',
       'Power, 3 s average',
       'Cadence',
-      'Gradient',
+      'Gradient indicator',
+      'Speedometer',
+      'Cadence dial',
       'Power zones',
       'Heart rate zones',
       'Climb so far',
@@ -78,6 +80,9 @@ describe('the registry of predefined components (AV-1016)', () => {
       'Distance of the total',
     ]);
     expect(PREDEFINED_ENTRIES.filter((entry) => entry.sport === 'any').map((entry) => entry.name)).toEqual([
+      'Speed against time',
+      'Heart rate against time',
+      'Compass',
       'Elevation profile',
       'Progress bar',
       'Route inset',
@@ -121,7 +126,17 @@ describe('the registry of predefined components (AV-1016)', () => {
     expect(window('cycling.climb')).toBeUndefined();
     expect(window('running.distance-total')).toBeUndefined();
     expect(one('cycling.power-3s').display?.label).toBe('Power 3s');
-    expect(one('cycling.gradient').display?.decimals).toBe(0);
+    // AV-1019. The gradient indicator replaces the plain figure under its id; the dials, charts and the compass join it.
+    expect(one('cycling.gradient')).toMatchObject({ type: 'gradient', source: { metric: 'grade' } });
+    expect(window('cycling.speedometer')).toBe(2);
+    expect(window('cycling.cadence-dial')).toBe(3);
+    expect(window('any.compass')).toBe(3);
+    expect(one('cycling.speedometer')).toMatchObject({ type: 'dial', source: { metric: 'speed' } });
+    expect(one('cycling.cadence-dial')).toMatchObject({ type: 'dial', source: { metric: 'cyclingCadence' }, display: { label: 'Cadence' } });
+    expect(one('any.speed-chart')).toMatchObject({ type: 'chart', source: { metric: 'speed' }, chart: { axis: 'time' } });
+    expect(one('any.heart-rate-chart')).toMatchObject({ type: 'chart', source: { metric: 'heartRate' } });
+    expect(one('any.compass')).toMatchObject({ type: 'compass', source: { metric: 'heading' }, compass: { style: 'rose', labels: true } });
+    expect(window('any.speed-chart')).toBeUndefined();
     expect(one('running.distance-total').display?.ofTotal).toBe(true);
     expect(one('cycling.speed-gauge')).toMatchObject({ type: 'gauge', source: { metric: 'speed' } });
     // The gauge's range comes from the activity's top speed, as a plain gauge's does.
@@ -150,12 +165,12 @@ describe('the registry of predefined components (AV-1016)', () => {
     const activity = full(['powerWatts', 'gradePercent', 'elevationMeters']);
     const choices = canvasElementChoices(timelineOf(activity), still(activity));
     const of = (id: string) => choices.find((choice) => choice.key === `predefined:${id}`)!;
-    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(10);
+    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(12);
     expect(choices.filter((choice) => choice.group === 'Running')).toHaveLength(5);
-    expect(choices.filter((choice) => choice.group === 'Any sport')).toHaveLength(3);
+    expect(choices.filter((choice) => choice.group === 'Any sport')).toHaveLength(6);
     expect(of('cycling.speed')).toMatchObject({ available: true, group: 'Cycling' });
     expect(of('cycling.power-3s')).toMatchObject({ available: false, reason: 'This activity has no power.' });
-    expect(of('cycling.gradient')).toMatchObject({ available: false, reason: 'This activity has no gradient.' });
+    expect(of('cycling.gradient')).toMatchObject({ available: false, reason: expect.stringContaining('This activity has no gradient') });
     expect(of('cycling.climb')).toMatchObject({ available: false, reason: 'This activity has no elevation.' });
     expect(of('any.elevation-profile')).toMatchObject({ available: false, reason: 'This activity has no elevation.' });
     expect(of('any.progress').available).toBe(true);
@@ -247,7 +262,8 @@ describe('a starting layout per sport (AV-1016)', () => {
   });
 
   it('leaves out what the activity cannot supply, falls back to climb without a gradient, and closes up', () => {
-    const noGrade = componentsFromSportLayout('cycling', timelineOf(full(['gradePercent'])), SIZES[0]!);
+    // No positions: no distance, so no derived grade either (AV-1019), but there is still a climb.
+    const noGrade = componentsFromSportLayout('cycling', timelineOf(full(['gradePercent', 'lat'])), SIZES[0]!);
     expect(metricsOf(noGrade)).toEqual(['speed', 'power', 'cyclingCadence', 'climb', 'elevationProfile']);
     const noPower = componentsFromSportLayout('cycling', timelineOf(full(['powerWatts', 'cyclingCadenceRpm'])), SIZES[0]!);
     expect(metricsOf(noPower)).toEqual(['speed', 'grade', 'elevationProfile']);

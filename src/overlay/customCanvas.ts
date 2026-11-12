@@ -8,6 +8,7 @@ import {
 import { figureLayout } from './figureLayout';
 import { stillElementChoices, newStillComponent, freshComponentId, type StillImageContext } from './staticImage';
 import {
+  DEFAULT_CHART,
   DEFAULT_OVERLAY_STYLE,
   DEFAULT_SHAPE,
   OVERLAY_TEMPLATE_VERSION,
@@ -22,6 +23,9 @@ import {
 } from './template';
 import { DEFAULT_ZONES_SMOOTHING_SECONDS, defaultZonesSetting } from './zones';
 import { dataSourceId, type OverlayMetricKey, type OverlayTimeline } from './timeline';
+import { DEFAULT_DIAL, activityRange } from './dial';
+import { DEFAULT_GRADIENT } from './gradient';
+import { DEFAULT_COMPASS } from './compass';
 import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
 import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
 import type { MeasureText } from './staticImage';
@@ -79,6 +83,12 @@ export type CanvasElementKey =
   /** AV-1018. A zones component, with its source's default zones. */
   | 'zones:heartRate'
   | 'zones:power'
+  /** AV-1019. A dial of a metric, with the activity's own range. */
+  | `dial:${DialMetric}`
+  /** AV-1019. A chart of a metric against time (against distance for the elevation). */
+  | `chart:${ChartMetric}`
+  | 'gradient'
+  | 'compass'
   | 'route'
   | 'progress'
   | 'elevationProfile'
@@ -86,6 +96,28 @@ export type CanvasElementKey =
   | `shape:${ShapeKind}`
   /** AV-1016. An entry of the registry of predefined components, by its id. */
   | `predefined:${string}`;
+
+/** AV-1019. The figures the Add list offers a dial and a chart of. A dial or a chart in a layout file may read any source. */
+export const DIAL_METRICS = ['speed', 'pace', 'heartRate', 'power', 'cyclingCadence', 'runningCadence'] as const;
+export const CHART_METRICS = ['speed', 'pace', 'heartRate', 'power', 'cyclingCadence', 'runningCadence', 'elevation', 'grade', 'temperature'] as const;
+type DialMetric = (typeof DIAL_METRICS)[number];
+type ChartMetric = (typeof CHART_METRICS)[number];
+const FIGURE_NAMES: Record<OverlayMetricKey, string> = {
+  speed: 'Speed',
+  pace: 'Pace',
+  distance: 'Distance',
+  elapsed: 'Elapsed time',
+  moving: 'Moving time',
+  elevation: 'Elevation',
+  heartRate: 'Heart rate',
+  power: 'Power',
+  cyclingCadence: 'Cycling cadence',
+  runningCadence: 'Running cadence',
+  temperature: 'Temperature',
+  grade: 'Grade',
+  climb: 'Climb so far',
+  heading: 'Heading',
+};
 
 export interface CanvasElementChoice {
   key: CanvasElementKey;
@@ -107,6 +139,8 @@ const LIVE_FIGURES: readonly { metric: OverlayMetricKey; label: string; missing:
     ['elevation', 'Elevation'],
     // AV-1016. The elevation gained so far.
     ['climb', 'Climb so far'],
+    // AV-1019. The direction of travel, as a figure; the compass draws it.
+    ['heading', 'Heading'],
     ['heartRate', 'Heart rate'],
     ['power', 'Power'],
     ['cyclingCadence', 'Cycling cadence'],
@@ -148,6 +182,23 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
     // AV-1018. Zones, in the sport's own defaults; their reference is asked for in the editor.
     { key: 'zones:heartRate', label: 'Heart rate zones', group: 'Live figures', available: has('metric:heartRate'), ...(has('metric:heartRate') ? {} : { reason: METRIC_MISSING.heartRate }) },
     { key: 'zones:power', label: 'Power zones', group: 'Live figures', available: has('metric:power'), ...(has('metric:power') ? {} : { reason: METRIC_MISSING.power }) },
+    // AV-1019. Dials, charts, the gradient indicator and the compass, each for what the activity has.
+    ...DIAL_METRICS.map((metric): CanvasElementChoice => ({
+      key: `dial:${metric}`,
+      label: `${FIGURE_NAMES[metric]} dial`,
+      group: 'Live figures',
+      available: has(`metric:${metric}`),
+      ...(has(`metric:${metric}`) ? {} : { reason: METRIC_MISSING[metric] }),
+    })),
+    ...CHART_METRICS.map((metric): CanvasElementChoice => ({
+      key: `chart:${metric}`,
+      label: `${FIGURE_NAMES[metric]} chart`,
+      group: 'Live figures',
+      available: has(`metric:${metric}`),
+      ...(has(`metric:${metric}`) ? {} : { reason: METRIC_MISSING[metric] }),
+    })),
+    { key: 'gradient', label: 'Gradient indicator', group: 'Live figures', available: has('metric:grade'), ...(has('metric:grade') ? {} : { reason: METRIC_MISSING.grade }) },
+    { key: 'compass', label: 'Compass', group: 'Live figures', available: has('metric:heading'), ...(has('metric:heading') ? {} : { reason: METRIC_MISSING.heading }) },
     { key: 'progress', label: 'Progress bar', group: 'Live figures', available: !timeline.unavailable },
     {
       key: 'elevationProfile',
@@ -227,6 +278,10 @@ export function newCanvasComponent(
   if (key === 'zones:heartRate' || key === 'zones:power') {
     return newZonesComponent(template, key === 'zones:heartRate' ? 'heartRate' : 'power', size);
   }
+  if (key.startsWith('dial:')) return newDialComponent(template, key.slice('dial:'.length) as OverlayMetricKey, size, timeline);
+  if (key.startsWith('chart:')) return newChartComponent(template, key.slice('chart:'.length) as OverlayMetricKey, size, timeline);
+  if (key === 'gradient') return newGradientComponent(template, size);
+  if (key === 'compass') return newCompassComponent(template, size);
   if (key.startsWith('shape:')) {
     const kind = key.slice('shape:'.length) as ShapeKind;
     return {
@@ -296,6 +351,97 @@ export function newZonesComponent(
   if (seconds > 0) component.smoothing = { windowSeconds: seconds };
   return component;
 }
+
+/**
+ * AV-1019 (TD-087). A dial of a metric: a square in the top-left, with the
+ * range of the activity's own values rounded to a step, falling back to the
+ * speed gauge's rule for speed (or a heart rate's usual 50 to 200) where the
+ * activity gives none, and the default arc, ticks and colours.
+ */
+export function newDialComponent(
+  template: OverlayTemplate,
+  metric: OverlayMetricKey,
+  size: { width: number; height: number },
+  timeline: OverlayTimeline,
+): OverlayComponent {
+  const aspect = size.width / size.height;
+  const side = Math.min(0.3, 0.3 / aspect);
+  const source = { kind: 'metric' as const, metric };
+  return {
+    id: freshComponentId(template, `${metric}-dial`),
+    type: 'dial',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width: side, height: side * aspect }),
+    source,
+    range: activityRange(timeline, source) ?? (metric === 'heartRate' ? HEART_RATE_RANGE : { min: 0, max: metric === 'speed' ? speedRangeOf(timeline) : 100 }),
+    dial: { ...DEFAULT_DIAL },
+  };
+}
+
+/**
+ * AV-1019 (TD-087). A chart of a metric against time, or against distance for
+ * elevation where the activity has one (the profile's own axis): a strip in the
+ * top-left over the whole activity, with axis labels on.
+ */
+export function newChartComponent(
+  template: OverlayTemplate,
+  metric: OverlayMetricKey,
+  size: { width: number; height: number },
+  timeline: OverlayTimeline,
+): OverlayComponent {
+  const aspect = size.width / size.height;
+  const width = Math.min(0.4, 0.4 / aspect);
+  return {
+    id: freshComponentId(template, `${metric}-chart`),
+    type: 'chart',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width, height: (width * aspect) / 3 }),
+    source: { kind: 'metric', metric },
+    chart: { ...DEFAULT_CHART, axis: metric === 'elevation' && timeline.available.has('metric:distance') ? 'distance' : 'time' },
+  };
+}
+
+/** AV-1019 (TD-087). The gradient indicator: a tile with the default bands and a glyph, the grade smoothed over 5 s (it is noisy from GPS). */
+export function newGradientComponent(template: OverlayTemplate, size: { width: number; height: number }): OverlayComponent {
+  const aspect = size.width / size.height;
+  const tileW = Math.min(0.3, (BASE_FONT_CQW / 100) * TILE_WIDTH_EMS * 1.3);
+  return {
+    id: freshComponentId(template, 'gradient'),
+    type: 'gradient',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width: tileW, height: Math.min(0.2, 0.075 * aspect) }),
+    source: { kind: 'metric', metric: 'grade' },
+    gradient: { bands: DEFAULT_GRADIENT.bands.map((band) => ({ ...band })), glyph: true },
+    smoothing: { windowSeconds: GRADIENT_SMOOTHING_SECONDS },
+  };
+}
+
+/** AV-1019 (TD-087). The compass: a rose that turns, labelled, the heading smoothed over 3 s (it is noisy from GPS). */
+export function newCompassComponent(template: OverlayTemplate, size: { width: number; height: number }): OverlayComponent {
+  const aspect = size.width / size.height;
+  const side = Math.min(0.22, 0.22 / aspect);
+  return {
+    id: freshComponentId(template, 'compass'),
+    type: 'compass',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width: side, height: side * aspect }),
+    source: { kind: 'metric', metric: 'heading' },
+    compass: { ...DEFAULT_COMPASS },
+    smoothing: { windowSeconds: COMPASS_SMOOTHING_SECONDS },
+  };
+}
+
+/** AV-1019. How long the grade and the heading are averaged over to start with. */
+export const GRADIENT_SMOOTHING_SECONDS = 5;
+export const COMPASS_SMOOTHING_SECONDS = 3;
 
 /**
  * AV-1016. What adding an element puts on the canvas: one component, or the
@@ -404,6 +550,7 @@ const WIDEST_VALUE: Record<OverlayMetricKey, number> = {
   elapsed: 35_999,
   moving: 35_999,
   climb: 9999,
+  heading: 359,
 };
 
 /**

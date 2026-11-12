@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import type { Activity } from '../domain/activity';
+import { computeDistance } from '../domain/stats';
 import { makeActivity } from '../test/helpers/activity';
 import { activityThrough, straightNorth } from '../test/helpers/mapVideoRoutes';
 import { MAX_PROFILE_COLUMNS, projectProfile } from './elevationProfile';
@@ -68,5 +70,164 @@ describe('the elevation profile (AV-1211)', () => {
     expect(drawn).toBeLessThanOrEqual(MAX_PROFILE_COLUMNS * 2);
     // Every spike is still drawn at the top.
     expect(profile.runs[0]!.filter(([, y]) => y < 0.13)).toHaveLength(14);
+  });
+});
+
+/*
+ * AV-1019 (TD-087). The profile is now the series of elevation along distance. This is AV-1211's projection as it
+ * was before, kept whole as the reference, so the test below holds the new one to its output point for point: a
+ * profile draws the same pixels, and the cursor lands on the same place.
+ */
+type LegacyPoint = [number, number];
+interface LegacyProfile {
+  runs: LegacyPoint[][];
+  at(progress: number): LegacyPoint | undefined;
+}
+const LEGACY_COLUMNS = 1000;
+const LEGACY_TOP = 0.12;
+const LEGACY_BOTTOM = 0.08;
+type Point = LegacyPoint;
+
+/** The profile of `activity`, or `undefined` when it has no two places with an elevation along it. */
+function legacyProjectProfile(activity: Activity): LegacyProfile | undefined {
+  const { points } = activity;
+  const distance = computeDistance(points).cumulativeMeters;
+  const along: (number | undefined)[] = new Array(points.length).fill(undefined);
+  let first: number | undefined;
+  let last: number | undefined;
+  for (let i = 0; i < points.length; i += 1) {
+    const meters = distance[i];
+    if (typeof meters !== 'number' || !Number.isFinite(meters)) continue;
+    first ??= meters;
+    last = meters;
+    along[i] = meters;
+  }
+  // No distance at all: along by time, as the timeline's progress is then.
+  if (first === undefined || last === undefined || last <= first) {
+    first = undefined;
+    last = undefined;
+    for (let i = 0; i < points.length; i += 1) {
+      const ms = points[i]!.time?.getTime();
+      along[i] = typeof ms === 'number' && Number.isFinite(ms) ? ms / 1000 : undefined;
+      if (along[i] === undefined) continue;
+      first ??= along[i];
+      last = along[i];
+    }
+  }
+  if (first === undefined || last === undefined || last <= first) return undefined;
+
+  let low = Infinity;
+  let high = -Infinity;
+  for (const point of points) {
+    const elevation = point.elevationMeters;
+    if (typeof elevation !== 'number' || !Number.isFinite(elevation)) continue;
+    low = Math.min(low, elevation);
+    high = Math.max(high, elevation);
+  }
+  if (!Number.isFinite(low)) return undefined;
+  const span = last - first;
+  const x = (value: number) => Math.min(1, Math.max(0, (value - first) / span));
+  // A flat profile is a line across the middle of where a hilly one would be.
+  const y = (elevation: number) =>
+    high > low ? 1 - LEGACY_BOTTOM - ((elevation - low) / (high - low)) * (1 - LEGACY_TOP - LEGACY_BOTTOM) : (1 + LEGACY_TOP - LEGACY_BOTTOM) / 2;
+
+  // Every point with both, in runs; then each run kept to its lowest and highest point per column.
+  const full: Point[][] = [];
+  let run: Point[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const elevation = points[i]!.elevationMeters;
+    const where = along[i];
+    if (where === undefined || typeof elevation !== 'number' || !Number.isFinite(elevation)) {
+      if (run.length) full.push(run);
+      run = [];
+      continue;
+    }
+    run.push([x(where), y(elevation)]);
+  }
+  if (run.length) full.push(run);
+  const runs = full.map(thin).filter((line) => line.length > 0);
+  if (runs.length === 0) return undefined;
+
+  // For the cursor: every run's points in order along, to search.
+  const ordered = runs.flatMap((line, index) => line.map((point) => ({ point, run: index })));
+  return {
+    runs,
+    at(progress) {
+      const target = Math.min(1, Math.max(0, progress));
+      let lo = 0;
+      let hi = ordered.length - 1;
+      if (target < ordered[0]!.point[0] || target > ordered[hi]!.point[0]) return undefined;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (ordered[mid]!.point[0] <= target) lo = mid;
+        else hi = mid;
+      }
+      const a = ordered[lo]!;
+      const b = ordered[hi]!;
+      if (a.point[0] === target || lo === hi) return [target, a.point[1]];
+      // Between two runs is a gap: no elevation there.
+      if (a.run !== b.run) return undefined;
+      const t = (target - a.point[0]) / (b.point[0] - a.point[0] || 1);
+      return [target, a.point[1] + (b.point[1] - a.point[1]) * t];
+    },
+  };
+}
+
+/** A run with at most two points a column: its lowest and highest there, in the order they come along. */
+function thin(run: Point[]): Point[] {
+  if (run.length <= LEGACY_COLUMNS * 2) return run;
+  const out: Point[] = [];
+  let column = -1;
+  let lowest: Point | undefined;
+  let highest: Point | undefined;
+  const flush = () => {
+    if (!lowest || !highest) return;
+    if (lowest === highest) out.push(lowest);
+    else out.push(...(lowest[0] <= highest[0] ? [lowest, highest] : [highest, lowest]));
+  };
+  for (const point of run) {
+    const at = Math.min(LEGACY_COLUMNS - 1, Math.floor(point[0] * LEGACY_COLUMNS));
+    if (at !== column) {
+      flush();
+      column = at;
+      lowest = point;
+      highest = point;
+      continue;
+    }
+    // y is down: the lowest place has the largest y.
+    if (point[1] > lowest![1]) lowest = point;
+    if (point[1] < highest![1]) highest = point;
+  }
+  flush();
+  return out;
+}
+
+describe('the profile as a case of the series (AV-1019, TD-087)', () => {
+  const T0 = Date.UTC(2026, 10, 1, 8);
+  const fixtures: [string, Activity][] = [
+    ['a hill', hill],
+    ['a gap in the elevation', activityThrough(straightNorth(1000, 10, 5).map((point) => (point.north > 400 && point.north < 600 ? point : { ...point, elevation: 100 + point.north / 10 })))],
+    ['two segments', activityThrough(straightNorth(1000, 10, 5).map((point, i) => ({ ...point, elevation: 100 + (i % 9), segment: i < 50 ? 0 : 1 })))],
+    ['a long ride', activityThrough(Array.from({ length: 30_001 }, (_, i) => ({ north: i, east: Math.sin(i / 900) * 200, second: i / 5, elevation: 100 + Math.sin(i / 700) * 30 + (i % 4000 === 1 ? 300 : 0) })))],
+    ['no distance, by time', makeActivity(Array.from({ length: 101 }, (_, i) => ({ time: new Date(T0 + i * 1000), elevationMeters: 100 + (i < 50 ? i : 100 - i) })))],
+    ['a flat ride', activityThrough(straightNorth(500, 10, 5).map((point) => ({ ...point, elevation: 42 })))],
+    ['elevation at the ends missing', activityThrough(straightNorth(500, 10, 5).map((point, i) => (i < 3 || i > 45 ? point : { ...point, elevation: 10 + i })))],
+    ['a recorded distance', makeActivity(Array.from({ length: 80 }, (_, i) => ({ time: new Date(T0 + i * 1000), distanceMeters: i * 3 + (i > 40 ? 50 : 0), elevationMeters: 300 + Math.cos(i / 6) * 40 })))],
+  ];
+
+  for (const [name, activity] of fixtures) {
+    it(`has the runs and the cursor of AV-1211's projection on ${name}`, () => {
+      const before = legacyProjectProfile(activity);
+      const after = projectProfile(activity);
+      expect(after === undefined).toBe(before === undefined);
+      if (!before || !after) return;
+      expect(after.runs).toEqual(before.runs);
+      for (let i = -1; i <= 101; i += 1) expect(after.at(i / 100)).toEqual(before.at(i / 100));
+    });
+  }
+
+  it('has its distance measured as the timeline measures it', () => {
+    expect(projectProfile(hill)!.axis).toBe('distance');
+    expect(projectProfile(hill)!.last - projectProfile(hill)!.first).toBeCloseTo(computeDistance(hill.points).totalMeters!, 6);
   });
 });

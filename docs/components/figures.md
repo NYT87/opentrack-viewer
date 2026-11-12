@@ -1,7 +1,7 @@
 # Live figures
 
 Section `figure` (`FigureProps`): one value at the moment shown. Speed, pace, distance, elevation, heart
-rate, running and cycling cadence, power, temperature, gradient, elapsed time, moving time, climb so far,
+rate, running and cycling cadence, power, temperature, gradient, heading, elapsed time, moving time, climb so far,
 and a camera's charted streams. The shared props are in the [README](README.md): `section`, `box`
 (`x`, `y`, `width`, `height`), `frame`, `fontPx`, `style` (`textColor`, `accentColor`,
 `backgroundOpacity`, `fontScale`), `videoTimeSeconds` and `activityElapsedSeconds`.
@@ -9,7 +9,7 @@ and a camera's charted streams. The shared props are in the [README](README.md):
 | Prop | Unit | Changes | Meaning |
 | --- | --- | --- | --- |
 | `source` | | never | What is read: `{ kind: 'metric', metric }` or `{ kind: 'sensor', key }` (`kind` is `metric` or `sensor`; `metric` one of the metric names; `key` the camera stream's). |
-| `value` | stored unit | every frame | The number, in the stored unit of `unit`: m/s, s/km, m, bpm, spm, rpm, W, °C, %, s. The trailing mean when `smoothingWindowSeconds` is present. |
+| `value` | stored unit | every frame | The number, in the stored unit of `unit`: m/s, s/km, m, bpm, spm, rpm, W, °C, % (gradient), ° (heading, clockwise from north), s. The trailing mean when `smoothingWindowSeconds` is present. |
 | `unit` | | never | The unit of `value`. Absent for a camera stream that states none. |
 | `unitSystem` | | never | `metric` or `imperial`: the component's own choice, else the reader's. |
 | `label` | | never | The name as the reader sees it ("Speed", or their wording). Not upper-cased. |
@@ -19,7 +19,7 @@ and a camera's charted streams. The shared props are in the [README](README.md):
 | `totalDistanceMeters` | m | never | Present only for a distance written "of the total", whose `text` says both ("12.4 / 42.2 km"). |
 
 `value` changes between the activity's points at the video's frame rate; through a stop it follows
-TD-080: speed, pace, power and cadence read 0, and the rest hold the value they had.
+TD-080: speed, pace, power and cadence read 0, and the rest hold the value they had. The gradient is the file's own where it has one, and otherwise the climb over the last 50 m of distance (AV-1019); the heading is the bearing of the last 20 m of the route, written "123° SE".
 
 A figure that has no value at the moment (no heart rate here, a dropout, outside the recording) is not
 drawn. A gauge with no range is a figure here, because the renderer draws it without a track.

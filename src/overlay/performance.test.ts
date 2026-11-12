@@ -3,6 +3,7 @@ import { createOverlayRenderer, type OverlayContext2D } from './export/drawOverl
 import { runExport } from './export/runExport';
 import { DEFAULT_OVERLAY_CONTROLS, buildOverlay } from './presets';
 import { projectRoute } from './routeProjection';
+import { projectSeries } from './series';
 import { buildOverlayTimeline } from './timeline';
 import { syntheticRide } from '../test/helpers/syntheticTelemetry';
 
@@ -117,6 +118,8 @@ describe('long timelines (AV-1008)', { timeout: 90_000 }, () => {
       lineWidth: 1,
       lineJoin: '',
       lineCap: '',
+      shadowColor: '',
+      shadowBlur: 0,
       textAlign: '',
       textBaseline: '',
       clearRect: count,
@@ -133,6 +136,7 @@ describe('long timelines (AV-1008)', { timeout: 90_000 }, () => {
       lineTo: count,
       stroke: count,
       arc: count,
+      closePath: count,
     } as unknown as OverlayContext2D;
 
     it('draws 5,000 frames of a six-hour ride within a budget, and the route is projected once, not per frame', () => {
@@ -168,6 +172,44 @@ describe('long timelines (AV-1008)', { timeout: 90_000 }, () => {
       expect(calls.count).toBeGreaterThan(before);
       expect(ms).toBeLessThan(10_000);
     }, 60_000);
+
+    it('draws 5,000 frames of a six-hour ride with a dial, a whole chart, a windowed chart, a gradient indicator and a compass within a budget, the series made once (AV-1019)', () => {
+      // The series is projected once per chart, and a window costs a search and the points in it, so a frame
+      // costs no more on a six-hour ride than on a short one: the line is the budget above's.
+      const base = { visible: true, unitMode: 'auto' as const, style: {}, rect: { x: 0.05, y: 0.05, width: 0.3, height: 0.2 } };
+      const moment = {
+        ...template,
+        components: [
+          { ...base, id: 'dial', type: 'dial' as const, source: { kind: 'metric' as const, metric: 'speed' as const }, range: { min: 0, max: 10 }, smoothing: { windowSeconds: 5 } },
+          { ...base, id: 'whole', type: 'chart' as const, source: { kind: 'metric' as const, metric: 'heartRate' as const }, chart: { axis: 'time' as const, lineColor: '#ffffff', fillColor: '#ffffff', fillOpacity: 0.25, labels: true } },
+          { ...base, id: 'window', type: 'chart' as const, source: { kind: 'metric' as const, metric: 'power' as const }, chart: { axis: 'distance' as const, window: 2000, lineColor: '#ffffff', fillColor: '#ffffff', fillOpacity: 0.25, labels: true } },
+          { ...base, id: 'gradient', type: 'gradient' as const, source: { kind: 'metric' as const, metric: 'grade' as const }, smoothing: { windowSeconds: 5 } },
+          { ...base, id: 'compass', type: 'compass' as const, source: { kind: 'metric' as const, metric: 'heading' as const }, smoothing: { windowSeconds: 3 } },
+        ],
+      };
+      const renderer = createOverlayRenderer({ template: moment, timeline, activity: medium, units: 'metric', width: 1920, height: 1080 });
+      renderer.drawFrame(ctx, 1); // projects both series once, outside the measurement
+      const before = calls.count;
+      const ms = best(3, () => {
+        for (let i = 0; i < 5000; i += 1) renderer.drawFrame(ctx, (i / 5000) * 6 * HOURS);
+      });
+      expect(calls.count).toBeGreaterThan(before + 5000);
+      expect(ms).toBeLessThan(10_000);
+    }, 60_000);
+
+    it('projects a 216,000-point series within a budget, and slices a window of it in a moment (AV-1019)', () => {
+      const values = (index: number) => long.points[index]!.heartRateBpm;
+      expect(best(3, () => void projectSeries(long, values, 'time'))).toBeLessThan(2500);
+      const series = projectSeries(long, values, 'time')!;
+      const ms = best(3, () => {
+        for (let i = 0; i < 5000; i += 1) series.window(series.first + scatter(i) * 6 * HOURS, 60);
+      });
+      expect(ms).toBeLessThan(2000);
+    }, 30_000);
+
+    it('derives the grade and the heading for a 216,000-point ride within the timeline’s budget (AV-1019)', () => {
+      expect(best(3, () => void buildOverlayTimeline(long, { video: { durationSeconds: 6 * HOURS } }))).toBeLessThan(4000);
+    }, 30_000);
 
     it('projects a 216,000-point route within a budget', () => {
       expect(best(3, () => void projectRoute(long, 1.5))).toBeLessThan(2500);

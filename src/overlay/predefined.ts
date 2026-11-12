@@ -13,9 +13,9 @@ import { normalizeRect, type OverlayComponent, type OverlayTemplate } from './te
  * is plain data: a sport is added by adding entries here, and the editor, which
  * only reads `PREDEFINED_ENTRIES`, does not change.
  *
- * Zones came with AV-1018 (TD-086). Dials, charts, the gradient glyph, the
- * compass, splits and average-so-far figures wait for their own drawing pieces
- * (#21, #22, #39) and have no entry until those land.
+ * Zones came with AV-1018 (TD-086), and the dial, the chart, the gradient
+ * indicator and the compass with AV-1019 (TD-087). Splits and average-so-far
+ * figures wait for their own pieces (#22, #39) and have no entry until those land.
  */
 
 export type PredefinedSport = 'cycling' | 'running' | 'any';
@@ -87,7 +87,10 @@ export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
   { id: 'cycling.power', name: 'Power', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: plain('metric:power') },
   { id: 'cycling.power-3s', name: 'Power, 3 s average', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: figure('metric:power', { smoothing: 3, label: 'Power 3s' }) },
   { id: 'cycling.cadence', name: 'Cadence', sport: 'cycling', needs: ['metric:cyclingCadence'], missing: METRIC_MISSING.cyclingCadence, build: figure('metric:cyclingCadence', { smoothing: 3, label: 'Cadence' }) },
-  { id: 'cycling.gradient', name: 'Gradient', sport: 'cycling', needs: ['metric:grade'], missing: METRIC_MISSING.grade, build: figure('metric:grade', { smoothing: 5, decimals: 0 }) },
+  // AV-1019. The gradient indicator replaces the plain gradient figure, under the same id: a layout stores components, not entries. It has the derived grade, so most files have one.
+  { id: 'cycling.gradient', name: 'Gradient indicator', sport: 'cycling', needs: ['metric:grade'], missing: METRIC_MISSING.grade, build: plain('gradient') },
+  { id: 'cycling.speedometer', name: 'Speedometer', sport: 'cycling', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: figure('dial:speed', { smoothing: 2 }) },
+  { id: 'cycling.cadence-dial', name: 'Cadence dial', sport: 'cycling', needs: ['metric:cyclingCadence'], missing: METRIC_MISSING.cyclingCadence, build: figure('dial:cyclingCadence', { smoothing: 3, label: 'Cadence' }) },
   { id: 'cycling.power-zones', name: 'Power zones', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: zones('power') },
   { id: 'cycling.heart-rate-zones', name: 'Heart rate zones', sport: 'cycling', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
   { id: 'cycling.climb', name: 'Climb so far', sport: 'cycling', needs: ['metric:climb'], missing: METRIC_MISSING.climb, build: plain('metric:climb') },
@@ -99,6 +102,9 @@ export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
   { id: 'running.cadence', name: 'Running cadence', sport: 'running', needs: ['metric:runningCadence'], missing: METRIC_MISSING.runningCadence, build: figure('metric:runningCadence', { smoothing: 3 }) },
   { id: 'running.distance-total', name: 'Distance of the total', sport: 'running', needs: ['metric:distance'], missing: METRIC_MISSING.distance, build: figure('metric:distance', { ofTotal: true }) },
   // Any sport
+  { id: 'any.speed-chart', name: 'Speed against time', sport: 'any', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: plain('chart:speed') },
+  { id: 'any.heart-rate-chart', name: 'Heart rate against time', sport: 'any', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: plain('chart:heartRate') },
+  { id: 'any.compass', name: 'Compass', sport: 'any', needs: ['metric:heading'], missing: METRIC_MISSING.heading, build: plain('compass') },
   { id: 'any.elevation-profile', name: 'Elevation profile', sport: 'any', needs: ['metric:elevation'], missing: ELEVATION_MISSING, build: plain('elevationProfile') },
   { id: 'any.progress', name: 'Progress bar', sport: 'any', needs: [], missing: '', build: plain('progress') },
   { id: 'any.route', name: 'Route inset', sport: 'any', needs: ['route'], missing: NO_ROUTE, build: plain('route') },

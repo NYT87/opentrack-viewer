@@ -321,6 +321,15 @@ export function describeStillComponent(component: OverlayComponent): string {
       return 'Date';
     case 'elevationProfile':
       return 'Elevation profile';
+    // AV-1019. Named for the warning a still gives when it leaves them out.
+    case 'dial':
+      return 'Dial';
+    case 'chart':
+      return 'Chart';
+    case 'gradient':
+      return 'Gradient indicator';
+    case 'compass':
+      return 'Compass';
     case 'label': {
       const first = (component.content ?? '').split('\n')[0]!.trim();
       return first ? `Text: ${first.length > 24 ? `${first.slice(0, 23)}…` : first}` : 'Text';

@@ -229,14 +229,15 @@ describe('the custom canvas (AV-1011)', () => {
     const cyclist = () => ride((i) => ({ powerWatts: 150 + 2 * i, elevationMeters: 100 + i, cyclingCadenceRpm: 80 }));
 
     it('groups the registry by sport, and lists one the activity lacks as disabled, with its reason', () => {
-      setup(cyclist());
+      // No elevation: no gradient either, recorded or derived (AV-1019).
+      setup(ride((i) => ({ powerWatts: 150 + 2 * i, cyclingCadenceRpm: 80 })));
       const add = within(region()).getByLabelText('Add');
       const group = (name: string) => within(add).getByRole('group', { name });
       expect(within(group('Cycling')).getByRole('option', { name: 'Power, 3 s average' })).toBeEnabled();
-      expect(within(group('Cycling')).getByRole('option', { name: 'Gradient (not in this activity)' })).toBeDisabled();
+      expect(within(group('Cycling')).getByRole('option', { name: 'Gradient indicator (Cycling) (not in this activity)' })).toBeDisabled();
       expect(within(group('Running')).getByRole('option', { name: 'Running cadence (Running) (not in this activity)' })).toBeDisabled();
       expect(within(group('Any sport')).getByRole('option', { name: 'Progress bar (Any sport)' })).toBeEnabled();
-      expect(within(region()).getByRole('list', { name: 'Not in this activity' })).toHaveTextContent('Gradient: This activity has no gradient.');
+      expect(within(region()).getByRole('list', { name: 'Not in this activity' })).toHaveTextContent('Gradient indicator (Cycling): This activity has no gradient');
     });
 
     it('adds a predefined entry as an ordinary component, with its smoothing, saved in the layout', async () => {
@@ -270,8 +271,8 @@ describe('the custom canvas (AV-1011)', () => {
       setup(cyclist());
       await userEvent.selectOptions(within(region()).getByLabelText('Start from'), 'cycling');
       await userEvent.click(within(region()).getByRole('button', { name: 'Use this layout' }));
-      // No gradient in this ride, so climb so far stands in; the profile closes the row.
-      expect(names()).toEqual(['Speed', 'Power 3s', 'Cadence', 'Climb so far', 'Elevation profile']);
+      // The ride has elevation, so it has a gradient (derived from it, AV-1019); the profile closes the row.
+      expect(names()).toEqual(['Speed', 'Power 3s', 'Cadence', 'Gradient indicator', 'Elevation profile']);
       await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
       expect(elements()).not.toBeInTheDocument();
       await userEvent.selectOptions(within(region()).getByLabelText('Start from'), 'running');
@@ -507,6 +508,201 @@ describe('the custom canvas (AV-1011)', () => {
     expect(region()).not.toHaveTextContent(/Transparent WebM is not made by this app yet/);
   });
 
+  describe('dials, charts, the gradient indicator and the compass (AV-1019, TD-087)', { timeout: 20_000 }, () => {
+    // Positions, speed, heart rate, power, cadence and elevation: a recorded gradient is not needed, and the heading comes from the positions.
+    const athlete = () => ride((i) => ({ speedMetersPerSecond: i / 6, heartRateBpm: 100 + i, powerWatts: 120 + 4 * i, cyclingCadenceRpm: 70 + (i % 9), elevationMeters: 100 + i / 2, distanceMeters: i * 5 }));
+    type Saved = Record<string, unknown> & { dial: Record<string, unknown> & { sweep: number }; chart: Record<string, unknown>; gradient: { glyph: boolean; bands: { from: number; color: string }[] } };
+    const first = async () => (await layoutJson()).template.components[0] as Saved;
+
+    it('adds each from the Add list, names it by its figure, and offers none a still has', async () => {
+      setup(athlete());
+      await add('Speed dial');
+      await add('Heart rate chart');
+      await add('Gradient indicator');
+      await add('Compass');
+      expect(names()).toEqual(['Speed dial', 'Heart rate chart', 'Gradient indicator', 'Compass']);
+      const components = (await layoutJson()).template.components as { type: string }[];
+      expect(components.map((component) => component.type)).toEqual(['dial', 'chart', 'gradient', 'compass']);
+      // The registry's entries are told apart by their sport.
+      const registry = within(region()).getByLabelText('Add');
+      for (const name of ['Speedometer', 'Cadence dial', 'Speed against time', 'Heart rate against time', 'Gradient indicator (Cycling)', 'Compass (Any sport)']) {
+        expect(within(registry).getByRole('option', { name: new RegExp(`^${name.replace(/[()]/g, '\\$&')}`) })).toBeEnabled();
+      }
+    });
+
+    it('does not offer them in a still, and leaves them out of a layout opened there, with a warning', async () => {
+      const activity = athlete();
+      const host = { title: 'Figures', intro: 'x', frame: { width: 1280, height: 720 }, timeline: buildOverlayTimeline(activity, { video: { durationSeconds: 60 } }), seconds: 0, onSeek: () => {}, onComponentsChange: () => {}, still: true };
+      render(<CustomCanvas activity={activity} offsetSeconds={0} units="metric" readerTimeZone="UTC" host={host} />);
+      const figures = within(screen.getByRole('region', { name: 'Figures' }));
+      for (const name of ['Speed dial', 'Heart rate chart', 'Gradient indicator', 'Compass']) expect(figures.queryByRole('option', { name })).not.toBeInTheDocument();
+      const entry = (type: string) => ({ id: type, type, visible: true, rect: { x: 0, y: 0, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, source: { kind: 'metric', metric: 'speed' } });
+      const json = { kind: 'opentrack-overlay-layout', version: 1, image: { width: 1280, height: 720 }, template: { version: 2, name: 'x', style: {}, components: ['dial', 'chart', 'gradient', 'compass'].map(entry) } };
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'm.json', { type: 'application/json' }));
+      expect(await screen.findByText(/Zones, dials, charts, gradient indicators and compasses were left out/)).toBeInTheDocument();
+    });
+
+    it('offers a dial a figure, a range, a sweep, ticks, a pointer and three colours, each named, and saves them', async () => {
+      setup(athlete());
+      await add('Speed dial');
+      expect(editor()).toHaveAccessibleName('Selected: Speed dial');
+      const initial = await first();
+      expect(initial).toMatchObject({ type: 'dial', range: { min: 0, max: 10 }, dial: { sweep: 240, minorTicks: 4, pointer: 'needle' } });
+
+      await userEvent.selectOptions(field('Figure') as unknown as HTMLElement, 'metric:heartRate');
+      expect(await first()).toMatchObject({ source: { metric: 'heartRate' }, range: { min: 100, max: 160 } });
+      fireEvent.change(field('Range starts at (bpm)'), { target: { value: '60' } });
+      fireEvent.change(field('Range ends at (bpm)'), { target: { value: '200' } });
+      // A start at or over the end is kept as typed and not used.
+      fireEvent.change(field('Range starts at (bpm)'), { target: { value: '300' } });
+      expect(await first()).toMatchObject({ range: { min: 60, max: 200 } });
+      expect(field('Range starts at (bpm)').value).toBe('300');
+      fireEvent.change(field('Range starts at (bpm)'), { target: { value: '80' } });
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Use this activity’s range' }));
+      expect(await first()).toMatchObject({ range: { min: 100, max: 160 } });
+
+      fireEvent.change(field('Sweep (degrees)'), { target: { value: '270' } });
+      fireEvent.change(field('Major tick every (bpm)'), { target: { value: '20' } });
+      fireEvent.change(field('Minor ticks between major ones'), { target: { value: '1' } });
+      await userEvent.selectOptions(within(editor()).getByLabelText('Pointer'), 'marker');
+      fireEvent.change(field('Track colour'), { target: { value: '#010203' } });
+      fireEvent.change(field('Filled part colour'), { target: { value: '#040506' } });
+      fireEvent.change(field('Needle colour'), { target: { value: '#070809' } });
+      fireEvent.change(field('Smoothing (s)'), { target: { value: '3' } });
+      expect(await first()).toMatchObject({
+        dial: { sweep: 270, majorStep: 20, minorTicks: 1, pointer: 'marker', trackColor: '#010203', fillColor: '#040506', needleColor: '#070809' },
+        smoothing: { windowSeconds: 3 },
+      });
+      fireEvent.change(field('Major tick every (bpm)'), { target: { value: '0' } });
+      expect((await first()).dial).not.toHaveProperty('majorStep');
+      // The sweep stays inside its limits.
+      fireEvent.change(field('Sweep (degrees)'), { target: { value: '500' } });
+      expect((await first()).dial.sweep).toBe(300);
+      fireEvent.change(field('Sweep (degrees)'), { target: { value: '20' } });
+      expect((await first()).dial.sweep).toBe(180);
+    });
+
+    it('lists only the figures the activity has for a dial, and offers the usual text styling', async () => {
+      setup(athlete());
+      await add('Speed dial');
+      const figure = field('Figure') as unknown as HTMLSelectElement;
+      expect(within(figure).getByRole('option', { name: 'Running cadence (not in this activity)' })).toBeDisabled();
+      expect(within(figure).getByRole('option', { name: 'Power' })).toBeEnabled();
+      for (const label of ['Label', 'Show the label', 'Units', 'Smoothing (s)', 'Value colour', 'Label colour', 'Label size (%)', 'Value size (%)', 'Spacing (% of width)', 'Halo colour', 'Halo (%)', 'Accent colour', 'Background (%)']) {
+        expect(within(editor()).getByLabelText(label), label).toBeInTheDocument();
+      }
+      // A dial's text is centred in it: there is no alignment to set.
+      expect(within(editor()).queryByLabelText('Alignment')).not.toBeInTheDocument();
+    });
+
+    it('sets a chart’s figure, axis, window, colours and labels, and keeps a window’s unit in step with the axis', async () => {
+      setup(athlete());
+      await add('Heart rate chart');
+      expect(await first()).toMatchObject({ type: 'chart', chart: { axis: 'time', labels: true } });
+      expect((await first()).chart).not.toHaveProperty('window');
+      await userEvent.selectOptions(field('Figure') as unknown as HTMLElement, 'metric:power');
+      await userEvent.selectOptions(within(editor()).getByLabelText('Along'), 'distance');
+      await userEvent.selectOptions(within(editor()).getByLabelText('Shows'), 'window');
+      expect(field('Window either side of now (metres)').value).toBe('500');
+      fireEvent.change(field('Window either side of now (metres)'), { target: { value: '250' } });
+      fireEvent.change(field('Line colour'), { target: { value: '#112233' } });
+      fireEvent.change(field('Fill colour'), { target: { value: '#445566' } });
+      fireEvent.change(field('Fill opacity (%)'), { target: { value: '60' } });
+      await userEvent.click(within(editor()).getByLabelText('Axis labels'));
+      expect(await first()).toMatchObject({ source: { metric: 'power' }, chart: { axis: 'distance', window: 250, lineColor: '#112233', fillColor: '#445566', fillOpacity: 0.6, labels: false } });
+      await userEvent.selectOptions(within(editor()).getByLabelText('Along'), 'time');
+      expect((await first()).chart).toMatchObject({ axis: 'time', window: 30 });
+      expect(within(editor()).getByLabelText('Window either side of now (seconds)')).toBeInTheDocument();
+      await userEvent.selectOptions(within(editor()).getByLabelText('Shows'), 'whole');
+      expect((await first()).chart).not.toHaveProperty('window');
+      expect(within(editor()).queryByLabelText(/Window either side of now/)).not.toBeInTheDocument();
+      // No smoothing and no alignment for a chart.
+      expect(within(editor()).queryByLabelText('Smoothing (s)')).not.toBeInTheDocument();
+      expect(within(editor()).queryByLabelText('Alignment')).not.toBeInTheDocument();
+    });
+
+    it('offers a distance axis only where the activity has a distance', async () => {
+      setup(ride((i) => ({ heartRateBpm: 100 + i, lat: undefined, lon: undefined })));
+      await add('Heart rate chart');
+      expect(within(within(editor()).getByLabelText('Along')).getByRole('option', { name: /Distance/ })).toBeDisabled();
+    });
+
+    it('edits the gradient bands: where each starts and its colour, adding, removing and resetting, and the glyph', async () => {
+      setup(athlete());
+      await add('Gradient indicator');
+      expect(await first()).toMatchObject({ type: 'gradient', source: { metric: 'grade' }, smoothing: { windowSeconds: 5 }, gradient: { glyph: true } });
+      expect(within(editor()).getByRole('group', { name: 'Colour bands' })).toBeInTheDocument();
+      expect(within(editor()).queryByLabelText('Band 1 starts at (%)')).not.toBeInTheDocument();
+      expect(field('Band 2 starts at (%)').value).toBe('-1');
+      fireEvent.change(field('Band 3 starts at (%)'), { target: { value: '4' } });
+      fireEvent.change(field('Band 4 colour'), { target: { value: '#123456' } });
+      fireEvent.change(field('Band 1 colour'), { target: { value: '#654321' } });
+      let bands = (await first()).gradient.bands as { from: number; color: string }[];
+      expect(bands[2]).toMatchObject({ from: 4 });
+      expect(bands[3]).toMatchObject({ color: '#123456' });
+      expect(bands[0]).toMatchObject({ from: -100, color: '#654321' });
+      // A start typed outside its neighbours is kept between them.
+      fireEvent.change(field('Band 3 starts at (%)'), { target: { value: '50' } });
+      bands = (await first()).gradient.bands;
+      expect(bands[2]!.from).toBeLessThan(bands[3]!.from);
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Add a band' }));
+      expect(field('Band 7 starts at (%)').value).toBe('15');
+      for (let i = 0; i < 5; i += 1) await userEvent.click(within(editor()).getByRole('button', { name: 'Add a band' }));
+      expect(within(editor()).getByRole('button', { name: 'Add a band' })).toBeDisabled();
+      for (let i = 0; i < 8; i += 1) await userEvent.click(within(editor()).getByRole('button', { name: 'Remove the last band' }));
+      expect(within(editor()).getByRole('button', { name: 'Remove the last band' })).toBeDisabled();
+      expect((await first()).gradient.bands).toHaveLength(2);
+      await userEvent.click(within(editor()).getByLabelText('Show the up or down glyph'));
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Reset the bands' }));
+      expect(await first()).toMatchObject({ gradient: { glyph: false } });
+      expect((await first()).gradient.bands).toHaveLength(6);
+      fireEvent.change(field('Smoothing (s)'), { target: { value: '8' } });
+      expect(await first()).toMatchObject({ smoothing: { windowSeconds: 8 } });
+    });
+
+    it('sets the compass’ style, labels and colours, and its smoothing', async () => {
+      setup(athlete());
+      await add('Compass');
+      expect(await first()).toMatchObject({ type: 'compass', source: { metric: 'heading' }, smoothing: { windowSeconds: 3 }, compass: { style: 'rose', labels: true } });
+      await userEvent.selectOptions(within(editor()).getByLabelText('Style'), 'needle');
+      await userEvent.click(within(editor()).getByLabelText('Label the cardinal points'));
+      fireEvent.change(field('Rose colour'), { target: { value: '#0a0b0c' } });
+      fireEvent.change(field('Needle colour'), { target: { value: '#0d0e0f' } });
+      fireEvent.change(field('Smoothing (s)'), { target: { value: '0' } });
+      const saved = await first();
+      expect(saved).toMatchObject({ compass: { style: 'needle', labels: false, roseColor: '#0a0b0c', needleColor: '#0d0e0f' } });
+      expect(saved).not.toHaveProperty('smoothing');
+      // The heading is written as degrees and a letter whatever the decimals: there is none to choose.
+      expect(within(editor()).queryByLabelText('Decimal places')).not.toBeInTheDocument();
+    });
+
+    it('gives every control a name, and groups the bands', async () => {
+      setup(athlete());
+      for (const label of ['Speed dial', 'Heart rate chart', 'Gradient indicator', 'Compass']) {
+        await add(label);
+        for (const role of ['textbox', 'spinbutton', 'combobox', 'checkbox'] as const) {
+          for (const control of within(editor()).queryAllByRole(role)) expect(control, `${label} ${role}`).toHaveAccessibleName();
+        }
+        for (const control of Array.from(editor().querySelectorAll('input[type="color"]'))) expect(control, label).toHaveAccessibleName();
+        for (const button of within(editor()).getAllByRole('button')) expect(button).toHaveAccessibleName();
+      }
+    });
+
+    it('opens a layout saved with them, and saves it again the same', async () => {
+      setup(athlete());
+      await add('Speed dial');
+      await add('Heart rate chart');
+      await add('Gradient indicator');
+      await add('Compass');
+      const saved = await layoutJson();
+      await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify({ kind: 'opentrack-overlay-layout', version: 1, ...saved })], 'm.json', { type: 'application/json' }));
+      expect(await within(region()).findByText('Opened the layout in m.json.')).toBeInTheDocument();
+      expect(names()).toEqual(['Speed dial', 'Heart rate chart', 'Gradient indicator', 'Compass']);
+      expect((await layoutJson()).template.components).toEqual(saved.template.components);
+    });
+  });
+
   describe('zones (AV-1018, TD-086)', () => {
     const athlete = () => ride((i) => ({ heartRateBpm: 110 + i, powerWatts: 120 + 4 * i, distanceMeters: i * 5 }));
     const fresh = async () => {
@@ -721,7 +917,7 @@ describe('the custom canvas (AV-1011)', () => {
       expect(within(screen.getByRole('region', { name: 'Figures' })).queryByRole('option', { name: 'Heart rate zones' })).not.toBeInTheDocument();
       const json = { kind: 'opentrack-overlay-layout', version: 1, image: { width: 1280, height: 720 }, template: { version: 2, name: 'x', style: {}, components: [{ id: 'z', type: 'zones', visible: true, rect: { x: 0, y: 0, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, source: { kind: 'metric', metric: 'heartRate' } }] } };
       await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'z.json', { type: 'application/json' }));
-      expect(await screen.findByText('Zones were left out: this picture shows no moment of the activity.')).toBeInTheDocument();
+      expect(await screen.findByText('Zones, dials, charts, gradient indicators and compasses were left out: this picture shows no moment of the activity.')).toBeInTheDocument();
     });
 
     it('stores nothing on the device: the figures are in memory for the session, and not in any storage', async () => {

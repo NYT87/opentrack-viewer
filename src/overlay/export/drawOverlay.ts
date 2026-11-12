@@ -2,6 +2,7 @@ import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import { BASE_FONT_CQW } from '../presets';
 import { projectProfile, type ProjectedProfile } from '../elevationProfile';
+import type { ProjectedSeries } from '../series';
 import { projectRoute, type ProjectedRoute } from '../routeProjection';
 import { FIGURE_MIN_TOP_EMS, figureLayout, haloShadow } from '../figureLayout';
 import { drawShape } from '../shapes';
@@ -18,6 +19,12 @@ import {
   type ResolvedOverlayComponent,
 } from '../template';
 import type { OverlayTimeline } from '../timeline';
+import { DEFAULT_CHART } from '../template';
+import { chartMoment, chartSeriesOf } from '../chart';
+import { drawChart, drawSeries } from './drawChart';
+import { drawCompass } from './drawCompass';
+import { drawDial } from './drawDial';
+import { drawGradient } from './drawGradient';
 import { drawZones } from './drawZones';
 import { zoneTimesFor } from '../zones';
 
@@ -99,6 +106,10 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     if (profile === null) profile = activity ? projectProfile(activity) : undefined;
     return profile;
   };
+
+  // AV-1019. A chart's series is made once per component, from the points the renderer was given (the map video's are the trimmed ones).
+  const seriesOf = (component: OverlayComponent): ProjectedSeries | undefined =>
+    activity && component.source ? chartSeriesOf(activity, component.source, (component.chart ?? DEFAULT_CHART).axis) : undefined;
 
   const boxOf = (component: OverlayComponent): Box => ({
     x: component.rect.x * width,
@@ -204,25 +215,14 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     if (!projected) return;
     const px = (x: number) => box.x + x * box.w;
     const py = (y: number) => box.y + y * box.h;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    for (const run of projected.runs) {
-      ctx.beginPath();
-      run.forEach(([x, y], index) => (index === 0 ? ctx.moveTo(px(x), py(y)) : ctx.lineTo(px(x), py(y))));
-      ctx.lineTo(px(run[run.length - 1]![0]), box.y + box.h);
-      ctx.lineTo(px(run[0]![0]), box.y + box.h);
-      ctx.closePath();
-      ctx.globalAlpha = 0.25;
-      ctx.fillStyle = ready.style.textColor;
-      ctx.fill();
-      ctx.beginPath();
-      run.forEach(([x, y], index) => (index === 0 ? ctx.moveTo(px(x), py(y)) : ctx.lineTo(px(x), py(y))));
-      ctx.globalAlpha = 0.9;
-      ctx.strokeStyle = ready.style.textColor;
-      ctx.lineWidth = Math.max(1, 0.025 * box.h);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
+    // AV-1019. The same drawing of a series that a chart uses, with the profile's own look.
+    drawSeries(ctx, box, projected.runs, {
+      fillColor: ready.style.textColor,
+      fillAlpha: 0.25,
+      lineColor: ready.style.textColor,
+      lineAlpha: 0.9,
+      lineWidth: Math.max(1, 0.025 * box.h),
+    });
     const progress = ready.fraction ?? 0;
     ctx.fillStyle = ready.style.accentColor;
     ctx.fillRect(px(progress) - Math.max(1, 0.01 * box.h), box.y, Math.max(2, 0.02 * box.h), box.h);
@@ -295,6 +295,11 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
         const box = boxOf(component);
         const em = BASE_FONT_FRACTION * width * ready.style.fontScale;
 
+        // A chart with no place on its axis at this moment (a dropout) draws nothing, background included, as the contract has no props for it.
+        if (component.type === 'chart') {
+          const chartSeries = seriesOf(component);
+          if (!chartSeries || !component.source || chartMoment(chartSeries, component.source, sample, timeline).centre === undefined) continue;
+        }
         ctx.save();
         // Each component stays inside its own box, as the preview's tile does.
         roundedRect(ctx, box, 0.4 * em);
@@ -313,6 +318,15 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
               ? zoneTimesFor(timeline, component.source, resolved.bounds)?.at(sample.activityElapsedSeconds)
               : undefined;
           drawZones(ctx, box, ready, em, width, times);
+        } else if (component.type === 'dial') {
+          drawDial(ctx, box, ready, em, width);
+        } else if (component.type === 'gradient') {
+          drawGradient(ctx, box, ready, em, width);
+        } else if (component.type === 'compass') {
+          drawCompass(ctx, box, ready, em, width);
+        } else if (component.type === 'chart') {
+          const series = seriesOf(component);
+          if (series && component.source) drawChart(ctx, box, ready, em, series, chartMoment(series, component.source, sample, timeline), units, timeline);
         } else if (component.type === 'progress') {
           ctx.fillStyle = 'rgb(255 255 255 / 0.25)';
           ctx.fillRect(box.x, box.y, box.w, box.h);

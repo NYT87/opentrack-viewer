@@ -12,7 +12,7 @@ Section `gauge` (`GaugeProps`): everything a [figure](figures.md) has (`source` 
 
 Draw the track from `fraction`; do not recompute it from `value` and `range`, which would disagree with
 the built-ins where the value is smoothed or clamped. A gauge with no range is given as a
-[figure](figures.md), not a gauge.
+[figure](figures.md), not a gauge. A [dial](dials.md) is a gauge drawn on an arc, with its own section.
 
 ## What it must draw
 

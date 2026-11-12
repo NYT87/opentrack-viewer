@@ -3,6 +3,8 @@ import { RIDE_PATH, fetchBlobBytes } from './helpers/overlayFixtures';
 import { decodePng, type DecodedPng } from './helpers/png';
 import { readZip } from '../src/test/helpers/zipReader';
 import { defaultZones } from '../src/overlay/zones';
+import { dialAngle } from '../src/overlay/dial';
+import { BASE_FONT_CQW } from '../src/overlay/presets';
 
 /**
  * AV-1011. The custom canvas in a real browser: a resolution chosen, a shape
@@ -328,4 +330,113 @@ test('zones draw the zone the ride is in, in its colour, once the reader has giv
     // Transparent where nothing was placed.
     expect(pixel(png, 640, 360)[3]).toBe(0);
   }
+});
+
+test('a dial and a chart draw their needle, their line and their cursor where the ride puts them: read from exported frames (AV-1019)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');
+  await expect(canvas.getByRole('group', { name: /^Canvas preview, 1280 by 720 pixels/ })).toBeVisible();
+  const W = 1280;
+  const H = 720;
+  const em = (BASE_FONT_CQW / 100) * W;
+  const place = async (box: { x: number; y: number; width: number; height: number }) => {
+    for (const [label, value] of [['Width (%)', box.width], ['Height (%)', box.height], ['From the left (%)', box.x], ['From the top (%)', box.y]] as const) {
+      await canvas.getByLabel(label, { exact: true }).fill(String(value * 100));
+    }
+    await canvas.getByLabel('Background (%)').fill('0');
+  };
+
+  // A speed dial, with colours that cannot be mistaken for one another. The ride's speed is 4 + 0.2 t m/s: the dial's own
+  // range is 4 to 16, so the needle is at the start of the arc at 0 s, straight up at 30 s and at the end of it at 60 s.
+  await add(canvas, 'Speed dial');
+  const dial = { x: 0.05, y: 0.05, width: 0.2, height: 0.35 };
+  await place(dial);
+  await canvas.getByLabel('Needle colour').fill('#00ff00');
+  await canvas.getByLabel('Track colour').fill('#0000ff');
+  await canvas.getByLabel('Filled part colour').fill('#ffff00');
+
+  // A heart rate chart across the whole ride, then one through a 20 s window.
+  await add(canvas, 'Heart rate chart');
+  const whole = { x: 0.3, y: 0.05, width: 0.65, height: 0.3 };
+  await place(whole);
+  await canvas.getByLabel('Line colour').fill('#ff00ff');
+  await canvas.getByLabel('Accent colour').fill('#00ffff');
+  await add(canvas, 'Power chart');
+  const windowed = { x: 0.3, y: 0.5, width: 0.65, height: 0.3 };
+  await place(windowed);
+  await canvas.getByLabel('Shows').selectOption('window');
+  await canvas.getByLabel('Window either side of now (seconds)').fill('20');
+  await canvas.getByLabel('Line colour').fill('#ff8000');
+  await canvas.getByLabel('Accent colour').fill('#00ffff');
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-1280x720-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+  const frameAt = (seconds: number) => decodePng(Buffer.from(frames[Math.round(seconds * 10)]!.data));
+  // The last frame is a tenth of a second short of the minute.
+  const END = (frames.length - 1) / 10;
+
+  // The needle: a point half way along it is its colour, and the mirrored point is not.
+  const centre = { x: (dial.x + dial.width / 2) * W, y: (dial.y + dial.height / 2) * H };
+  const R = (Math.min(dial.width * W, dial.height * H) / 2 - 0.3 * em) / 1.03;
+  const alongNeedle = (fraction: number, at: number) => {
+    const angle = dialAngle(240, fraction);
+    return pixel(frameAt(at), centre.x + 0.4 * R * Math.cos(angle), centre.y + 0.4 * R * Math.sin(angle));
+  };
+  for (const [seconds, fraction] of [[0, 0], [30, 0.5], [END, END / 60]] as const) {
+    expect(alongNeedle(fraction, seconds), `needle at ${seconds} s`).toEqual([0, 255, 0, 255]);
+    // Not where it would be at the other end of the arc.
+    if (fraction !== 0.5) expect(alongNeedle(1 - fraction, seconds)).not.toEqual([0, 255, 0, 255]);
+  }
+  // The arc: filled up to the value in yellow, the rest of the track blue.
+  const arc = (fraction: number, at: number) => {
+    const angle = dialAngle(240, fraction);
+    const radius = R - Math.max(1.5, 0.13 * R) / 2;
+    return pixel(frameAt(at), centre.x + radius * Math.cos(angle), centre.y + radius * Math.sin(angle));
+  };
+  expect(arc(0.25, 30)).toEqual([255, 255, 0, 255]);
+  expect(arc(0.75, 30)).toEqual([0, 0, 255, 255]);
+  expect(arc(0.9, END)).toEqual([255, 255, 0, 255]);
+  expect(arc(0.9, 0)).toEqual([0, 0, 255, 255]);
+
+  // The whole chart: the cursor moves along it, and the line is the heart rate, 100 + t bpm.
+  const pad = 0.3 * em;
+  const area = (box: typeof whole, labels: boolean) => ({
+    x: box.x * W + pad,
+    y: box.y * H + pad,
+    width: box.width * W - 2 * pad,
+    height: box.height * H - 2 * pad - (labels ? 0.45 * em * 1.5 : 0),
+  });
+  const plot = area(whole, true);
+  for (const seconds of [0, 30, END]) {
+    const x = plot.x + (seconds / 60) * plot.width;
+    // The top of the bar, above the line.
+    expect(pixel(frameAt(seconds), seconds === 0 ? x + 1 : Math.min(x, plot.x + plot.width - 2), plot.y + 1), `cursor at ${seconds} s`).toEqual([0, 255, 255, 255]);
+    // And not at the other moments.
+    for (const other of [0, 30, END].filter((value) => value !== seconds)) {
+      expect(pixel(frameAt(seconds), plot.x + (other / 60) * plot.width + (other === 0 ? 3 : other === END ? -3 : 0), plot.y + 1)[3]).toBeLessThan(255);
+    }
+  }
+  // 100 to 160 bpm over the ride puts the line at 0.92 of the plot's height at the start and 0.12 at the end: at a quarter, 0.72.
+  expect(pixel(frameAt(45), plot.x + 0.25 * plot.width, plot.y + 0.72 * plot.height)).toEqual([255, 0, 255, 255]);
+  // The fill under it is white, a quarter opaque.
+  const fill = pixel(frameAt(45), plot.x + 0.25 * plot.width, plot.y + 0.9 * plot.height);
+  expect(fill.slice(0, 3)).toEqual([255, 255, 255]);
+  expect(fill[3]).toBeGreaterThan(55);
+  expect(fill[3]).toBeLessThan(75);
+  // Above the line there is nothing but the cursor.
+  expect(pixel(frameAt(45), plot.x + 0.25 * plot.width, plot.y + 0.4 * plot.height)[3]).toBe(0);
+
+  // The windowed chart keeps its cursor in the middle, wherever the ride is.
+  const strip = area(windowed, true);
+  for (const seconds of [5, 30, 55]) {
+    expect(pixel(frameAt(seconds), strip.x + strip.width / 2, strip.y + 1), `window cursor at ${seconds} s`).toEqual([0, 255, 255, 255]);
+    expect(pixel(frameAt(seconds), strip.x + strip.width * 0.25, strip.y + 1)[3]).toBeLessThan(255);
+  }
+  // Transparent where nothing was placed.
+  expect(pixel(frameAt(30), 4, 716)[3]).toBe(0);
+  expect(pixel(frameAt(30), 1276, 716)[3]).toBe(0);
 });

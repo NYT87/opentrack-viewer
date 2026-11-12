@@ -4,7 +4,7 @@ What an overlay component is, what it is given, what it must and must not do, an
 contract is TypeScript in [`src/overlay/contract.ts`](../../src/overlay/contract.ts); these pages
 document it, and a test keeps the two in step. The decision behind it is TD-085 in
 [`docs/planning/06-decisions-and-open-questions.md`](../planning/06-decisions-and-open-questions.md);
-the request is [issue #19](https://github.com/NYT87/opentrack-viewer/issues/19).
+the request is [issue #19](https://github.com/NYT87/opentrack-viewer/issues/19). The dial, the chart, the gradient indicator and the compass (TD-087, [issue #21](https://github.com/NYT87/opentrack-viewer/issues/21)) are sections too.
 
 ## Status: documented, not loaded
 
@@ -38,11 +38,15 @@ There is one kind of component per **section**, each with its own props:
 
 | Section | Props | Page | Reads |
 | --- | --- | --- | --- |
-| `figure` | `FigureProps` | [figures.md](figures.md) | One value now: speed, pace, distance, heart rate, power, cadence, elevation, temperature, gradient, a time, a camera stream |
+| `figure` | `FigureProps` | [figures.md](figures.md) | One value now: speed, pace, distance, heart rate, power, cadence, elevation, temperature, gradient, heading, a time, a camera stream |
 | `gauge` | `GaugeProps` | [gauges.md](gauges.md) | A figure, plus its range and where the value falls in it |
 | `route` | `RouteProps` | [along-the-route.md](along-the-route.md) | The route and the position, the progress bar, the elevation profile |
 | `wholeActivity` | `WholeActivityProps` | [whole-activity.md](whole-activity.md) | A text, a figure from the summary, the date, the activity's name |
 | `zones` | `ZoneProps` | [zones.md](zones.md) | The heart rate or power zone now, the zones' bounds, and the time in each zone so far |
+| `dial` | `DialProps` | [dials.md](dials.md) | A figure on an arc of ticks: its range, where the needle points, and the ticks |
+| `chart` | `ChartProps` | [charts.md](charts.md) | A figure against time or distance, whole or through a window, with a cursor |
+| `gradient` | `GradientProps` | [gradient.md](gradient.md) | The slope in percent, its colour band and its glyph |
+| `compass` | `HeadingProps` | [compass.md](compass.md) | The heading in degrees, and where the rose and the needle point |
 
 ## The rules
 
@@ -77,7 +81,7 @@ Every component's props hold these, besides its section's (the tables below say 
 | `fontPx` | px | never | The base type size: 2.2 % of the frame's width times `style.fontScale` (smaller only for a whole-activity text that would not fit the frame). |
 | `style` | | never | The look chosen. `textColor` and `accentColor` are `#rrggbb`; `backgroundOpacity` is 0 to 1 and the host paints it behind a figure, gauge or route (not a whole-activity component); `fontScale` is a multiplier, already in `fontPx`. |
 
-A component that reads a moment (`figure`, `gauge`, `route`, `zones`) also has:
+A component that reads a moment (`figure`, `gauge`, `route`, `zones`, `dial`, `chart`, `gradient`, `compass`) also has:
 
 | Prop | Unit | Changes | Meaning |
 | --- | --- | --- | --- |
@@ -110,7 +114,7 @@ the app draws it; no font is fetched.
 Numbers that carry a quantity are in **stored units**, whatever the reader's unit system, so a component
 can compare and scale them: speed m/s, pace s/km (0 is standing still, TD-080), distance and elevation
 and climb m, heart rate bpm, running cadence spm, cycling cadence rpm, power W, temperature °C,
-gradient %, times s. The reader's unit system is in `unitSystem`, and `text` is already in it. Geometry
+gradient %, heading degrees (clockwise from north), times s. The reader's unit system is in `unitSystem`, and `text` is already in it. Geometry
 in `route` and `profile` is in 0..1 of the box.
 
 ## Examples
