@@ -664,13 +664,16 @@ function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd:
   const firstAvailable = choices.find((choice) => choice.available)?.key;
   const [wanted, setWanted] = useState<CanvasElementKey | undefined>();
   const chosen = choices.find((choice) => choice.key === wanted && choice.available)?.key ?? firstAvailable;
-  const groups = ['Live figures', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes'] as const;
+  // TD-088 (AV-1019). The groups the choices bring, in a fixed preferred order and any other after them: a still's "Along the route" is not left out.
+  const preferred: CanvasElementChoice['group'][] = ['Live figures', 'Along the route', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes'];
+  const present = new Set(choices.map((choice) => choice.group));
+  const groups = [...preferred.filter((group) => present.has(group)), ...[...present].filter((group) => !preferred.includes(group))];
   return (
     <>
       <div className="overlay-controls__field">
         <label htmlFor={`${id}-add`}>Add</label>
         <select id={`${id}-add`} className="select" value={chosen ?? ''} onChange={(event) => setWanted(event.target.value as CanvasElementKey)}>
-          {groups.filter((group) => choices.some((choice) => choice.group === group)).map((group) => (
+          {groups.map((group) => (
             <optgroup key={group} label={group}>
               {choices
                 .filter((choice) => choice.group === group)

@@ -3,6 +3,7 @@ import type { OverlayContext2D } from '../overlay/export/drawOverlay';
 import { canvasTemplate, newCanvasComponent, newZonesComponent } from '../overlay/customCanvas';
 import { DEFAULT_OVERLAY_STYLE, OVERLAY_TEMPLATE_VERSION, type OverlayTemplate } from '../overlay/template';
 import { smoothedValueAt } from '../overlay/timeline';
+import { zoneBounds, zoneIndex } from '../overlay/zones';
 import { parseGpx } from '../parsers/gpx/parseGpx';
 import { readFixture } from '../test/helpers/fixtures';
 import { activityThrough, straightNorth, type TestPoint } from '../test/helpers/mapVideoRoutes';
@@ -115,6 +116,53 @@ describe('figures on the map video\'s clock (AV-1207)', () => {
     }
     // And after the beat, the ride goes on from the stop's end.
     expect(clock.sampleAt(paused.timeline.introSeconds + pause!.endSeconds + 0.05)!.activityElapsedSeconds).toBeGreaterThan(t + 600);
+  });
+});
+
+describe('stops and the trimmed start on the map video (TD-088)', () => {
+  it('read power and cadence at zero through a shortened stop, and power zones put it in zone 1 (TD-080)', () => {
+    const points: TestPoint[] = straightNorth(1000, 10, 5);
+    const t = points[points.length - 1]!.second!;
+    for (let s = 5; s <= 600; s += 5) points.push({ north: 1000, east: 0, second: t + s });
+    for (const point of straightNorth(1000, 10, 5).slice(1)) points.push({ north: 1000 + point.north, east: 0, second: t + 600 + point.second! });
+    const stopped = activityThrough(points);
+    stopped.points.forEach((point) => {
+      point.powerWatts = 250;
+      point.cyclingCadenceRpm = 90;
+    });
+    const paused = modelOf(stopped, { lengthSeconds: 30, timing: { mode: 'time', pauseBeatSeconds: 2 } });
+    const [pause] = paused.timeline.pauses;
+    const clock = mapVideoOverlayTimeline(stopped, paused);
+    const into = paused.timeline.introSeconds + pause!.startSeconds;
+    const moving = clock.sampleAt(paused.timeline.introSeconds + 0.5)!;
+    expect(moving.values['metric:power']).toBe(250);
+    expect(moving.values['metric:cyclingCadence']).toBe(90);
+    const zones = newZonesComponent(canvasTemplate([]), 'power', { width: 1280, height: 720 }).zones!;
+    const bounds = zoneBounds(zones, { ftp: 250 })!;
+    for (const d of [0.1, 1.9]) {
+      const sample = clock.sampleAt(into + d)!;
+      expect(sample.values['metric:power']).toBe(0);
+      expect(sample.values['metric:cyclingCadence']).toBe(0);
+      expect(sample.values[SPEED]).toBe(0);
+      expect(zoneIndex(sample.values['metric:power']!, bounds)).toBe(0);
+    }
+  });
+
+  it('count the climb from where the shown route starts, not from the trimmed start (TD-084)', () => {
+    // 2 km due north at 5 m/s, climbing 0.05 m a metre: 100 m in all, the first kilometre hidden.
+    const climbing = activityThrough(straightNorth(2000, 10, 5).map((point) => ({ ...point, elevation: point.north * 0.05 })));
+    const patch = { privacyTrim: { startMeters: 1000, endMeters: 0 } };
+    const model = modelOf(climbing, patch);
+    const clock = mapVideoOverlayTimeline(climbing, model, settings(patch));
+    const CLIMB = 'metric:climb';
+    const start = clock.sampleAt(model.timeline.introSeconds)!.values[CLIMB]!;
+    const end = clock.sampleAt(model.timeline.lengthSeconds - model.timeline.outroSeconds)!.values[CLIMB]!;
+    expect(start).toBeLessThan(2);
+    expect(end).toBeGreaterThan(40);
+    expect(end).toBeLessThan(55);
+    // Untrimmed, the whole activity's climb is read as before.
+    const whole = mapVideoOverlayTimeline(climbing, modelOf(climbing));
+    expect(whole.sampleAt(modelOf(climbing).timeline.lengthSeconds)!.values[CLIMB]).toBeGreaterThan(90);
   });
 });
 

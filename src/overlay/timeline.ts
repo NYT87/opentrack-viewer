@@ -225,7 +225,7 @@ const MOVING_SPEED_THRESHOLD_MPS = 0.5;
  * TD-080. What reads zero while the activity stands still: the figures of
  * motion. Everything else holds the value it had when the stop began.
  */
-const STILL_AT_ZERO: readonly string[] = ['metric:speed', 'metric:runningCadence', 'metric:cyclingCadence', 'metric:power'];
+export const STILL_AT_ZERO: readonly string[] = ['metric:speed', 'metric:runningCadence', 'metric:cyclingCadence', 'metric:power'];
 
 /**
  * AV-1011. Moving time so far at each point, counted the way the stats count

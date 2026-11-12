@@ -25,6 +25,12 @@ export interface FileDropZoneProps {
    * the zone shows the reason where it stays.
    */
   onRefused?: (message: string | undefined) => void;
+  /**
+   * TD-088 (AV-1014). How the zone sorts what it is given: by `extension` (the default), refusing what is
+   * not in `acceptedExtensions` here, or `none`, handing every file on to the page, which sorts them by
+   * their content and refuses with a reason of its own. The picker's `accept` keeps the extensions either way, as a hint.
+   */
+  classify?: 'extension' | 'none';
 }
 
 /**
@@ -42,6 +48,7 @@ export function FileDropZone({
   title,
   subtitle,
   onRefused,
+  classify = 'extension',
 }: FileDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
@@ -55,6 +62,7 @@ export function FileDropZone({
       const files = Array.from(list ?? []).slice(0, multiple ? undefined : 1);
       if (files.length === 0) return;
       const accepted = (file: File) =>
+        classify === 'none' ||
         acceptedExtensions.includes(file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase());
       const refused = files.filter((file) => !accepted(file));
       const reason =
@@ -68,7 +76,7 @@ export function FileDropZone({
       if (onFiles) onFiles(taken);
       else taken.forEach((file) => onFile?.(file));
     },
-    [acceptedExtensions, onFile, onFiles, onRefused, multiple],
+    [acceptedExtensions, classify, onFile, onFiles, onRefused, multiple],
   );
 
   const onDrop = useCallback(

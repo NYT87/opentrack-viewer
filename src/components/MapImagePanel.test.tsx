@@ -147,4 +147,44 @@ describe('MapImagePanel (AV-1013)', () => {
     // No panel: the map is the whole image.
     expect(screen.getByTestId('preview')).toHaveTextContent('1080×1350, map 1350');
   });
+
+  it('keeps what was placed on the canvas when the layout is switched away and back (TD-088)', async () => {
+    const { panel } = setup();
+    const canvas = () => within(panel).getByRole('radio', { name: /map filling the image/ });
+    await userEvent.click(canvas());
+    const editor = () => screen.getByRole('region', { name: 'Over the map' });
+    await userEvent.selectOptions(within(editor()).getByLabelText('Add', { exact: true }), 'Rectangle');
+    await userEvent.click(within(editor()).getByRole('button', { name: 'Add to the canvas' }));
+    await waitFor(() => expect(useMapImageStore.getState().settings.overlay).toHaveLength(1));
+    // To the panel and back to the canvas, twice: the rectangle is still there, and still stored.
+    for (let round = 0; round < 2; round += 1) {
+      await userEvent.click(within(panel).getByRole('radio', { name: /panel of details below/ }));
+      expect(screen.queryByRole('region', { name: 'Over the map' })).not.toBeInTheDocument();
+      await userEvent.click(canvas());
+      expect(within(editor()).getAllByText(/Rectangle/).length).toBeGreaterThan(0);
+      expect(useMapImageStore.getState().settings.overlay).toHaveLength(1);
+    }
+  });
+
+  it('offers the route and the elevation profile in the canvas\'s Add menu, under "Along the route" (TD-088)', async () => {
+    const { panel } = setup(hilly);
+    await userEvent.click(within(panel).getByRole('radio', { name: /map filling the image/ }));
+    const add = within(screen.getByRole('region', { name: 'Over the map' })).getByLabelText('Add', { exact: true });
+    const along = within(add).getByRole('group', { name: 'Along the route' });
+    const options = within(along).getAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual(['Route with position', 'Elevation profile']);
+    expect(options.every((option) => !(option as HTMLOptionElement).disabled)).toBe(true);
+  });
+
+  it('draws geometry on the free canvas for an activity with no timestamps, and offers no live figure (TD-088)', async () => {
+    const untimed = activityThrough(straightNorth(3000, 20, 5).map((place) => ({ north: place.north, east: place.east, elevation: 100 + place.north / 30 })));
+    const { panel } = setup(untimed);
+    await userEvent.click(within(panel).getByRole('radio', { name: /map filling the image/ }));
+    const add = within(screen.getByRole('region', { name: 'Over the map' })).getByLabelText('Add', { exact: true });
+    const along = within(add).getByRole('group', { name: 'Along the route' });
+    const options = within(along).getAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual(['Route with position', 'Elevation profile']);
+    expect(options.every((option) => !(option as HTMLOptionElement).disabled)).toBe(true);
+    expect(within(add).queryByRole('option', { name: /^Speed/ })).not.toBeInTheDocument();
+  });
 });

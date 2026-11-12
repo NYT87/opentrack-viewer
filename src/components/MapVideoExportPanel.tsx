@@ -181,7 +181,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
   const input = { activity, model, settings, units, maptilerKey, photoImages, personal };
 
   const begin = async () => {
-    if (!plan || 'problem' in plan) return;
+    if (!plan || 'problem' in plan || poster.busy) return;
     void output.current?.dispose();
     output.current = undefined;
     const active = new AbortController();
@@ -222,6 +222,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
   };
 
   const savePoster = async () => {
+    if (running) return;
     setPoster({ busy: true });
     try {
       const { renderPoster } = await import('../mapVideo/export/renderMapVideo');
@@ -233,7 +234,9 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
     }
   };
 
-  const blocked = !support || !format || planProblem !== undefined || keyMissing || running || counting || overBudget;
+  // TD-088 (TD-076): a still and a video are not made together; the one that is not running waits, and says why.
+  const blocked = !support || !format || planProblem !== undefined || keyMissing || running || counting || overBudget || poster.busy;
+  const waitReasonId = `${ids.format}-wait`;
 
   return (
     <section className="prose map-video-export" aria-label="Make the video">
@@ -298,7 +301,13 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
                 Stop
               </button>
             ) : (
-              <button type="button" className="button button--primary" onClick={() => void begin()} disabled={blocked}>
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => void begin()}
+                disabled={blocked}
+                aria-describedby={poster.busy ? waitReasonId : undefined}
+              >
                 {stale ? 'Make it again' : 'Make the video'}
               </button>
             )}
@@ -307,10 +316,21 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
       )}
       {/* A still needs no video encoder: it is offered wherever the map can be drawn (TD-064). */}
       <p className="video__actions">
-        <button type="button" className="button" onClick={() => void savePoster()} disabled={poster.busy || keyMissing || running}>
+        <button
+          type="button"
+          className="button"
+          onClick={() => void savePoster()}
+          disabled={poster.busy || keyMissing || running}
+          aria-describedby={running ? waitReasonId : undefined}
+        >
           {poster.busy ? 'Saving the still…' : `Save a still of ${formatVideoTime(pausedAt)} (PNG)`}
         </button>
       </p>
+      {(running || poster.busy) && (
+        <p id={waitReasonId} className="map-video-settings__hint">
+          {running ? 'A still waits for the video to finish: the two are not drawn at once.' : 'The video waits for the still to be saved: the two are not drawn at once.'}
+        </p>
+      )}
       {poster.message && <p role="status">{poster.message}</p>}
 
       {phase.status === 'running' && (

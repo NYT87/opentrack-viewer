@@ -129,9 +129,10 @@ test('fits a phone screen without sideways scrolling', async ({ page }) => {
 test('previews the route only with no request at all, and plays by keyboard', async ({ page }) => {
   const asked = await stubOpenFreeMap(page);
   await page.goto('./#/map-video');
-  const requests = recordRequests(page);
   await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
   await page.getByRole('radio', { name: /^Route only/ }).check();
+  // From here: the page's own online map asked for its style before Route only was chosen, and under load that was seen as a leak.
+  const requests = recordRequests(page);
 
   const preview = page.getByRole('region', { name: 'Preview' });
   await expect(preview.locator('.map-video-preview__map canvas')).toBeVisible();
@@ -183,9 +184,10 @@ test('asks OpenFreeMap for the online map, and nothing else outside the page', a
 
 test('styles the route by elevation with an arrow on route only, asking nothing', async ({ page }) => {
   await page.goto('./#/map-video');
-  const requests = recordRequests(page);
   await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
   await page.getByRole('radio', { name: /^Route only/ }).check();
+  // From here: the page's own online map asked for its style before Route only was chosen, and under load that was seen as a leak.
+  const requests = recordRequests(page);
   await page.getByRole('combobox', { name: 'Colour' }).selectOption('elevation');
   await page.getByRole('radio', { name: 'An arrow pointing the way' }).check();
   await page.getByRole('slider', { name: 'Position in the video' }).fill('27');
@@ -266,10 +268,11 @@ test('takes a keyframe from a view dragged by hand, and edits one by keyboard', 
 
 test('draws a figure placed in the editor over the map, and the summary card in the outro', async ({ page }) => {
   await page.goto('./#/map-video');
-  const requests = recordRequests(page);
   await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'overlay-ride.gpx'));
   // A point a second, so a live figure has a value at every moment (a sparser file leaves gaps unfilled, TD-041).
   await page.getByRole('radio', { name: /^Route only/ }).check();
+  // From here: the page's own online map asked for its style before Route only was chosen, and under load that was seen as a leak.
+  const requests = recordRequests(page);
   await page.getByRole('slider', { name: 'Position in the video' }).fill('12');
 
   /** White pixels, in a share of the frame: figures are white type, and nothing else on route only is. */
@@ -303,9 +306,10 @@ test('draws a figure placed in the editor over the map, and the summary card in 
 
 test('places a photo by the time in its EXIF, and shows it while the marker waits', async ({ page }) => {
   await page.goto('./#/map-video');
-  const requests = recordRequests(page);
   await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'overlay-ride.gpx'));
   await page.getByRole('radio', { name: /^Route only/ }).check();
+  // From here: the page's own online map asked for its style before Route only was chosen, and under load that was seen as a leak.
+  const requests = recordRequests(page);
   // The ride runs 10:00:00 to 10:01:00 UTC; a magenta photo taken at 10:00:30, with a place and a time in its EXIF.
   const photo = withExif(solidPng(300, [255, 0, 255]), tiffBlock({ dateTimeOriginal: '2024:01:01 10:00:30', offsetTimeOriginal: '+00:00', lat: 51.503, lon: 0 }));
   await page.getByTestId('map-video-photo-input').setInputFiles({ name: 'IMG_0001.png', mimeType: 'image/png', buffer: photo });
@@ -340,9 +344,10 @@ test('the guard against live providers stops a request to one, and sees it (AV-1
 
 test('places an elevation profile with the editor, and draws it over the map with its cursor (AV-1211)', async ({ page }) => {
   await page.goto('./#/map-video');
-  const requests = recordRequests(page);
   await page.getByTestId('map-video-activity-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
   await page.getByRole('radio', { name: /^Route only/ }).check();
+  // From here: the page's own online map asked for its style before Route only was chosen, and under load that was seen as a leak.
+  const requests = recordRequests(page);
   await page.getByRole('slider', { name: 'Position in the video' }).fill('15');
 
   /** Pixels of the accent colour (the cursor and its dot) in the frame's top half, where a new element goes. */

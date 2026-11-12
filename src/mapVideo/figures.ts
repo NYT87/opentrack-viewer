@@ -2,7 +2,8 @@ import type { Activity, ActivitySport } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
 import { createOverlayRenderer, type OverlayContext2D } from '../overlay/export/drawOverlay';
 import { DEFAULT_OVERLAY_STYLE, DEFAULT_SHAPE, OVERLAY_TEMPLATE_VERSION, type OverlayComponent, type OverlayTemplate, type PersonalFigures, type SummaryStatKey } from '../overlay/template';
-import { buildOverlayTimeline, dataSourceId, type OverlaySample, type OverlayTimeline } from '../overlay/timeline';
+import { elevationClimb } from '../domain/stats';
+import { buildOverlayTimeline, dataSourceId, STILL_AT_ZERO, type OverlaySample, type OverlayTimeline } from '../overlay/timeline';
 import type { MapVideoModel } from './model';
 import type { MapVideoSettings } from './project';
 import { positionAt } from './route';
@@ -16,7 +17,7 @@ import { TERRAIN_FULL_CREDIT, terrainActive } from './style';
  * with the same renderer, over the map frame.
  */
 
-const SPEED = dataSourceId({ kind: 'metric', metric: 'speed' });
+const CLIMB = dataSourceId({ kind: 'metric', metric: 'climb' });
 const PACE = dataSourceId({ kind: 'metric', metric: 'pace' });
 
 /**
@@ -27,13 +28,16 @@ const PACE = dataSourceId({ kind: 'metric', metric: 'pace' });
  */
 export function shownActivity(activity: Activity, model: Pick<MapVideoModel, 'route'>, settings: Pick<MapVideoSettings, 'privacyTrim'>): Activity {
   const { vertices } = model.route;
-  const first = vertices[0]!;
   const last = vertices[vertices.length - 1]!;
-  // A trimmed route starts on its cut; the point that vertex names lies just before it, in the trimmed stretch.
-  const from = first.pointIndex + (settings.privacyTrim.startMeters > 0 ? 1 : 0);
+  const from = shownFrom(model, settings);
   const kept = activity.points.filter((point) => point.index >= from && point.index <= last.pointIndex);
   if (kept.length === activity.points.length) return activity;
   return { ...activity, points: kept };
+}
+
+/** The first point index the figures may draw. A trimmed route starts on its cut; the point that vertex names lies just before it, in the trimmed stretch. */
+function shownFrom(model: Pick<MapVideoModel, 'route'>, settings: Pick<MapVideoSettings, 'privacyTrim'>): number {
+  return model.route.vertices[0]!.pointIndex + (settings.privacyTrim.startMeters > 0 ? 1 : 0);
 }
 
 /**
@@ -44,11 +48,14 @@ export function shownActivity(activity: Activity, model: Pick<MapVideoModel, 'ro
  * than racing through the minutes the beat skips. The intro shows the start
  * and the outro the end.
  */
-export function mapVideoOverlayTimeline(activity: Activity, model: MapVideoModel): OverlayTimeline {
+export function mapVideoOverlayTimeline(activity: Activity, model: MapVideoModel, settings?: Pick<MapVideoSettings, 'privacyTrim'>): OverlayTimeline {
   // Anchored at the activity's first timed point, with no offset: video time is activity time.
   const base = buildOverlayTimeline(activity, { video: { durationSeconds: Number.MAX_SAFE_INTEGER } });
   const firstMs = activity.points.find((point) => point.time instanceof Date && Number.isFinite(point.time.getTime()))?.time?.getTime();
   const { timeline, route } = model;
+  // TD-088 (TD-084). The live climb counts from where the route starts: what the privacy trim hides is no part of it.
+  const trimmed = settings && settings.privacyTrim.startMeters > 0 ? activity.points.findIndex((point) => point.index >= shownFrom(model, settings)) : -1;
+  const climbBefore = trimmed >= 0 ? (elevationClimb(activity.points).gainSoFar[trimmed] ?? 0) : 0;
   const length = timeline.lengthSeconds;
 
   const sampleAt = (videoSeconds: number): OverlaySample | undefined => {
@@ -66,10 +73,11 @@ export function mapVideoOverlayTimeline(activity: Activity, model: MapVideoModel
     if (!sample) return undefined;
     const values = { ...sample.values };
     if (pause) {
-      // Standing still: a speed and a pace of zero, as the overlay's stops read (TD-080).
-      values[SPEED] = 0;
+      // Standing still reads as the overlay's stops do (TD-080, TD-088): the figures of motion at zero, pace with them.
+      for (const id of STILL_AT_ZERO) if (base.available.has(id)) values[id] = 0;
       if (base.available.has(PACE)) values[PACE] = 0;
     }
+    if (climbBefore > 0 && values[CLIMB] !== undefined) values[CLIMB] = Math.max(0, values[CLIMB] - climbBefore);
     return { ...sample, videoTimeSeconds: videoSeconds, values, progress: route.totalMeters > 0 ? frame.sample.distance / route.totalMeters : 0 };
   };
 
@@ -192,7 +200,7 @@ export function drawPhoto(ctx: OverlayContext2D, photo: PhotoImage, shown: { ela
 /** The figures of a map video, ready to draw at any moment. */
 export function createMapVideoFigures(input: MapVideoFiguresInput): MapVideoFigures {
   const { activity, model, settings, units, width, height, readerTimeZone, photoImages, personal } = input;
-  const timeline = mapVideoOverlayTimeline(activity, model);
+  const timeline = mapVideoOverlayTimeline(activity, model, settings);
   const shown = shownActivity(activity, model, settings);
   const overlay = settings.overlay && settings.overlay.components.length > 0
     ? createOverlayRenderer({ template: settings.overlay, timeline, activity: shown, units, width, height, readerTimeZone, personal })

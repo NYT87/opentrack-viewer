@@ -1,4 +1,4 @@
-import type { Activity } from '../domain/activity';
+import { toValidCoordinate, type Activity } from '../domain/activity';
 import type { UnitSystem } from '../domain/units';
 import { shownActivity } from '../mapVideo/figures';
 import type { MapVideoSettings } from '../mapVideo/project';
@@ -93,5 +93,28 @@ export function stillOverlayClock(shown: Activity): { timeline: OverlayTimeline;
     last = Math.max(last, ms);
   }
   const span = last > first ? (last - first) / 1000 : 0;
-  return { timeline: buildOverlayTimeline(shown, { video: { durationSeconds: span } }), seconds: span };
+  const timeline = buildOverlayTimeline(shown, { video: { durationSeconds: span } });
+  if (timeline.unavailable === 'no_timestamps') return { timeline: staticTimeline(shown), seconds: 0 };
+  return { timeline, seconds: span };
+}
+
+/**
+ * TD-088 (TD-061). The clock of a still whose activity has no timestamps (a GPX
+ * route, a KML path): no moment can be asked of it, but the picture shows the
+ * end of it, so the route inset and the elevation profile, which are geometry,
+ * are drawn with their position at the last point and their progress at 1. No
+ * figure is live: nothing is read at a moment that has none.
+ */
+function staticTimeline(shown: Activity): OverlayTimeline {
+  const last = [...shown.points].reverse().map((point) => toValidCoordinate(point.lat, point.lon)).find((place) => place !== undefined);
+  const available = new Set<string>();
+  if (shown.points.some((point) => typeof point.elevationMeters === 'number' && Number.isFinite(point.elevationMeters))) available.add('metric:elevation');
+  return {
+    durationSeconds: 0,
+    offsetSeconds: 0,
+    available,
+    hasRoute: last !== undefined,
+    sensorLabels: new Map(),
+    sampleAt: (videoTimeSeconds) => ({ videoTimeSeconds, activityElapsedSeconds: 0, values: {}, position: last, progress: 1 }),
+  };
 }

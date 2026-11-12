@@ -46,6 +46,37 @@ describe('a series along time', () => {
   });
 });
 
+describe('a series along time, from a file in another order (TD-088)', () => {
+  // Timestamps 0, 10 and 5 s: the third point was written last and happened between the others.
+  const shuffled = makeActivity([0, 10, 5].map((second, i) => ({ time: new Date(Date.UTC(2026, 0, 1) + second * 1000), elevationMeters: [0, 100, 10][i] })));
+  const value = (index: number) => shuffled.points[index]!.elevationMeters;
+
+  it('spans the whole clock, and draws the line in time order', () => {
+    const series = projectSeries(shuffled, value, 'time')!;
+    expect(series.last - series.first).toBe(10);
+    const [run] = series.runs;
+    expect(run!.map(([x]) => x)).toEqual([0, 0.5, 1]);
+    expect(run!.map(([, y]) => y)).toEqual([series.y(0), series.y(10), series.y(100)]);
+  });
+
+  it('does not pin a cursor at 8 s to the end, and searches a window on the sorted series', () => {
+    const series = projectSeries(shuffled, value, 'time')!;
+    const at = series.at(0.8)!;
+    expect(at[0]).toBeCloseTo(0.8, 9);
+    // Between 5 s (10) and 10 s (100): 64, not the 80 a file-order walk would give.
+    expect(at[1]).toBeCloseTo(series.y(64), 9);
+    const window = series.window(series.first + 8, 1)!;
+    expect(window.from).toBe(series.first + 7);
+    expect(window.low).toBeCloseTo(46, 9);
+    expect(window.high).toBeCloseTo(82, 9);
+  });
+
+  it('leaves the distance axis to follow distance, as the profile always has', () => {
+    const ordered = projectSeries(ride, north, 'distance')!;
+    expect(ordered.last - ordered.first).toBeCloseTo(1000, 0);
+  });
+});
+
 describe('gaps in a series', () => {
   it('is a gap in the line where the value is missing, and a cursor has no point there', () => {
     const series = projectSeries(ride, (i) => (i >= 40 && i <= 60 ? undefined : north(i)), 'distance')!;

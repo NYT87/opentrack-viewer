@@ -925,15 +925,28 @@ describe('one input for the video and the activity (AV-1014)', () => {
   it('names a file that is neither, and takes the other', async () => {
     await openEmpty();
 
-    // The input turns it away by its extension, before the page sorts the rest.
+    // The input hands on every file (TD-088); the page sorts them, and refuses this one with its own reason.
     await userEvent.upload(
       screen.getByTestId('overlay-file-input'),
       [new File(['hello'], 'notes.txt'), gpxFile()],
       { applyAccept: false },
     );
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('"notes.txt" is not supported');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '"notes.txt" is neither a video nor an activity. Choose an MP4 or MOV video, or a GPX, FIT, TCX or KML activity.',
+    );
     expect(await madeFrom('morning-run.gpx')).toBeInTheDocument();
+  });
+
+  it.each([['ride.txt'], ['ride']])('takes a GPX by its content when it is named %s (TD-088)', async (name) => {
+    await openEmpty();
+    await userEvent.upload(
+      screen.getByTestId('overlay-file-input'),
+      new File([readFixture('simple-route.gpx')], name),
+      { applyAccept: false },
+    );
+    expect(await madeFrom(name)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('clears a refusal with the next pick', async () => {
@@ -1055,7 +1068,9 @@ describe('one input for the video and the activity (AV-1014)', () => {
       { applyAccept: false },
     );
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('"other.gpx" is not supported');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '"other.gpx" is an activity, and only a video is taken here',
+    );
     expect(useOverlayStore.getState().source.activity?.source.fileName).toBe('morning-run.gpx');
   });
 
@@ -1079,6 +1094,30 @@ describe('one input for the video and the activity (AV-1014)', () => {
 
     expect(useOverlayStore.getState().source).toEqual({});
     expect(screen.queryByRole('region', { name: 'Reading the video' })).not.toBeInTheDocument();
+  });
+
+  it('does not let an older pick, sorted late, replace a newer one (TD-088)', async () => {
+    await openEmpty();
+    // Pick A: an activity whose first bytes are slow to come, so it is still being told apart.
+    let release: (bytes: ArrayBuffer) => void = () => {};
+    const slow = new File([readFixture('simple-route.gpx')], 'older.gpx');
+    // Only the first look at its head is held: reading it afterwards, to parse it, is as any file's.
+    const ordinary = slow.slice.bind(slow);
+    let looked = false;
+    slow.slice = ((...args: Parameters<Blob['slice']>) => {
+      if (looked) return ordinary(...args);
+      looked = true;
+      return { arrayBuffer: () => new Promise<ArrayBuffer>((resolve) => (release = resolve)) } as Blob;
+    }) as Blob['slice'];
+    await userEvent.upload(screen.getByTestId('overlay-file-input'), slow);
+    // Pick B, made after it, is sorted and read first.
+    await userEvent.upload(screen.getByTestId('overlay-file-input'), gpxFile());
+    await madeFrom('morning-run.gpx');
+    await act(async () => {
+      release(new TextEncoder().encode(readFixture('simple-route.gpx')).buffer as ArrayBuffer);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(useOverlayStore.getState().source.activity?.source.fileName).toBe('morning-run.gpx');
   });
 
   it('names an activity that is dropped where only a video is taken, by its bytes', async () => {

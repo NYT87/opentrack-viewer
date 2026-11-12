@@ -43,6 +43,18 @@ describe('FileDropZone (AV-102)', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/not supported/i);
   });
 
+  it('hands every file on, whatever its extension, when it does not classify (TD-088), and keeps the extensions as the picker\'s hint', () => {
+    const onFiles = vi.fn();
+    render(<FileDropZone multiple classify="none" acceptedExtensions={['gpx']} onFiles={onFiles} />);
+    const files = [fixtureFile('not-gpx.txt', 'text/plain'), new File(['x'], 'ride')];
+
+    fireEvent.drop(screen.getByRole('button'), { dataTransfer: { files } });
+
+    expect(onFiles).toHaveBeenCalledWith(files);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('file-input')).toHaveAttribute('accept', '.gpx');
+  });
+
   it('makes no network request when a file is provided', () => {
     const fetchSpy = vi.fn();
     const originalFetch = globalThis.fetch;

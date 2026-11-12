@@ -91,6 +91,8 @@ export function projectSeries(
   let first: number | undefined;
   let last: number | undefined;
   let measured: SeriesAxis = axis;
+  // The order the points are walked in: the file's, except along time (TD-088).
+  let order: number[] = points.map((_, i) => i);
 
   const alongTime = () => {
     first = undefined;
@@ -98,6 +100,17 @@ export function projectSeries(
     for (let i = 0; i < points.length; i += 1) {
       const ms = points[i]!.time?.getTime();
       along[i] = typeof ms === 'number' && Number.isFinite(ms) ? ms / 1000 : undefined;
+    }
+    // TD-088 (TD-087). Time runs forward whatever order the file lists its points in: the timed points
+    // are put in time order (a tie keeps the file's order) in the places the timed points held, so a
+    // point with no time still ends a run where it was.
+    const slots = order.filter((i) => along[i] !== undefined);
+    const sorted = [...slots].sort((a, b) => along[a]! - along[b]! || a - b);
+    order = order.slice();
+    slots.forEach((slot, k) => {
+      order[slot] = sorted[k]!;
+    });
+    for (const i of order) {
       if (along[i] === undefined) continue;
       first ??= along[i];
       last = along[i];
@@ -150,7 +163,7 @@ export function projectSeries(
     if (run.x.length) raw.push(run);
     run = { x: [], v: [] };
   };
-  for (let i = 0; i < points.length; i += 1) {
+  for (const i of order) {
     const value = values[i];
     const where = along[i];
     if (where === undefined || value === undefined) {

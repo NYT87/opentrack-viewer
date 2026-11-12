@@ -98,7 +98,12 @@ export function MapVideoPage() {
   const built = useMemo(() => (activity ? buildMapVideoModel(activity, settings, photoInputs) : undefined), [activity, settings, photoInputs]);
   const model = built?.ok ? built.model : undefined;
   // What the editor offers and draws from: the map video's clock, and the trimmed stretch (TD-066).
-  const figuresTimeline = useMemo(() => (activity && model ? mapVideoOverlayTimeline(activity, model) : undefined), [activity, model]);
+  const figuresTimeline = useMemo(
+    () => (activity && model ? mapVideoOverlayTimeline(activity, model, settings) : undefined),
+    // TD-088: only the privacy trim reaches the climb; the rest of the settings do not move the timeline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activity, model],
+  );
   const figuresActivity = useMemo(
     () => (activity && model ? shownActivity(activity, model, settings) : undefined),
     // The trimmed stretch changes with the model; the rest of the settings do not move it.

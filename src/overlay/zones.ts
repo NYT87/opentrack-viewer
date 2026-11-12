@@ -291,10 +291,35 @@ export interface ZoneTimes {
 
 const cache = new WeakMap<OverlayTimeline, Map<string, ZoneTimes | null>>();
 
+const zoneKey = (source: OverlayDataSource, bounds: readonly number[]) => `${dataSourceId(source)}|${bounds.join(',')}`;
+
+/**
+ * TD-088 (TD-086). The time in each zone for one renderer: an accumulator for
+ * each source and bounds it is asked for, built once and kept for as long as
+ * the renderer lives, with no cap, so every zones component drawn is built
+ * once however many there are. The editor makes a new renderer on an edit, so
+ * a reader typing a bound leaves a key a keystroke for as long as that
+ * renderer and no longer.
+ */
+export function createZoneTimes(timeline: OverlayTimeline): (source: OverlayDataSource, bounds: readonly number[]) => ZoneTimes | undefined {
+  const kept = new Map<string, ZoneTimes | null>();
+  return (source, bounds) => {
+    if (!timeline.zoneTimes) return undefined;
+    const key = zoneKey(source, bounds);
+    let times = kept.get(key);
+    if (times === undefined) {
+      times = timeline.zoneTimes(source, bounds) ?? null;
+      kept.set(key, times);
+    }
+    return times ?? undefined;
+  };
+}
+
 /**
  * `timeline.zoneTimes` for a source and bounds, kept per timeline so the pass
  * over the activity is made once for as long as the same timeline, source and
- * bounds are drawn: every frame of an export, every repaint of the preview.
+ * bounds are drawn. For a caller with no renderer of its own to keep them (the
+ * contract adapter); a renderer keeps its own (`createZoneTimes`, TD-088).
  */
 export function zoneTimesFor(
   timeline: OverlayTimeline,
@@ -307,7 +332,7 @@ export function zoneTimesFor(
     byKey = new Map();
     cache.set(timeline, byKey);
   }
-  const key = `${dataSourceId(source)}|${bounds.join(',')}`;
+  const key = zoneKey(source, bounds);
   let times = byKey.get(key);
   if (times === undefined) {
     times = timeline.zoneTimes(source, bounds) ?? null;

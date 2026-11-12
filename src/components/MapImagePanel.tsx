@@ -113,11 +113,14 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   // The free canvas's editor: its frame is the image, its clock the activity's end.
   const [backdrop, setBackdrop] = useState<string>();
   const clock = useMemo(() => (plan ? stillOverlayClock(plan.shown) : undefined), [plan]);
+  // TD-088 (AV-1013). Each time the editor opens it starts from what the store holds now, not from what it held when the panel
+  // opened: switching to the panel's layout and back keeps everything placed. The undo history starts again with the editor.
+  const canvasOpen = settings.layout === 'canvas';
   const editorDraft = useMemo<CanvasDraft>(
-    () => ({ width: String(drawable.width), height: String(drawable.height), frame: drawable, state: { components: stored.overlay }, history: [] }),
-    // Where the editor starts; it keeps its own copy from then on.
+    () => ({ width: String(drawable.width), height: String(drawable.height), frame: drawable, state: { components: useMapImageStore.getState().settings.overlay }, history: [] }),
+    // Where the editor starts: when it opens. It keeps its own copy from then on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [canvasOpen],
   );
   const reported = useRef<OverlayComponent[] | undefined>(undefined);
   const onComponentsChange = useCallback(

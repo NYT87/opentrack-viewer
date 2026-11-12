@@ -26,7 +26,7 @@ import { drawCompass } from './drawCompass';
 import { drawDial } from './drawDial';
 import { drawGradient } from './drawGradient';
 import { drawZones } from './drawZones';
-import { zoneTimesFor } from '../zones';
+import { createZoneTimes } from '../zones';
 
 /**
  * AV-1006. Draws a template on a canvas, at any resolution, on a transparent
@@ -106,6 +106,9 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     if (profile === null) profile = activity ? projectProfile(activity) : undefined;
     return profile;
   };
+
+  // TD-088 (TD-086). The time in each zone, one accumulator for each zones component drawn, kept for this renderer's life.
+  const zoneTimesOf = createZoneTimes(timeline);
 
   // AV-1019. A chart's series is made once per component, from the points the renderer was given (the map video's are the trimmed ones).
   const seriesOf = (component: OverlayComponent): ProjectedSeries | undefined =>
@@ -311,11 +314,11 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
         } else if (component.type === 'elevationProfile') {
           drawProfile(ctx, box, ready);
         } else if (component.type === 'zones') {
-          // The time in each zone is a pass over the activity, made once for these bounds and then looked up (zoneTimesFor).
+          // The time in each zone is a pass over the activity, made once for these bounds and then looked up (`createZoneTimes`, kept with this renderer: TD-088).
           const resolved = ready.zones;
           const times =
             resolved?.setting.show.timeInZone && component.source
-              ? zoneTimesFor(timeline, component.source, resolved.bounds)?.at(sample.activityElapsedSeconds)
+              ? zoneTimesOf(component.source, resolved.bounds)?.at(sample.activityElapsedSeconds)
               : undefined;
           drawZones(ctx, box, ready, em, width, times);
         } else if (component.type === 'dial') {

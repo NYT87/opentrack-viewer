@@ -28,6 +28,7 @@ import {
   type OverlayZonesSetting,
 } from './template';
 import { canvasTemplate, newZonesComponent } from './customCanvas';
+import { createOverlayRenderer, type OverlayContext2D } from './export/drawOverlay';
 import { buildOverlayTimeline } from './timeline';
 import { makeActivity } from '../test/helpers/activity';
 
@@ -322,6 +323,26 @@ describe('time in each zone', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     zoneTimesFor(timeline, source, [0, 131, 175]);
     expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+
+  it('is built once for each of four or more zones components, with a renderer, over many frames (TD-088)', () => {
+    const counting = buildOverlayTimeline(activity, { video: { durationSeconds: 19 } });
+    const spy = vi.spyOn(counting, 'zoneTimes');
+    const components = [100, 110, 120, 130, 140].map((floor, i): OverlayComponent => {
+      const base = zonesOf('heartRate');
+      const setting = { ...base.zones!, basis: 'value' as const, show: { ...base.zones!.show, timeInZone: true } };
+      setting.zones = setting.zones.map((zone, k) => ({ ...zone, from: floor + k * 20 }));
+      return { ...base, id: `zones-${i}`, zones: setting };
+    });
+    const renderer = createOverlayRenderer({ template: canvasTemplate(components), timeline: counting, activity, units: 'metric', ...FRAME });
+    const ctx = new Proxy({ measureText: (text: string) => ({ width: text.length * 6 }) } as Record<string, unknown>, {
+      get: (target, key: string) => (key in target ? target[key] : () => undefined),
+      set: (target, key: string, value) => ((target[key] = value), true),
+    }) as unknown as OverlayContext2D;
+    for (let frame = 0; frame < 60; frame += 1) renderer.drawFrame(ctx, (frame * 19) / 59);
+    // One accumulator each: five distinct bounds, five passes, and no more however many frames.
+    expect(spy).toHaveBeenCalledTimes(5);
     spy.mockRestore();
   });
 

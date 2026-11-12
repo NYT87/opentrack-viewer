@@ -25,7 +25,7 @@ import {
   type OverlayVideo,
 } from '../state/overlayStore';
 import type { VideoReadProgressState } from '../components/VideoReadProgress';
-import { classifyOverlayFile, sortOverlayFiles } from './overlayFiles';
+import { classifyOverlayFile, sortOverlayFiles, type OverlayFileKind } from './overlayFiles';
 import { VIDEO_EXTENSIONS } from './readVideoTelemetry';
 import { useVideoTelemetryRead } from './useVideoTelemetryRead';
 
@@ -154,6 +154,17 @@ export function OverlayPage() {
   const activityRead = useRef(0);
   /** AV-1014. Moves on when Start over lets go, so a pick still being sorted takes nothing after it. */
   const picks = useRef(0);
+  /**
+   * TD-088 (AV-1014). A ticket for each pick, taken before its files are sorted, and the newest ticket
+   * that has chosen each kind of file. A pick whose sorting finishes late finds a newer pick has chosen
+   * its kind and takes nothing of it, so an older file never replaces a newer one. Remove moves a kind's
+   * newest ticket past every pick in flight, so a pick still being sorted takes nothing of that kind after it.
+   */
+  const tickets = useRef(0);
+  const newestOfKind = useRef<Record<OverlayFileKind, number>>({ video: 0, activity: 0 });
+  const supersedeKind = (kind: OverlayFileKind) => {
+    newestOfKind.current[kind] = ++tickets.current;
+  };
   /** The name of the video being read, if one is: a second video is refused until it is done. */
   const readingVideo = useRef<string | undefined>(undefined);
   /** What the input refused by name before the pick reached `handleFiles`, taken up there. */
@@ -233,6 +244,7 @@ export function OverlayPage() {
    */
   const handleFiles = async (picked: File[], videoOnly: boolean) => {
     const pick = picks.current;
+    const ticket = ++tickets.current;
     // What the input refused by name is already shown; the sorting adds to it.
     const earlier = refusedByName.current;
     refusedByName.current = undefined;
@@ -240,7 +252,9 @@ export function OverlayPage() {
       picked.map(async (file) => ({ file, kind: await classifyOverlayFile(file) })),
     );
     if (pick !== picks.current) return;
-    const sorted = sortOverlayFiles(classified);
+    // TD-088. What an older pick holds of a kind a newer pick has already taken is let go, as the reader chose another file after it.
+    const current = classified.filter((entry) => entry.kind === undefined || ticket >= newestOfKind.current[entry.kind]);
+    const sorted = sortOverlayFiles(current);
     const reasons = [earlier, sorted.refusal].filter((reason) => reason !== undefined);
     let { video, activity } = sorted;
     if (activity && videoOnly) {
@@ -256,6 +270,9 @@ export function OverlayPage() {
       video = undefined;
     }
     setRefusal(reasons.length > 0 ? reasons.join(' ') : undefined);
+    // A kind is claimed by the files this pick takes, not by ones it refuses: a refused file must not silence an older pick it did not replace.
+    if (video) newestOfKind.current.video = ticket;
+    if (activity) newestOfKind.current.activity = ticket;
     if (video) void handleVideo(video);
     if (activity) void handleActivity(activity);
   };
@@ -514,8 +531,15 @@ export function OverlayPage() {
                   setRefusal(reason);
                 }}
                 onFiles={(files, videoOnly) => void handleFiles(files, videoOnly)}
-                onVideo={(file) => void handleVideo(file)}
-                onActivity={(file) => void handleActivity(file)}
+                // TD-088. A file chosen by Choose another is the newest of its kind, as a pick's is.
+                onVideo={(file) => {
+                  supersedeKind('video');
+                  void handleVideo(file);
+                }}
+                onActivity={(file) => {
+                  supersedeKind('activity');
+                  void handleActivity(file);
+                }}
                 onCancelReading={cancel}
                 onDismissVideo={() => {
                   setVideoState(IDLE);
@@ -531,11 +555,13 @@ export function OverlayPage() {
                 }}
                 onRemoveVideo={() => {
                   picks.current += 1;
+                  supersedeKind('video');
                   letGoOfVideoRead();
                   setVideo(undefined);
                   focusSlot(filesSection);
                 }}
                 onRemoveActivity={() => {
+                  supersedeKind('activity');
                   letGoOfActivityRead();
                   setActivityState(IDLE);
                   clearActivity();
@@ -776,6 +802,8 @@ function FilesSection({
         <FileDropZone
           multiple
           acceptedExtensions={stillImage ? VIDEO_EXTENSIONS : KIND_ACCEPTED}
+          // TD-088: the page tells a file by its content first, so a GPX named ride.txt is taken; the extensions stay the picker's hint.
+          classify="none"
           onFiles={(files) => onFiles(files, stillImage)}
           onRefused={onRefused}
           testId="overlay-file-input"
