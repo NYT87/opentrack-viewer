@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createOverlayRenderer, type OverlayContext2D } from './drawOverlay';
 import { DEFAULT_OVERLAY_CONTROLS, buildOverlay, overlayCatalog, type OverlayControls } from '../presets';
 import { buildOverlayTimeline } from '../timeline';
+import { resolveOverlayComponent, DEFAULT_OVERLAY_STYLE, OVERLAY_TEMPLATE_VERSION, type OverlayTemplate } from '../template';
 import { makeActivity } from '../../test/helpers/activity';
 
 const T0 = new Date('2024-01-01T10:00:00Z');
@@ -171,5 +172,36 @@ describe('figures on a clear background (TD-059)', () => {
     const { needsHalo, HALO_BELOW_OPACITY } = await import('../template');
     expect(needsHalo({ backgroundOpacity: 0 })).toBe(true);
     expect(needsHalo({ backgroundOpacity: HALO_BELOW_OPACITY })).toBe(false);
+  });
+});
+
+describe('smoothed figures (AV-1016)', () => {
+  it('draws the same number the preview resolves, from the same timeline, and a frame depends on no other', () => {
+    const source = activity((i) => ({ powerWatts: 100 + 10 * i }));
+    const timeline = buildOverlayTimeline(source, { video: { durationSeconds: 10 } });
+    const template: OverlayTemplate = {
+      version: OVERLAY_TEMPLATE_VERSION,
+      name: 'Smoothed',
+      style: DEFAULT_OVERLAY_STYLE,
+      components: [
+        { id: 'power', type: 'text', visible: true, rect: { x: 0.05, y: 0.05, width: 0.2, height: 0.1 }, unitMode: 'auto', style: {}, source: { kind: 'metric', metric: 'power' }, smoothing: { windowSeconds: 4 } },
+      ],
+    };
+    const renderer = createOverlayRenderer({ template, timeline, activity: source, units: 'metric', width: 1920, height: 1080 });
+    const drawnAt = (time: number) => {
+      const recording = recordingContext();
+      renderer.drawFrame(recording.ctx, time);
+      return recording.ops('fillText').map((call) => String(call.args[0]));
+    };
+    const previewAt = (time: number) =>
+      (resolveOverlayComponent(template, template.components[0]!, timeline.sampleAt(time), timeline, 'metric') as { text: string }).text;
+    // Seconds 4..8 of 100 + 10 s average 160 W; the raw value would be 180 W.
+    expect(drawnAt(8)).toContain('160 W');
+    expect(drawnAt(8)).toContain(previewAt(8));
+    // Out of order and repeated, the same.
+    const frames = [9, 2, 8, 2, 9].map(drawnAt);
+    expect(frames[2]).toEqual(drawnAt(8));
+    expect(frames[1]).toEqual(frames[3]);
+    expect(frames[0]).toContain(previewAt(9));
   });
 });

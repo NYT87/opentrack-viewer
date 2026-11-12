@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { OverlayContext2D } from '../overlay/export/drawOverlay';
 import { canvasTemplate, newCanvasComponent } from '../overlay/customCanvas';
 import { DEFAULT_OVERLAY_STYLE, OVERLAY_TEMPLATE_VERSION, type OverlayTemplate } from '../overlay/template';
+import { smoothedValueAt } from '../overlay/timeline';
 import { parseGpx } from '../parsers/gpx/parseGpx';
 import { readFixture } from '../test/helpers/fixtures';
 import { activityThrough, straightNorth, type TestPoint } from '../test/helpers/mapVideoRoutes';
@@ -70,6 +71,18 @@ describe('figures on the map video\'s clock (AV-1207)', () => {
       expect(sample.progress).toBeCloseTo(frame.sample.distance / model.route.totalMeters, 9);
       expect(sample.videoTimeSeconds).toBe(t);
     }
+  });
+
+  it('smooth over the map video\'s clock: a window of video seconds, the start held through the intro (AV-1016)', () => {
+    const power = { kind: 'metric', metric: 'heartRate' } as const;
+    // Through the intro the marker is at the start, so every moment of the window is the start's.
+    expect(smoothedValueAt(timeline, power, 1, 2)).toBeCloseTo(timeline.sampleAt(0)!.values[HEART]!, 6);
+    // On the climb, the heart rate rises each second, so the mean trails the moment's own value.
+    const now = timeline.sampleAt(6)!.values[HEART]!;
+    const mean = smoothedValueAt(timeline, power, 6, 2)!;
+    expect(mean).toBeLessThan(now);
+    expect(mean).toBeGreaterThan(timeline.sampleAt(4)!.values[HEART]! - 1e-9);
+    expect(smoothedValueAt(timeline, power, 6, 2)).toBe(mean);
   });
 
   it('show the start through the intro and the end through the outro', () => {

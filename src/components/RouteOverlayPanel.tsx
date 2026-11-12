@@ -812,6 +812,7 @@ export function PercentField({
   min = 0,
   max = 100,
   step = 1,
+  hint,
 }: {
   id: string;
   label: string;
@@ -820,6 +821,8 @@ export function PercentField({
   min?: number;
   max?: number;
   step?: number;
+  /** AV-1016. A line of help under the field, tied to it for a screen reader. */
+  hint?: string;
 }) {
   const [draft, setDraft] = useState<string | undefined>();
   return (
@@ -827,6 +830,7 @@ export function PercentField({
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
+        aria-describedby={hint ? `${id}-hint` : undefined}
         className="input"
         type="number"
         inputMode="decimal"
@@ -841,6 +845,11 @@ export function PercentField({
         }}
         onBlur={() => setDraft(undefined)}
       />
+      {hint && (
+        <p id={`${id}-hint`} className="overlay-controls__hint">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

@@ -144,6 +144,31 @@ describe('long timelines (AV-1008)', { timeout: 90_000 }, () => {
       expect(calls.count).toBeGreaterThan(5000);
     }, 30_000);
 
+    it('draws 5,000 frames of a six-hour ride with five 30 s smoothed figures within a budget (AV-1016)', () => {
+      // Each smoothed figure takes at most 121 samples a frame, so the cost is a fixed multiple and a
+      // six-hour recording costs no more per frame than a short one: the line is the budget above's, twice.
+      const smoothed = {
+        ...template,
+        components: (['speed', 'pace', 'power', 'heartRate', 'cyclingCadence'] as const).map((metric) => ({
+          id: metric,
+          type: 'text' as const,
+          visible: true,
+          rect: { x: 0.05, y: 0.05, width: 0.2, height: 0.1 },
+          unitMode: 'auto' as const,
+          style: {},
+          source: { kind: 'metric' as const, metric },
+          smoothing: { windowSeconds: 30 },
+        })),
+      };
+      const renderer = createOverlayRenderer({ template: smoothed, timeline, activity: medium, units: 'metric', width: 1920, height: 1080 });
+      const before = calls.count;
+      const ms = best(3, () => {
+        for (let i = 0; i < 5000; i += 1) renderer.drawFrame(ctx, (i / 5000) * 6 * HOURS);
+      });
+      expect(calls.count).toBeGreaterThan(before);
+      expect(ms).toBeLessThan(10_000);
+    }, 60_000);
+
     it('projects a 216,000-point route within a budget', () => {
       expect(best(3, () => void projectRoute(long, 1.5))).toBeLessThan(2500);
     }, 30_000);

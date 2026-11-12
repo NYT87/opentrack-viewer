@@ -421,3 +421,69 @@ describe('a figure’s label and value, styled apart (AV-1015, TD-083)', () => {
     expect(parsed.template.components[0]).toMatchObject({ id: 'speed', display: { label: 'Pace' } });
   });
 });
+
+describe('smoothing in a template (AV-1016)', () => {
+  const T = new Date('2024-01-01T10:00:00Z');
+  const ramp = makeActivity(
+    Array.from({ length: 21 }, (_, i) => ({ time: new Date(T.getTime() + i * 1000), powerWatts: 100 + 10 * i, speedMetersPerSecond: i, distanceMeters: i * i / 2 })),
+  );
+  const timeline = buildOverlayTimeline(ramp, { video: { durationSeconds: 20 } });
+  const power = (extra: Partial<OverlayComponent> = {}) =>
+    component({ id: 'power', type: 'text', source: { kind: 'metric', metric: 'power' }, ...extra });
+  const parseOne = (value: object) =>
+    parseOverlayTemplate(JSON.stringify({ version: 2, name: 'x', components: [{ id: 'a', type: 'text', rect, source: { kind: 'metric', metric: 'power' }, ...value }] }));
+
+  it('shows the trailing mean of the window up to the moment, and the moment itself when off', () => {
+    const sample = timeline.sampleAt(10)!;
+    const shown = (c: OverlayComponent) => resolveOverlayComponent(template, c, sample, timeline, 'metric');
+    expect(shown(power())).toMatchObject({ status: 'ready', text: '200 W' });
+    expect(shown(power({ smoothing: { windowSeconds: 4 } }))).toMatchObject({ text: '180 W' });
+  });
+
+  it('moves a gauge’s fill with the smoothed value, and is hidden by the moment’s own data', () => {
+    const gauge = power({ type: 'gauge', range: { min: 100, max: 300 }, smoothing: { windowSeconds: 4 } });
+    const ready = resolveOverlayComponent(template, gauge, timeline.sampleAt(10)!, timeline, 'metric');
+    expect(ready).toMatchObject({ status: 'ready', fraction: 0.4 });
+    expect(resolveOverlayComponent(template, gauge, undefined, timeline, 'metric')).toMatchObject({ status: 'hidden', reason: 'no_data' });
+  });
+
+  it('writes pace from the smoothed speed', () => {
+    const pace = component({ id: 'pace', type: 'text', source: { kind: 'metric', metric: 'pace' }, smoothing: { windowSeconds: 4 } });
+    // Speed 8 m/s at second 10, averaged over 8..12 is 8 m/s too: 1000 / 8 = 125 s/km.
+    expect(resolveOverlayComponent(template, pace, timeline.sampleAt(10)!, timeline, 'metric')).toMatchObject({ text: '2:05 /km' });
+  });
+
+  it('keeps a window of 0 to 30 s, and drops anything else, so older layouts read unchanged', () => {
+    const smoothing = (windowSeconds: unknown) => {
+      const parsed = parseOne({ smoothing: { windowSeconds } });
+      return parsed.ok ? parsed.template.components[0]!.smoothing : 'refused';
+    };
+    expect(smoothing(3)).toEqual({ windowSeconds: 3 });
+    expect(smoothing(99)).toEqual({ windowSeconds: 30 });
+    for (const off of [0, -2, 'x', null, Number.NaN]) expect(smoothing(off)).toBeUndefined();
+    expect(parseOne({})).toMatchObject({ ok: true, warnings: [] });
+    // Only a live figure or gauge, and only a source that is a reading.
+    const total = parseOverlayTemplate(JSON.stringify({ version: 2, name: 'x', components: [{ id: 'a', type: 'text', rect, source: { kind: 'metric', metric: 'distance' }, smoothing: { windowSeconds: 3 } }] }));
+    expect(total.ok && total.template.components[0]!.smoothing).toBeUndefined();
+  });
+
+  it('round-trips through the layout file, and an older reader skips a climb figure it does not know', () => {
+    const smoothed: OverlayTemplate = { ...template, components: [power({ smoothing: { windowSeconds: 3 } })] };
+    expect(parseOverlayTemplate(serializeOverlayTemplate(smoothed))).toEqual({ ok: true, template: smoothed, warnings: [] });
+    // What an older build does with metric:climb: that one component is skipped, with a warning; the rest opens.
+    const older = parseOverlayTemplate(
+      JSON.stringify({ version: 2, name: 'x', components: [{ id: 'a', type: 'text', rect, source: { kind: 'metric', metric: 'climbing' } }, { id: 'b', type: 'text', rect, source: { kind: 'metric', metric: 'speed' } }] }),
+    );
+    expect(older).toMatchObject({ ok: true, warnings: [expect.stringMatching(/missing or invalid data source/)] });
+    expect(older.ok && older.template.components.map((c) => c.id)).toEqual(['b']);
+  });
+
+  it('writes climb as an elevation, in the unit chosen', () => {
+    const climb = component({ id: 'climb', type: 'text', source: { kind: 'metric', metric: 'climb' } });
+    const sample = { videoTimeSeconds: 1, activityElapsedSeconds: 1, values: { 'metric:climb': 100 } };
+    const tl = { ...timeline, available: new Set(['metric:climb']) };
+    expect(resolveOverlayComponent(template, climb, sample, tl, 'metric')).toMatchObject({ label: 'Climb so far', text: '100 m' });
+    expect(resolveOverlayComponent(template, climb, sample, tl, 'imperial')).toMatchObject({ text: '328 ft' });
+    expect(resolveOverlayComponent(template, { ...climb, display: { decimals: 1 } }, sample, tl, 'metric')).toMatchObject({ text: '100.0 m' });
+  });
+});

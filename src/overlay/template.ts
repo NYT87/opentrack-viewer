@@ -11,7 +11,10 @@ import {
 } from '../domain/units';
 import {
   OVERLAY_METRIC_KEYS,
+  SMOOTHING_LIMITS,
+  canSmooth,
   dataSourceId,
+  smoothedValueAt,
   type OverlayDataSource,
   type OverlayMetricKey,
   type OverlaySample,
@@ -257,6 +260,11 @@ export interface OverlayComponent {
   display?: OverlayDisplaySetting;
   /** AV-1015. A live figure's label and value, styled apart. */
   figure?: OverlayFigureSetting;
+  /**
+   * AV-1016 (TD-084). A live figure or gauge shows the trailing mean of its
+   * value over this many seconds, 0 to 30. Absent is off, as 0 is.
+   */
+  smoothing?: { windowSeconds: number };
 }
 
 export interface OverlayTemplate {
@@ -433,6 +441,12 @@ function parseComponent(value: unknown): OverlayComponent | string {
     const figure = parseFigure(value.figure);
     if (figure) component.figure = figure;
   }
+  if ((componentType === 'text' || componentType === 'gauge') && isRecord(value.smoothing) && canSmooth(source)) {
+    const seconds = value.smoothing.windowSeconds;
+    if (isNumber(seconds) && seconds > 0) {
+      component.smoothing = { windowSeconds: Math.min(SMOOTHING_LIMITS.max, seconds) };
+    }
+  }
   if (componentType === 'routeInset' && isRecord(value.route)) {
     const route = value.route;
     if (isNumber(route.lineWidth) && route.lineWidth > 0 && isNumber(route.padding) && route.padding >= 0) {
@@ -590,6 +604,7 @@ const METRIC_LABELS: Record<OverlayMetricKey, string> = {
   grade: 'Grade',
   elapsed: 'Time',
   moving: 'Moving time',
+  climb: 'Climb so far',
 };
 
 function describeSource(source: OverlayDataSource, timeline: OverlayTimeline): string {
@@ -632,6 +647,7 @@ function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem
     case 'distance':
       return formatDistance(value, units);
     case 'elevation':
+    case 'climb':
       return formatElevation(value, units);
     case 'temperature':
       return formatTemperature(value, units);
@@ -664,6 +680,7 @@ export function formatMetricWith(metric: OverlayMetricKey, value: number, units:
     case 'distance':
       return imperial ? fixed(value / 1609.344, 'mi') : fixed(value / 1000, 'km');
     case 'elevation':
+    case 'climb':
       return imperial ? fixed(value * 3.28084, 'ft') : fixed(value, 'm');
     case 'temperature':
       return imperial ? fixed((value * 9) / 5 + 32, '°F') : fixed(value, '°C');
@@ -738,26 +755,29 @@ export function resolveOverlayComponent(
   const value = source ? sample.values[dataSourceId(source)] : undefined;
   if (!source || value === undefined) return { status: 'hidden', reason: 'no_data', componentId };
 
+  // AV-1016. What a smoothed figure shows is the trailing mean up to this moment; hiding stays by the moment's own value.
+  const windowSeconds = component.smoothing?.windowSeconds;
+  const shown = (windowSeconds ? smoothedValueAt(timeline, source, sample.videoTimeSeconds, windowSeconds) : undefined) ?? value;
   const label = component.display?.label?.trim() || describeSource(source, timeline);
   let text: string;
   const total = timeline.distanceTotalMeters;
   if (source.kind === 'metric' && source.metric === 'distance' && component.display?.ofTotal && total !== undefined) {
-    text = distanceOfTotal(value, total, unitSystem, component.display.decimals);
+    text = distanceOfTotal(shown, total, unitSystem, component.display.decimals);
   } else if (source.kind === 'metric') {
     text =
       component.display?.decimals !== undefined
-        ? formatMetricWith(source.metric, value, unitSystem, component.display.decimals)
-        : formatMetric(source.metric, value, unitSystem);
+        ? formatMetricWith(source.metric, shown, unitSystem, component.display.decimals)
+        : formatMetric(source.metric, shown, unitSystem);
   }
   else {
     const unit = timeline.sensorLabels.get(dataSourceId(source))?.unit;
-    text = `${Number(value.toFixed(2))}${unit ? ` ${unit}` : ''}`;
+    text = `${Number(shown.toFixed(2))}${unit ? ` ${unit}` : ''}`;
   }
 
   let fraction: number | undefined;
   if (component.type === 'gauge' && component.range) {
     const { min, max } = component.range;
-    fraction = clamp01((value - min) / (max - min));
+    fraction = clamp01((shown - min) / (max - min));
   }
   return { status: 'ready', componentId, component, style, label, text, fraction };
 }

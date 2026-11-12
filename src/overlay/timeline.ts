@@ -1,7 +1,7 @@
 import type { Activity, ActivityPoint, Coordinate } from '../domain/activity';
 import { toValidCoordinate } from '../domain/activity';
 import { deriveSpeed } from '../domain/series';
-import { computeDistance } from '../domain/stats';
+import { computeDistance, elevationClimb } from '../domain/stats';
 
 /**
  * AV-1003. The overlay timeline: video time in, normalized activity values out.
@@ -29,7 +29,9 @@ export type OverlayMetricKey =
   | 'grade'
   | 'elapsed'
   /** AV-1011. Time spent moving so far, by the viewer's own rule (TD-058). */
-  | 'moving';
+  | 'moving'
+  /** AV-1016. Elevation gained so far, by the summary's own rule (TD-084). */
+  | 'climb';
 
 export const OVERLAY_METRIC_KEYS: readonly OverlayMetricKey[] = [
   'speed',
@@ -44,6 +46,7 @@ export const OVERLAY_METRIC_KEYS: readonly OverlayMetricKey[] = [
   'grade',
   'elapsed',
   'moving',
+  'climb',
 ];
 
 /** Where a value comes from: a built-in metric, or a named camera stream. */
@@ -179,6 +182,8 @@ interface DerivedStreams {
   speed: (number | undefined)[];
   /** Seconds spent moving up to each point, by point index; see `movingSoFar`. */
   moving: (number | undefined)[];
+  /** AV-1016. Elevation gained up to each point, by point index; see `elevationClimb`. */
+  climb: (number | undefined)[];
 }
 
 /** A step is moving at or above this, as the stats count moving time (TD-058). */
@@ -218,7 +223,7 @@ function movingSoFar(
   return moving;
 }
 
-function metricReaders({ distance, speed, moving }: DerivedStreams): Record<OverlayMetricKey, Reader> {
+function metricReaders({ distance, speed, moving, climb }: DerivedStreams): Record<OverlayMetricKey, Reader> {
   return {
     speed: ({ index }) => finite(speed[index]),
     // Pace is derived from the interpolated speed, not stored per point.
@@ -233,6 +238,7 @@ function metricReaders({ distance, speed, moving }: DerivedStreams): Record<Over
     grade: ({ point }) => finite(point.gradePercent),
     elapsed: ({ seconds }) => seconds,
     moving: ({ index }) => finite(moving[index]),
+    climb: ({ index }) => finite(climb[index]),
   };
 }
 
@@ -241,6 +247,57 @@ export function paceFromSpeed(metersPerSecond: number | undefined): number | und
   return typeof metersPerSecond === 'number' && metersPerSecond > 0
     ? 1000 / metersPerSecond
     : undefined;
+}
+
+/**
+ * AV-1016 (TD-084). Smoothing: the trailing mean of a figure's value over the
+ * `windowSeconds` up to a moment, taken from `sampleAt` at a fixed step so it
+ * depends on (time, window) alone: the preview and every export draw the same
+ * number, and a frame never depends on the frame before it.
+ */
+export const SMOOTHING_LIMITS = { min: 0, max: 30 } as const;
+/** The step between the samples of one average, and so at most 120 of them in a 30 s window. */
+const SMOOTHING_STEP_SECONDS = 0.25;
+/** Totals so far: a running mean of a total is not a number the activity ever had. */
+const NEVER_SMOOTHED: readonly OverlayMetricKey[] = ['distance', 'elapsed', 'moving', 'climb'];
+
+/** Whether a source's value is a reading that can be averaged over a window. */
+export function canSmooth(source: OverlayDataSource | undefined): boolean {
+  if (!source) return false;
+  return source.kind === 'sensor' || !NEVER_SMOOTHED.includes(source.metric);
+}
+
+/**
+ * The mean of `source` over [t - window, t], ignoring moments with no value;
+ * `undefined` when there are none. Through a stop the samples are TD-080's
+ * (zeros, or held), so the mean decays and holds. Pace is the mean of speed,
+ * turned back into pace by the same rule as a single moment (0 when stopped).
+ */
+export function smoothedValueAt(
+  timeline: Pick<OverlayTimeline, 'sampleAt'>,
+  source: OverlayDataSource,
+  videoTimeSeconds: number,
+  windowSeconds: number,
+): number | undefined {
+  if (!(windowSeconds > 0) || !canSmooth(source)) return undefined;
+  const window = Math.min(windowSeconds, SMOOTHING_LIMITS.max);
+  const pace = source.kind === 'metric' && source.metric === 'pace';
+  const id = pace ? 'metric:speed' : dataSourceId(source);
+  const steps = Math.ceil(window / SMOOTHING_STEP_SECONDS);
+  const step = window / steps;
+  let sum = 0;
+  let count = 0;
+  for (let k = 0; k <= steps; k += 1) {
+    const value = timeline.sampleAt(videoTimeSeconds - k * step)?.values[id];
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    sum += value;
+    count += 1;
+  }
+  if (count === 0) return undefined;
+  const mean = sum / count;
+  // A mean speed under the moving threshold is standing still: through a stop the mean decays towards 0, and
+  // its reciprocal would read an hour a kilometre before it read 0 (AV-1016).
+  return pace ? (mean < MOVING_SPEED_THRESHOLD_MPS ? 0 : (paceFromSpeed(mean) ?? 0)) : mean;
 }
 
 /** Interpolates a longitude along the shorter arc, across the antimeridian. */
@@ -311,6 +368,7 @@ export function buildOverlayTimeline(
     distance,
     speed: deriveSpeed(activity),
     moving: movingSoFar(points, distance, activity.points.length),
+    climb: elevationClimb(activity.points).gainSoFar,
   };
   const readers = metricReaders(derived);
   const sources: { id: string; read: Reader }[] = OVERLAY_METRIC_KEYS.map((metric) => ({

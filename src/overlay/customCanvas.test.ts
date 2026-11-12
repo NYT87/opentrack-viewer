@@ -305,4 +305,10 @@ describe('growing a figure’s box to fit its text (AV-1015, TD-083)', () => {
     const total = rectOf(grow([box('a', small, { source: { kind: 'metric', metric: 'distance' }, display: { ofTotal: true } })]));
     expect(total.width).toBeGreaterThan(plain.width);
   });
+
+  it('sizes a smoothed figure for its widest value, as it does an unsmoothed one (AV-1016)', () => {
+    const plain = rectOf(grow([box('a', small)]));
+    const smoothed = rectOf(grow([box('a', small, { smoothing: { windowSeconds: 5 } })]));
+    expect(smoothed).toEqual(plain);
+  });
 });

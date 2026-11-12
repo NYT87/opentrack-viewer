@@ -9,12 +9,12 @@ import {
   canvasElementChoices,
   canvasTemplate,
   checkCanvasSize,
-  componentsFromPreset,
+  componentsFromStart,
   duplicateComponent,
   growFigureToFit,
   moveComponent,
   moveLayer,
-  newCanvasComponent,
+  newCanvasComponents,
   nudgeComponent,
   pushHistory,
   removeComponent,
@@ -33,7 +33,8 @@ import {
 import { figureLayout } from '../overlay/figureLayout';
 import { BASE_FONT_FRACTION, createOverlayRenderer } from '../overlay/export/drawOverlay';
 import { measureText } from '../overlay/measureText';
-import { DEFAULT_OVERLAY_CONTROLS, OVERLAY_PRESETS, type OverlayPresetId } from '../overlay/presets';
+import { DEFAULT_OVERLAY_CONTROLS } from '../overlay/presets';
+import { START_LAYOUTS, type StartLayoutId } from '../overlay/predefined';
 import { extractRoute } from '../overlay/routeImage';
 import {
   SNAP_POSITIONS,
@@ -64,7 +65,7 @@ import {
   type SummaryStatKey,
   type TextAlign,
 } from '../overlay/template';
-import { buildOverlayTimeline, type OverlayTimeline } from '../overlay/timeline';
+import { SMOOTHING_LIMITS, buildOverlayTimeline, canSmooth, type OverlayTimeline } from '../overlay/timeline';
 import type { VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
@@ -177,7 +178,7 @@ export function CustomCanvas({
   const [state, setState] = useState<CanvasState>(initialDraft.state);
   const [history, setHistory] = useState<CanvasState[]>(initialDraft.history);
   const [notice, setNotice] = useState<{ kind: 'status' | 'alert'; message: string; warnings?: string[] }>();
-  const [preset, setPreset] = useState<OverlayPresetId>('compact-hud');
+  const [preset, setPreset] = useState<StartLayoutId>('compact-hud');
   const loadInput = useRef<HTMLInputElement>(null);
   const { components, selectedId } = state;
 
@@ -229,7 +230,7 @@ export function CustomCanvas({
     () =>
       still
         ? canvasElementChoices(timeline, stillContext)
-            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && choice.key !== 'progress')
+            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && !choice.key.startsWith('predefined:') && choice.key !== 'progress')
             .map((choice) => (choice.group === 'Live figures' ? { ...choice, group: 'Along the route' as const } : choice))
         : canvasElementChoices(timeline, stillContext),
     [timeline, stillContext, still],
@@ -258,8 +259,9 @@ export function CustomCanvas({
   };
 
   const add = (key: CanvasElementKey) => {
-    const component = newCanvasComponent(template, key, frame, timeline);
-    change([...components, component], component.id);
+    // AV-1016. A predefined entry may build several; the first is the one selected.
+    const added = newCanvasComponents(template, key, frame, timeline);
+    change([...components, ...added], added[0]?.id);
   };
 
   const saveLayout = () => {
@@ -413,8 +415,8 @@ export function CustomCanvas({
           )}
           <div className="overlay-controls__field">
             <label htmlFor={`${id}-start`}>Start from</label>
-            <select id={`${id}-start`} className="select" value={preset} onChange={(event) => setPreset(event.target.value as OverlayPresetId)}>
-              {OVERLAY_PRESETS.map((entry) => (
+            <select id={`${id}-start`} className="select" value={preset} onChange={(event) => setPreset(event.target.value as StartLayoutId)}>
+              {START_LAYOUTS.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.name}
                 </option>
@@ -423,7 +425,7 @@ export function CustomCanvas({
             <button
               type="button"
               className="button"
-              onClick={() => change(componentsFromPreset(preset, timeline, frame), undefined)}
+              onClick={() => change(componentsFromStart(preset, timeline, frame), undefined)}
             >
               Use this layout
             </button>
@@ -537,7 +539,7 @@ export function describeCanvasComponent(component: OverlayComponent): string {
     const name = component.display?.label?.trim();
     if (name) return name;
     if (source?.kind === 'metric') {
-      const base = { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade' }[source.metric];
+      const base = { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade', climb: 'Climb so far' }[source.metric];
       return component.type === 'gauge' ? `${base} gauge` : base;
     }
     return source?.kind === 'sensor' ? source.key : 'Figure';
@@ -562,12 +564,12 @@ function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd:
   const firstAvailable = choices.find((choice) => choice.available)?.key;
   const [wanted, setWanted] = useState<CanvasElementKey | undefined>();
   const chosen = choices.find((choice) => choice.key === wanted && choice.available)?.key ?? firstAvailable;
-  const groups = ['Live figures', 'Whole activity', 'Shapes'] as const;
+  const groups = ['Live figures', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes'] as const;
   return (
     <div className="overlay-controls__field">
       <label htmlFor={`${id}-add`}>Add</label>
       <select id={`${id}-add`} className="select" value={chosen ?? ''} onChange={(event) => setWanted(event.target.value as CanvasElementKey)}>
-        {groups.map((group) => (
+        {groups.filter((group) => choices.some((choice) => choice.group === group)).map((group) => (
           <optgroup key={group} label={group}>
             {choices
               .filter((choice) => choice.group === group)
@@ -1143,6 +1145,26 @@ function ComponentEditor({
                 <option value="total">The distance so far, of the total</option>
               </select>
             </div>
+          )}
+          {canSmooth(component.source) && (
+            <PercentField
+              id={`${id}-smoothing`}
+              label="Smoothing (s)"
+              hint="0 turns it off"
+              value={String(component.smoothing?.windowSeconds ?? 0)}
+              min={SMOOTHING_LIMITS.min}
+              max={SMOOTHING_LIMITS.max}
+              step={0.5}
+              onCommit={(value) =>
+                update((current) => {
+                  const next = { ...current };
+                  const seconds = Math.min(SMOOTHING_LIMITS.max, Math.max(0, Math.round(value * 100) / 100));
+                  if (seconds > 0) next.smoothing = { windowSeconds: seconds };
+                  else delete next.smoothing;
+                  return next;
+                })
+              }
+            />
           )}
           {numeric && (
             <div className="overlay-controls__field">

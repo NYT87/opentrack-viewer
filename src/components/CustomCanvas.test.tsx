@@ -211,6 +211,62 @@ describe('the custom canvas (AV-1011)', () => {
     expect(elements()).not.toBeInTheDocument();
   });
 
+  describe('predefined components and smoothing (AV-1016)', () => {
+    const cyclist = () => ride((i) => ({ powerWatts: 150 + 2 * i, elevationMeters: 100 + i, cyclingCadenceRpm: 80 }));
+
+    it('groups the registry by sport, and lists one the activity lacks as disabled, with its reason', () => {
+      setup(cyclist());
+      const add = within(region()).getByLabelText('Add');
+      const group = (name: string) => within(add).getByRole('group', { name });
+      expect(within(group('Cycling')).getByRole('option', { name: 'Power, 3 s average' })).toBeEnabled();
+      expect(within(group('Cycling')).getByRole('option', { name: 'Gradient (not in this activity)' })).toBeDisabled();
+      expect(within(group('Running')).getByRole('option', { name: 'Running cadence (Running) (not in this activity)' })).toBeDisabled();
+      expect(within(group('Any sport')).getByRole('option', { name: 'Progress bar (Any sport)' })).toBeEnabled();
+      expect(within(region()).getByRole('list', { name: 'Not in this activity' })).toHaveTextContent('Gradient: This activity has no gradient.');
+    });
+
+    it('adds a predefined entry as an ordinary component, with its smoothing, saved in the layout', async () => {
+      setup(cyclist());
+      await add('Power, 3 s average');
+      expect(names()).toEqual(['Power 3s']);
+      expect(editor()).toHaveAccessibleName('Selected: Power 3s');
+      expect(field('Smoothing (s)').value).toBe('3');
+      expect((await layoutJson()).template.components[0]).toMatchObject({ type: 'text', source: { kind: 'metric', metric: 'power' }, smoothing: { windowSeconds: 3 }, display: { label: 'Power 3s' } });
+    });
+
+    it('changes or turns off the smoothing of a figure, with a hint that 0 turns it off, and hides it for a total', async () => {
+      setup(cyclist());
+      await add('Power');
+      expect(field('Smoothing (s)').value).toBe('0');
+      expect(field('Smoothing (s)')).toHaveAccessibleDescription('0 turns it off');
+      fireEvent.change(field('Smoothing (s)'), { target: { value: '45' } });
+      expect((await layoutJson()).template.components[0]).toMatchObject({ smoothing: { windowSeconds: 30 } });
+      fireEvent.change(field('Smoothing (s)'), { target: { value: '0' } });
+      expect((await layoutJson()).template.components[0]).not.toHaveProperty('smoothing');
+      // A gauge can be smoothed; a total so far cannot.
+      await add('Speed gauge');
+      expect(field('Smoothing (s)')).toBeInTheDocument();
+      await add('Distance');
+      expect(within(editor()).queryByLabelText('Smoothing (s)')).not.toBeInTheDocument();
+      await add('Climb so far');
+      expect(within(editor()).queryByLabelText('Smoothing (s)')).not.toBeInTheDocument();
+    });
+
+    it('starts from the Cycling or Running layout, built from the activity’s own streams, and takes it back', async () => {
+      setup(cyclist());
+      await userEvent.selectOptions(within(region()).getByLabelText('Start from'), 'cycling');
+      await userEvent.click(within(region()).getByRole('button', { name: 'Use this layout' }));
+      // No gradient in this ride, so climb so far stands in; the profile closes the row.
+      expect(names()).toEqual(['Speed', 'Power 3s', 'Cadence', 'Climb so far', 'Elevation profile']);
+      await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+      expect(elements()).not.toBeInTheDocument();
+      await userEvent.selectOptions(within(region()).getByLabelText('Start from'), 'running');
+      await userEvent.click(within(region()).getByRole('button', { name: 'Use this layout' }));
+      // No heart rate or running cadence in this ride: the rest close up.
+      expect(names()).toEqual(['Pace', 'Distance', 'Elevation profile']);
+    });
+  });
+
   it('styles a shape: fill and border, their transparency, width and corner', async () => {
     setup();
     await add('Rounded rectangle');

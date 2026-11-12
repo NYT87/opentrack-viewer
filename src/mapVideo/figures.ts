@@ -5,6 +5,7 @@ import { DEFAULT_OVERLAY_STYLE, DEFAULT_SHAPE, OVERLAY_TEMPLATE_VERSION, type Ov
 import { buildOverlayTimeline, dataSourceId, type OverlaySample, type OverlayTimeline } from '../overlay/timeline';
 import type { MapVideoModel } from './model';
 import type { MapVideoSettings } from './project';
+import { positionAt } from './route';
 import { TERRAIN_FULL_CREDIT, terrainActive } from './style';
 
 /**
@@ -52,7 +53,9 @@ export function mapVideoOverlayTimeline(activity: Activity, model: MapVideoModel
 
   const sampleAt = (videoSeconds: number): OverlaySample | undefined => {
     if (base.unavailable || firstMs === undefined) return undefined;
-    const frame = model.at(Math.min(length, Math.max(0, videoSeconds)));
+    // The timeline and the marker's place only: a figure's smoothing samples this up to 121 times a frame (AV-1016), and the camera and the revealed line are not needed for a value.
+    const sampled = timeline.at(Math.min(length, Math.max(0, videoSeconds)));
+    const frame = { sample: sampled, position: positionAt(route, sampled.distance) };
     const followSeconds = videoSeconds - timeline.introSeconds;
     const pause = frame.sample.paused
       ? timeline.pauses.find((stop) => followSeconds >= stop.startSeconds && followSeconds < stop.endSeconds)

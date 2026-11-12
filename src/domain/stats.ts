@@ -195,14 +195,9 @@ export function computeElevation(
   points: ActivityPoint[],
   thresholdMeters: number = ELEVATION_NOISE_THRESHOLD_METERS,
 ): ElevationResult {
-  let gain = 0;
-  let loss = 0;
   let min: number | undefined;
   let max: number | undefined;
-  let anchor: number | undefined;
-  let anchorSegment: number | undefined;
   let seen = 0;
-
   for (const point of points) {
     const elevation = point.elevationMeters;
     if (!Number.isFinite(elevation)) continue;
@@ -210,32 +205,61 @@ export function computeElevation(
     seen += 1;
     if (min === undefined || value < min) min = value;
     if (max === undefined || value > max) max = value;
-
-    // Like distance, a climb is not counted across a recording gap: the ground
-    // between the end of one segment and the start of the next was not travelled
-    // by this recording, so the difference in height is not height climbed.
-    // The new segment starts a fresh anchor; the overall min and max stand.
-    const segment = point.segmentIndex ?? 0;
-    if (anchor !== undefined && segment !== anchorSegment) anchor = undefined;
-    anchorSegment = segment;
-
-    if (anchor === undefined) {
-      anchor = value;
-      continue;
-    }
-
-    const delta = value - anchor;
-    if (delta >= thresholdMeters) {
-      gain += delta;
-      anchor = value;
-    } else if (delta <= -thresholdMeters) {
-      loss += -delta;
-      anchor = value;
-    }
   }
-
   if (seen === 0) return {};
-  return { gainMeters: gain, lossMeters: loss, minMeters: min, maxMeters: max };
+  const { gainMeters, lossMeters } = elevationClimb(points, thresholdMeters);
+  return { gainMeters, lossMeters, minMeters: min, maxMeters: max };
+}
+
+/**
+ * AV-1016 (TD-084). The rule behind the summary's elevation gain, walked once
+ * so the summary and the overlay's "climb so far" cannot disagree: a climb or
+ * descent is committed once it clears the threshold from the last anchor, and
+ * a recording gap starts a fresh anchor. Besides the totals it returns the gain
+ * committed up to each point, by point index; a point before the first reading
+ * of elevation has none, and a point without a reading holds the gain so far.
+ */
+export function elevationClimb(
+  points: ActivityPoint[],
+  thresholdMeters: number = ELEVATION_NOISE_THRESHOLD_METERS,
+): { gainMeters: number; lossMeters: number; gainSoFar: (number | undefined)[] } {
+  let gain = 0;
+  let loss = 0;
+  let anchor: number | undefined;
+  let anchorSegment: number | undefined;
+  let started = false;
+  const gainSoFar: (number | undefined)[] = new Array(points.length).fill(undefined);
+
+  points.forEach((point, index) => {
+    const elevation = point.elevationMeters;
+    if (Number.isFinite(elevation)) {
+      const value = elevation as number;
+      // Like distance, a climb is not counted across a recording gap: the ground
+      // between the end of one segment and the start of the next was not travelled
+      // by this recording, so the difference in height is not height climbed.
+      // The new segment starts a fresh anchor; the overall min and max stand.
+      const segment = point.segmentIndex ?? 0;
+      if (anchor !== undefined && segment !== anchorSegment) anchor = undefined;
+      anchorSegment = segment;
+      started = true;
+
+      if (anchor === undefined) {
+        anchor = value;
+      } else {
+        const delta = value - anchor;
+        if (delta >= thresholdMeters) {
+          gain += delta;
+          anchor = value;
+        } else if (delta <= -thresholdMeters) {
+          loss += -delta;
+          anchor = value;
+        }
+      }
+    }
+    if (started) gainSoFar[index] = gain;
+  });
+
+  return { gainMeters: gain, lossMeters: loss, gainSoFar };
 }
 
 interface SensorSummary {

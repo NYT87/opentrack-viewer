@@ -1252,6 +1252,43 @@ Acceptance criteria:
   - editor tests for each control, the box growing to fit, and stopping at the frame's edge;
   - a browser test that reads an exported frame's pixels for the two colours and the halo.
 
+#### AV-1016: Predefined Overlay Components for Cycling and Running, With Smoothing, and a Starting Layout per Sport
+
+Dependencies: AV-1011, AV-1015, TD-080
+
+GitHub issue #18. The canvas editor offers each figure and gauge on its own, with nothing designed for a sport. This task adds a **registry of predefined components** that can be dropped in by sport, **smoothing** for figures that jump second to second, and a starting **layout per sport**.
+
+It builds only what can be drawn today. These entries wait for their own drawing pieces and are not offered until those land:
+- dials, charts, the gradient glyph and colour, and the compass (#21);
+- zones (#20);
+- splits (#22);
+- average-so-far figures (#39).
+
+Acceptance criteria:
+- **Registry:**
+  - `src/overlay/predefined.ts` holds the entries as plain data. Each has an id, a name, a sport (`cycling`, `running` or `any`), the data it needs, and a builder that makes ordinary components with a default look, size and smoothing.
+  - Adding a sport later means adding entries, not changing the editor.
+- **Offered in the editor:** the *Add* list gets *Cycling*, *Running* and *Any sport* groups. An entry the activity can't supply is offered disabled with the reason, as figures are now.
+- **Once added, an ordinary component:** saved in the layout file, edited with the usual controls (including AV-1015's), and drawn by the one renderer in the preview, every export and the map video.
+- **Entries available now:**
+  - **Cycling:** speed (figure and bar gauge, ranged from the activity's top speed), power, power 3 s average, cadence (rpm), gradient (%, smoothed), climb so far, elevation profile.
+  - **Running:** pace (smoothed), heart rate, running cadence (spm), distance of the total.
+  - **Any sport:** elevation profile, progress bar, route inset.
+- **Climb so far:** a new live metric, the elevation gained up to this moment. It uses the same rule as the summary's elevation gain, so at the end it equals the summary's figure. It holds through a stop.
+- **Smoothing:**
+  - Any live figure or gauge can show the trailing average of its value over a window of 0 to 30 s. 0 is off, and a component saved without a window is off.
+  - Pace is smoothed through speed, then turned back into pace.
+  - The preview and every export compute it from the same timeline, so they agree, and it holds through a stop (TD-080).
+  - Predefined entries set a default window: power 3 s, pace 5 s, speed 2 s, gradient 5 s, cadence 3 s. The reader can change it or turn it off per component.
+- **Starting layouts:** *Cycling* and *Running* join *Start from* in the canvas editor. Each is built from the registry's entries and laid out for the frame's shape (landscape or portrait), using only entries the activity can supply.
+- **Layout files:** the new fields stay within template version 2, and older layouts open unchanged.
+- **Tests:**
+  - every registry entry builds valid components, and one the activity lacks is disabled with its reason;
+  - smoothing: the window, off, a stop, pace through speed, and the same values in the preview's and the export's renderer;
+  - climb so far: rising, falling and the end equalling the summary's figure;
+  - the starting layouts in both shapes, and with a missing stream;
+  - a browser test that adds a predefined entry and reads its smoothed value in an exported frame.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

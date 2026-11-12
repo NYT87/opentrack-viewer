@@ -189,3 +189,53 @@ test('a figure’s label and value in their own colours, and a halo of its own o
   // Nothing is drawn where nothing was placed.
   expect(pixel(png, 640, 360)[3]).toBe(0);
 });
+
+test('a predefined power figure averaged over 3 s reads, in an exported frame, as the plain figure did 1.5 s earlier (AV-1016)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');
+  await expect(canvas.getByRole('group', { name: /^Canvas preview, 1280 by 720 pixels/ })).toBeVisible();
+
+  // The registry's entry is in the Add list, under Cycling, with its default 3 s window.
+  await add(canvas, 'Power, 3 s average');
+  await expect(canvas.getByLabel('Smoothing (s)')).toHaveValue('3');
+  await expect(canvas.getByLabel('Smoothing (s)')).toHaveAccessibleDescription('0 turns it off');
+
+  /** The same look for both figures, in boxes of whole pixels: 256 × 108 at (128, 72) and at (768, 432). */
+  const place = async (left: string, top: string) => {
+    await canvas.getByLabel('Label', { exact: true }).fill('Power 3s');
+    await canvas.getByLabel('Width (%)').fill('20');
+    await canvas.getByLabel('Height (%)').fill('15');
+    await canvas.getByLabel('From the left (%)').fill(left);
+    await canvas.getByLabel('From the top (%)').fill(top);
+  };
+  await place('10', '10');
+  // The plain figure of the same power, to be read where the average was.
+  await add(canvas, 'Power');
+  await place('60', '60');
+  await expect(canvas.getByLabel('Smoothing (s)')).toHaveValue('0');
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-1280x720-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+  const frameAt = (seconds: number) => decodePng(Buffer.from(frames[Math.round(seconds * 10)]!.data));
+  const crop = (png: DecodedPng, x: number, y: number) => {
+    const rows: Buffer[] = [];
+    for (let row = 0; row < 108; row += 1) rows.push(Buffer.from(png.pixels.subarray(((y + row) * png.width + x) * 4, ((y + row) * png.width + x + 256) * 4)));
+    return Buffer.concat(rows);
+  };
+  const smoothed = (seconds: number) => crop(frameAt(seconds), 128, 72);
+  const plain = (seconds: number) => crop(frameAt(seconds), 768, 432);
+
+  // The ride's power is 150 + 2 t W: the 3 s average at 30 s is the plain value at 28.5 s (207 W).
+  expect(drawnWithin(frameAt(30), { x: 0.1, y: 0.1, width: 0.2, height: 0.15 })).toBeGreaterThan(50);
+  expect(smoothed(30).equals(plain(28.5))).toBe(true);
+  // And it is not the plain value at that moment (210 W), nor the one of the second before (205 W).
+  expect(smoothed(30).equals(plain(30))).toBe(false);
+  expect(smoothed(30).equals(plain(27.5))).toBe(false);
+  // The same elsewhere in the ride, and the frame before it is the average a tenth earlier.
+  expect(smoothed(45).equals(plain(43.5))).toBe(true);
+  expect(smoothed(20).equals(plain(18.5))).toBe(true);
+});

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeDistance,
   computeElevation,
+  elevationClimb,
   computeStats,
   computeTimeBounds,
   haversineMeters,
@@ -264,6 +265,27 @@ describe('computeElevation (AV-403)', () => {
 
   it('returns an empty result when no point has elevation', () => {
     expect(computeElevation(points([{ lat: 1, lon: 1 }]))).toEqual({});
+  });
+});
+
+describe('elevationClimb (AV-1016)', () => {
+  it('commits the gain as the summary does, so the last point reads the summary figure', () => {
+    const list = points(
+      [100, 101, 104, 103, 110, 108, 99, 99.5, 112].map((elevationMeters, i) => ({ elevationMeters, segmentIndex: i < 5 ? 0 : 1 })),
+    );
+    const { gainMeters, lossMeters, gainSoFar } = elevationClimb(list);
+    expect(gainMeters).toBe(computeElevation(list).gainMeters);
+    expect(lossMeters).toBe(computeElevation(list).lossMeters);
+    expect(gainSoFar[list.length - 1]).toBe(gainMeters);
+    // Never decreasing: a descent adds nothing and takes nothing away.
+    for (let i = 1; i < gainSoFar.length; i += 1) expect(gainSoFar[i]!).toBeGreaterThanOrEqual(gainSoFar[i - 1]!);
+  });
+
+  it('has none before the first reading and holds through points without one', () => {
+    const { gainSoFar } = elevationClimb(
+      points([{ lat: 1 }, { elevationMeters: 10 }, { elevationMeters: 20 }, { lat: 2 }, { elevationMeters: 40 }]),
+    );
+    expect(gainSoFar).toEqual([undefined, 0, 10, 10, 30]);
   });
 });
 

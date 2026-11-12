@@ -20,6 +20,8 @@ import {
   type ShapeKind,
 } from './template';
 import { dataSourceId, type OverlayMetricKey, type OverlayTimeline } from './timeline';
+import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
+import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
 import type { MeasureText } from './staticImage';
 import type { UnitSystem } from '../domain/units';
 
@@ -76,31 +78,36 @@ export type CanvasElementKey =
   | 'progress'
   | 'elevationProfile'
   | `still:${string}`
-  | `shape:${ShapeKind}`;
+  | `shape:${ShapeKind}`
+  /** AV-1016. An entry of the registry of predefined components, by its id. */
+  | `predefined:${string}`;
 
 export interface CanvasElementChoice {
   key: CanvasElementKey;
   label: string;
-  group: 'Live figures' | 'Along the route' | 'Whole activity' | 'Shapes';
+  group: 'Live figures' | 'Along the route' | 'Whole activity' | 'Shapes' | 'Cycling' | 'Running' | 'Any sport';
   available: boolean;
   reason?: string;
 }
 
-/** Why an activity cannot show its elevation, as a figure or a profile. */
-export const ELEVATION_MISSING = 'This activity has no elevation.';
+export { ELEVATION_MISSING };
 
-const LIVE_FIGURES: readonly { metric: OverlayMetricKey; label: string; missing: string }[] = [
-  { metric: 'speed', label: 'Speed', missing: 'This activity has no speed: it needs positions or a recorded speed, and times.' },
-  { metric: 'pace', label: 'Pace', missing: 'This activity has no pace: it needs a speed, and some movement.' },
-  { metric: 'distance', label: 'Distance', missing: 'This activity has no distance: it has no positions or recorded distance.' },
-  { metric: 'elapsed', label: 'Elapsed time', missing: 'This activity has no timestamps.' },
-  { metric: 'moving', label: 'Moving time', missing: 'This activity has no moving time: it needs a distance and times.' },
-  { metric: 'elevation', label: 'Elevation', missing: ELEVATION_MISSING },
-  { metric: 'heartRate', label: 'Heart rate', missing: 'This activity has no heart rate.' },
-  { metric: 'power', label: 'Power', missing: 'This activity has no power.' },
-  { metric: 'cyclingCadence', label: 'Cycling cadence', missing: 'This activity has no cycling cadence.' },
-  { metric: 'runningCadence', label: 'Running cadence', missing: 'This activity has no running cadence.' },
-];
+const LIVE_FIGURES: readonly { metric: OverlayMetricKey; label: string; missing: string }[] = (
+  [
+    ['speed', 'Speed'],
+    ['pace', 'Pace'],
+    ['distance', 'Distance'],
+    ['elapsed', 'Elapsed time'],
+    ['moving', 'Moving time'],
+    ['elevation', 'Elevation'],
+    // AV-1016. The elevation gained so far.
+    ['climb', 'Climb so far'],
+    ['heartRate', 'Heart rate'],
+    ['power', 'Power'],
+    ['cyclingCadence', 'Cycling cadence'],
+    ['runningCadence', 'Running cadence'],
+  ] as const
+).map(([metric, label]) => ({ metric, label, missing: METRIC_MISSING[metric] }));
 
 const SHAPE_CHOICES: readonly { kind: ShapeKind; label: string }[] = [
   { kind: 'roundedRect', label: 'Rounded rectangle' },
@@ -131,7 +138,7 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
       label: 'Route with position',
       group: 'Live figures',
       available: !timeline.unavailable && timeline.hasRoute,
-      ...(!timeline.unavailable && timeline.hasRoute ? {} : { reason: 'This activity has no positions, so there is no route.' }),
+      ...(!timeline.unavailable && timeline.hasRoute ? {} : { reason: NO_ROUTE }),
     },
     { key: 'progress', label: 'Progress bar', group: 'Live figures', available: !timeline.unavailable },
     {
@@ -157,8 +164,29 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
     group: 'Shapes',
     available: true,
   }));
-  return [...live, ...gauges, ...whole, ...shapes];
+  // AV-1016. The registry's entries, by sport; the editor only reads this list, so a sport is added in the registry.
+  const predefined: CanvasElementChoice[] = PREDEFINED_ENTRIES.map((entry) => {
+    const available = predefinedAvailability(entry, timeline);
+    return {
+      key: `predefined:${entry.id}`,
+      label: entry.name,
+      group: SPORT_GROUPS[entry.sport],
+      available,
+      ...(available ? {} : { reason: entry.missing }),
+    };
+  });
+  // A predefined entry named as a plain element is told apart by its sport, so every option reads differently.
+  const others = new Set([...live, ...gauges, ...whole, ...shapes].map((choice) => choice.label));
+  const names = predefined.map((choice) => choice.label);
+  const told = predefined.map((choice, index) =>
+    others.has(choice.label) || names.indexOf(choice.label) !== index || names.lastIndexOf(choice.label) !== index
+      ? { ...choice, label: `${choice.label} (${choice.group})` }
+      : choice,
+  );
+  return [...live, ...gauges, ...told, ...whole, ...shapes];
 }
+
+const SPORT_GROUPS = { cycling: 'Cycling', running: 'Running', any: 'Any sport' } as const;
 
 const HEART_RATE_RANGE = { min: 50, max: 200 };
 
@@ -172,6 +200,12 @@ export function newCanvasComponent(
   size: { width: number; height: number },
   timeline: OverlayTimeline,
 ): OverlayComponent {
+  if (key.startsWith('predefined:')) {
+    const entry = predefinedEntry(key.slice('predefined:'.length));
+    const built = entry?.build(template, size, timeline)[0];
+    if (!built) throw new Error(`No predefined component "${key}".`);
+    return built;
+  }
   const aspect = size.width / size.height;
   const tileW = Math.min(0.3, (BASE_FONT_CQW / 100) * TILE_WIDTH_EMS);
   const tileH = Math.min(0.2, 0.075 * aspect);
@@ -224,6 +258,23 @@ export function newCanvasComponent(
     rect: at(tileW, tileH),
     source: { kind: 'metric', metric },
   };
+}
+
+/**
+ * AV-1016. What adding an element puts on the canvas: one component, or the
+ * several a predefined entry builds. The first is the one to select.
+ */
+export function newCanvasComponents(
+  template: OverlayTemplate,
+  key: CanvasElementKey,
+  size: { width: number; height: number },
+  timeline: OverlayTimeline,
+): OverlayComponent[] {
+  if (key.startsWith('predefined:')) {
+    const built = predefinedEntry(key.slice('predefined:'.length))?.build(template, size, timeline) ?? [];
+    if (built.length > 0) return built;
+  }
+  return [newCanvasComponent(template, key, size, timeline)];
 }
 
 /** A speed gauge's top: the fastest the activity went, rounded up, or 15 m/s (54 km/h). */
@@ -315,6 +366,7 @@ const WIDEST_VALUE: Record<OverlayMetricKey, number> = {
   grade: -20,
   elapsed: 35_999,
   moving: 35_999,
+  climb: 9999,
 };
 
 /**
@@ -330,19 +382,23 @@ export function growFigureToFit(
   frame: { width: number; height: number },
   context: { timeline: OverlayTimeline; units: UnitSystem; measure: MeasureText },
 ): OverlayComponent[] {
-  const target = components.find((component) => component.id === id);
-  if (!target || (target.type !== 'text' && target.type !== 'gauge') || !target.source) return components;
+  const found = components.find((component) => component.id === id);
+  if (!found || (found.type !== 'text' && found.type !== 'gauge') || !found.source) return components;
+  // AV-1016. The widest value is laid out as it is, not averaged with the activity's own.
+  const target: OverlayComponent = { ...found };
+  delete target.smoothing;
+  const source = found.source;
   const { timeline } = context;
-  const sourceId = dataSourceId(target.source);
+  const sourceId = dataSourceId(source);
   const wide =
-    target.source.kind === 'metric'
-      ? target.source.metric === 'distance' && target.display?.ofTotal && timeline.distanceTotalMeters !== undefined
+    source.kind === 'metric'
+      ? source.metric === 'distance' && target.display?.ofTotal && timeline.distanceTotalMeters !== undefined
         ? timeline.distanceTotalMeters
-        : target.source.metric === 'elapsed' || target.source.metric === 'moving'
-          ? Math.max(WIDEST_VALUE[target.source.metric], timeline.alignment?.videoEndInActivity ?? timeline.durationSeconds)
-          : target.source.metric === 'distance'
+        : source.metric === 'elapsed' || source.metric === 'moving'
+          ? Math.max(WIDEST_VALUE[source.metric], timeline.alignment?.videoEndInActivity ?? timeline.durationSeconds)
+          : source.metric === 'distance'
             ? Math.max(WIDEST_VALUE.distance, timeline.distanceTotalMeters ?? 0)
-            : WIDEST_VALUE[target.source.metric]
+            : WIDEST_VALUE[source.metric]
       : (timeline.sensorLabels.get(sourceId)?.max ?? 999);
   const resolved = resolveOverlayComponent(
     canvasTemplate(components),
@@ -361,7 +417,7 @@ export function growFigureToFit(
     track: resolved.fraction !== undefined,
     measure: context.measure,
   });
-  const { rect } = target;
+  const { rect } = found;
   const grown = (needed: number, now: number, room: number) =>
     needed > now + 1e-9 ? round(clamp(needed, now, room)) : now;
   const width = grown(layout.neededWidth / frame.width, rect.width, 1 - rect.x);
@@ -483,6 +539,17 @@ export function componentsFromPreset(
   size: { width: number; height: number },
 ): OverlayComponent[] {
   return buildOverlay({ ...DEFAULT_OVERLAY_CONTROLS, presetId }, timeline, size.width / size.height).template.components;
+}
+
+/** AV-1016. What Start from lays out: a built-in template, or a sport's own layout of predefined components. */
+export function componentsFromStart(
+  id: StartLayoutId,
+  timeline: OverlayTimeline,
+  size: { width: number; height: number },
+): OverlayComponent[] {
+  return id === 'cycling' || id === 'running'
+    ? componentsFromSportLayout(id, timeline, size)
+    : componentsFromPreset(id, timeline, size);
 }
 
 /** A template of these components, ready for an exporter or a layout file. */

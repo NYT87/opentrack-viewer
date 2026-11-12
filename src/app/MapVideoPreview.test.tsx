@@ -479,7 +479,7 @@ describe('figures over the map (AV-1207)', () => {
 
   it('offers no elevation profile for an activity without elevation, and says why one placed is empty (AV-1211)', async () => {
     await openWithRoute('simple-route.gpx');
-    const offer = within(editor()).getByRole('option', { name: /Elevation profile/ });
+    const offer = within(editor()).getByRole('option', { name: 'Elevation profile (not in this activity)' });
     expect(offer).toBeDisabled();
     const project = {
       kind: MAP_VIDEO_PROJECT_KIND,
