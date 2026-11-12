@@ -68,6 +68,7 @@ import {
 import { SMOOTHING_LIMITS, buildOverlayTimeline, canSmooth, type OverlayTimeline } from '../overlay/timeline';
 import type { VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
+import { GITHUB_URL } from './SiteFooter';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { DateSettings, PercentField } from './RouteOverlayPanel';
@@ -559,6 +560,9 @@ function NumberInput({ id, label, value, onChange }: { id: string; label: string
   );
 }
 
+/** AV-1017. The README of the component contract, in the repository. */
+export const COMPONENT_DOCS_URL = `${GITHUB_URL}/blob/main/docs/components/README.md`;
+
 function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd: (key: CanvasElementKey) => void }) {
   const id = useId();
   const firstAvailable = choices.find((choice) => choice.available)?.key;
@@ -566,26 +570,35 @@ function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd:
   const chosen = choices.find((choice) => choice.key === wanted && choice.available)?.key ?? firstAvailable;
   const groups = ['Live figures', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes'] as const;
   return (
-    <div className="overlay-controls__field">
-      <label htmlFor={`${id}-add`}>Add</label>
-      <select id={`${id}-add`} className="select" value={chosen ?? ''} onChange={(event) => setWanted(event.target.value as CanvasElementKey)}>
-        {groups.filter((group) => choices.some((choice) => choice.group === group)).map((group) => (
-          <optgroup key={group} label={group}>
-            {choices
-              .filter((choice) => choice.group === group)
-              .map((choice) => (
-                <option key={choice.key} value={choice.key} disabled={!choice.available}>
-                  {choice.label}
-                  {choice.available ? '' : ' (not in this activity)'}
-                </option>
-              ))}
-          </optgroup>
-        ))}
-      </select>
-      <button type="button" className="button" disabled={!chosen} onClick={() => chosen && onAdd(chosen)}>
-        Add to the canvas
-      </button>
-    </div>
+    <>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-add`}>Add</label>
+        <select id={`${id}-add`} className="select" value={chosen ?? ''} onChange={(event) => setWanted(event.target.value as CanvasElementKey)}>
+          {groups.filter((group) => choices.some((choice) => choice.group === group)).map((group) => (
+            <optgroup key={group} label={group}>
+              {choices
+                .filter((choice) => choice.group === group)
+                .map((choice) => (
+                  <option key={choice.key} value={choice.key} disabled={!choice.available}>
+                    {choice.label}
+                    {choice.available ? '' : ' (not in this activity)'}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+        <button type="button" className="button" disabled={!chosen} onClick={() => chosen && onAdd(chosen)}>
+          Add to the canvas
+        </button>
+      </div>
+      <p className="overlay-controls__hint">
+        {/* AV-1017 (TD-085). Where the documented component contract lives; a component of your own is not loaded yet. */}
+        <a className="link" href={COMPONENT_DOCS_URL} target="_blank" rel="noopener noreferrer">
+          Write your own component (documentation)
+          <span className="visually-hidden"> (opens in a new tab)</span>
+        </a>
+      </p>
+    </>
   );
 }
 

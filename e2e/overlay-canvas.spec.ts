@@ -128,6 +128,18 @@ test('without a video: a chosen size, a shape and a text placed and styled, expo
   }
 });
 
+test('the editor links to the component documentation in a new tab without opening it here (AV-1017)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  const link = canvas.getByRole('link', { name: /Write your own component \(documentation\)/ });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('href', 'https://github.com/NYT87/opentrack-viewer/blob/main/docs/components/README.md');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', /noopener/);
+  await expect(link).toHaveAttribute('rel', /noreferrer/);
+  // Not followed: the test never leaves the page, so no request goes out.
+  await expect(page).toHaveURL(/#\/overlays/);
+});
+
 test('a figure’s label and value in their own colours, and a halo of its own or none, read from an exported frame (AV-1015)', async ({ page }) => {
   const canvas = await openCanvas(page);
   await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');

@@ -1289,6 +1289,34 @@ Acceptance criteria:
   - the starting layouts in both shapes, and with a missing stream;
   - a browser test that adds a predefined entry and reads its smoothed value in an exported frame.
 
+#### AV-1017: A Documented Contract for Overlay Components, and Why Remotion Is Not Used
+
+Dependencies: AV-1011, AV-1015, AV-1016
+
+GitHub issue #19, first part. The issue asks for readers' own overlay components, using Remotion, and lists three blockers to settle first.
+
+Two of them rule Remotion out (TD-085):
+- its browser rendering sends a telemetry event on every render, with the IP address and the page's origin, and it "cannot be disabled";
+- its terms forbid services that let end users bring their own Remotion code.
+
+The issue's fallback stands: the app's own renderer, with a documented component contract.
+
+This task writes that contract and its documentation. **Loading and running a reader's own component is not part of it.** Running someone else's code needs a sandbox and a change to the page's CSP, which is a security decision left to the maintainer on the issue.
+
+Acceptance criteria:
+- **Remotion decision recorded:** TD-085 quotes the pages read on 2026-11-12 for telemetry, the licence and the terms, says why each rules Remotion out for this app, and names what would have to change to look again.
+- **Contract types:** in `src/overlay/contract.ts`, as TypeScript types and JSON-serialisable props, one section per kind of component:
+  - **Live figures:** the value in stored units (m/s, s/km, m, bpm, W, rpm, %, s), the unit system chosen, the formatted text and label, the style including AV-1015's figure settings, the smoothing window, the box in pixels, the frame size and the video time.
+  - **Gauges:** the above plus the range and the fraction within it.
+  - **Along the route:** the route's shape in the box's 0..1 space, the position, the progress, and the elevation profile.
+  - **Whole activity:** the summary figures, the date, and the activity's name where the file states one.
+  - **Zones:** reserved and documented as coming with #20.
+
+  Missing data is absent, never a placeholder. A draw function's signature is `(ctx, props) => void`, drawing on a 2D canvas context inside its box only.
+- **One adapter:** `contractProps(...)` builds each section's props from what the renderer already resolves. A test checks that every built-in component, in every state the renderer draws, maps to valid props of its section.
+- **Documentation:** in `docs/components/`, a README covering what a component is, the rules (no network, no storage, nothing outside the box, the same picture for the same props) and the status (loading readers' components is not built yet, and why). Then a page per section with a props table, units, how often props change, and a minimal example draw function. The examples are real files that a test typechecks and runs against a recording context. The canvas editor links to the README.
+- **Tests:** the adapter for every built-in; props that survive `structuredClone`; absent rather than placeholder data; the examples run.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

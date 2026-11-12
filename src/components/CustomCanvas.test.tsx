@@ -69,6 +69,17 @@ describe('the custom canvas (AV-1011)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('too large to be a layout');
     expect(read).not.toHaveBeenCalled();
   });
+  it('links to the component documentation, in a new tab that cannot reach this page (AV-1017)', () => {
+    setup();
+    const link = within(region()).getByRole('link', { name: /Write your own component \(documentation\)/ });
+    expect(link).toHaveAttribute('href', 'https://github.com/NYT87/opentrack-viewer/blob/main/docs/components/README.md');
+    expect(link).toHaveAttribute('target', '_blank');
+    const rel = link.getAttribute('rel')!.split(/\s+/);
+    expect(rel).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
+    // Said to a screen reader too, not only seen.
+    expect(link).toHaveAccessibleName(/opens in a new tab/);
+  });
+
   it('starts empty, adds a live figure and selects it', async () => {
     setup();
     expect(region()).toHaveTextContent('The canvas is empty');

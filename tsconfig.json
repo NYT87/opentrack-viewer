@@ -22,6 +22,7 @@
   "include": [
     "src",
     "e2e",
+    "docs/components/examples",
     "base-path.ts",
     "vite.config.ts",
     "eslint.config.js",
