@@ -7,6 +7,7 @@ import {
   checkCanvasSize,
   componentsFromPreset,
   duplicateComponent,
+  growFigureToFit,
   moveComponent,
   moveLayer,
   newCanvasComponent,
@@ -208,5 +209,100 @@ describe('what the canvas offers (AV-1011)', () => {
   it('starts from a built-in template’s layout', () => {
     const components = componentsFromPreset('metric-strip', timelineOf(ride()), { width: 1080, height: 1920 });
     expect(components.map((c) => c.id)).toEqual(expect.arrayContaining(['speed', 'distance', 'elapsed']));
+  });
+});
+
+describe('growing a figure’s box to fit its text (AV-1015, TD-083)', () => {
+  const frame = { width: 1920, height: 1080 };
+  const measure = (text: string, font: string) => text.length * Number(/([\d.]+)px/.exec(font)![1]) * 0.55;
+  const context = { timeline: timelineOf(ride()), units: 'metric' as const, measure };
+  const em = 0.022 * frame.width;
+  const small = { x: 0.1, y: 0.1, width: 0.05, height: 0.03 };
+  const grow = (components: OverlayComponent[], id = 'a') => growFigureToFit(components, id, frame, context);
+  const rectOf = (components: OverlayComponent[], id = 'a') => components.find((component) => component.id === id)!.rect;
+
+  it('grows a box too small for its two lines, right and down, and never moves it', () => {
+    const after = rectOf(grow([box('a', small)]));
+    expect(after.x).toBe(small.x);
+    expect(after.y).toBe(small.y);
+    // The value "72.0 km/h" at 1.1 em and the inset either side; the two lines and the room above and below.
+    expect(after.width * frame.width).toBeCloseTo(2 * 0.6 * em + '72.0 km/h'.length * 1.1 * em * 0.55, 3);
+    expect(after.height * frame.height).toBeCloseTo(0.55 * em * 1.2 + 1.1 * em * 1.1 + 0.6 * em, 3);
+  });
+
+  it('never shrinks a box that is big enough, and returns the same list', () => {
+    const roomy = [box('a', { x: 0.1, y: 0.1, width: 0.6, height: 0.5 })];
+    expect(grow(roomy)).toBe(roomy);
+  });
+
+  it('grows to a bigger size, a longer label, more spacing, and takes back nothing when they shrink', () => {
+    const roomy = box('a', { x: 0.1, y: 0.1, width: 0.2, height: 0.1 });
+    const bigger = grow([{ ...roomy, figure: { valueScale: 3, labelScale: 3 } }]);
+    expect(rectOf(bigger).width).toBeGreaterThan(0.2);
+    expect(rectOf(bigger).height).toBeGreaterThan(0.1);
+    const apart = grow([{ ...roomy, figure: { gap: 0.2 } }]);
+    expect(rectOf(apart).height * frame.height).toBeGreaterThan(0.2 * frame.width);
+    const labelled = grow([{ ...roomy, display: { label: 'An exceedingly long label for a speed' } }]);
+    expect(rectOf(labelled).width).toBeGreaterThan(0.2);
+    expect(rectOf(labelled).height).toBe(0.1);
+    const smaller = grow([{ ...bigger[0]!, figure: { valueScale: 0.2, labelScale: 0.2 } }]);
+    expect(rectOf(smaller)).toEqual(rectOf(bigger));
+  });
+
+  it('counts the label only while it is shown, and a gauge’s track', () => {
+    const wide = box('a', { x: 0, y: 0, width: 0.01, height: 0.01 }, { display: { label: 'An exceedingly long label for a speed' } });
+    const shown = rectOf(grow([wide]));
+    const hidden = rectOf(grow([{ ...wide, figure: { showLabel: false } }]));
+    expect(hidden.width).toBeLessThan(shown.width);
+    expect(hidden.height).toBeLessThan(shown.height);
+    const gauge = rectOf(grow([{ ...wide, type: 'gauge', range: { min: 0, max: 20 }, figure: { showLabel: false } }]));
+    expect(gauge.height * frame.height - hidden.height * frame.height).toBeCloseTo(0.2 * em + 0.25 * em, 3);
+  });
+
+  it('stops at the frame’s edges: x + width and y + height stay within 1', () => {
+    const edge = grow([box('a', { x: 0.95, y: 0.97, width: 0.02, height: 0.02 }, { figure: { valueScale: 10, labelScale: 10 } })]);
+    const { x, y, width, height } = rectOf(edge);
+    expect(x).toBe(0.95);
+    expect(y).toBe(0.97);
+    expect(x + width).toBeLessThanOrEqual(1);
+    expect(y + height).toBeLessThanOrEqual(1);
+    expect(width).toBeCloseTo(0.05, 6);
+    expect(height).toBeCloseTo(0.03, 6);
+  });
+
+  it('keeps a box already past its room where it is, and touches no other element', () => {
+    const others = [box('b', small), card('c', { x: 0.5, y: 0.5, width: 0.1, height: 0.1 })];
+    const after = grow([box('a', { x: 0.1, y: 0.1, width: 0.01, height: 0.01 }, { parentId: 'c' }), ...others]);
+    expect(after.slice(1)).toEqual(others);
+    expect(after[0]!.parentId).toBe('c');
+  });
+
+  it('leaves anything that is not a live figure alone', () => {
+    const list = [box('a', small, { type: 'routeInset', source: undefined }), card('c', small)];
+    expect(grow(list)).toBe(list);
+    expect(grow(list, 'c')).toBe(list);
+    expect(grow(list, 'missing')).toBe(list);
+  });
+
+  it('lets a figure held by a shape grow to the frame, not the shape, and leaves the shape as it is', () => {
+    const holder = card('c', { x: 0.1, y: 0.1, width: 0.06, height: 0.04 });
+    const after = grow([holder, box('a', { x: 0.1, y: 0.1, width: 0.05, height: 0.03 }, { parentId: 'c' })]);
+    expect(after[0]).toBe(holder);
+    expect(rectOf(after).width).toBeGreaterThan(holder.rect.width);
+  });
+
+  it('sizes a sensor’s figure and an imperial one', () => {
+    const metric = rectOf(grow([box('a', small)]));
+    const imperial = rectOf(grow([box('a', small, { unitMode: 'imperial' })]));
+    expect(imperial.width).not.toBe(metric.width);
+    const sensor = growFigureToFit([box('a', small, { source: { kind: 'sensor', key: 'ACCL' } })], 'a', frame, context);
+    // No such stream in this activity: sized for a three-digit reading.
+    expect(rectOf(sensor).width).toBeGreaterThan(small.width);
+  });
+
+  it('sizes a distance of the total for the total’s own text', () => {
+    const plain = rectOf(grow([box('a', small, { source: { kind: 'metric', metric: 'distance' } })]));
+    const total = rectOf(grow([box('a', small, { source: { kind: 'metric', metric: 'distance' }, display: { ofTotal: true } })]));
+    expect(total.width).toBeGreaterThan(plain.width);
   });
 });

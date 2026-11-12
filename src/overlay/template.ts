@@ -91,6 +91,34 @@ export interface OverlayDisplaySetting {
   ofTotal?: boolean;
 }
 
+/** The text size a text, a figure for the whole activity or a date can take, as a multiple of the base. */
+export const TEXT_SCALE_LIMITS = { min: 0.1, max: 10 } as const;
+
+/** The most room, in frame widths, a figure may leave between its label and its value. */
+export const FIGURE_GAP_MAX = 0.2;
+
+/**
+ * AV-1015 (TD-083). How a live figure's two lines are set apart: a label over
+ * a value. Every member is optional and an absent one is today's look, so a
+ * layout made before it draws the same pixels.
+ */
+export interface OverlayFigureSetting {
+  /** Absent: shown. Off, only the value (and a gauge's track) is drawn. */
+  showLabel?: boolean;
+  /** Multiplies the label's 0.55 em; absent is 1. */
+  labelScale?: number;
+  /** Multiplies the value's 1.1 em; absent is 1. */
+  valueScale?: number;
+  /** `#rrggbb`; absent is the style's text colour. The value always takes the text colour. */
+  labelColor?: string;
+  /** Space between the label and the value, in frame widths; absent is 0.2 of the label's size. */
+  gap?: number;
+  /** Both lines; absent is left. */
+  align?: TextAlign;
+  /** The halo under the type on a clear background; absent is black at 0.8, opacity 0 is none. */
+  halo?: { color: string; opacity: number };
+}
+
 /**
  * AV-1010. Components that describe the whole activity rather than a moment of
  * it: drawn on the still image, and hidden in a video, where a frame shows a
@@ -227,6 +255,8 @@ export interface OverlayComponent {
   parentId?: string;
   /** AV-1011. A data figure's own label and number format. */
   display?: OverlayDisplaySetting;
+  /** AV-1015. A live figure's label and value, styled apart. */
+  figure?: OverlayFigureSetting;
 }
 
 export interface OverlayTemplate {
@@ -399,6 +429,10 @@ function parseComponent(value: unknown): OverlayComponent | string {
     if (value.display.ofTotal === true) display.ofTotal = true;
     if (display.label !== undefined || display.decimals !== undefined || display.ofTotal) component.display = display;
   }
+  if ((componentType === 'text' || componentType === 'gauge') && isRecord(value.figure)) {
+    const figure = parseFigure(value.figure);
+    if (figure) component.figure = figure;
+  }
   if (componentType === 'routeInset' && isRecord(value.route)) {
     const route = value.route;
     if (isNumber(route.lineWidth) && route.lineWidth > 0 && isNumber(route.padding) && route.padding >= 0) {
@@ -413,6 +447,26 @@ function parseComponent(value: unknown): OverlayComponent | string {
 }
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+const HEX6 = /^#[0-9a-f]{6}$/i;
+
+/** AV-1015. A figure's settings, each kept only when it reads; `undefined` when none does. */
+function parseFigure(raw: Record<string, unknown>): OverlayFigureSetting | undefined {
+  const figure: OverlayFigureSetting = {};
+  const scale = (value: unknown) =>
+    isNumber(value) && value > 0 ? Math.min(TEXT_SCALE_LIMITS.max, Math.max(TEXT_SCALE_LIMITS.min, value)) : undefined;
+  if (raw.showLabel === false) figure.showLabel = false;
+  const labelScale = scale(raw.labelScale);
+  if (labelScale !== undefined) figure.labelScale = labelScale;
+  const valueScale = scale(raw.valueScale);
+  if (valueScale !== undefined) figure.valueScale = valueScale;
+  if (typeof raw.labelColor === 'string' && HEX6.test(raw.labelColor)) figure.labelColor = raw.labelColor.toLowerCase();
+  if (isNumber(raw.gap) && raw.gap >= 0) figure.gap = Math.min(FIGURE_GAP_MAX, raw.gap);
+  if (raw.align === 'left' || raw.align === 'center' || raw.align === 'right') figure.align = raw.align;
+  if (isRecord(raw.halo) && typeof raw.halo.color === 'string' && HEX6.test(raw.halo.color) && isNumber(raw.halo.opacity)) {
+    figure.halo = { color: raw.halo.color.toLowerCase(), opacity: clamp01(raw.halo.opacity) };
+  }
+  return Object.keys(figure).length > 0 ? figure : undefined;
+}
 
 /** The default shape: a dark rounded card, as a figure's tile is. */
 export const DEFAULT_SHAPE: OverlayShapeSetting = {

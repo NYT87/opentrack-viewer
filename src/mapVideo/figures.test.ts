@@ -227,3 +227,25 @@ describe('the elevation profile over the map video (AV-1211)', () => {
     expect(read(at(into + 2 + 3)).cursor).toBeGreaterThan(during[0]!);
   });
 });
+
+describe('a figure’s label and value, styled apart, over the map video (AV-1015, TD-083)', () => {
+  const size = { width: 1280, height: 720 };
+  const drawn = (figure?: NonNullable<OverlayTemplate['components'][number]['figure']>) => {
+    const model = modelOf(ride);
+    const timeline = mapVideoOverlayTimeline(ride, model);
+    const empty: OverlayTemplate = { version: OVERLAY_TEMPLATE_VERSION, name: 'Figures', style: DEFAULT_OVERLAY_STYLE, components: [] };
+    const speed = newCanvasComponent(empty, 'metric:speed', size, timeline);
+    const figures = createMapVideoFigures({ activity: ride, model, settings: settings({ overlay: canvasTemplate([{ ...speed, ...(figure ? { figure } : {}) }]) }), units: 'metric', ...size });
+    return displayList((ctx) => figures.drawFrame(ctx, 5));
+  };
+
+  it('draws a figure with the settings of the layout it was given, through the same renderer', () => {
+    const plain = drawn();
+    expect(plain).toMatch(/fillText\("SPEED", [\d.]+, [\d.]+\) fill="#ffffff"/);
+    const styled = drawn({ labelColor: '#ff0000', align: 'right', labelScale: 2 });
+    expect(styled).toMatch(/fillText\("SPEED", [\d.]+, [\d.]+\) fill="#ff0000" font="30\.9\d+px/);
+    expect(styled).toMatch(/fillText\("45\.6 km\/h", [\d.]+, [\d.]+\) fill="#ffffff" font="bold/);
+    expect(drawn({ showLabel: false })).not.toMatch(/SPEED/);
+    expect(drawn({ showLabel: false })).toMatch(/fillText\("45\.6 km\/h"/);
+  });
+});

@@ -3,6 +3,7 @@ import type { UnitSystem } from '../../domain/units';
 import { BASE_FONT_CQW } from '../presets';
 import { projectProfile, type ProjectedProfile } from '../elevationProfile';
 import { projectRoute, type ProjectedRoute } from '../routeProjection';
+import { FIGURE_MIN_TOP_EMS, figureLayout, haloShadow } from '../figureLayout';
 import { drawShape } from '../shapes';
 import { extractRoute } from '../routeImage';
 import { layoutStillText, stillValue, type PlannedStillItem } from '../staticImage';
@@ -32,8 +33,6 @@ export type OverlayContext2D = CanvasRenderingContext2D | OffscreenCanvasRenderi
 
 /** Type size in frame widths at scale 1: the preview's `2.2cqw`, from the same constant. */
 export const BASE_FONT_FRACTION = BASE_FONT_CQW / 100;
-
-const FONT_FAMILY = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 export interface OverlayRendererInput {
   template: OverlayTemplate;
@@ -107,35 +106,43 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
   }
 
   function drawFigure(ctx: OverlayContext2D, box: Box, ready: Ready, em: number): void {
-    const labelSize = 0.55 * em;
-    const valueSize = 1.1 * em;
-    const track = ready.fraction !== undefined ? 0.25 * em : 0;
-    const trackGap = ready.fraction !== undefined ? 0.2 * em : 0;
-    const contentHeight = labelSize * 1.2 + valueSize * 1.1 + trackGap + track;
-    const padX = 0.6 * em;
-    let y = box.y + Math.max(0.3 * em, (box.h - contentHeight) / 2);
-    const x = box.x + padX;
+    const figure = ready.component.figure;
+    const layout = figureLayout({
+      em,
+      frameWidth: width,
+      label: ready.label,
+      value: ready.text ?? '',
+      figure,
+      track: ready.fraction !== undefined,
+    });
+    const { padX, track, trackGap } = layout;
+    let y = box.y + Math.max(FIGURE_MIN_TOP_EMS * em, (box.h - layout.contentHeight) / 2);
+    const x = layout.align === 'center' ? box.x + box.w / 2 : layout.align === 'right' ? box.x + box.w - padX : box.x + padX;
+    const trackX = box.x + padX;
 
     ctx.textBaseline = 'top';
-    ctx.textAlign = 'left';
+    ctx.textAlign = layout.align;
     // The preview's text-shadow, drawn: a dark halo under the type on a clear background.
-    const halo = needsHalo(ready.style);
-    if (halo) {
-      ctx.shadowColor = 'rgb(0 0 0 / 0.8)';
+    const shadow = needsHalo(ready.style) ? haloShadow(figure) : undefined;
+    if (shadow) {
+      ctx.shadowColor = shadow;
       ctx.shadowBlur = 0.2 * em;
     }
 
-    ctx.globalAlpha = 0.75;
-    ctx.fillStyle = ready.style.textColor;
-    ctx.font = `${labelSize}px ${FONT_FAMILY}`;
-    ctx.fillText((ready.label ?? '').toUpperCase(), x, y);
-    ctx.globalAlpha = 1;
-    y += labelSize * 1.2;
+    if (layout.showLabel) {
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = figure?.labelColor ?? ready.style.textColor;
+      ctx.font = layout.labelFont;
+      ctx.fillText((ready.label ?? '').toUpperCase(), x, y);
+      ctx.globalAlpha = 1;
+      y += layout.labelAdvance;
+    }
 
-    ctx.font = `bold ${valueSize}px ${FONT_FAMILY}`;
+    ctx.fillStyle = ready.style.textColor;
+    ctx.font = layout.valueFont;
     ctx.fillText(ready.text ?? '', x, y);
-    y += valueSize * 1.1 + trackGap;
-    if (halo) {
+    y += layout.valueSize * 1.1 + trackGap;
+    if (shadow) {
       ctx.shadowColor = 'transparent';
       ctx.shadowBlur = 0;
     }
@@ -143,9 +150,9 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     if (ready.fraction !== undefined) {
       const trackWidth = box.w - 2 * padX;
       ctx.fillStyle = 'rgb(255 255 255 / 0.25)';
-      ctx.fillRect(x, y, trackWidth, track);
+      ctx.fillRect(trackX, y, trackWidth, track);
       ctx.fillStyle = ready.style.accentColor;
-      ctx.fillRect(x, y, trackWidth * ready.fraction, track);
+      ctx.fillRect(trackX, y, trackWidth * ready.fraction, track);
     }
   }
 

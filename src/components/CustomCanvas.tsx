@@ -11,6 +11,7 @@ import {
   checkCanvasSize,
   componentsFromPreset,
   duplicateComponent,
+  growFigureToFit,
   moveComponent,
   moveLayer,
   newCanvasComponent,
@@ -29,7 +30,8 @@ import {
   type CanvasState,
   type LayerMove,
 } from '../overlay/customCanvas';
-import { createOverlayRenderer } from '../overlay/export/drawOverlay';
+import { figureLayout } from '../overlay/figureLayout';
+import { BASE_FONT_FRACTION, createOverlayRenderer } from '../overlay/export/drawOverlay';
 import { measureText } from '../overlay/measureText';
 import { DEFAULT_OVERLAY_CONTROLS, OVERLAY_PRESETS, type OverlayPresetId } from '../overlay/presets';
 import { extractRoute } from '../overlay/routeImage';
@@ -47,12 +49,15 @@ import {
 import {
   DEFAULT_OVERLAY_STYLE,
   DEFAULT_SHAPE,
+  FIGURE_GAP_MAX,
   SHAPE_KINDS,
   STILL_IMAGE_COMPONENT_TYPES,
   SUMMARY_STAT_KEYS,
+  needsHalo,
   normalizeRect,
   sanitizeLabel,
   type OverlayComponent,
+  type OverlayFigureSetting,
   type OverlayShapeSetting,
   type OverlayUnitMode,
   type ShapeKind,
@@ -432,6 +437,8 @@ export function CustomCanvas({
             components={components}
             frame={frame}
             stillContext={stillContext}
+            timeline={timeline}
+            units={units}
             onChange={(next, ...selected) => change(next, ...selected)}
           />
         )}
@@ -916,12 +923,16 @@ function ComponentEditor({
   components,
   frame,
   stillContext,
+  timeline,
+  units,
   onChange,
 }: {
   component: OverlayComponent;
   components: OverlayComponent[];
   frame: { width: number; height: number };
   stillContext: StillImageContext;
+  timeline: OverlayTimeline;
+  units: UnitSystem;
   onChange: (components: OverlayComponent[], ...selected: [string | undefined] | []) => void;
 }) {
   const id = useId();
@@ -930,6 +941,27 @@ function ComponentEditor({
   const shorter = Math.min(frame.width, frame.height);
   const update = (patch: (current: OverlayComponent) => OverlayComponent) =>
     onChange(components.map((entry) => (entry.id === component.id ? patch(entry) : entry)));
+  /** AV-1015. A change to what a figure's lines say or how big they are: the box grows to hold them. */
+  const updateFigure = (patch: (current: OverlayComponent) => OverlayComponent) =>
+    onChange(
+      growFigureToFit(
+        components.map((entry) => (entry.id === component.id ? patch(entry) : entry)),
+        component.id,
+        frame,
+        { timeline, units, measure: measureText },
+      ),
+    );
+  /** Merges into the figure's settings, dropping what is unset and the whole of it when nothing is. */
+  const withFigure = (current: OverlayComponent, patch: { [K in keyof OverlayFigureSetting]: OverlayFigureSetting[K] | undefined }) => {
+    const figure: Record<string, unknown> = { ...current.figure, ...patch };
+    for (const key of Object.keys(figure)) if (figure[key] === undefined) delete figure[key];
+    const next = { ...current };
+    if (Object.keys(figure).length > 0) next.figure = figure as OverlayFigureSetting;
+    else delete next.figure;
+    return next;
+  };
+  const setFigure = (patch: { [K in keyof OverlayFigureSetting]: OverlayFigureSetting[K] | undefined }, grow = true) =>
+    (grow ? updateFigure : update)((current) => withFigure(current, patch));
   const holders = components.filter((entry) => entry.type === 'shape' && entry.id !== component.id);
   const isData = component.type === 'text' || component.type === 'gauge';
   const isStill = STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
@@ -937,6 +969,27 @@ function ComponentEditor({
   const shape: OverlayShapeSetting | undefined = component.type === 'shape' ? (component.shape ?? DEFAULT_SHAPE) : undefined;
   const setShape = (patch: Partial<OverlayShapeSetting>) => update((current) => ({ ...current, shape: { ...(current.shape ?? DEFAULT_SHAPE), ...patch } }));
   const style = { ...DEFAULT_OVERLAY_STYLE, ...component.style };
+  const figure = component.figure;
+  const fontScale = style.fontScale;
+  // The sizes are shown as the figure's own text size times its line's scale, so a layout saved at 150 % reads 150 % for both.
+  const lineScale = (scale: number | undefined) => String(Math.round(fontScale * (scale ?? 1) * 100));
+  const lineSetting = (value: number): number | undefined => {
+    const scale = Math.min(TEXT_SCALE_LIMITS.max, Math.max(TEXT_SCALE_LIMITS.min, value / 100 / fontScale));
+    return Math.abs(scale - 1) < 1e-9 ? undefined : scale;
+  };
+  const spacing = isData
+    ? (() => {
+        const laid = figureLayout({
+          em: BASE_FONT_FRACTION * frame.width * fontScale,
+          frameWidth: frame.width,
+          label: undefined,
+          value: '',
+          figure,
+          track: false,
+        });
+        return (laid.labelAdvance - laid.labelSize) / frame.width;
+      })()
+    : 0;
   const numeric = component.source?.kind === 'metric' && !['pace', 'elapsed', 'moving'].includes(component.source.metric);
 
   return (
@@ -1044,6 +1097,10 @@ function ComponentEditor({
 
       {isData && (
         <>
+          <label className="overlay-controls__choice">
+            <input type="checkbox" checked={figure?.showLabel !== false} onChange={(event) => setFigure({ showLabel: event.target.checked ? undefined : false })} />
+            <span>Show the label</span>
+          </label>
           <div className="overlay-controls__field">
             <label htmlFor={`${id}-label`}>Label</label>
             <input
@@ -1054,13 +1111,13 @@ function ComponentEditor({
               value={component.display?.label ?? ''}
               onChange={(event) => {
                 const label = sanitizeLabel(event.target.value).split('\n')[0]!.slice(0, 40);
-                update((current) => ({ ...current, display: { ...current.display, label } }));
+                updateFigure((current) => ({ ...current, display: { ...current.display, label } }));
               }}
             />
           </div>
           <div className="overlay-controls__field">
             <label htmlFor={`${id}-units`}>Units</label>
-            <select id={`${id}-units`} className="select" value={component.unitMode} onChange={(event) => update((current) => ({ ...current, unitMode: event.target.value as OverlayUnitMode }))}>
+            <select id={`${id}-units`} className="select" value={component.unitMode} onChange={(event) => updateFigure((current) => ({ ...current, unitMode: event.target.value as OverlayUnitMode }))}>
               <option value="auto">Follow Settings</option>
               <option value="metric">Metric</option>
               <option value="imperial">Imperial</option>
@@ -1074,7 +1131,7 @@ function ComponentEditor({
                 className="select"
                 value={component.display?.ofTotal ? 'total' : 'so-far'}
                 onChange={(event) =>
-                  update((current) => {
+                  updateFigure((current) => {
                     const display = { ...current.display };
                     if (event.target.value === 'total') display.ofTotal = true;
                     else delete display.ofTotal;
@@ -1095,7 +1152,7 @@ function ComponentEditor({
                 className="select"
                 value={component.display?.decimals ?? 'default'}
                 onChange={(event) =>
-                  update((current) => {
+                  updateFigure((current) => {
                     const display = { ...current.display };
                     if (event.target.value === 'default') delete display.decimals;
                     else display.decimals = Number(event.target.value) as 0 | 1 | 2;
@@ -1135,14 +1192,33 @@ function ComponentEditor({
 
       {(isData || isStill || isLine || component.type === 'progress') && (
         <>
-          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
+          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : isData ? 'Value colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
+          {isData && <ColorField id={`${id}-label-colour`} label="Label colour" value={figure?.labelColor ?? style.textColor} onChange={(labelColor) => setFigure({ labelColor }, false)} />}
           {!isStill && (
             <>
               <ColorField id={`${id}-accent`} label="Accent colour" value={style.accentColor} onChange={(accentColor) => update((current) => ({ ...current, style: { ...current.style, accentColor } }))} />
               <PercentField id={`${id}-bg`} label="Background (%)" value={percent(style.backgroundOpacity)} onCommit={(value) => update((current) => ({ ...current, style: { ...current.style, backgroundOpacity: Math.min(1, Math.max(0, value / 100)) } }))} />
             </>
           )}
-          {(isData || isStill) && (
+          {isData && (
+            <>
+              <PercentField id={`${id}-label-size`} label="Label size (%)" value={lineScale(figure?.labelScale)} max={fontScale * TEXT_SCALE_LIMITS.max * 100} onCommit={(value) => setFigure({ labelScale: lineSetting(value) })} />
+              <PercentField id={`${id}-value-size`} label="Value size (%)" value={lineScale(figure?.valueScale)} max={fontScale * TEXT_SCALE_LIMITS.max * 100} onCommit={(value) => setFigure({ valueScale: lineSetting(value) })} />
+              <PercentField id={`${id}-spacing`} label="Spacing (% of width)" value={String(Math.round(spacing * 1000) / 10)} max={FIGURE_GAP_MAX * 100} step={0.1} onCommit={(value) => setFigure({ gap: Math.min(FIGURE_GAP_MAX, Math.max(0, value / 100)) })} />
+              <div className="overlay-controls__field">
+                <label htmlFor={`${id}-figure-align`}>Alignment</label>
+                <select id={`${id}-figure-align`} className="select" value={figure?.align ?? 'left'} onChange={(event) => setFigure({ align: event.target.value === 'left' ? undefined : (event.target.value as TextAlign) }, false)}>
+                  <option value="left">Left</option>
+                  <option value="center">Centre</option>
+                  <option value="right">Right</option>
+                </select>
+              </div>
+              <ColorField id={`${id}-halo-colour`} label="Halo colour" value={figure?.halo?.color ?? '#000000'} onChange={(color) => setFigure({ halo: { color, opacity: figure?.halo?.opacity ?? 0.8 } }, false)} />
+              <PercentField id={`${id}-halo-opacity`} label="Halo (%)" value={percent(figure?.halo?.opacity ?? 0.8)} onCommit={(value) => setFigure({ halo: { color: figure?.halo?.color ?? '#000000', opacity: Math.min(1, Math.max(0, value / 100)) } }, false)} />
+              {!needsHalo(style) && <p className="overlay-controls__hint">The halo is drawn under the text when the background is under 30 %.</p>}
+            </>
+          )}
+          {isStill && (
             <PercentField id={`${id}-size`} label="Text size (%)" value={String(Math.round(style.fontScale * 100))} max={1000} onCommit={(value) => update((current) => ({ ...current, style: { ...current.style, fontScale: Math.min(TEXT_SCALE_LIMITS.max, Math.max(TEXT_SCALE_LIMITS.min, value / 100)) } }))} />
           )}
           {isStill && (

@@ -5,18 +5,23 @@ import {
   buildOverlay,
   type OverlayPresetId,
 } from './presets';
+import { figureLayout } from './figureLayout';
 import { stillElementChoices, newStillComponent, freshComponentId, type StillImageContext } from './staticImage';
 import {
   DEFAULT_OVERLAY_STYLE,
   DEFAULT_SHAPE,
   OVERLAY_TEMPLATE_VERSION,
+  TEXT_SCALE_LIMITS,
   normalizeRect,
+  resolveOverlayComponent,
   type OverlayComponent,
   type OverlayRect,
   type OverlayTemplate,
   type ShapeKind,
 } from './template';
-import type { OverlayMetricKey, OverlayTimeline } from './timeline';
+import { dataSourceId, type OverlayMetricKey, type OverlayTimeline } from './timeline';
+import type { MeasureText } from './staticImage';
+import type { UnitSystem } from '../domain/units';
 
 /**
  * AV-1011 (TD-062). The custom canvas: a video overlay laid out freely, with
@@ -290,8 +295,82 @@ export function resizeComponent(components: OverlayComponent[], id: string, widt
   );
 }
 
-/** The text size a text, a figure for the whole activity or a date can take, as a multiple of the base. */
-export const TEXT_SCALE_LIMITS = { min: 0.1, max: 10 } as const;
+export { TEXT_SCALE_LIMITS };
+
+/**
+ * AV-1015 (TD-083). The widest a metric can reasonably read, in its stored
+ * unit, for sizing a figure's box: a text that fits these fits what the
+ * activity shows. Pace is seconds per kilometre.
+ */
+const WIDEST_VALUE: Record<OverlayMetricKey, number> = {
+  speed: 20,
+  pace: 900,
+  distance: 99_999,
+  elevation: 3000,
+  heartRate: 199,
+  runningCadence: 199,
+  cyclingCadence: 199,
+  power: 999,
+  temperature: 40,
+  grade: -20,
+  elapsed: 35_999,
+  moving: 35_999,
+};
+
+/**
+ * Grows a live figure's box to hold its label and value as `drawFigure` lays
+ * them out (`figureLayout`), right and down and no further than the frame's
+ * edges. It never moves the box and never shrinks it; text that still does
+ * not fit is cut at the box when drawn. Other elements and a shape's
+ * members are untouched, as a plain resize leaves them (TD-083).
+ */
+export function growFigureToFit(
+  components: OverlayComponent[],
+  id: string,
+  frame: { width: number; height: number },
+  context: { timeline: OverlayTimeline; units: UnitSystem; measure: MeasureText },
+): OverlayComponent[] {
+  const target = components.find((component) => component.id === id);
+  if (!target || (target.type !== 'text' && target.type !== 'gauge') || !target.source) return components;
+  const { timeline } = context;
+  const sourceId = dataSourceId(target.source);
+  const wide =
+    target.source.kind === 'metric'
+      ? target.source.metric === 'distance' && target.display?.ofTotal && timeline.distanceTotalMeters !== undefined
+        ? timeline.distanceTotalMeters
+        : target.source.metric === 'elapsed' || target.source.metric === 'moving'
+          ? Math.max(WIDEST_VALUE[target.source.metric], timeline.alignment?.videoEndInActivity ?? timeline.durationSeconds)
+          : target.source.metric === 'distance'
+            ? Math.max(WIDEST_VALUE.distance, timeline.distanceTotalMeters ?? 0)
+            : WIDEST_VALUE[target.source.metric]
+      : (timeline.sensorLabels.get(sourceId)?.max ?? 999);
+  const resolved = resolveOverlayComponent(
+    canvasTemplate(components),
+    target,
+    { videoTimeSeconds: 0, activityElapsedSeconds: 0, values: { [sourceId]: wide } },
+    timeline,
+    context.units,
+  );
+  if (resolved.status !== 'ready') return components;
+  const layout = figureLayout({
+    em: (BASE_FONT_CQW / 100) * frame.width * resolved.style.fontScale,
+    frameWidth: frame.width,
+    label: resolved.label,
+    value: resolved.text ?? '',
+    figure: target.figure,
+    track: resolved.fraction !== undefined,
+    measure: context.measure,
+  });
+  const { rect } = target;
+  const grown = (needed: number, now: number, room: number) =>
+    needed > now + 1e-9 ? round(clamp(needed, now, room)) : now;
+  const width = grown(layout.neededWidth / frame.width, rect.width, 1 - rect.x);
+  const height = grown(layout.neededHeight / frame.height, rect.height, 1 - rect.y);
+  if (width === rect.width && height === rect.height) return components;
+  return components.map((component) =>
+    component.id === id ? { ...component, rect: normalizeRect({ ...rect, width, height }) } : component,
+  );
+}
 
 /**
  * Resizes a text, a figure for the whole activity or a date: its box is the

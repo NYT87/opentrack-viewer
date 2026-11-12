@@ -127,3 +127,65 @@ test('without a video: a chosen size, a shape and a text placed and styled, expo
     expect(request.method(), url).toBe('GET');
   }
 });
+
+test('a figure’s label and value in their own colours, and a halo of its own or none, read from an exported frame (AV-1015)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');
+  await expect(canvas.getByRole('group', { name: /^Canvas preview, 1280 by 720 pixels/ })).toBeVisible();
+
+  /** A figure with a green value, a red label, both large, on a clear background, and a blue halo of the given strength. */
+  const style = async (haloPercent: string) => {
+    await canvas.getByLabel('Background (%)').fill('0');
+    await canvas.getByLabel('Value colour').fill('#00ff00');
+    await canvas.getByLabel('Label colour').fill('#ff0000');
+    await canvas.getByLabel('Label size (%)').fill('300');
+    await canvas.getByLabel('Value size (%)').fill('300');
+    await canvas.getByLabel('Halo colour').fill('#0000ff');
+    await canvas.getByLabel('Halo (%)').fill(haloPercent);
+  };
+  await add(canvas, 'Speed');
+  await style('100');
+  await canvas.getByRole('button', { name: 'Snap to top left' }).click();
+  const haloed = await rectOf(canvas);
+  await add(canvas, 'Distance');
+  await style('0');
+  await canvas.getByRole('button', { name: 'Snap to bottom right' }).click();
+  const bare = await rectOf(canvas);
+  // The box grew to hold the larger text, and stayed in the frame.
+  expect(haloed.width).toBeGreaterThan(0.1);
+  expect(bare.x + bare.width).toBeLessThanOrEqual(1 + 1e-9);
+  expect(bare.y + bare.height).toBeLessThanOrEqual(1 + 1e-9);
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-1280x720-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+  const png = decodePng(Buffer.from(frames[frames.length >> 1]!.data));
+
+  /** Counts, within a box: the value's green, the label's red at about 75 %, and the halo's blue where the type is not. */
+  const read = (box: { x: number; y: number; width: number; height: number }) => {
+    const found = { value: 0, label: 0, halo: 0 };
+    for (let y = Math.floor(box.y * png.height); y < Math.ceil((box.y + box.height) * png.height); y += 1) {
+      for (let x = Math.floor(box.x * png.width); x < Math.ceil((box.x + box.width) * png.width); x += 1) {
+        const [r, g, b, a] = pixel(png, x, y) as [number, number, number, number];
+        if (r === 0 && g === 255 && b === 0 && a === 255) found.value += 1;
+        // The label is red at 75 %; over the halo's blue it is a little less red and a little more opaque.
+        else if (r > 200 && g === 0 && b < 60 && a >= 185 && a < 235) found.label += 1;
+        else if (b > 200 && r < 40 && g < 40 && a > 0) found.halo += 1;
+      }
+    }
+    return found;
+  };
+  const withHalo = read(haloed);
+  const withoutHalo = read(bare);
+  expect(withHalo.value).toBeGreaterThan(50);
+  expect(withHalo.label).toBeGreaterThan(10);
+  expect(withHalo.halo).toBeGreaterThan(30);
+  expect(withoutHalo.value).toBeGreaterThan(50);
+  expect(withoutHalo.label).toBeGreaterThan(10);
+  expect(withoutHalo.halo).toBe(0);
+  // Nothing is drawn where nothing was placed.
+  expect(pixel(png, 640, 360)[3]).toBe(0);
+});

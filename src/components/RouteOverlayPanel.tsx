@@ -811,6 +811,7 @@ export function PercentField({
   onCommit,
   min = 0,
   max = 100,
+  step = 1,
 }: {
   id: string;
   label: string;
@@ -818,6 +819,7 @@ export function PercentField({
   onCommit: (value: number) => void;
   min?: number;
   max?: number;
+  step?: number;
 }) {
   const [draft, setDraft] = useState<string | undefined>();
   return (
@@ -830,7 +832,7 @@ export function PercentField({
         inputMode="decimal"
         min={min}
         max={max}
-        step={1}
+        step={step}
         value={draft ?? value}
         onChange={(event) => {
           setDraft(event.target.value);

@@ -354,3 +354,70 @@ describe('the elevation profile in a layout (AV-1211)', () => {
     expect(resolve(flatland)).toEqual({ status: 'hidden', reason: 'no_data', componentId: 'elevation-profile' });
   });
 });
+
+describe('a figure’s label and value, styled apart (AV-1015, TD-083)', () => {
+  const read = (components: object[], version = 2) => {
+    const parsed = parseOverlayTemplate(JSON.stringify({ version, name: 'Canvas', style: {}, components }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed;
+  };
+  const speed = { id: 'speed', type: 'text', rect, source: { kind: 'metric', metric: 'speed' } };
+  const figure = {
+    showLabel: false,
+    labelScale: 1.5,
+    valueScale: 0.8,
+    labelColor: '#FF0000',
+    gap: 0.01,
+    align: 'right',
+    halo: { color: '#00FF00', opacity: 0.4 },
+  };
+
+  it('keeps every setting through a save and a read, in version 2', () => {
+    const first = read([{ ...speed, figure }]);
+    expect(first.template.version).toBe(2);
+    expect(first.template.components[0]!.figure).toEqual({ ...figure, labelColor: '#ff0000', halo: { color: '#00ff00', opacity: 0.4 } });
+    const again = read(JSON.parse(serializeOverlayTemplate(first.template)).components);
+    expect(again.template).toEqual(first.template);
+    expect(JSON.parse(serializeOverlayTemplate(first.template)).version).toBe(2);
+  });
+
+  it('opens a layout from before it as it was: no figure settings, the label in the text colour', () => {
+    const parsed = read([{ ...speed, style: { textColor: '#123456' } }]);
+    expect(parsed.template.components[0]).not.toHaveProperty('figure');
+    expect(parsed.template.components[0]!.style.textColor).toBe('#123456');
+  });
+
+  it('keeps what reads and drops what does not: scales and gap and opacity in range, colours as #rrggbb, align named', () => {
+    const parsed = read([
+      { ...speed, figure: { labelScale: 99, valueScale: 0, labelColor: 'red', gap: 5, align: 'middle', halo: { color: 'black', opacity: 0.5 } } },
+      { ...speed, id: 'two', figure: { labelScale: 0.001, gap: -1, halo: { color: '#000000', opacity: 7 } } },
+      { ...speed, id: 'three', figure: { showLabel: true, labelColor: '#abc' } },
+      { ...speed, id: 'four', figure: 'big' },
+    ]);
+    const [one, two, three, four] = parsed.template.components;
+    expect(one!.figure).toEqual({ labelScale: 10, gap: 0.2 });
+    expect(two!.figure).toEqual({ labelScale: 0.1, halo: { color: '#000000', opacity: 1 } });
+    // Nothing set: no figure at all (a label shown is the default).
+    expect(three).not.toHaveProperty('figure');
+    expect(four).not.toHaveProperty('figure');
+  });
+
+  it('keeps a halo of 0 % (no halo), which is not the same as none set', () => {
+    expect(read([{ ...speed, figure: { halo: { color: '#000000', opacity: 0 } } }]).template.components[0]!.figure).toEqual({ halo: { color: '#000000', opacity: 0 } });
+  });
+
+  it('keeps it for a gauge, and leaves it off everything that is not a live figure', () => {
+    const parsed = read([
+      { id: 'gauge', type: 'gauge', rect, source: { kind: 'metric', metric: 'speed' }, range: { min: 0, max: 20 }, figure },
+      { id: 'bar', type: 'progress', rect, figure },
+      { id: 'card', type: 'shape', rect, shape: { kind: 'ellipse' }, figure },
+    ]);
+    expect(parsed.template.components.map((component) => 'figure' in component)).toEqual([true, false, false]);
+  });
+
+  it('is ignored by a reader that predates it: a version 2 file with the field reads with the others’ fields unchanged', () => {
+    // The parser reads fields by name and checks no other keys, so an older build drops this one and keeps the rest.
+    const parsed = read([{ ...speed, display: { label: 'Pace' }, figure, somethingNew: 1 }]);
+    expect(parsed.template.components[0]).toMatchObject({ id: 'speed', display: { label: 'Pace' } });
+  });
+});

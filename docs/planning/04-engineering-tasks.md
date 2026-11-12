@@ -1222,6 +1222,36 @@ Acceptance criteria:
 - **Layout (TD-059):** the input never moves or is drawn anew while a file is read, so a file dropped mid-read is never lost. In the still image and map image, *Add a video* brings back the input, taking videos only; the activity is changed by Start over, as now.
 - **Tests:** unit tests for what a file is (by content, by extension, neither); component tests for each row of *Opens in the mode that fits*, several files in one drop (one of each, two of a kind, a refused one), replacing and removing each, a video dropped while one is read, the input's wording in each state, and focus on a failure; the browser tests moved from `overlay-video-input` and `overlay-activity-input` to the one input.
 
+#### AV-1015: Style a Figure's Label and Value Apart, With Spacing, Alignment, a Halo of Its Own and a Switch to Hide the Label
+
+Dependencies: AV-1011, AV-1207, TD-059, TD-062
+
+GitHub issue #17. A live figure on the custom canvas (a text or gauge component) is drawn as a label over a value. Both lines share one colour and one size scale, at fixed proportions, always left-aligned, with a fixed dark halo when the background is under 30 %. This task styles the two lines apart. The extras in gpx2video's reference comment on the issue are not part of this task: the unit as a third part, an icon, font weights, italic, vertical alignment, a shadow, and side-by-side layouts. Fonts are #26.
+
+Acceptance criteria:
+- **Settings per figure:** set in the canvas editor for a text or gauge component, and saved in its layout file:
+  - **Show the label:** a switch. Off, only the value is drawn, centred in the box's height. The label's text is kept, so switching it back on restores it.
+  - **Label size (%)** and **Value size (%)**, in place of the one *Text size (%)*.
+  - **Label colour** and **Value colour**, in place of the one *Text colour*.
+  - **Spacing** between the label and the value, as a share of the frame's width, so it scales with the picture.
+  - **Alignment:** left, centre or right, for both lines.
+  - **Halo colour** and **Halo (%)** for the halo drawn under the text on a clear background. 0 % means no halo.
+- **Older layouts draw exactly as before:**
+  - The value takes the existing text colour, and a missing label colour falls back to it.
+  - Missing sizes, spacing, alignment and halo take today's values: the label at 0.55 em and 75 % opacity, the value at 1.1 em bold, today's gap, left-aligned, and today's halo (black at 80 %) where the background is under 30 %.
+  - The label is shown.
+  - No new template version: the new fields are optional within version 2.
+- **One renderer:** the canvas preview and every export (PNG sequence, transparent WebM, burned-in video) draw the new settings, and so do the map video's figures, through the same renderer.
+- **The box grows to fit:** when a change in the editor makes the text need more room than the box has, the box grows to hold it.
+  - It grows right and down, and stops at the frame's edges: it never grows or moves past them.
+  - Text that still doesn't fit is cut at the box, which is inside the frame. Nothing past the frame's edge is drawn in the preview or any export.
+  - The box never shrinks by itself.
+- **Tests:**
+  - template round trips of the new fields, an older layout keeping its colour and defaults, and the fields within version 2;
+  - renderer tests: each line's size and colour, the spacing, the alignment, the label hidden, the halo's colour and transparency, no halo at 0 %, an older layout drawing the same pixels as before, and text past the frame's edge not drawn;
+  - editor tests for each control, the box growing to fit, and stopping at the frame's edge;
+  - a browser test that reads an exported frame's pixels for the two colours and the halo.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model
