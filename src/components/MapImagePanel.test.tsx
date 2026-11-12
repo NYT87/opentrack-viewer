@@ -127,6 +127,13 @@ describe('MapImagePanel (AV-1013)', () => {
     expect(useMapImageStore.getState().view?.width).toBe(1080);
   });
 
+  it('opens again at the default size when a size past the limits was left typed', () => {
+    useMapImageStore.getState().updateSettings({ output: { width: 4000, height: 4000 } });
+    setup();
+    expect(screen.getByTestId('preview')).toHaveTextContent(/^1080×1350/);
+    expect(screen.getByRole('alert')).toHaveTextContent('at most 4K’s pixels');
+  });
+
   it('places elements over the map with the canvas editor, as a still: no clock and no live figures', async () => {
     const { panel } = setup();
     await userEvent.click(within(panel).getByRole('radio', { name: /map filling the image/ }));

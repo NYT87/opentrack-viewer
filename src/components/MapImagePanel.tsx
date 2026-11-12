@@ -4,7 +4,7 @@ import { formatFileSize, type UnitSystem } from '../domain/units';
 import { mapImageDetailChoices } from '../mapImage/details';
 import { clampZoom, fitCamera, normalizeBearing } from '../mapImage/geometry';
 import { planMapImage, stillOverlayClock } from '../mapImage/plan';
-import { MAP_IMAGE_LIMITS, MAP_IMAGE_SIZE_PRESETS, mapImageSizeProblem, type MapImageCamera, type MapImageDetail, type MapImageSettings } from '../mapImage/settings';
+import { DEFAULT_MAP_IMAGE_SETTINGS, MAP_IMAGE_LIMITS, MAP_IMAGE_SIZE_PRESETS, mapImageSizeProblem, type MapImageCamera, type MapImageDetail, type MapImageSettings } from '../mapImage/settings';
 import { MAP_VIDEO_LIMITS, type MapVideoColorBy } from '../mapVideo/project';
 import { colorByChoices } from '../mapVideo/style';
 import type { RenderWaiting } from '../mapVideo/export/renderMapVideo';
@@ -83,7 +83,8 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   const basemapEnabled = useInteractionStore((state) => state.basemapEnabled);
   const sizeProblem = mapImageSizeProblem(stored.output);
   /** The last size that could be drawn: the preview keeps it while another is typed. */
-  const [drawable, setDrawable] = useState(stored.output);
+  // Opened again with a size past the limits still typed, it starts from the default size.
+  const [drawable, setDrawable] = useState(() => (sizeProblem ? DEFAULT_MAP_IMAGE_SETTINGS.output : stored.output));
   if (!sizeProblem && (drawable.width !== stored.output.width || drawable.height !== stored.output.height)) setDrawable(stored.output);
   // The camera at the width the preview draws, so a size still being typed never rescales it.
   const settings = useMemo(

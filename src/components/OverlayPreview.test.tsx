@@ -367,6 +367,21 @@ describe('cutting the video to the part exported (TD-081)', () => {
     expect(end).toHaveAttribute('aria-valuenow', '4');
   });
 
+  it('says in Sync when the activity covers none of the cut, though it covers the video', async () => {
+    render(<Harness />);
+    const field = screen.getByRole('textbox', { name: 'Video starts at' });
+    await userEvent.clear(field);
+    await userEvent.type(field, '-5');
+    await userEvent.tab();
+    seekTo(4);
+    await userEvent.click(screen.getByRole('button', { name: 'End the export here' }));
+    expect(line()).toHaveTextContent('Exporting 0:00 to 0:04 of the video, 0:04. The activity covers none of it');
+    seekTo(3);
+    await userEvent.click(screen.getByRole('button', { name: 'Start the export here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Export the whole video' }));
+    expect(line()).not.toHaveTextContent('covers none');
+  });
+
   it('keeps the ends apart', async () => {
     render(<Harness />);
     seekTo(6);

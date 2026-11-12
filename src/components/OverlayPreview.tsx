@@ -4,7 +4,7 @@ import type { Activity } from '../domain/activity';
 import { formatDateTime, formatDuration, type UnitSystem } from '../domain/units';
 import { buildOverlay, type OverlayControls as Controls } from '../overlay/presets';
 import { buildOverlayTimeline, type OverlayAlignment } from '../overlay/timeline';
-import { MIN_TRIM_SECONDS, trimRange, withTrimEnd, withTrimStart, type TrimRange, type VideoTrim } from '../overlay/trim';
+import { MIN_TRIM_SECONDS, activityCoversPart, trimRange, withTrimEnd, withTrimStart, type TrimRange, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { OverlayControls } from './OverlayControls';
 import { OverlayLayer } from './OverlayLayer';
@@ -419,7 +419,11 @@ export function OverlayPreview({
         <div className="overlay-trim" role="group" aria-label="Part exported">
           <p className="overlay-trim__line">
             {kept.trimmed
-              ? `Exporting ${formatDuration(kept.start)} to ${formatDuration(kept.end)} of the video, ${formatDuration(kept.length)}.`
+              ? `Exporting ${formatDuration(kept.start)} to ${formatDuration(kept.end)} of the video, ${formatDuration(kept.length)}.${
+                  alignment.overlaps && activityCoversPart(alignment, kept) === false
+                    ? ' The activity covers none of it, so nothing would be drawn: change where the video starts, or the cut.'
+                    : ''
+                }`
               : 'Exporting the whole video. Drag its ends on the video’s lane, or set them at the playhead, to export a part.'}
           </p>
           <div className="overlay-trim__actions">
