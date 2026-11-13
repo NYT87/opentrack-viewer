@@ -25,6 +25,7 @@ import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial';
 import { DEFAULT_GRADIENT, GRADIENT_BAND_LIMITS, GRADIENT_FROM_LIMITS } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
+import { MAX_MAP_INSETS, parseRouteInsetSetting, type OverlayRouteInsetSetting } from './routeInset';
 import {
   DEFAULT_SPLITS,
   SPLITS_EVERY_METERS,
@@ -426,6 +427,11 @@ export interface OverlayComponent {
   text?: OverlayTextSetting;
   /** `routeInset` on the still image: line, padding and markers. */
   route?: OverlayRouteSetting;
+  /**
+   * AV-1023 (TD-092). `routeInset` on a video: the view, orientation, shape, trail, line and map. Absent
+   * is today's inset (the whole kept route, north up, line only).
+   */
+  routeInset?: OverlayRouteInsetSetting;
   /** `shape`: what it is and how it is drawn. */
   shape?: OverlayShapeSetting;
   /** AV-1011. The shape this component is held by: moved with it, and kept inside the frame with it. */
@@ -660,6 +666,8 @@ function parseComponent(value: unknown): OverlayComponent | string {
       component.smoothing = { windowSeconds: Math.min(SMOOTHING_LIMITS.max, seconds) };
     }
   }
+  // AV-1023. The inset's own setting, read as it may be drawn; absent stays absent, so an older layout is the old inset.
+  if (componentType === 'routeInset' && isRecord(value.routeInset)) component.routeInset = parseRouteInsetSetting(value.routeInset);
   if (componentType === 'routeInset' && isRecord(value.route)) {
     const route = value.route;
     if (isNumber(route.lineWidth) && route.lineWidth > 0 && isNumber(route.padding) && route.padding >= 0) {
@@ -938,6 +946,17 @@ export function parseOverlayTemplate(json: string): ParseOverlayTemplateResult {
       components.push(parsed);
     }
   });
+
+  // AV-1023. At most two insets carry a map: a third read from a file is a line only, with a warning.
+  let maps = 0;
+  for (const entry of components) {
+    if (entry.type !== 'routeInset' || !entry.routeInset || entry.routeInset.map.provider === 'none') continue;
+    maps += 1;
+    if (maps > MAX_MAP_INSETS) {
+      entry.routeInset = { ...entry.routeInset, map: { ...entry.routeInset.map, provider: 'none' } };
+      warnings.push(`The map of the route inset "${entry.id}" was left out: an overlay has at most ${MAX_MAP_INSETS} maps.`);
+    }
+  }
 
   // A component held by a shape that is not there is simply free.
   const shapes = new Set(components.filter((entry) => entry.type === 'shape').map((entry) => entry.id));

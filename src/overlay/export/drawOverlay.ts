@@ -7,6 +7,8 @@ import { projectRoute, type ProjectedRoute } from '../routeProjection';
 import { keptRoute, markerVisible, sampleActivityMs } from '../privacyTrim';
 import { FIGURE_MIN_TOP_EMS, figureLayout, haloShadow } from '../figureLayout';
 import { drawShape } from '../shapes';
+import { createInsetModels } from '../insetCamera';
+import { drawInset, drawInsetBorder, insetPath, type InsetMapSource } from './drawInset';
 import { extractRoute } from '../routeImage';
 import { layoutStillText, stillValue, type PlannedStillItem } from '../staticImage';
 import {
@@ -72,8 +74,14 @@ export interface OverlayRenderer {
    * Draws the overlay as it is at this video time. By default the context is
    * cleared first, so what is not overlay is transparent; a burned-in render
    * passes `clear: false` to draw over a video frame already on the canvas.
+   * AV-1023: `maps` is what stands behind the route insets that have a basemap.
    */
-  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number, options?: { clear?: boolean }): void;
+  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number, options?: { clear?: boolean; maps?: InsetMapSource }): void;
+  /**
+   * AV-1023 (TD-092). The route insets that need a basemap picture for this moment, by component id: those
+   * with a map that are drawn here. Empty when none is, so an export asks its page for nothing.
+   */
+  insetsAt(videoTimeSeconds: number): string[];
 }
 
 type Ready = Extract<ResolvedOverlayComponent, { status: 'ready' }>;
@@ -104,6 +112,9 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
     }
     return routes.get(component.id);
   };
+
+  // AV-1023 (TD-092). The insets that follow, round, border, trail or map: each with its camera, made from the same kept route.
+  const insetModels = createInsetModels({ template, timeline, activity, width, height });
 
   // So is the elevation profile, which is in the same units whatever the box.
   let profile: ProjectedProfile | undefined | null = null;
@@ -273,6 +284,11 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
   };
 
   return {
+    insetsAt(videoTimeSeconds) {
+      const ids: string[] = [];
+      for (const [id, model] of insetModels) if (model.hasMap && model.momentAt(videoTimeSeconds)) ids.push(id);
+      return ids;
+    },
     drawFrame(ctx, videoTimeSeconds, options) {
       // Transparent by construction: nothing but the components is ever painted.
       if (options?.clear !== false) ctx.clearRect(0, 0, width, height);
@@ -313,12 +329,27 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
           if (!chartSeries || !component.source || chartMoment(chartSeries, component.source, sample, timeline).centre === undefined) continue;
         }
         ctx.save();
-        // Each component stays inside its own box, as the preview's tile does.
-        roundedRect(ctx, box, 0.4 * em);
-        ctx.clip();
-        drawBackground(ctx, box, ready, em);
+        // Each component stays inside its own box, as the preview's tile does; a round inset inside its circle.
+        const inset = component.type === 'routeInset' ? insetModels.get(component.id) : undefined;
+        const moment = inset?.momentAt(videoTimeSeconds);
+        if (inset) {
+          insetPath(ctx, inset, box, em);
+          ctx.clip();
+          // A live map under the canvas (the preview) is not dimmed by the fill: the export's opaque picture covers it, so the two match.
+          if (ready.style.backgroundOpacity > 0 && !options?.maps?.live?.has(component.id)) {
+            ctx.fillStyle = `rgb(0 0 0 / ${ready.style.backgroundOpacity})`;
+            ctx.fill();
+          }
+        } else {
+          roundedRect(ctx, box, 0.4 * em);
+          ctx.clip();
+          drawBackground(ctx, box, ready, em);
+        }
 
-        if (component.type === 'routeInset') {
+        if (inset) {
+          if (moment) drawInset(ctx, inset, ready, em, moment, options?.maps);
+          drawInsetBorder(ctx, inset, box, em, Math.min(width, height));
+        } else if (component.type === 'routeInset') {
           drawRoute(ctx, box, ready, sample);
         } else if (component.type === 'elevationProfile') {
           drawProfile(ctx, box, ready);

@@ -1,7 +1,7 @@
 import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
 import { PrivacyTrimField } from './PrivacyTrimField';
-import type { PrivacyTrim } from '../overlay/privacyTrim';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { hasPrivacyTrim, type PrivacyTrim } from '../overlay/privacyTrim';
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
 import {
@@ -105,6 +105,14 @@ import {
 import { ElementRows } from './ElementRows';
 import { ColorField } from './ColorField';
 import { ChartEditor, CompassEditor, DialEditor, GradientEditor, SplitsEditor } from './MomentEditors';
+import { RouteInsetEditor } from './RouteInsetEditor';
+import { routeInsetOf } from '../overlay/routeInset';
+import { insetStyleUrl } from '../overlay/insetMapStyle';
+import { cappedMapIds } from '../overlay/insetCamera';
+import { useMapVideoStore } from '../state/mapVideoStore';
+
+// AV-1023. The live maps pull MapLibre in: loaded only when an inset shows one.
+const InsetMapLayer = lazy(() => import('./InsetMapLayer'));
 
 /** The long side of the preview, in pixels: the overlay is drawn at this size by the export's renderer. */
 const PREVIEW_LONG_SIDE = 720;
@@ -338,9 +346,17 @@ export function CustomCanvas({
     const fitted = fitCanvasSize(parsed.layout.width, parsed.layout.height);
     setSize(String(fitted.width), String(fitted.height));
     // A still (the map image) shows no moment, so what only means something at one (zones, dials, charts, the gradient indicator and the compass: AV-1018, AV-1019) is left out of it, as the still image leaves out a video's figures.
-    const opened = host?.still
+    const readable = host?.still
       ? parsed.layout.template.components.filter((component) => !MOMENT_COMPONENT_TYPES.includes(component.type))
       : parsed.layout.template.components;
+    // AV-1023. A map's own canvas has the map already: an inset in it keeps its view and its line, not a second map.
+    const opened = host
+      ? readable.map((component) =>
+          component.type === 'routeInset' && component.routeInset && component.routeInset.map.provider !== 'none'
+            ? { ...component, routeInset: { ...component.routeInset, map: { ...component.routeInset.map, provider: 'none' as const } } }
+            : component,
+        )
+      : readable;
     commit({ components: opened, selectedId: undefined });
     if (!host) setPrivacyTrim(parsed.layout.template.privacyTrim);
     const warnings = [...parsed.warnings];
@@ -396,6 +412,7 @@ export function CustomCanvas({
         onUndo={undo}
         clock={host ? { seconds: host.seconds, onSeek: host.onSeek, still } : undefined}
         backdrop={host?.backdrop}
+        liveMaps={!host}
       />
       {sizeProblem && (
         <p role="alert" className="export__error">
@@ -507,6 +524,8 @@ export function CustomCanvas({
             stillContext={stillContext}
             timeline={timeline}
             units={units}
+            host={host !== undefined}
+            trimmed={hasPrivacyTrim(privacyTrim)}
             onChange={(next, ...selected) => change(next, ...selected)}
           />
         )}
@@ -785,7 +804,10 @@ function CanvasPreview({
   onMediaInfo,
   clock,
   backdrop,
+  liveMaps,
 }: {
+  /** AV-1023 (TD-092). Whether a route inset's map is shown live under the canvas: not inside a map's own canvas. */
+  liveMaps: boolean;
   /** The host's time, shown and moved here instead of a clock of the preview's own (AV-1207). */
   clock?: { seconds: number; onSeek: (seconds: number) => void; still?: boolean };
   backdrop?: string;
@@ -879,10 +901,29 @@ function CanvasPreview({
     return () => cancelAnimationFrame(handle);
   }, [playing, video, durationSeconds]);
 
+  // AV-1023 (TD-092). The insets whose map is shown live under the canvas, so the canvas draws their credit; MapTiler needs the reader's key.
+  const typedKey = useMapVideoStore((state) => state.maptilerKey);
+  // A key being typed is not a key until it rests: each keystroke would otherwise make a map and ask MapTiler for its style with a partial key.
+  const [maptilerKey, setRestedKey] = useState(typedKey);
+  useEffect(() => {
+    const timer = setTimeout(() => setRestedKey(typedKey), typedKey === '' ? 0 : 700);
+    return () => clearTimeout(timer);
+  }, [typedKey]);
+  const liveIds = useMemo(
+    () =>
+      new Set(
+        liveMaps
+          ? template.components
+              .filter((component) => component.visible && cappedMapIds(template.components).has(component.id) && component.routeInset && insetStyleUrl(component.routeInset, maptilerKey) !== undefined)
+              .map((component) => component.id)
+          : [],
+      ),
+    [liveMaps, template, maptilerKey],
+  );
   useEffect(() => {
     const ctx = canvas.current?.getContext('2d');
     if (!ctx) return;
-    renderer.drawFrame(ctx, time);
+    renderer.drawFrame(ctx, time, liveIds.size > 0 ? { maps: { live: liveIds } } : undefined);
     const box = selectedId ? boxes.get(selectedId) : undefined;
     if (box) {
       // The outline and the corner handle are the preview's own; never in the export.
@@ -896,7 +937,7 @@ function CanvasPreview({
       ctx.fillRect(box.x + box.w - HANDLE / 2, box.y + box.h - HANDLE / 2, HANDLE, HANDLE);
       ctx.restore();
     }
-  }, [renderer, time, boxes, selectedId]);
+  }, [renderer, time, boxes, selectedId, liveIds]);
 
   const togglePlay = () => {
     const media = element.current;
@@ -968,6 +1009,11 @@ function CanvasPreview({
       >
         {video && <video ref={element} className="custom-canvas__video" playsInline preload="metadata" muted data-testid="canvas-video" />}
         {backdrop && <img className="custom-canvas__video" src={backdrop} alt="" data-testid="canvas-backdrop" />}
+        {liveIds.size > 0 && (
+          <Suspense fallback={null}>
+            <InsetMapLayer template={template} timeline={timeline} activity={activity} width={pw} height={ph} seconds={time} maptilerKey={maptilerKey} />
+          </Suspense>
+        )}
         <canvas
           ref={canvas}
           className="custom-canvas__canvas"
@@ -1056,6 +1102,8 @@ function ComponentEditor({
   stillContext,
   timeline,
   units,
+  host,
+  trimmed,
   onChange,
 }: {
   component: OverlayComponent;
@@ -1064,6 +1112,9 @@ function ComponentEditor({
   stillContext: StillImageContext;
   timeline: OverlayTimeline;
   units: UnitSystem;
+  /** AV-1023. Inside the map video's or the map image's canvas: a map is not offered. */
+  host: boolean;
+  trimmed: boolean;
   onChange: (components: OverlayComponent[], ...selected: [string | undefined] | []) => void;
 }) {
   const id = useId();
@@ -1358,6 +1409,8 @@ function ComponentEditor({
       {isSplits && <SplitsEditor id={id} component={component} timeline={timeline} units={units} frame={frame} onChange={(patch) => update(patch)} />}
       {component.type === 'compass' && <CompassEditor id={id} component={component} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
 
+      {component.type === 'routeInset' && <RouteInsetEditor component={component} components={components} frame={frame} host={host} trimmed={trimmed} onChange={(patch) => update(patch)} />}
+
       {component.type === 'label' && (
         <div className="overlay-controls__field still-image__text">
           <label htmlFor={`${id}-content`}>Text</label>
@@ -1380,7 +1433,7 @@ function ComponentEditor({
 
       {(isFigureLike || isStill || isLine || component.type === 'progress') && (
         <>
-          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : isFigureLike && component.type !== 'chart' && component.type !== 'gradient' ? 'Value colour' : 'Text colour'} value={style.textColor} onChange={(textColor) => update((current) => ({ ...current, style: { ...current.style, textColor } }))} />
+          <ColorField id={`${id}-text`} label={isLine ? 'Line colour' : isFigureLike && component.type !== 'chart' && component.type !== 'gradient' ? 'Value colour' : 'Text colour'} value={component.type === 'routeInset' ? (routeInsetOf(component.routeInset).lineColor ?? style.textColor) : style.textColor} onChange={(textColor) => update((current) => withLineColour(current, textColor))} />
           {isFigureLike && <ColorField id={`${id}-label-colour`} label="Label colour" value={figure?.labelColor ?? style.textColor} onChange={(labelColor) => setFigure({ labelColor }, false)} />}
           {!isStill && (
             <>
@@ -1455,6 +1508,17 @@ function ComponentEditor({
       </p>
     </fieldset>
   );
+}
+
+/** The line's colour is the component's text colour, as it always was; a colour set in a file for the inset alone gives way to it. */
+function withLineColour(current: OverlayComponent, textColor: string): OverlayComponent {
+  const next: OverlayComponent = { ...current, style: { ...current.style, textColor } };
+  if (current.type === 'routeInset' && current.routeInset?.lineColor !== undefined) {
+    const { lineColor: _unused, ...rest } = current.routeInset;
+    void _unused;
+    next.routeInset = rest;
+  }
+  return next;
 }
 
 const ZONES_SOURCE_LABELS: Record<ZonesSource, string> = { heartRate: 'Heart rate', power: 'Power' };

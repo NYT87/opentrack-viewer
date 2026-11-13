@@ -31,6 +31,10 @@ import { buildOverlayTimeline } from '../overlay/timeline';
 import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { usePersonalStore } from '../state/personalStore';
+import { useMapVideoStore } from '../state/mapVideoStore';
+import { checkInsetExportCached } from '../overlay/insetExportCheck';
+import { hasMapInset } from '../overlay/insetCamera';
+import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
 
 interface OverlayExportPanelProps {
   /**
@@ -138,6 +142,9 @@ export function OverlayExportPanel({
   const [fps, setFps] = useState(() => nearestFrameRate(video?.timing?.frameIntervalSeconds));
   const [heightChoice, setHeightChoice] = useState<string>(NATIVE);
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
+  // AV-1023. Why a route inset's map is waiting, and the WebM's pre-load.
+  const [waiting, setWaiting] = useState<'tiles' | 'hidden' | undefined>(undefined);
+  const [loading, setLoading] = useState<{ done: number; total: number } | undefined>(undefined);
   const [storageState, setStorageState] = useState<StorageState>({ status: 'checking' });
   const [format, setFormat] = useState<ExportFormat>('png');
   const [webmState, setWebmState] = useState<WebmState>({ status: 'checking' });
@@ -226,6 +233,22 @@ export function OverlayExportPanel({
     () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, exportWidth / exportHeight)),
     [customTemplate, controls, timeline, exportWidth, exportHeight],
   );
+  // AV-1023 (TD-092). A map in a route inset: what its export asks of the provider, counted before it starts, and whether it may go ahead.
+  const maptilerKey = useMapVideoStore((state) => state.maptilerKey);
+  const insetCheck = hasMapInset(built.template)
+    ? checkInsetExportCached({
+        template: built.template,
+        activity,
+        timeline,
+        width: plan.width,
+        height: plan.height,
+        fps: plan.fps,
+        frameCount: plan.frameCount,
+        trimStartSeconds: range?.trimmed ? range.start : 0,
+        kind: asWebm ? 'webm' : 'png',
+        maptilerKey,
+      })
+    : undefined;
   // AV-1018 (TD-086). The reader's figures go with the request only when a zones component can use them.
   const sessionFigures = usePersonalStore((state) => state.personal);
   const personal = built.template.components.some((component) => component.type === 'zones') ? sessionFigures : {};
@@ -286,7 +309,7 @@ export function OverlayExportPanel({
   const nothingOn = built.template.components.length === 0;
 
   const begin = () => {
-    if (!ready || running) return;
+    if (!ready || running || insetCheck?.refusal) return;
     void output.current?.dispose();
     output.current = undefined;
     setPhase({ status: 'running', done: 0, total: plan.frameCount });
@@ -294,23 +317,33 @@ export function OverlayExportPanel({
 
     let active: ExportJob;
     try {
-      active = (madeAs === 'webm' ? startWebm : start)(
-        {
-          width: plan.width,
-          height: plan.height,
-          fps: plan.fps,
-          frameCount: plan.frameCount,
-          videoDurationSeconds: durationSeconds ?? 0,
-          videoStart,
-          offsetSeconds: effectiveOffset,
-          ...(range?.trimmed ? { trimStartSeconds: range.start } : {}),
-          units,
-          template: built.template,
-          activity,
-          ...(Object.keys(personal).length > 0 ? { personal } : {}),
-        },
-        (done, total) => setPhase({ status: 'running', done, total }),
-      );
+      const body = {
+        width: plan.width,
+        height: plan.height,
+        fps: plan.fps,
+        frameCount: plan.frameCount,
+        videoDurationSeconds: durationSeconds ?? 0,
+        videoStart,
+        offsetSeconds: effectiveOffset,
+        ...(range?.trimmed ? { trimStartSeconds: range.start } : {}),
+        units,
+        template: built.template,
+        activity,
+        ...(Object.keys(personal).length > 0 ? { personal } : {}),
+      };
+      const progress = (done: number, total: number) => setPhase({ status: 'running', done, total });
+      // AV-1023. The key stays on the page, where the maps are; it goes with the export only when a route inset has a map.
+      setWaiting(undefined);
+      setLoading(undefined);
+      const withMap = insetCheck ? { maptilerKey, onWaiting: setWaiting } : undefined;
+      active =
+        madeAs === 'webm'
+          ? withMap
+            ? startWebm(body, progress, undefined, { ...withMap, onLoading: (done, total) => setLoading(done < total ? { done, total } : undefined) })
+            : startWebm(body, progress)
+          : withMap
+            ? start(body, progress, withMap)
+            : start(body, progress);
     } catch (error) {
       // The export could not even be started: say so, and leave the panel ready to try again.
       setPhase({
@@ -497,6 +530,10 @@ export function OverlayExportPanel({
           {nothingOn && (
             <p role="status">No component is switched on, so there is nothing to export.</p>
           )}
+          <InsetExportNotes check={insetCheck} />
+          {asWebm && insetCheck && !insetCheck.refusal && (
+            <p className="overlay-controls__hint">The map’s tiles are all loaded before the recording starts, which can take a while; then it is recorded in real time.</p>
+          )}
           {outsideActivity && <p role="status">{uncoveredNotice(range, drawnAnyway)}</p>}
 
           <p className="video__actions">
@@ -509,7 +546,7 @@ export function OverlayExportPanel({
                 type="button"
                 className={downloadFirst ? 'button' : 'button button--primary'}
                 onClick={begin}
-                disabled={!fits || nothingOn || noOverlap}
+                disabled={!fits || nothingOn || noOverlap || insetCheck?.refusal !== undefined}
               >
                 {stale ? 'Export again' : asWebm ? 'Export transparent video' : 'Export PNG sequence'}
               </button>
@@ -533,6 +570,7 @@ export function OverlayExportPanel({
           <p className="visually-hidden" role="status">
             Exporting: {Math.floor((phase.done / Math.max(1, phase.total)) * 4) * 25}% done.
           </p>
+          <InsetWaiting waiting={waiting} loading={loading} />
         </>
       )}
       {stale && (

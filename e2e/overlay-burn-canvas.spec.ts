@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { FIXTURE_DIR, widestGpx } from './helpers/overlayFixtures';
+import { forbidLiveProviders, serveVectorFixture } from './helpers/mapVideoTiles';
 
 /**
  * AV-1011. The custom canvas over a video, in the browser with an H.264
@@ -63,4 +64,30 @@ test('with a video: the preview plays over it, and the burned-in render needs th
   await canvas.getByLabel('Size', { exact: true }).selectOption({ label: 'Same as the video (848 × 480)' });
   await expect(burn).not.toContainText('which is not the video’s shape');
   await expect(burn.getByRole('button', { name: 'Render video with overlay' })).toBeEnabled();
+});
+
+test('a route inset with a map in the video with the overlay drawn in: its tiles counted first, each asked once, none from a live provider (AV-1023)', async ({ page }, testInfo) => {
+  test.setTimeout(240_000);
+  const live = await forbidLiveProviders(page);
+  const asked = await serveVectorFixture(page);
+  const canvas = await openCanvas(page, testInfo.outputDir);
+  await canvas.getByLabel('Add', { exact: true }).selectOption({ label: 'Route with position' });
+  await canvas.getByRole('button', { name: 'Add to the canvas' }).click();
+  await canvas.getByLabel('View', { exact: true }).selectOption('follow');
+  await canvas.getByLabel('Zoom', { exact: true }).fill('15');
+  await canvas.getByLabel('Map behind the line').selectOption('openfreemap');
+  await canvas.getByLabel('Size', { exact: true }).selectOption({ label: 'Same as the video (848 × 480)' });
+  const burn = canvas.getByRole('region', { name: 'Export video with the overlay' });
+  await expect(burn.getByTestId('burn-plan').or(burn.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
+  const refusal = await burn.getByRole('alert').allTextContents();
+  test.skip(refusal.some((text) => !/tiles/.test(text)), `This machine cannot render here: ${refusal.join(' ')}`);
+  await expect(burn.getByTestId('inset-tiles')).toContainText(/asks OpenFreeMap for \d+ tiles?, each once/);
+  await expect.poll(async () => { const n = asked.length; await page.waitForTimeout(2000); return asked.length === n; }, { timeout: 60_000 }).toBe(true);
+  const before = asked.length;
+  await burn.getByRole('button', { name: 'Render video with overlay' }).click();
+  await expect(burn.getByRole('link', { name: /with-overlay\.mp4/ })).toBeVisible({ timeout: 200_000 });
+  const tiles = asked.slice(before).filter((url) => url.endsWith('.pbf'));
+  expect(tiles.length).toBeGreaterThan(0);
+  expect(new Set(tiles).size, 'each tile is asked for once').toBe(tiles.length);
+  expect(live).toEqual([]);
 });

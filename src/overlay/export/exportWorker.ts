@@ -1,6 +1,7 @@
 import { buildOverlayTimeline } from '../timeline';
 import { createArchiveSink, probeArchiveStorage } from './archiveSink';
 import { createOverlayRenderer } from './drawOverlay';
+import { acquireInsets, receiveInsetBitmaps } from './insetBridge';
 import { OverlayExportError, isOverlayExportError } from './errors';
 import type { ExportRequest, FromWorker, ToWorker } from './protocol';
 import { runExport } from './runExport';
@@ -69,8 +70,14 @@ async function run(request: ExportRequest, controller: AbortController): Promise
       templateName: request.template.name,
       signal: controller.signal,
       sink: archive.sink,
-      renderFrame: async (_index, videoTime) => {
-        renderer.drawFrame(ctx, from + videoTime);
+      renderFrame: async (index, videoTime) => {
+        // AV-1023. A route inset with a map has its picture asked of the page, one frame at a time, and let go once drawn.
+        const insets = await acquireInsets(renderer, post, index, from + videoTime, controller.signal);
+        try {
+          renderer.drawFrame(ctx, from + videoTime, insets.maps ? { maps: insets.maps } : undefined);
+        } finally {
+          insets.release();
+        }
         const blob = await canvas.convertToBlob({ type: 'image/png' });
         return new Uint8Array(await blob.arrayBuffer());
       },
@@ -109,6 +116,10 @@ scope.onmessage = (event) => {
   const message = event.data;
   if (message.type === 'cancel') {
     current?.abort();
+    return;
+  }
+  if (message.type === 'insetBitmaps') {
+    receiveInsetBitmaps(message);
     return;
   }
   if (message.type === 'probe') {

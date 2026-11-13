@@ -38,7 +38,7 @@ const request = (overrides: Partial<BurnRequest> = {}): BurnRequest => ({
 /** Everything drawn on the canvas, and the frames put there, in order. */
 const events: string[] = [];
 function canvasContext() {
-  const state: Record<string, unknown> = { font: '', fillStyle: '', globalAlpha: 1 };
+  const state: Record<string, unknown> = { font: '', fillStyle: '', globalAlpha: 1, measureText: () => ({ width: 10 }) };
   return new Proxy(state, {
     get(target, key: string) {
       if (key in target) return target[key];
@@ -456,5 +456,74 @@ describe('the burned-in render (AV-1007)', () => {
   it('refuses where an offscreen canvas has no 2D context', async () => {
     vi.stubGlobal('OffscreenCanvas', class { getContext() { return null; } });
     await expect(run({}).promise).rejects.toMatchObject({ code: 'unsupported_browser' });
+  });
+});
+
+describe('a map in a route inset, in the burned-in render (AV-1023, TD-092)', () => {
+  const mapTemplate = canvasTemplate([
+    {
+      id: 'route',
+      type: 'routeInset',
+      visible: true,
+      rect: { x: 0.1, y: 0.1, width: 0.3, height: 0.3 },
+      unitMode: 'auto',
+      style: {},
+      routeInset: { view: 'follow', zoom: 15, orientation: 'north', shape: 'square', border: { width: 0, color: '#ffffff' }, trail: 'all', ahead: 'shown', lineWidth: 0.03, map: { provider: 'openfreemap', style: 'liberty' } },
+    },
+  ]);
+  const run = async (script: Script, post: (message: unknown) => void, signal?: AbortSignal) => {
+    const fake = fakeMediabunny(script);
+    const promise = runBurn({
+      mb: fake.mb,
+      request: request({ template: mapTemplate }),
+      writeAt: () => undefined,
+      post: post as never,
+      signal,
+    });
+    return { ...fake, promise };
+  };
+
+  it('asks for each frame’s picture before drawing the frame, draws it under the overlay, and lets it go', async () => {
+    const closes: ReturnType<typeof vi.fn>[] = [];
+    const posted: { type: string; frame?: number; seconds?: number; ids?: string[] }[] = [];
+    const { receiveInsetBitmaps } = await import('./insetBridge');
+    const post = (message: unknown) => {
+      const asked = message as { type: string; frame: number; ids: string[] };
+      posted.push(asked);
+      events.push(`asked:${asked.frame}`);
+      // The page answers a moment later, as a round trip does.
+      queueMicrotask(() => {
+        const close = vi.fn();
+        closes.push(close);
+        receiveInsetBitmaps({ type: 'insetBitmaps', frame: asked.frame, bitmaps: Object.fromEntries(asked.ids.map((id) => [id, { close } as unknown as ImageBitmap])) });
+      });
+    };
+    const { promise } = await run({ frames: [0, 1, 2] }, post);
+    await promise;
+    expect(posted.map((message) => [message.frame, message.seconds, message.ids])).toEqual([
+      [0, 0, ['route']],
+      [1, 1, ['route']],
+      [2, 2, ['route']],
+    ]);
+    // Asked, then the video frame, then the map picture, then the overlay; for each frame.
+    const first = events.slice(0, events.indexOf('asked:1'));
+    expect(first.indexOf('asked:0')).toBeLessThan(first.indexOf('frame'));
+    expect(first.indexOf('frame')).toBeLessThan(first.indexOf('drawImage'));
+    expect(closes).toHaveLength(3);
+    for (const close of closes) expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('is stopped while waiting for a picture: the render ends as stopped', async () => {
+    const controller = new AbortController();
+    const post = () => queueMicrotask(() => controller.abort());
+    const { promise } = await run({ frames: [0] }, post, controller.signal);
+    await expect(promise).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('makes no round trip for a template with no map', async () => {
+    const post = vi.fn();
+    const fake = fakeMediabunny({ frames: [0, 1] });
+    await runBurn({ mb: fake.mb, request: request(), writeAt: () => undefined, post });
+    expect(post).not.toHaveBeenCalled();
   });
 });

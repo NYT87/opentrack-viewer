@@ -3,6 +3,7 @@ import { createOverlayRenderer, type OverlayContext2D } from './drawOverlay';
 import { DEFAULT_OVERLAY_CONTROLS, buildOverlay, overlayCatalog, type OverlayControls } from '../presets';
 import { DEFAULT_OVERLAY_STYLE as DEFAULT_OVERLAY_TEMPLATE_STYLE, type OverlayComponent } from '../template';
 import { canvasTemplate, newSplitsComponent } from '../customCanvas';
+import { DEFAULT_ROUTE_INSET, parseRouteInsetSetting } from '../routeInset';
 import { DEFAULT_SPLITS } from '../splits';
 import type { OverlayMetricKey } from '../timeline';
 import { buildOverlayTimeline } from '../timeline';
@@ -240,6 +241,28 @@ describe('custom canvas render goldens (AV-1011)', () => {
     expect(list).toMatch(/\/km"/);
     expect(drawn('imperial')).toMatch(/\/mi"/);
     await expect(list).toMatchFileSnapshot(snapshot('custom-splits-t45'));
+  });
+
+  it('draws a route inset following the position, heading up, with its trail, a dimmed route ahead and a border (AV-1023)', async () => {
+    const inset = (id: string, patch: object): OverlayComponent => ({
+      id,
+      type: 'routeInset',
+      visible: true,
+      rect: at(0.05, 0.05, 0.3, 0.5),
+      unitMode: 'auto',
+      style: {},
+      routeInset: parseRouteInsetSetting({ ...DEFAULT_ROUTE_INSET, view: 'follow', zoom: 17, orientation: 'heading', ahead: 'dimmed', border: { width: 0.004, color: '#ffcc00' }, ...patch }),
+    });
+    const list = custom([inset('route', {})], 5);
+    // The marker held in the centre of the 384 x 360 box, and the trail and the dimmed route ahead around it.
+    expect(list).toContain('arc(');
+    expect(list).toMatch(/stroke\(\) stroke="#ffffff" width=[\d.]+ alpha=0.3/);
+    expect(list).toContain('stroke="#ffcc00"');
+    await expect(list).toMatchFileSnapshot(snapshot('custom-route-follow-heading-t5'));
+    // The same, round, at another moment: the clip is a circle.
+    const round = custom([inset('route', { shape: 'round', ahead: 'hidden', trail: 1 })], 2.5);
+    expect(round).toMatch(/arc\(\d+, \d+, 180, 0, 6.28\)/);
+    await expect(round).toMatchFileSnapshot(snapshot('custom-route-round-t2_5'));
   });
 
   it('draws shapes and texts for the whole activity where the activity does not reach, and its figures only where it does', () => {

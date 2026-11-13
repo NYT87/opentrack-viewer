@@ -237,3 +237,157 @@ describe('zones in the transparent video (AV-1018)', () => {
     expect(await texts()).toEqual([]);
   });
 });
+
+describe('a map in a route inset, in the transparent video (AV-1023, TD-092)', () => {
+  const ride = makeActivity(
+    Array.from({ length: 11 }, (_, i) => ({ time: new Date(i * 1000), lat: 46 + i * 0.0005, lon: 7, distanceMeters: i * 55 })),
+  );
+  const mapTemplate = canvasTemplate([
+    {
+      id: 'route',
+      type: 'routeInset',
+      visible: true,
+      rect: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 },
+      unitMode: 'auto',
+      style: {},
+      routeInset: { view: 'follow', zoom: 15, orientation: 'north', shape: 'square', border: { width: 0, color: '#ffffff' }, trail: 'all', ahead: 'shown', lineWidth: 0.03, map: { provider: 'openfreemap', style: 'liberty' } },
+    },
+  ]);
+  const base = { width: 64, height: 36, fps: 10, frameCount: 3, videoDurationSeconds: 10, offsetSeconds: 0, units: 'metric' as const, template: mapTemplate, activity: ride };
+  const recordingContext = () => {
+    const calls: string[] = [];
+    const ctx = new Proxy({ measureText: () => ({ width: 10 }) } as Record<string, unknown>, {
+      get: (target, key: string) => (key in target ? target[key] : (...args: unknown[]) => void (key === 'drawImage' && calls.push(`drawImage:${String(args[1])},${String(args[2])}`))),
+      set: (target, key: string, value) => ((target[key] = value), true),
+    }) as unknown as OverlayContext2D;
+    return { ctx, calls };
+  };
+
+  it('loads every tile of the plan before the clock starts, then draws each frame from the maps, closing each picture', async () => {
+    const fake = fakes();
+    const { ctx, calls } = recordingContext();
+    const order: string[] = [];
+    const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+    const session = {
+      warm: vi.fn(async (times: Iterable<number>) => void order.push(`warm ${[...times].length}`)),
+      bitmapsAt: vi.fn(async (seconds: number) => (order.push(`bitmap ${seconds}`), { route: bitmap })),
+      close: vi.fn(),
+    };
+    const deps: WebmRecordingDeps = { ...fake.deps, setUp: (...args) => (order.push('setUp'), { ...fake.deps.setUp(...args), ctx }) };
+    const job = startWebmExport({ ...base, trimStartSeconds: 4 }, () => undefined, deps, { createInsets: () => session });
+    await job.done;
+    // Warmed before the recording began, over the plan's three frames, from the trim's start.
+    expect(order.slice(0, 2)).toEqual(['warm 3', 'setUp']);
+    expect(session.warm.mock.calls[0]![0]).toEqual([4, 4.1, 4.2]);
+    expect(session.bitmapsAt.mock.calls.map((call) => call[0])).toEqual([4, 4.1, 4.2]);
+    expect(calls).toHaveLength(3);
+    expect((bitmap as unknown as { close: ReturnType<typeof vi.fn> }).close).toHaveBeenCalledTimes(3);
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('records a template with no map with no maps and no warming', async () => {
+    const fake = fakes();
+    const { ctx } = recordingContext();
+    const create = vi.fn();
+    const job = startWebmExport({ ...base, template: canvasTemplate([]) }, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) }, { createInsets: create });
+    await job.done;
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('stops with the reason, and ends the maps, when a tile cannot be had', async () => {
+    const fake = fakes();
+    const { ctx } = recordingContext();
+    const session = {
+      warm: vi.fn(async () => {
+        throw new OverlayExportError('render_failed', 'A map tile could not be loaded after 3 tries.');
+      }),
+      bitmapsAt: vi.fn(),
+      close: vi.fn(),
+    };
+    const job = startWebmExport(base, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) }, { createInsets: () => session });
+    await expect(job.done).rejects.toMatchObject({ message: expect.stringContaining('tile could not be loaded') });
+    expect(session.close).toHaveBeenCalledTimes(1);
+    // Nothing was recorded: it never started.
+    expect(fake.events).not.toContain('start 1000');
+  });
+
+  it('keeps the rule that a frame more than a second behind stops the recording, when a map holds it up', async () => {
+    const fake = fakes();
+    const { ctx } = recordingContext();
+    const session = {
+      warm: vi.fn(async () => undefined),
+      bitmapsAt: vi.fn(async () => {
+        // A tile not in memory: the map takes longer than the clock allows.
+        fake.deps.wait(MAX_LAG_MS + 500);
+        return {};
+      }),
+      close: vi.fn(),
+    };
+    const job = startWebmExport({ ...base, frameCount: 5 }, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) }, { createInsets: () => session });
+    await expect(job.done).rejects.toThrow(/fell behind/);
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends as stopped, not as a frame that could not be drawn, when Stop is pressed while a frame waits on its map', async () => {
+    const fake = fakes();
+    const { ctx } = recordingContext();
+    const session = {
+      warm: vi.fn(async () => undefined),
+      bitmapsAt: vi.fn(async () => {
+        throw new OverlayExportError('cancelled', 'The export was stopped.');
+      }),
+      close: vi.fn(),
+    };
+    const job = startWebmExport(base, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) }, { createInsets: () => session });
+    await expect(job.done).rejects.toMatchObject({ code: 'cancelled', message: 'The export was stopped.' });
+  });
+
+  it('keeps a map’s own reason when a tile cannot be had during a frame', async () => {
+    const fake = fakes();
+    const { ctx } = recordingContext();
+    const session = {
+      warm: vi.fn(async () => undefined),
+      bitmapsAt: vi.fn(async () => {
+        throw new OverlayExportError('render_failed', 'A map tile could not be loaded after 3 tries (503).');
+      }),
+      close: vi.fn(),
+    };
+    const job = startWebmExport(base, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) }, { createInsets: () => session });
+    await expect(job.done).rejects.toMatchObject({ code: 'render_failed', message: 'A map tile could not be loaded after 3 tries (503).' });
+  });
+
+  it('reports why a map waits and how the pre-load goes', async () => {
+    const fake = fakes();
+    const { ctx } = recordingContext();
+    let given: Parameters<NonNullable<Parameters<typeof startWebmExport>[3]>['createInsets'] & {}>[0] | undefined;
+    const session = {
+      warm: vi.fn(async (_times: Iterable<number>, onProgress?: (done: number, total: number) => void) => void onProgress?.(3, 3)),
+      bitmapsAt: vi.fn(async () => ({})),
+      close: vi.fn(),
+    };
+    const onLoading = vi.fn();
+    const onWaiting = vi.fn();
+    const job = startWebmExport(base, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) }, {
+      createInsets: (input) => ((given = input), session),
+      onLoading,
+      onWaiting,
+    });
+    await job.done;
+    expect(onLoading).toHaveBeenCalledWith(3, 3);
+    expect(given!.onWaiting).toBe(onWaiting);
+  });
+
+  it('stops the maps when the recording is stopped', async () => {
+    const fake = fakes();
+    const { ctx } = recordingContext();
+    const session = { warm: vi.fn(async () => undefined), bitmapsAt: vi.fn(async () => ({})), close: vi.fn() };
+    let signal: AbortSignal | undefined;
+    const job = startWebmExport(base, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) }, {
+      createInsets: (input) => ((signal = input.signal), session),
+    });
+    job.cancel();
+    expect(signal?.aborted).toBe(true);
+    await expect(job.done).rejects.toMatchObject({ code: 'cancelled' });
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+});

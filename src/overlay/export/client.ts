@@ -1,6 +1,11 @@
 import { removeArchive, removeStaleArchives } from './archiveSink';
 import { ownArchive } from './archiveOwnership';
 import { OverlayExportError } from './errors';
+import { hasMapInset } from '../insetCamera';
+import { buildOverlayTimeline } from '../timeline';
+import type { OverlayTemplate } from '../template';
+import type { Activity } from '../../domain/activity';
+import { createInsetMaps, type InsetMapSession, type InsetMapsInput } from './insetMaps';
 import {
   ARCHIVE_NAME_PREFIX,
   type ArchiveStorage,
@@ -34,7 +39,7 @@ export interface ExportJob {
 
 /** The part of `Worker` the client uses, so tests can stand in for it. */
 export interface WorkerLike {
-  postMessage(message: ToWorker): void;
+  postMessage(message: ToWorker, transfer?: Transferable[]): void;
   terminate(): void;
   onmessage: ((event: MessageEvent<FromWorker>) => void) | null;
   onerror: ((event: ErrorEvent) => void) | null;
@@ -42,7 +47,59 @@ export interface WorkerLike {
 
 export interface ExportClientDeps {
   createWorker?: () => WorkerLike;
+  /**
+   * AV-1023 (TD-092). The reader's MapTiler key, for a route inset whose map is MapTiler's: it stays on the page, where the
+   * maps are, and is never in a request to the worker.
+   */
+  maptilerKey?: string;
+  /** AV-1023. Why a route inset's map is waiting (tiles still coming, a hidden tab), for the panel to say. */
+  onWaiting?: InsetMapsInput['onWaiting'];
+  /** For tests: how the page's route-inset maps are made. */
+  createInsets?: (input: InsetMapsInput) => InsetMapSession;
 }
+
+/** What a job holds of the page's maps while it runs: the session, and the way to stop a map waiting on a tile. */
+interface InsetBridge {
+  session: InsetMapSession;
+  controller: AbortController;
+}
+
+interface InsetSource {
+  template: OverlayTemplate;
+  activity: Activity;
+  width: number;
+  height: number;
+  videoDurationSeconds: number;
+  videoStart?: Date;
+  offsetSeconds: number;
+}
+
+/** The page's maps for a template that has a basemap behind a route inset; `undefined` (and no round trips) for one that has none. */
+function openInsetBridge(request: InsetSource, deps: ExportClientDeps): InsetBridge | undefined {
+  if (!hasMapInset(request.template)) return undefined;
+  const controller = new AbortController();
+  const timeline = buildOverlayTimeline(request.activity, {
+    video: { durationSeconds: request.videoDurationSeconds, start: request.videoStart },
+    offsetSeconds: request.offsetSeconds,
+  });
+  const session = (deps.createInsets ?? createInsetMaps)({
+    template: request.template,
+    activity: request.activity,
+    timeline,
+    width: request.width,
+    height: request.height,
+    maptilerKey: deps.maptilerKey ?? '',
+    signal: controller.signal,
+    onWaiting: deps.onWaiting,
+  });
+  return { session, controller };
+}
+
+/** AV-1023 (TD-079). A MapTiler map is not for pictures: the PNG sequence refuses it, whoever asks. */
+export const MAPTILER_PNG_REFUSAL =
+  'A MapTiler map cannot go into the PNG sequence: MapTiler’s terms allow videos, not pictures of its map. Export a video, or change the route inset’s map to OpenFreeMap or none.';
+export const hasMaptilerInset = (template: OverlayTemplate): boolean =>
+  template.components.some((component) => component.visible && component.type === 'routeInset' && component.routeInset?.map.provider === 'maptiler');
 
 /** How long a stop may take before the worker is ended outright. */
 export const CANCEL_GRACE_MS = 2000;
@@ -136,12 +193,16 @@ export function startOverlayExport(
   onProgress: (done: number, total: number) => void,
   deps: ExportClientDeps = {},
 ): ExportJob {
+  if (hasMaptilerInset(request.template)) {
+    return { cancel: () => undefined, done: Promise.reject(new OverlayExportError('render_failed', MAPTILER_PNG_REFUSAL)) };
+  }
   return startWorkerJob(
     (archiveName) => ({ type: 'start', request: { ...request, archiveName } }),
     (message) => {
       if (message.type === 'progress') onProgress(message.done, message.total);
     },
     deps,
+    openInsetBridge(request, deps),
   );
 }
 
@@ -157,6 +218,7 @@ export function startBurnedInExport(
       if (message.type === 'burnProgress') onProgress(message.fraction, message.processedSeconds);
     },
     deps,
+    openInsetBridge(request, deps),
   );
 }
 
@@ -221,6 +283,7 @@ function startWorkerJob(
   startMessage: (archiveName: string) => ToWorker,
   onWorkerMessage: (message: FromWorker) => void,
   deps: ExportClientDeps,
+  insets?: InsetBridge,
 ): ExportJob {
   const archiveName = newArchiveName();
   // A worker that cannot even be constructed (a blocked script, a policy) is a
@@ -232,6 +295,13 @@ function startWorkerJob(
   } catch (error) {
     return { cancel: () => undefined, done: Promise.reject(startupError(error)) };
   }
+  /** The worker is ended, and with it the maps the page held for it. */
+  const stopWorker = () => {
+    worker.terminate();
+    // A map still waiting on a tile stops at once rather than poll for two minutes for a job that is over.
+    insets?.controller.abort();
+    insets?.session.close();
+  };
   let cancelTimer: ReturnType<typeof setTimeout> | undefined;
   let settled = false;
   let started = false;
@@ -252,13 +322,47 @@ function startWorkerJob(
     const finish = () => {
       settled = true;
       if (cancelTimer) clearTimeout(cancelTimer);
-      worker.terminate();
+      stopWorker();
     };
 
     worker.onmessage = (event) => {
       const message = event.data;
       if (message.type === 'progress' || message.type === 'burnProgress') {
         onWorkerMessage(message);
+      } else if (message.type === 'insets' && insets) {
+        // AV-1023. The worker is waiting for these pictures before it draws frame `frame`: asked of the maps, sent back transferred.
+        const { frame } = message;
+        void insets.session.bitmapsAt(message.seconds, message.ids).then(
+          (bitmaps) => {
+            const pictures = Object.values(bitmaps);
+            if (settled) {
+              for (const bitmap of pictures) bitmap.close();
+              return;
+            }
+            try {
+              worker.postMessage({ type: 'insetBitmaps', frame, bitmaps }, pictures);
+            } catch (error) {
+              for (const bitmap of pictures) bitmap.close();
+              settled = true;
+              stopWorker();
+              void discard();
+              reject(startupError(error));
+            }
+          },
+          (error: unknown) => {
+            if (settled) return;
+            // A stop the reader asked for while the worker waits on a picture ends as the worker ends it: it hears the stop,
+            // aborts its archive and says so (the grace timer ends it if it does not).
+            if (cancelRequested && error instanceof OverlayExportError && error.code === 'cancelled') return;
+            finish();
+            void discard();
+            reject(
+              error instanceof OverlayExportError
+                ? error
+                : new OverlayExportError('render_failed', error instanceof Error && error.message ? error.message : 'The route inset’s map could not be drawn.', { cause: error }),
+            );
+          },
+        );
       } else if (message.type === 'done') {
         finish();
         if (cancelRequested) {
@@ -300,7 +404,7 @@ function startWorkerJob(
     if (cancelRequested) {
       // Stopped before it began: nothing was written, so there is nothing to undo.
       settled = true;
-      worker.terminate();
+      stopWorker();
       releaseOwnership();
       rejectJob(new OverlayExportError('cancelled', 'The export was stopped.'));
       return;
@@ -312,13 +416,13 @@ function startWorkerJob(
       // A request that cannot be sent (it could not be cloned) would otherwise
       // leave the job waiting for a worker that never heard of it.
       settled = true;
-      worker.terminate();
+      stopWorker();
       void discard();
       rejectJob(startupError(error));
     }
   }).catch((error: unknown) => {
     settled = true;
-    worker.terminate();
+    stopWorker();
     void discard();
     rejectJob(startupError(error));
   });
@@ -331,11 +435,13 @@ function startWorkerJob(
       // Before the start message has gone out, the start itself is what is dropped.
       if (!started) return;
       worker.postMessage({ type: 'cancel' });
+      // A map waiting on a tile gives up at once rather than hold the stop for it.
+      insets?.controller.abort();
       // A worker busy in one long frame still answers eventually; if it does not, end it.
       cancelTimer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        worker.terminate();
+        stopWorker();
         void discard();
         rejectJob(new OverlayExportError('cancelled', 'The export was stopped.'));
       }, CANCEL_GRACE_MS);

@@ -1471,6 +1471,34 @@ Acceptance criteria:
 - **The other trims:** the map video's and map image's trims stay in metres, as their projects save them, and now show the share they hide beside them. One cut serves all three.
 - Tests: the cut at chosen shares, at 0 %, at both ends at once, on a route with a segment break, and too little left; the fit using only the kept part; no marker in a hidden stretch; the editor's slider and inputs in step both ways and by keyboard; the layout round trip; the share beside the map video's and map image's trims; and a browser test whose exported frame has no line or marker in the hidden stretches.
 
+#### AV-1023: The Route Inset as a Real Map: Styles, a Chosen Zoom Following the Position, and Heading-Up or North-Up
+
+Dependencies: AV-1004, AV-1011, AV-1022, AV-1201, AV-1205, AV-1209, AV-1013, TD-064, TD-068, TD-076, TD-077, TD-079, TD-091
+
+GitHub issue #23. The route inset (`routeInset`) is only the line, fitted whole and north up. It gains a view that follows the position, heading-up or north-up, and optionally a basemap drawn by the map video's own MapLibre path. The privacy trim of AV-1022 applies to all of it.
+
+Acceptance criteria:
+- **View** (per inset, every inset, with or without a map):
+  - **Whole route** (today's fit of the kept route, north up), the default, so older layouts draw as before;
+  - **Follow:** a zoom the reader picks (10 to 18, default 15), the position held in the centre and the route moving under it.
+  - **Orientation when following:** north up, or heading up (the direction of travel up), from the timeline's smoothed heading (AV-1019), so it does not swing on GPS noise, and held through a stop (TD-080).
+  - The route and marker are drawn by the renderer in Web Mercator at the camera's centre, zoom and bearing, the same projection MapLibre uses, so a line drawn over a map lies on its roads.
+- **Shape and line:** square or round, a border (width and colour), the trail behind (all of it, or the last 1 to 60 minutes) and the route ahead (shown, dimmed or hidden), and the line colour and width.
+- **Map** (off by default):
+  - None (the line only, as today), or a basemap from the providers the map video already uses: OpenFreeMap's styles, and MapTiler's with the reader's key, the latter only for video exports (the transparent WebM and the video with the overlay drawn in), never the PNG sequence, whose frames are static images its terms forbid (TD-079).
+  - No other provider is offered. Those raised on the issue (OpenStreetMap's tile servers, OpenTopoMap, Thunderforest/OpenCycleMap, Stadia, Esri, Google, Bing and IGN) have their terms read and recorded in the decision with whether each could be offered and how; none is added here.
+  - Where the map is turned on, the page says that tile requests reveal the area to the provider, and how many tiles the export will ask for before it starts (the map video's count and limits, TD-076, TD-077).
+  - The map's credit is drawn in the inset whenever a provider's map is shown.
+  - At most two map insets in one overlay.
+  - Not offered inside the map video's and map image's canvas, which are maps already; the view and orientation are.
+- **Drawing:**
+  - **Export:** the inset's map is drawn on the page by the map video's offscreen map and request queue (`openExportMap`, TD-064), every tile waited for before a frame is written. For each frame the worker asks the page for each map inset's picture, gets it as an `ImageBitmap`, and draws it in the inset's box under the line, the marker and the rest of the overlay. One frame at a time in memory.
+  - This one path serves the PNG sequence and the video with the overlay drawn in; the transparent WebM, recorded in real time, first loads every tile its plan needs, and a frame that still cannot be drawn in time stops the recording with the reason, as now.
+  - **Preview:** a live MapLibre map in the inset's box, under the overlay, moved to the same camera each frame without waiting for tiles; the page says the export waits for every tile and the preview does not.
+- **Privacy trim (AV-1022):** only the kept route is drawn or framed; while the moment is in a hidden stretch the camera holds at the kept route's nearest end and no marker is drawn, so no tile is asked for a hidden stretch.
+- **Saved** in the layout as the inset's settings, within template version 2; older layouts open as a whole-route, line-only inset.
+- Tests: the camera (centre held while following, zoom, heading-up from the smoothed heading, held through a stop, across 359°/0°); the Mercator projection against MapLibre's at known points; the trail and the route ahead; the trim (camera held, no marker, no tile for a hidden stretch); providers per export kind (MapTiler never for the PNG sequence); the editor's controls; at most two map insets; the layout round trip; golden renders of a following, heading-up line-only inset; and browser tests over fixture tiles (never a live provider): an exported frame's pixels show the map, the route and a centred marker, every tile asked once, by GET, with nothing of the activity, and none for the trimmed ends.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

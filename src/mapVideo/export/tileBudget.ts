@@ -138,6 +138,15 @@ function addView(tiles: Set<number>, camera: MapVideoCamera, width: number, heig
   }
 }
 
+/**
+ * AV-1023 (TD-092). The tiles one flat, unpitched view of `width` by `height` pixels asks for, as the map video
+ * counts them: what a route inset's map (which never tilts and has no terrain) is moved through.
+ */
+export function flatViewTiles(camera: Pick<MapVideoCamera, 'center' | 'zoom' | 'bearing'>, width: number, height: number, into: Set<number> = new Set()): Set<number> {
+  addView(into, { ...camera, pitch: 0 }, width, height, false);
+  return into;
+}
+
 const sameView = (a: MapVideoCamera, b: MapVideoCamera) =>
   a.zoom === b.zoom && a.pitch === b.pitch && a.bearing === b.bearing && a.center[0] === b.center[0] && a.center[1] === b.center[1];
 

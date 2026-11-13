@@ -90,8 +90,18 @@ export async function openExportMap(options: {
   what: string;
   signal?: AbortSignal;
   onWaiting?: (waiting: RenderWaiting) => void;
+  /**
+   * AV-1023 (TD-092). The picture's pixels to one laid-out pixel: the map is laid out at `width` by `height` and drawn
+   * at that times this, so a route inset's map has the labels and the ground of its reference size at any output size.
+   */
+  pixelRatio?: number;
+  /**
+   * AV-1023 (TD-092). Where the map starts, so its first draw asks for the tiles of the first frame and not of the
+   * world's default view (the whole world's one tile, at the origin of the map).
+   */
+  camera?: { center: [number, number]; zoom: number; bearing: number };
 }): Promise<ExportMap> {
-  const { width, height, styleUrl, what, signal, onWaiting } = options;
+  const { width, height, styleUrl, what, signal, onWaiting, pixelRatio = 1, camera } = options;
   // Laid out at the picture's size, out of sight: WebGL draws it all the same.
   const container = document.createElement('div');
   container.setAttribute('aria-hidden', 'true');
@@ -106,7 +116,8 @@ export async function openExportMap(options: {
     container,
     style: styleUrl ? tiles.queued(styleUrl).url : routeOnlyStyle(),
     transformRequest: (url) => tiles.queued(url),
-    pixelRatio: 1,
+    pixelRatio,
+    ...(camera ? { center: camera.center, zoom: camera.zoom, bearing: camera.bearing } : {}),
     interactive: false,
     attributionControl: false,
     // TD-064: no fades, which run on the wall clock; the buffer kept, so the frame is read after it settles.

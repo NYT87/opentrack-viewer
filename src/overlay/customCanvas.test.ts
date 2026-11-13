@@ -350,3 +350,22 @@ describe('growing a figure’s box to fit its text (AV-1015, TD-083)', () => {
     expect(smoothed).toEqual(plain);
   });
 });
+
+describe('a duplicate of an inset with a map (AV-1023)', () => {
+  it('carries no map once the overlay already has two', () => {
+    const inset = (id: string) => ({
+      id,
+      type: 'routeInset' as const,
+      visible: true,
+      rect: { x: 0, y: 0, width: 0.2, height: 0.2 },
+      unitMode: 'auto' as const,
+      style: {},
+      routeInset: { view: 'whole' as const, zoom: 15, orientation: 'north' as const, shape: 'square' as const, border: { width: 0, color: '#ffffff' }, trail: 'all' as const, ahead: 'shown' as const, lineWidth: 0.03, map: { provider: 'openfreemap' as const, style: 'liberty' } },
+    });
+    const one = duplicateComponent([inset('route')], 'route');
+    expect(one.components[1]!.routeInset!.map.provider).toBe('openfreemap');
+    const two = duplicateComponent(one.components, 'route');
+    expect(two.components[2]!.routeInset!.map.provider).toBe('none');
+    expect(two.components[2]!.routeInset!.view).toBe('whole');
+  });
+});

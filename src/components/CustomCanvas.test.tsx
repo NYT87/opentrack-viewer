@@ -1240,3 +1240,131 @@ describe('the custom canvas (AV-1011)', () => {
     });
   });
 });
+
+describe('the route inset’s view, shape, trail and map (AV-1023, TD-092)', () => {
+  const layoutRoute = async (index = 0) => {
+    const json = await layoutJson();
+    return json.template.components.filter((component) => component.type === 'routeInset')[index] as Record<string, unknown> & { routeInset?: Record<string, unknown> };
+  };
+  const select = (label: string, value: string) => userEvent.selectOptions(within(editor()).getByLabelText(label), value);
+
+  it('starts as it always was: the whole route, north up, no map, and nothing saved of settings', async () => {
+    setup();
+    await add('Route with position');
+    expect(within(editor()).getByLabelText('View')).toHaveValue('whole');
+    expect(within(editor()).getByLabelText('Shape')).toHaveValue('square');
+    expect(within(editor()).getByLabelText('Map behind the line')).toHaveValue('none');
+    expect(within(editor()).queryByLabelText('Zoom')).toBeNull();
+    expect(within(editor()).queryByLabelText('Orientation')).toBeNull();
+    expect((await layoutRoute()).routeInset).toBeUndefined();
+  });
+
+  it('follows the position at a zoom, north up or heading up, and keeps them in the layout', async () => {
+    setup();
+    await add('Route with position');
+    await select('View', 'follow');
+    expect(field('Zoom').value).toBe('15');
+    fireEvent.change(field('Zoom'), { target: { value: '17.5' } });
+    await select('Orientation', 'heading');
+    expect(await layoutRoute()).toMatchObject({ routeInset: { view: 'follow', zoom: 17.5, orientation: 'heading' } });
+    // Out of range is kept inside it.
+    fireEvent.change(field('Zoom'), { target: { value: '30' } });
+    expect((await layoutRoute()).routeInset).toMatchObject({ zoom: 18 });
+    await select('View', 'whole');
+    expect(within(editor()).queryByLabelText('Zoom')).toBeNull();
+  });
+
+  it('sets the shape, the border, the trail, the route ahead and the line', async () => {
+    setup();
+    await add('Route with position');
+    await select('Shape', 'round');
+    fireEvent.change(field('Border width (px)'), { target: { value: '6' } });
+    fireEvent.change(field('Border colour'), { target: { value: '#ff0000' } });
+    await select('Trail behind', 'last');
+    expect(field('Trail length (minutes)').value).toBe('10');
+    fireEvent.change(field('Trail length (minutes)'), { target: { value: '5' } });
+    await select('Route ahead', 'dimmed');
+    fireEvent.change(field('Line width (% of the inset)'), { target: { value: '5' } });
+    const route = await layoutRoute();
+    expect(route.routeInset).toMatchObject({ shape: 'round', border: { color: '#ff0000' }, trail: 5, ahead: 'dimmed', lineWidth: 0.05 });
+    expect((route.routeInset!.border as { width: number }).width).toBeGreaterThan(0);
+    await select('Trail behind', 'all');
+    expect((await layoutRoute()).routeInset).toMatchObject({ trail: 'all' });
+  });
+
+  it('turns the map on with the notice, the style and the way the export treats it', async () => {
+    setup();
+    await add('Route with position');
+    await select('Map behind the line', 'openfreemap');
+    expect(within(editor()).getByText(/tiles are fetched from OpenFreeMap, which learns the area shown\. No privacy trim is set/)).toBeInTheDocument();
+    expect(within(editor()).getByText(/waits for every tile/)).toBeInTheDocument();
+    expect(within(editor()).getByLabelText('Map style')).toHaveValue('liberty');
+    await select('Map style', 'dark');
+    expect((await layoutRoute()).routeInset).toMatchObject({ map: { provider: 'openfreemap', style: 'dark' } });
+    await select('Map behind the line', 'maptiler');
+    expect(within(editor()).getByLabelText('Map style')).toHaveValue('satellite');
+    expect(within(editor()).getByLabelText('MapTiler key')).toHaveAttribute('type', 'password');
+    expect(within(editor()).getByText(/PNG sequence refuses it/)).toBeInTheDocument();
+    expect(within(editor()).getByText(/tiles are fetched from MapTiler/)).toBeInTheDocument();
+    // The key is the page's, never in the layout.
+    await userEvent.type(within(editor()).getByLabelText('MapTiler key'), 'sekrit');
+    expect(JSON.stringify(await layoutJson())).not.toContain('sekrit');
+    await select('Map behind the line', 'none');
+    expect(within(editor()).queryByLabelText('Map style')).toBeNull();
+  });
+
+  it('says the privacy trim keeps the ends out only when one is set, in a status line that is always there', async () => {
+    setup();
+    await add('Route with position');
+    const status = () => within(editor()).getAllByRole('status').find((element) => element.classList.contains('overlay-controls__note'))!;
+    expect(status()).toHaveTextContent('');
+    await select('Map behind the line', 'openfreemap');
+    expect(status()).toHaveTextContent(/No privacy trim is set/);
+    fireEvent.change(within(region()).getByLabelText('Hide from the start (%)'), { target: { value: '10' } });
+    expect(status()).toHaveTextContent('The privacy trim keeps the start and end out of every request.');
+    await select('Map behind the line', 'none');
+    expect(status()).toHaveTextContent('');
+  });
+
+  it('offers no third map, with the reason, and a map can be turned off to free one', async () => {
+    setup();
+    for (let i = 0; i < 3; i += 1) {
+      await add('Route with position');
+      if (i < 2) await select('Map behind the line', 'openfreemap');
+    }
+    const choice = within(editor()).getByLabelText('Map behind the line');
+    expect(within(choice).getByRole('option', { name: 'OpenFreeMap' })).toBeDisabled();
+    expect(within(choice).getByRole('option', { name: /MapTiler/ })).toBeDisabled();
+    expect(within(editor()).getByText(/At most 2 insets in one overlay show a map/)).toBeInTheDocument();
+  });
+
+  it('opens a layout with a third map as a line only, with a warning', async () => {
+    setup();
+    await add('Route with position');
+    const json = await layoutJson();
+    const base = json.template.components[0]!;
+    const map = { view: 'whole', map: { provider: 'openfreemap', style: 'liberty' } };
+    const file = { ...json, template: { ...json.template, components: ['a', 'b', 'c'].map((id) => ({ ...base, id, routeInset: map })) } };
+    fireEvent.change(screen.getByTestId('canvas-layout-input'), { target: { files: [new File([JSON.stringify(file)], 'maps.json', { type: 'application/json' })] } });
+    expect(await screen.findByText(/at most 2 maps/)).toBeInTheDocument();
+    const providers = (await layoutJson()).template.components.map((component) => (component.routeInset as { map: { provider: string } }).map.provider);
+    expect(providers).toEqual(['openfreemap', 'openfreemap', 'none']);
+  });
+
+  it('keeps the line colour field as the text colour, and a colour from a file for the inset alone gives way to it', async () => {
+    setup();
+    await add('Route with position');
+    fireEvent.change(field('Line colour'), { target: { value: '#00ff00' } });
+    expect(await layoutRoute()).toMatchObject({ style: { textColor: '#00ff00' } });
+  });
+
+  it('is exported in the layout as the inset’s own setting, with nothing of the activity', async () => {
+    setup();
+    await add('Route with position');
+    await select('View', 'follow');
+    await select('Map behind the line', 'openfreemap');
+    const json = await layoutJson();
+    expect(JSON.stringify(json)).not.toMatch(/"(lat|lon|time)"/);
+    expect((await layoutRoute()).routeInset).toMatchObject({ view: 'follow', map: { provider: 'openfreemap' } });
+  });
+});

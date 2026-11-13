@@ -1,8 +1,9 @@
 import type * as Mediabunny from 'mediabunny';
 import { buildOverlayTimeline } from '../timeline';
 import { createOverlayRenderer } from './drawOverlay';
+import { acquireInsets } from './insetBridge';
 import { OverlayExportError } from './errors';
-import type { BurnRequest, BurnSourceInfo } from './protocol';
+import type { BurnRequest, BurnSourceInfo, FromWorker } from './protocol';
 
 /**
  * AV-1007. The burned-in render, on Mediabunny's conversion pipeline: it
@@ -80,6 +81,8 @@ export interface BurnRunOptions {
   writeAt: (chunk: Uint8Array, position: number) => void;
   signal?: AbortSignal;
   onProgress?: (fraction: number, processedSeconds: number) => void;
+  /** AV-1023 (TD-092). How a route inset's map picture is asked of the page: the worker's `post`. Without it a map is not drawn. */
+  post?: (message: FromWorker) => void;
 }
 
 export interface BurnRunResult {
@@ -144,10 +147,17 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
         processedHeight: request.height,
         // The one thing that is ours: the frame, then the overlay over it. The
         // video is only ever read here, never written back.
-        process: (sample) => {
+        process: async (sample) => {
+          const seconds = from + Math.max(0, sample.timestamp);
+          // AV-1023. The map's picture for this frame is asked of the page first (the conversion waits for the answer, one frame at a time), then the frame and the overlay are drawn together.
+          const insets = options.post ? await acquireInsets(renderer, options.post, frames, seconds, signal) : undefined;
           frames += 1;
-          sample.draw(ctx, 0, 0, request.width, request.height);
-          renderer.drawFrame(ctx, from + Math.max(0, sample.timestamp), { clear: false });
+          try {
+            sample.draw(ctx, 0, 0, request.width, request.height);
+            renderer.drawFrame(ctx, seconds, { clear: false, ...(insets?.maps ? { maps: insets.maps } : {}) });
+          } finally {
+            insets?.release();
+          }
           return canvas;
         },
       },

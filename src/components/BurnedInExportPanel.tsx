@@ -19,6 +19,10 @@ import { buildOverlayTimeline } from '../overlay/timeline';
 import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { usePersonalStore } from '../state/personalStore';
+import { useMapVideoStore } from '../state/mapVideoStore';
+import { checkInsetExportCached } from '../overlay/insetExportCheck';
+import { hasMapInset } from '../overlay/insetCamera';
+import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
 
 interface BurnedInExportPanelProps {
   video: OverlayVideo;
@@ -109,6 +113,8 @@ export function BurnedInExportPanel({
   const id = useId();
   const [heightChoice, setHeightChoice] = useState<string>(NATIVE);
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
+  // AV-1023. Why a route inset's map is waiting.
+  const [waiting, setWaiting] = useState<'tiles' | 'hidden' | undefined>(undefined);
   const [inspected, setInspected] = useState<Inspected | undefined>(undefined);
   const [storage, setStorage] = useState<ArchiveStorage | undefined>(undefined);
   const [freeBytes, setFreeBytes] = useState<number | undefined>(undefined);
@@ -146,6 +152,22 @@ export function BurnedInExportPanel({
   // AV-1018 (TD-086). The reader's figures go with the request only when a zones component can use them.
   const sessionFigures = usePersonalStore((state) => state.personal);
   const personal = built.template.components.some((component) => component.type === 'zones') ? sessionFigures : {};
+  // AV-1023 (TD-092). A map in a route inset: what the render asks of the provider, counted before it starts. A video's frames are its own, at its own rate.
+  const maptilerKey = useMapVideoStore((state) => state.maptilerKey);
+  const insetCheck = hasMapInset(built.template)
+    ? checkInsetExportCached({
+        template: built.template,
+        activity,
+        timeline,
+        width: outWidth,
+        height: outHeight,
+        fps: frameRate ?? 30,
+        frameCount: Math.ceil(range.length * (frameRate ?? 30)),
+        trimStartSeconds: range.trimmed ? range.start : 0,
+        kind: 'burned',
+        maptilerKey,
+      })
+    : undefined;
   // The answer belongs to the file and size it was asked for: any other is a question not yet answered.
   const inspectKey = `${video.file.name}:${video.file.size}:${video.file.lastModified}:${outWidth}x${outHeight}:${frameRate}`;
   const source: Source =
@@ -246,12 +268,13 @@ export function BurnedInExportPanel({
           fileStorage: storage === 'opfs',
         })
       : undefined;
-  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn || noOverlap || shapeMismatch;
+  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn || noOverlap || shapeMismatch || insetCheck?.refusal !== undefined;
 
   const begin = () => {
     if (!ready || running || blocked) return;
     void output.current?.dispose();
     output.current = undefined;
+    setWaiting(undefined);
     setPhase({ status: 'running', fraction: 0, seconds: 0 });
 
     let active: ExportJob;
@@ -273,6 +296,8 @@ export function BurnedInExportPanel({
           ...(Object.keys(personal).length > 0 ? { personal } : {}),
         },
         (fraction, seconds) => setPhase({ status: 'running', fraction, seconds }),
+        // AV-1023. The key stays on the page, where the maps are; it goes with the render only when a route inset has a map.
+        ...(insetCheck ? [{ maptilerKey, onWaiting: setWaiting }] : []),
       );
     } catch (error) {
       setPhase({
@@ -408,6 +433,7 @@ export function BurnedInExportPanel({
           {nothingOn && (
             <p role="status">No component is switched on, so there is nothing to draw.</p>
           )}
+          <InsetExportNotes check={insetCheck} />
           {outsideActivity && <p role="status">{uncoveredNotice(range, drawnAnyway)}</p>}
 
           <p className="video__actions">
@@ -442,6 +468,7 @@ export function BurnedInExportPanel({
           {formatDuration(range.length)}
         </p>
       )}
+      {phase.status === 'running' && <InsetWaiting waiting={waiting} />}
       {phase.status === 'running' && (
         <p className="visually-hidden" role="status">
           Rendering: {Math.floor(phase.fraction * 4) * 25}% done.

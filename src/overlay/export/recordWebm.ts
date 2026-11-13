@@ -1,6 +1,8 @@
 import { buildOverlayTimeline } from '../timeline';
 import type { ExportJob, ExportOutput } from './client';
 import { createOverlayRenderer, type OverlayContext2D } from './drawOverlay';
+import { hasMapInset } from '../insetCamera';
+import { createInsetMaps, type InsetMapSession, type InsetMapsInput } from './insetMaps';
 import { OverlayExportError, isOverlayExportError } from './errors';
 import { frameVideoTime, webmBitsPerSecond } from './plan';
 import type { ExportRequest } from './protocol';
@@ -57,7 +59,8 @@ export interface RecordWebmOptions {
   fps: number;
   width: number;
   height: number;
-  drawFrame: (ctx: OverlayContext2D, videoTimeSeconds: number) => void;
+  /** May be asynchronous (a route inset's map picture is awaited): a frame that takes the clock past `MAX_LAG_MS` stops the recording. */
+  drawFrame: (ctx: OverlayContext2D, videoTimeSeconds: number) => void | Promise<void>;
   signal?: AbortSignal;
   onProgress?: (framesDone: number, frameCount: number) => void;
   deps: WebmRecordingDeps;
@@ -125,8 +128,10 @@ export async function recordWebm(options: RecordWebmOptions): Promise<{ file: Bl
       if (index === frameCount) break;
       if (signal?.aborted) throw stopped();
       try {
-        options.drawFrame(ctx, frameVideoTime(index, fps));
+        await options.drawFrame(ctx, frameVideoTime(index, fps));
       } catch (error) {
+        // A stop or a map's own reason (a tile that could not be loaded) is the reader's to read as it is, not a frame that could not be drawn.
+        if (error instanceof OverlayExportError) throw error;
         throw new OverlayExportError('render_failed', `Frame ${index + 1} of ${frameCount} could not be drawn.`, { cause: error });
       }
       track.requestFrame?.();
@@ -183,6 +188,15 @@ export function startWebmExport(
   request: Omit<ExportRequest, 'archiveName'>,
   onProgress: (done: number, total: number) => void,
   deps: WebmRecordingDeps = browserWebmDeps(),
+  /** AV-1023 (TD-092). The reader's MapTiler key (kept on the page), and for tests how the maps are made. */
+  insets: {
+    maptilerKey?: string;
+    createInsets?: (input: InsetMapsInput) => InsetMapSession;
+    /** Why a map is waiting: tiles still coming, or a hidden tab. */
+    onWaiting?: InsetMapsInput['onWaiting'];
+    /** The pre-load's progress: cameras visited out of all. */
+    onLoading?: (done: number, total: number) => void;
+  } = {},
 ): ExportJob {
   const controller = new AbortController();
   const timeline = buildOverlayTimeline(request.activity, {
@@ -199,16 +213,51 @@ export function startWebmExport(
     personal: request.personal,
   });
 
-  const done = recordWebm({
-    frameCount: request.frameCount,
-    fps: request.fps,
-    width: request.width,
-    height: request.height,
-    drawFrame: (ctx, videoTime) => renderer.drawFrame(ctx, (request.trimStartSeconds ?? 0) + videoTime),
-    signal: controller.signal,
-    onProgress,
-    deps,
-  }).then(
+  // AV-1023. The maps are the page's own, since the recording is on the page: warmed once over the plan's cameras, then drawn from.
+  const maps = hasMapInset(request.template)
+    ? (insets.createInsets ?? createInsetMaps)({
+        template: request.template,
+        activity: request.activity,
+        timeline,
+        width: request.width,
+        height: request.height,
+        maptilerKey: insets.maptilerKey ?? '',
+        signal: controller.signal,
+        onWaiting: insets.onWaiting,
+      })
+    : undefined;
+  const from = request.trimStartSeconds ?? 0;
+  const record = async () => {
+    if (maps) {
+      // Every tile the plan needs is loaded before the clock starts: a recording in real time cannot wait for one.
+      onProgress(0, request.frameCount);
+      await maps.warm(Array.from({ length: request.frameCount }, (_, index) => from + frameVideoTime(index, request.fps)), insets.onLoading);
+    }
+    return recordWebm({
+      frameCount: request.frameCount,
+      fps: request.fps,
+      width: request.width,
+      height: request.height,
+      drawFrame: async (ctx, videoTime) => {
+        const seconds = from + videoTime;
+        const ids = maps ? renderer.insetsAt(seconds) : [];
+        if (!maps || ids.length === 0) {
+          renderer.drawFrame(ctx, seconds);
+          return;
+        }
+        const bitmaps = await maps.bitmapsAt(seconds, ids);
+        try {
+          renderer.drawFrame(ctx, seconds, { maps: { bitmaps: new Map(Object.entries(bitmaps)) } });
+        } finally {
+          for (const bitmap of Object.values(bitmaps)) bitmap.close();
+        }
+      },
+      signal: controller.signal,
+      onProgress,
+      deps,
+    });
+  };
+  const done = record().finally(() => maps?.close()).then(
     (result): ExportOutput => ({
       file: result.file,
       bytes: result.file.size,

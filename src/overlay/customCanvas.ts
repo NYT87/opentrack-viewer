@@ -26,6 +26,7 @@ import { dataSourceId, type OverlayMetricKey, type OverlayTimeline } from './tim
 import { DEFAULT_DIAL, activityRange } from './dial';
 import { DEFAULT_GRADIENT } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
+import { cappedMapIds } from './insetCamera';
 import { DEFAULT_SPLITS, splitsContentHeight, splitsMetrics, splitsUnavailableReason } from './splits';
 import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
 import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
@@ -715,6 +716,10 @@ export function duplicateComponent(components: OverlayComponent[], id: string): 
   const copyId = freshComponentId({ version: OVERLAY_TEMPLATE_VERSION, name: '', style: DEFAULT_OVERLAY_STYLE, components }, prefix);
   const copy: OverlayComponent = structuredClone(source);
   copy.id = copyId;
+  // AV-1023. A copy carries no map when the overlay already has the most it may: each map is one the page holds open.
+  if (copy.type === 'routeInset' && copy.routeInset && copy.routeInset.map.provider !== 'none' && !cappedMapIds([...components, copy]).has(copyId)) {
+    copy.routeInset = { ...copy.routeInset, map: { ...copy.routeInset.map, provider: 'none' } };
+  }
   const placed = { ...copy, rect: normalizeRect({ ...copy.rect, x: copy.rect.x + 0.02, y: copy.rect.y + 0.02 }) };
   return { components: [...components, placed], id: copyId };
 }

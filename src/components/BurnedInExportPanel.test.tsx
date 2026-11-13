@@ -11,6 +11,7 @@ import { DEFAULT_OVERLAY_CONTROLS } from '../overlay/presets';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { makeActivity } from '../test/helpers/activity';
 import { usePersonalStore } from '../state/personalStore';
+import { useMapVideoStore } from '../state/mapVideoStore';
 import { canvasTemplate, newZonesComponent } from '../overlay/customCanvas';
 
 const T0 = new Date('2024-01-01T10:00:00Z');
@@ -454,5 +455,55 @@ describe('the reader’s figures go with the request (AV-1018, TD-086)', () => {
     const none = setup({ template: withZones });
     await userEvent.click(renderButton());
     expect(none.start.mock.calls[0]![0]).not.toHaveProperty('personal');
+  });
+});
+
+describe('a map in a route inset (AV-1023, TD-092)', () => {
+  const withMap = (provider: 'openfreemap' | 'maptiler') =>
+    canvasTemplate([
+      {
+        id: 'route',
+        type: 'routeInset',
+        visible: true,
+        rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.3555556 },
+        unitMode: 'auto',
+        style: {},
+        routeInset: { view: 'follow', zoom: 15, orientation: 'north', shape: 'square', border: { width: 0, color: '#ffffff' }, trail: 'all', ahead: 'shown', lineWidth: 0.03, map: { provider, style: provider === 'maptiler' ? 'satellite' : 'liberty' } },
+      },
+    ]);
+  afterEach(() => useMapVideoStore.setState({ maptilerKey: '' }));
+
+  it('counts the tiles before it starts, and hands the page’s key to the render', async () => {
+    useMapVideoStore.setState({ maptilerKey: 'k' });
+    const { start } = setup({ template: withMap('openfreemap') });
+    expect(screen.getByTestId('inset-tiles').textContent).toMatch(/asks OpenFreeMap for \d+ tiles?, each once/);
+    await userEvent.click(renderButton());
+    expect((start.mock.calls[0] as unknown[])[2]).toMatchObject({ maptilerKey: 'k' });
+  });
+
+  it('says why a running render waits for its map', async () => {
+    const { start } = setup({ template: withMap('openfreemap') });
+    await userEvent.click(renderButton());
+    const onWaiting = ((start.mock.calls[0] as unknown[])[2] as { onWaiting: (waiting: 'tiles' | 'hidden' | undefined) => void }).onWaiting;
+    act(() => onWaiting('hidden'));
+    expect(screen.getByText(/the tab is hidden, so the map cannot draw/)).toBeInTheDocument();
+    act(() => onWaiting('tiles'));
+    expect(screen.getByText('Waiting for map tiles…')).toBeInTheDocument();
+  });
+
+  it('lets a MapTiler map into the video with a key, and not without one', async () => {
+    const { rerender, common, start } = setup({ template: withMap('maptiler') });
+    expect(screen.getByText(/no key has been typed/)).toBeInTheDocument();
+    expect(renderButton()).toBeDisabled();
+    act(() => useMapVideoStore.setState({ maptilerKey: 'k' }));
+    rerender(<BurnedInExportPanel {...common} template={withMap('maptiler')} />);
+    expect(renderButton()).toBeEnabled();
+    await userEvent.click(renderButton());
+    expect((start.mock.calls[0] as unknown[])[2]).toMatchObject({ maptilerKey: 'k' });
+  });
+
+  it('says nothing about maps for a layout without one', () => {
+    setup();
+    expect(screen.queryByTestId('inset-tiles')).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import type { Activity } from '../domain/activity';
 import type { MapVideoColorBy, MapVideoSettings } from './project';
 import { positionAt, type MapVideoRoute } from './route';
 import { timeModeRefusal } from './timing';
+import { MAPTILER_CREDIT, OPENFREEMAP_CREDIT } from '../overlay/routeInset';
 
 /**
  * AV-1205. How a map video is styled, as data: what the route's colour can
@@ -203,8 +204,8 @@ export const TERRAIN_FULL_CREDIT =
  */
 export function mapVideoAttribution(settings: MapVideoSettings): string | undefined {
   const parts: string[] = [];
-  if (settings.basemap.source === 'online') parts.push('OpenFreeMap © OpenMapTiles Data from OpenStreetMap');
-  if (settings.basemap.source === 'maptiler') parts.push('© MapTiler © OpenStreetMap contributors');
+  if (settings.basemap.source === 'online') parts.push(OPENFREEMAP_CREDIT);
+  if (settings.basemap.source === 'maptiler') parts.push(MAPTILER_CREDIT);
   if (terrainActive(settings)) parts.push('Terrain: Mapzen, AWS Open Data, USGS, Copernicus and others');
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }

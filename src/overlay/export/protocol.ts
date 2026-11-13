@@ -103,6 +103,11 @@ export type ToWorker =
   | { type: 'mapVideoFrame'; frame: VideoFrame; index: number }
   | { type: 'mapVideoFinish' }
   | { type: 'cancel' }
+  /**
+   * AV-1023 (TD-092). The page's answer to `insets`: one basemap picture for each route inset asked for,
+   * transferred (the page keeps no copy), for this frame. The worker draws it and closes it.
+   */
+  | { type: 'insetBitmaps'; frame: number; bitmaps: Record<string, ImageBitmap> }
   /** Asks which storage the worker can really write to, without exporting. */
   | { type: 'probe'; archiveName: string }
   /** AV-1007 */
@@ -112,6 +117,12 @@ export type ToWorker =
 export type FromWorker =
   | { type: 'progress'; done: number; total: number }
   | { type: 'probed'; storage: ArchiveStorage }
+  /**
+   * AV-1023 (TD-092). Before frame `frame` is drawn, at `seconds` of the video, the worker asks the page for the
+   * basemap picture of each route inset in `ids` (the page holds the maps, which need a page). One frame at a
+   * time is asked for, and the worker waits for the answer.
+   */
+  | { type: 'insets'; frame: number; seconds: number; ids: string[] }
   | { type: 'inspected'; info: BurnSourceInfo }
   /** A burned-in render's progress, 0 to 1, and how much of the video is done. */
   | { type: 'burnProgress'; fraction: number; processedSeconds: number }

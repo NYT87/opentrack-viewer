@@ -12,6 +12,7 @@ import { DEFAULT_OVERLAY_CONTROLS, type OverlayControls } from '../overlay/prese
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { makeActivity } from '../test/helpers/activity';
 import { usePersonalStore } from '../state/personalStore';
+import { useMapVideoStore } from '../state/mapVideoStore';
 import { canvasTemplate, newZonesComponent } from '../overlay/customCanvas';
 
 const T0 = new Date('2024-01-01T10:00:00Z');
@@ -614,5 +615,111 @@ describe('the reader’s figures go with the request (AV-1018, TD-086)', () => {
     const { start } = setup({ template: withZones });
     await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
     expect(start.mock.calls[0]![0]).not.toHaveProperty('personal');
+  });
+});
+
+describe('a map in a route inset (AV-1023, TD-092)', () => {
+  const withMap = (provider: 'openfreemap' | 'maptiler') =>
+    canvasTemplate([
+      {
+        id: 'route',
+        type: 'routeInset',
+        visible: true,
+        rect: { x: 0.1, y: 0.1, width: 0.3, height: 0.4 },
+        unitMode: 'auto',
+        style: {},
+        routeInset: { view: 'follow', zoom: 15, orientation: 'north', shape: 'square', border: { width: 0, color: '#ffffff' }, trail: 'all', ahead: 'shown', lineWidth: 0.03, map: { provider, style: provider === 'maptiler' ? 'satellite' : 'liberty' } },
+      },
+    ]);
+
+  afterEach(() => useMapVideoStore.setState({ maptilerKey: '' }));
+
+  it('says how many tiles from which provider before it starts, and the trim’s promise', async () => {
+    setup({ template: withMap('openfreemap'), size: { width: 1280, height: 720 }, media: undefined });
+    const tiles = await screen.findByTestId('inset-tiles');
+    expect(tiles.textContent).toMatch(/asks OpenFreeMap for \d+ tiles?, each once/);
+    expect(tiles.textContent).toContain('No privacy trim is set');
+    expect(screen.getByRole('button', { name: 'Export PNG sequence' })).toBeEnabled();
+  });
+
+  it('hands the page’s key to the export only when a map needs it, and the template as it is', async () => {
+    const user = userEvent.setup();
+    const { start } = setup({ template: withMap('openfreemap'), size: { width: 1280, height: 720 }, media: undefined });
+    await user.click(await screen.findByRole('button', { name: 'Export PNG sequence' }));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]).toHaveLength(3);
+    expect((start.mock.calls[0] as unknown[])[2]).toMatchObject({ maptilerKey: '' });
+  });
+
+  it('says why a running export with a map waits: tiles still coming, or a hidden tab', async () => {
+    const user = userEvent.setup();
+    const { start } = setup({ template: withMap('openfreemap'), size: { width: 1280, height: 720 }, media: undefined });
+    await user.click(await screen.findByRole('button', { name: 'Export PNG sequence' }));
+    const onWaiting = ((start.mock.calls[0] as unknown[])[2] as { onWaiting: (waiting: 'tiles' | 'hidden' | undefined) => void }).onWaiting;
+    act(() => onWaiting('tiles'));
+    expect(screen.getByText('Waiting for map tiles…')).toBeInTheDocument();
+    act(() => onWaiting('hidden'));
+    expect(screen.getByText(/the tab is hidden, so the map cannot draw/)).toBeInTheDocument();
+    act(() => onWaiting(undefined));
+    expect(screen.queryByText(/Waiting/)).toBeNull();
+  });
+
+  it('shows the transparent video’s pre-load: the map’s tiles, N of M', async () => {
+    useMapVideoStore.setState({ maptilerKey: 'k' });
+    const user = userEvent.setup();
+    const startWebm = vi.fn(() => controlledJob().job);
+    setup({ template: withMap('openfreemap'), size: { width: 1280, height: 720 }, media: undefined, startWebm: startWebm as never, probeWebm: (async () => ({ supported: true })) as never });
+    await user.click(await screen.findByRole('radio', { name: /Transparent video/ }));
+    await user.click(screen.getByRole('button', { name: 'Export transparent video' }));
+    const options = (startWebm.mock.calls[0] as unknown[])[3] as { onLoading: (done: number, total: number) => void };
+    act(() => options.onLoading(5, 40));
+    expect(screen.getByText('Loading the map’s tiles: 5 of 40')).toBeInTheDocument();
+    act(() => options.onLoading(40, 40));
+    expect(screen.queryByText(/Loading the map/)).toBeNull();
+  });
+
+  it('refuses a MapTiler map for the PNG sequence, with the reason, and offers the video instead', async () => {
+    useMapVideoStore.setState({ maptilerKey: 'secret' });
+    const { start } = setup({ template: withMap('maptiler'), size: { width: 1280, height: 720 }, media: undefined });
+    expect(await screen.findByRole('alert')).toHaveTextContent('A MapTiler map cannot go into the PNG sequence');
+    const button = screen.getByRole('button', { name: 'Export PNG sequence' });
+    expect(button).toBeDisabled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('lets a MapTiler map into the transparent video, when its key is typed', async () => {
+    useMapVideoStore.setState({ maptilerKey: 'secret' });
+    const user = userEvent.setup();
+    const startWebm = vi.fn(() => controlledJob().job);
+    setup({
+      template: withMap('maptiler'),
+      size: { width: 1280, height: 720 },
+      media: undefined,
+      startWebm: startWebm as never,
+      probeWebm: (async () => ({ supported: true })) as never,
+    });
+    await user.click(await screen.findByRole('radio', { name: /Transparent video/ }));
+    await user.click(screen.getByRole('button', { name: 'Export transparent video' }));
+    expect(startWebm).toHaveBeenCalledTimes(1);
+    const args = startWebm.mock.calls[0] as unknown[];
+    expect(args[2]).toBeUndefined();
+    expect(args[3]).toMatchObject({ maptilerKey: 'secret' });
+    expect(screen.getByText(/tiles are all loaded before the recording starts/)).toBeInTheDocument();
+  });
+
+  it('asks for the key, and does not export without it, for a MapTiler map in the video', async () => {
+    const user = userEvent.setup();
+    setup({ template: withMap('maptiler'), size: { width: 1280, height: 720 }, media: undefined, probeWebm: (async () => ({ supported: true })) as never });
+    await user.click(await screen.findByRole('radio', { name: /Transparent video/ }));
+    expect(screen.getByRole('alert')).toHaveTextContent('no key has been typed');
+    expect(screen.getByRole('button', { name: 'Export transparent video' })).toBeDisabled();
+  });
+
+  it('says nothing about maps for a layout without one, and passes no third argument', async () => {
+    const user = userEvent.setup();
+    const { start } = setup();
+    expect(screen.queryByTestId('inset-tiles')).toBeNull();
+    await user.click(await screen.findByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]).toHaveLength(2);
   });
 });

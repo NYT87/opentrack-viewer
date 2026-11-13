@@ -30,6 +30,11 @@ Geometry is in 0..1 of the box, so multiply by `box.width` and `box.height`, the
 `box.y`. It does not depend on the frame's size. The shape is the same in every frame; only `position`,
 `cursor` and `progress` move.
 
+The route inset's own view (AV-1023, TD-092) is the app's, not the contract's: the built-in inset can follow the position
+at a zoom, turn heading up, be round or sit on a map, but `route` here is always the kept route fitted whole in the box, north up, as
+before, so a component of your own draws the same route as it did and sees nothing of a map or a camera. (Its camera is
+`src/overlay/insetCamera.ts`, and its projection is Web Mercator with 512-pixel tiles, MapLibre's.)
+
 A progress bar needs only `progress`. A route inset is not drawn where the activity has no position at
 the moment shown, and an elevation profile not where it has no elevation.
 

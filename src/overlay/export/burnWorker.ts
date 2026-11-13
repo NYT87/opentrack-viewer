@@ -88,6 +88,7 @@ export async function handleBurn(
       mb,
       request,
       writeAt: archive.writeAt,
+      post,
       signal: controller.signal,
       onProgress: (fraction, processedSeconds) => {
         const now = Date.now();

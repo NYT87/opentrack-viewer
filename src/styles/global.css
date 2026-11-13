@@ -1864,3 +1864,8 @@ input[type='range'].privacy-trim__handle { appearance: none; -webkit-appearance:
   .privacy-trim__handle::-moz-range-thumb { width: 22px; height: 36px; }
 }
 .map-video-settings__share { color: var(--text-muted); font-size: var(--text-reading); white-space: nowrap; }
+
+/* AV-1023 (TD-092). The preview's live maps under the canvas: each in its inset's box, laid out in reference pixels and scaled to it. */
+.inset-map-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.inset-map { position: absolute; overflow: hidden; background: #11161c; }
+.inset-map__map { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
