@@ -240,6 +240,10 @@ test('the transparent video loads every tile of its plan first, then records fro
       exporter.getByRole('alert').filter({ hasText: 'fell behind' }).waitFor({ timeout: 150_000 }).then(() => 'behind'),
     ]);
     if (outcome === 'done') break;
+    // Never silent: a retry is on the test's record and in its output, so a recording that keeps falling behind shows as a trend.
+    const note = `attempt ${attempt} of 3: the recording fell behind and was stopped; trying again`;
+    test.info().annotations.push({ type: 'retry', description: note });
+    console.log(`[overlay-inset-map] ${note}`);
     expect(attempt, 'the recording kept falling behind').toBeLessThan(3);
   }
   await expect(link).toBeVisible();

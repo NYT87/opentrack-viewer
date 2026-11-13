@@ -8,7 +8,7 @@ import {
   endBearing,
   fitCamera,
   fromMercator,
-  headingFreeMs,
+  createRouteHeading,
   insetFrame,
   insetScale,
   lowerIndex,
@@ -342,18 +342,71 @@ describe('the heading at a cut start and the cap on maps (AV-1023)', () => {
     }
   });
 
-  it('turns by the kept route until it is 20 m along and the smoothing window after, at walking pace: about 14 s, and a stop holds it', () => {
-    // 1.4 m/s: east for 120 m in the hidden stretch, then north.
-    const walk = activityThrough([
-      ...Array.from({ length: 41 }, (_, i) => ({ north: 0, east: i * 3, second: Math.round(i * 3 / 1.4) })),
-      ...Array.from({ length: 100 }, (_, i) => ({ north: (i + 1) * 3, east: 120, second: Math.round((120 + (i + 1) * 3) / 1.4) })),
-    ]);
-    const tl = buildOverlayTimeline(walk, { video: { durationSeconds: 400 } });
-    const model = createInsetModels({ template: templateOf(follow({ orientation: 'heading' }), { start: 0.3, end: 0 }), timeline: tl, activity: walk, width: 1920, height: 1080 }).get('route')!;
-    const from = (model.kept.startMs! - tl.activityStartMs!) / 1000;
-    const off = (b: number) => Math.min(b, 360 - b);
-    for (const t of [from + 1, from + 8, from + 13]) expect(off(model.momentAt(t)!.camera.bearing), `at +${(t - from).toFixed(0)}`).toBeLessThan(1);
-    expect(headingFreeMs(model.route)).toBeGreaterThan(model.kept.startMs! + 14_000);
+  const off = (b: number) => Math.min(b, 360 - b);
+  const headingUp = (points: TestPoint[], trim: OverlayTemplate['privacyTrim'], seconds: number) => {
+    const given = activityThrough(points);
+    const tl = buildOverlayTimeline(given, { video: { durationSeconds: seconds } });
+    return { tl, model: createInsetModels({ template: templateOf(follow({ orientation: 'heading' }), trim), timeline: tl, activity: given, width: 1920, height: 1080 }).get('route')! };
+  };
+
+  it('never reads the timeline’s heading: a cut between recorded points near a turn, then a stop, keeps the kept route’s own bearing', () => {
+    // East along the hidden start, a turn north at C; the cut is 5 m past C. At 15 m past C the timeline's back point (30 m of recorded
+    // distance behind) is the hidden point east of C, a bearing of 63 degrees, which it would hold for the whole stop.
+    const points: TestPoint[] = [
+      { north: 0, east: -30, second: 0 },
+      { north: 0, east: 0, second: 10 },
+      { north: 15, east: 0, second: 20 },
+      ...Array.from({ length: 20 }, (_, i) => ({ north: 15, east: 0, second: 21 + i })),
+      ...Array.from({ length: 14 }, (_, i) => ({ north: 45 + i * 30, east: 0, second: 50 + i * 5 })),
+    ];
+    const { tl, model } = headingUp(points, { start: 0.081, end: 0 }, 120);
+    expect(model.kept.startMs).toBeDefined();
+    // The timeline's own heading in the stop is the leak this guards against.
+    expect(off(tl.sampleAt(30)!.values['metric:heading']!)).toBeGreaterThan(40);
+    for (let t = 19; t <= 48; t += 1) expect(off(model.momentAt(t)!.camera.bearing), `at ${t}`).toBeLessThan(1);
+  });
+
+  it('holds a heading across a break in the kept route and turns again once 20 m of the next run exist', () => {
+    const points: TestPoint[] = [
+      ...Array.from({ length: 12 }, (_, i) => ({ north: i * 10, east: 0, second: i * 2, segment: 0 })),
+      ...Array.from({ length: 12 }, (_, i) => ({ north: 200, east: 500 + i * 10, second: 30 + i * 2, segment: 1 })),
+    ];
+    const { model } = headingUp(points, undefined, 60);
+    expect(off(model.momentAt(20)!.camera.bearing)).toBeLessThan(1);
+    // Just after the break the run has under 20 m: the last heading is held, not a bearing across the gap.
+    expect(off(model.momentAt(31)!.camera.bearing)).toBeLessThan(1);
+    expect(model.momentAt(48)!.camera.bearing).toBeCloseTo(90, 0);
+  });
+
+  it('turns by the kept route’s first direction where no run of it ever has 20 m', () => {
+    const points: TestPoint[] = Array.from({ length: 8 }, (_, k) => [
+      { north: k * 100, east: k % 2 ? 0 : 0, second: k * 20, segment: k },
+      { north: k * 100, east: 15, second: k * 20 + 10, segment: k },
+    ]).flat();
+    const { model } = headingUp(points, undefined, 200);
+    const bearings = [5, 45, 85, 125].map((t) => model.momentAt(t)?.camera.bearing);
+    for (const bearing of bearings) expect(bearing).toBe(0);
+  });
+
+  it('is a circular mean across 359 and 0 degrees, and none for headings that cancel', () => {
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const points: TestPoint[] = [];
+    let n = 0;
+    let e = 0;
+    for (let i = 0; i <= 24; i += 1) {
+      points.push({ north: n, east: e, second: i });
+      const h = i < 12 ? 350 : 10;
+      n += 5 * Math.cos(rad(h));
+      e += 5 * Math.sin(rad(h));
+    }
+    const { model } = headingUp(points, undefined, 24);
+    const heading = createRouteHeading(model.route);
+    for (let t = 6; t <= 24; t += 0.25) {
+      const value = heading(model.route.ms[0]! + t * 1000)!;
+      if (value !== undefined) expect(off(value), `at ${t}`).toBeLessThan(25);
+    }
+    // Before 20 m there is nothing to say.
+    expect(heading(model.route.ms[0]!)).toBeUndefined();
   });
 
   it('gives a map to the first two insets that have one, hidden ones counted, so a duplicate or a toggle cannot make a third', () => {

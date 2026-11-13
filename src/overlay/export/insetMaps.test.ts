@@ -189,6 +189,7 @@ describe('the page’s maps for an export (AV-1023)', () => {
       const { session } = make(template(), { signal: controller.signal });
       const progress = vi.fn();
       await session.warm([10, 20, 30], progress);
+      expect(progress.mock.calls[0]).toEqual([0, 3]);
       expect(progress).toHaveBeenLastCalledWith(3, 3);
       controller.abort();
       await expect(session.warm([40, 50])).rejects.toMatchObject({ code: 'cancelled' });

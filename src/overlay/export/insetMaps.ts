@@ -120,6 +120,8 @@ export function createInsetMaps(input: InsetMapsInput): InsetMapSession {
     async warm(times, onProgress) {
       const list = [...times];
       let done = 0;
+      // Said from the start, before the first map is open: 0 of all.
+      onProgress?.(0, list.length);
       for (const seconds of list) {
         if (signal?.aborted || closed) throw cancelled();
         for (const id of models.keys()) {

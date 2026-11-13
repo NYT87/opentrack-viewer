@@ -140,7 +140,12 @@ export async function openExportMap(options: {
   try {
     await new Promise<void>((resolve, reject) => {
       map.once('load', () => resolve());
+      let loading = 0;
       const check = setInterval(() => {
+        // The first load can wait on a slow style or a hidden tab as a frame can: said, not silent (AV-1023).
+        loading += 200;
+        if (typeof document !== 'undefined' && document.hidden) onWaiting?.('hidden');
+        else if (loading >= 600) onWaiting?.('tiles');
         if (signal?.aborted) {
           clearInterval(check);
           reject(cancelled());
@@ -149,7 +154,10 @@ export async function openExportMap(options: {
           reject(new OverlayExportError('render_failed', `The map could not be loaded (${errors[0]!.message}).`));
         }
       }, 200);
-      map.once('load', () => clearInterval(check));
+      map.once('load', () => {
+        clearInterval(check);
+        onWaiting?.(undefined);
+      });
     });
   } catch (error) {
     close();

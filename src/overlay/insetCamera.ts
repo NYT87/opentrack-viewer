@@ -3,7 +3,8 @@ import { toValidCoordinate } from '../domain/activity';
 import { keptRoute, markerVisible, sampleActivityMs, type KeptRoute } from './privacyTrim';
 import { MAX_MAP_INSETS, hasInsetMap, isPlainInset, routeInsetOf, type OverlayRouteInsetSetting } from './routeInset';
 import type { OverlayComponent, OverlayTemplate } from './template';
-import { smoothedValueAt, type OverlaySample, type OverlayTimeline } from './timeline';
+import { circularMeanDegrees, normalizeDegrees } from './derivedSeries';
+import type { OverlaySample, OverlayTimeline } from './timeline';
 
 /**
  * AV-1023 (TD-092). The route inset's camera and its projection, pure: where the camera is for a
@@ -231,7 +232,6 @@ export function splitIndex(route: InsetRoute, ms: number): number {
   return found;
 }
 
-const HEADING_SOURCE = { kind: 'metric', metric: 'heading' } as const;
 
 /** The initial bearing from one place to another, degrees clockwise from north, 0 to 360. */
 export function bearingBetween(from: [number, number], to: [number, number]): number {
@@ -265,16 +265,60 @@ export function endBearing(route: InsetRoute, atEnd: boolean): number {
   return 0;
 }
 
+/** How often the smoothing window is sampled, as the timeline's own smoothing steps. */
+const HEADING_STEP_MS = 250;
+
 /**
- * The activity time from which the timeline's heading reads only kept places: the time the kept route is `HOLD_BEARING_METERS`
- * along, and the smoothing window after it. `Infinity` where the route never gets that far with a time.
+ * AV-1023 (TD-092). The heading of the *kept route*, by the compass's own rule (TD-087) but read from the kept places alone:
+ * at each vertex the bearing from the vertex at least 20 m back along the route (within its unbroken run) to it, undefined until
+ * 20 m of a run exist, and held from the last defined one (through a stop, TD-080, and across a break); at a moment, the circular
+ * mean of those over the last 3 s. The timeline's heading is not read at all, so nothing of a hidden stretch (the point 20 m back
+ * of a place just after a cut, the window's look-back, the stop that holds one) can turn the camera. `undefined` before the kept route
+ * has 20 m of a run, and where the headings cancel: the caller turns by the route's own first bearing then.
  */
-export function headingFreeMs(route: InsetRoute): number {
-  const a = route.lonLat(0);
-  for (let i = 1; i < route.count; i += 1) {
-    if (metersBetween(a, route.lonLat(i)) >= HOLD_BEARING_METERS) return Number.isFinite(route.ms[i]!) ? route.ms[i]! + INSET_HEADING_SMOOTHING_SECONDS * 1000 : Infinity;
+export function createRouteHeading(route: InsetRoute): (ms: number) => number | undefined {
+  const n = route.count;
+  const held = new Float64Array(n).fill(Number.NaN);
+  const cumulative = new Float64Array(n);
+  let runStart = 0;
+  let far = -1;
+  for (let i = 0; i < n; i += 1) {
+    if (i === 0 || route.run[i] !== route.run[i - 1]) {
+      runStart = i;
+      far = i - 1;
+      cumulative[i] = 0;
+    } else {
+      cumulative[i] = cumulative[i - 1]! + metersBetween(route.lonLat(i - 1), route.lonLat(i));
+    }
+    while (far + 1 < i && cumulative[i]! - cumulative[far + 1]! >= HOLD_BEARING_METERS) far += 1;
+    let value = Number.NaN;
+    if (far >= runStart) {
+      const from = route.lonLat(far);
+      const to = route.lonLat(i);
+      if (from[0] !== to[0] || from[1] !== to[1]) value = bearingBetween(from, to);
+    }
+    held[i] = Number.isFinite(value) ? value : i > 0 ? held[i - 1]! : Number.NaN;
   }
-  return Infinity;
+  const at = (ms: number) => {
+    const index = splitIndex(route, ms);
+    return index >= 0 && Number.isFinite(held[index]!) ? held[index]! : undefined;
+  };
+  const steps = Math.ceil((INSET_HEADING_SMOOTHING_SECONDS * 1000) / HEADING_STEP_MS);
+  return (ms) => {
+    let sumSin = 0;
+    let sumCos = 0;
+    let count = 0;
+    for (let k = 0; k <= steps; k += 1) {
+      const value = at(ms - k * ((INSET_HEADING_SMOOTHING_SECONDS * 1000) / steps));
+      if (value === undefined) continue;
+      const radians = (value * Math.PI) / 180;
+      sumSin += Math.sin(radians);
+      sumCos += Math.cos(radians);
+      count += 1;
+    }
+    const mean = circularMeanDegrees(sumSin, sumCos, count);
+    return mean === undefined ? at(ms) : normalizeDegrees(mean);
+  };
 }
 
 /** The inset at one moment: where the camera is, and where the marker is (absent in a hidden stretch). */
@@ -336,8 +380,8 @@ export function createInsetModels(input: InsetModelInput): Map<string, InsetComp
   const scale = insetScale({ width, height });
   let ends: { first: number; last: number } | undefined;
   const holdBearings = () => (ends ??= { first: endBearing(route, false), last: endBearing(route, true) });
-  let free: number | undefined;
-  const headingFreeFrom = () => (free ??= headingFreeMs(route));
+  let heading: ((ms: number) => number | undefined) | undefined;
+  const headingAt = (ms: number) => (heading ??= createRouteHeading(route))(ms);
 
   const capped = cappedMapIds(template.components);
   for (const component of drawn) {
@@ -348,7 +392,7 @@ export function createInsetModels(input: InsetModelInput): Map<string, InsetComp
     const momentAt = (videoTimeSeconds: number): InsetMoment | undefined => {
       const sample = timeline.sampleAt(videoTimeSeconds);
       if (!sample?.position) return undefined;
-      return momentOf(setting, kept, route, fit, timeline, sample, holdBearings, headingFreeFrom);
+      return momentOf(setting, kept, route, fit, timeline, sample, holdBearings, headingAt);
     };
     models.set(component.id, { component, setting, frame, scale, kept, route, fit, hasMap: capped.has(component.id), momentAt });
   }
@@ -363,7 +407,7 @@ function momentOf(
   timeline: OverlayTimeline,
   sample: OverlaySample,
   holdBearings: () => { first: number; last: number },
-  headingFreeFrom: () => number,
+  headingAt: (ms: number) => number | undefined,
 ): InsetMoment {
   const ms = sampleActivityMs(timeline, sample);
   const visible = markerVisible(kept, ms);
@@ -376,15 +420,9 @@ function momentOf(
   if (setting.view === 'whole') return { camera: fit, ...(marker ? { marker } : {}), ...(nowMs !== undefined && Number.isFinite(nowMs) ? { nowMs } : {}) };
   let bearing = 0;
   if (setting.orientation === 'heading') {
-    // The heading is the bearing from the place 20 m back, smoothed over a window that looks back as well: until the kept route is 20 m
-    // along and a window further, what it reads is partly the hidden stretch, so the kept route's own direction is used there (a
-    // stop near the cut holds that direction too).
-    const nearCut = visible && ms !== undefined && kept.startMs !== undefined && ms < headingFreeFrom();
-    if (nearCut) {
-      bearing = holdBearings().first;
-    } else if (visible) {
-      const heading = smoothedValueAt(timeline, HEADING_SOURCE, sample.videoTimeSeconds, INSET_HEADING_SMOOTHING_SECONDS) ?? sample.values['metric:heading'];
-      bearing = typeof heading === 'number' && Number.isFinite(heading) ? heading : 0;
+    // The kept route's own heading, never the timeline's (TD-092): the kept route's first direction until it has 20 m of a run, and where the headings cancel.
+    if (visible) {
+      bearing = (ms !== undefined ? headingAt(ms) : undefined) ?? holdBearings().first;
     } else {
       const bearings = holdBearings();
       bearing = atEnd ? bearings.last : bearings.first;
