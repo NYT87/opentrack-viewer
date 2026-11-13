@@ -11,8 +11,12 @@ import type { PersonalFigures } from '../overlay/template';
  * They are given to the renderer and sent to an export worker with the request,
  * which is the page talking to its own code; they are never logged, never put in a
  * URL or a request, and written to a layout file only when the reader ticks the
- * box for it. Whether to keep them across reloads is left to the maintainer
- * (TD-086).
+ * box for it. They are not kept across reloads: the session only, as answered
+ * on issue #20 (TD-086).
+ *
+ * AV-1020 (TD-089). The overlay page's Start over lets them go with the files, and its
+ * Undo puts back what was there (`replace`), under any figure typed since; nothing else
+ * clears them.
  */
 interface PersonalState {
   personal: PersonalFigures;
@@ -20,6 +24,8 @@ interface PersonalState {
   setFigure: (key: PersonalKey, value: number | undefined) => void;
   /** Takes the figures a layout held: each one that is there, over what the session has. */
   adopt: (figures: PersonalFigures) => void;
+  /** Puts back exactly these figures, as Undo does after Start over. */
+  replace: (figures: PersonalFigures) => void;
   clear: () => void;
 }
 
@@ -42,5 +48,6 @@ export const usePersonalStore = create<PersonalState>((set) => ({
       if (ftp !== undefined) next.ftp = ftp;
       return { personal: next };
     }),
+  replace: (figures) => set({ personal: { ...figures } }),
   clear: () => set({ personal: {} }),
 }));

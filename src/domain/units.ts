@@ -5,7 +5,7 @@
 export type UnitSystem = 'metric' | 'imperial';
 
 export const METERS_PER_MILE = 1609.344;
-const METERS_PER_FOOT = 0.3048;
+export const METERS_PER_FOOT = 0.3048;
 
 /** Placeholder shown wherever a value is genuinely absent (AV-404). */
 export const MISSING = '—';

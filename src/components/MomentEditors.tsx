@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { METERS_PER_FOOT, type UnitSystem } from '../domain/units';
 import { CHART_METRICS, DIAL_METRICS } from '../overlay/customCanvas';
 import { DEFAULT_COMPASS } from '../overlay/compass';
-import { DEFAULT_DIAL, DIAL_LIMITS, activityRange } from '../overlay/dial';
+import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, dialToStored, dialUnitLabel, storedToDial } from '../overlay/dial';
 import {
   DEFAULT_GRADIENT,
   GRADIENT_BAND_LIMITS,
@@ -20,6 +21,7 @@ import {
   type OverlayComponent,
   type OverlayDialSetting,
   type OverlayGradientSetting,
+  effectiveUnits,
 } from '../overlay/template';
 import { dataSourceId, type OverlayDataSource, type OverlayMetricKey, type OverlayTimeline } from '../overlay/timeline';
 import { ColorField } from './ColorField';
@@ -102,12 +104,82 @@ function SourceSelect({
 
 const round = (value: number, places = 2) => Math.round(value * 10 ** places) / 10 ** places;
 
+/** Seconds as m:ss. */
+const minutesSeconds = (seconds: number) => {
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+};
+
+/** Seconds from "m:ss" or a plain number of minutes ("5.5" is 5:30); `undefined` while it reads as neither. */
+export function parsePace(text: string): number | undefined {
+  const clock = /^\s*(\d+):(\d{1,2})\s*$/.exec(text);
+  if (clock) return Number(clock[2]) < 60 ? Number(clock[1]) * 60 + Number(clock[2]) : undefined;
+  if (!/^\s*\d*[.,]?\d+\s*$/.test(text)) return undefined;
+  return Math.round(Number(text.replace(',', '.')) * 60);
+}
+
+/**
+ * AV-1020. A pace typed as m:ss, or as a number of minutes, and shown as m:ss. Like
+ * the other fields it passes on what reads as a pace as it is typed, and shows
+ * where it really went when the field is left (TD-074).
+ */
+function PaceField({ id, label, hint, seconds, onCommit }: { id: string; label: string; hint?: string; seconds: number; onCommit: (seconds: number) => void }) {
+  const [draft, setDraft] = useState<string | undefined>();
+  return (
+    <div className="overlay-controls__field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        className="input"
+        type="text"
+        autoComplete="off"
+        placeholder="m:ss"
+        value={draft ?? minutesSeconds(seconds)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          const parsed = parsePace(event.target.value);
+          if (parsed !== undefined) onCommit(parsed);
+        }}
+        onBlur={() => setDraft(undefined)}
+      />
+      {hint && (
+        <p id={`${id}-hint`} className="overlay-controls__hint">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** A dial: the figure, the range, the arc and its ticks, the pointer and the colours. */
-export function DialEditor({ id, component, timeline, smoothingField, onChange }: { id: string; component: OverlayComponent; timeline: OverlayTimeline; smoothingField: ReactNode; onChange: Patch }) {
+export function DialEditor({ id, component, timeline, units, smoothingField, onChange }: { id: string; component: OverlayComponent; timeline: OverlayTimeline; units: UnitSystem; smoothingField: ReactNode; onChange: Patch }) {
   const setting = component.dial ?? DEFAULT_DIAL;
   const source = component.source;
-  const unit = source?.kind === 'metric' ? STORED_UNITS[source.metric] : timeline.sensorLabels.get(source ? dataSourceId(source) : '')?.unit;
-  const own = source ? activityRange(timeline, source) : undefined;
+  // AV-1020 (TD-089). What is typed and shown is in the units the figure is shown in; what is stored is not.
+  const shownIn = effectiveUnits(component, units);
+  const metric = source?.kind === 'metric' ? source.metric : undefined;
+  const unit = dialUnitLabel(metric, shownIn) ?? (source?.kind === 'metric' ? STORED_UNITS[source.metric] : timeline.sensorLabels.get(source ? dataSourceId(source) : '')?.unit);
+  const own = source ? activityRange(timeline, source, shownIn) : undefined;
+  const isPace = metric === 'pace';
+  const shown = (stored: number) => storedToDial(metric, stored, shownIn);
+  const stored = (typed: number) => dialToStored(metric, typed, shownIn);
+  /** A field of the dial's units: minutes and seconds for a pace, a number for the rest. */
+  const unitField = (props: { id: string; label: string; hint?: string; stored: number; nonNegative?: boolean; onCommit: (stored: number) => void }) =>
+    isPace ? (
+      <PaceField id={props.id} label={props.label} hint={props.hint} seconds={shown(props.stored)} onCommit={(seconds) => props.onCommit(stored(seconds))} />
+    ) : (
+      <PercentField
+        id={props.id}
+        label={props.label}
+        hint={props.hint}
+        value={String(round(shown(props.stored), 3))}
+        min={props.nonNegative ? 0 : -100000}
+        max={100000}
+        step={0.1}
+        onCommit={(value) => props.onCommit(stored(value))}
+      />
+    );
   const range = component.range ?? own ?? { min: 0, max: 100 };
   const withDial = (patch: Partial<OverlayDialSetting>) => onChange((current) => ({ ...current, dial: { ...(current.dial ?? DEFAULT_DIAL), ...patch } }));
   const setRange = (next: { min: number; max: number }) => onChange((current) => ({ ...current, range: next }));
@@ -120,32 +192,26 @@ export function DialEditor({ id, component, timeline, smoothingField, onChange }
         timeline={timeline}
         onChoose={(next) =>
           onChange((current) => {
-            const found = activityRange(timeline, next);
+            const found = activityRange(timeline, next, shownIn);
             const changed: OverlayComponent = { ...current, source: next };
             if (found) changed.range = found;
             return changed;
           })
         }
       />
-      <PercentField
-        id={`${id}-dial-min`}
-        label={`Range starts at${unit ? ` (${unit})` : ''}`}
-        hint="Below the end. A value outside the range sits at its end."
-        value={String(round(range.min, 3))}
-        min={-100000}
-        max={100000}
-        step={0.1}
-        onCommit={(value) => value < range.max && setRange({ min: value, max: range.max })}
-      />
-      <PercentField
-        id={`${id}-dial-max`}
-        label={`Range ends at${unit ? ` (${unit})` : ''}`}
-        value={String(round(range.max, 3))}
-        min={-100000}
-        max={100000}
-        step={0.1}
-        onCommit={(value) => value > range.min && setRange({ min: range.min, max: value })}
-      />
+      {unitField({
+        id: `${id}-dial-min`,
+        label: `Range starts at${unit ? ` (${unit})` : ''}`,
+        hint: 'Below the end. A value outside the range sits at its end.',
+        stored: range.min,
+        onCommit: (value) => value < range.max && setRange({ min: value, max: range.max }),
+      })}
+      {unitField({
+        id: `${id}-dial-max`,
+        label: `Range ends at${unit ? ` (${unit})` : ''}`,
+        stored: range.max,
+        onCommit: (value) => value > range.min && setRange({ min: range.min, max: value }),
+      })}
       <p className="video__actions">
         <button type="button" className="button" disabled={!own} onClick={() => own && setRange(own)}>
           Use this activity’s range
@@ -160,23 +226,20 @@ export function DialEditor({ id, component, timeline, smoothingField, onChange }
         max={DIAL_LIMITS.sweep.max}
         onCommit={(value) => withDial({ sweep: Math.min(DIAL_LIMITS.sweep.max, Math.max(DIAL_LIMITS.sweep.min, Math.round(value))) })}
       />
-      <PercentField
-        id={`${id}-dial-major`}
-        label={`Major tick every${unit ? ` (${unit})` : ''}`}
-        hint="0 finds a step that suits the range."
-        value={String(setting.majorStep ?? 0)}
-        min={0}
-        max={100000}
-        step={0.1}
-        onCommit={(value) =>
+      {unitField({
+        id: `${id}-dial-major`,
+        label: `Major tick every${unit ? ` (${unit})` : ''}`,
+        hint: '0 finds a step that suits the range.',
+        stored: setting.majorStep ?? 0,
+        nonNegative: true,
+        onCommit: (value) =>
           onChange((current) => {
             const dial = { ...(current.dial ?? DEFAULT_DIAL) };
             if (value > 0) dial.majorStep = value;
             else delete dial.majorStep;
             return { ...current, dial };
-          })
-        }
-      />
+          }),
+      })}
       <PercentField
         id={`${id}-dial-minor`}
         label="Minor ticks between major ones"
@@ -200,12 +263,19 @@ export function DialEditor({ id, component, timeline, smoothingField, onChange }
   );
 }
 
+/** AV-1020. A new distance window in an imperial chart starts at this many feet (457.2 m). */
+const CHART_WINDOW_FEET_DEFAULT = 1500;
+
 /** A chart: the figure, the axis, the window, the colours and the labels. */
-export function ChartEditor({ id, component, timeline, onChange }: { id: string; component: OverlayComponent; timeline: OverlayTimeline; onChange: Patch }) {
+export function ChartEditor({ id, component, timeline, units, onChange }: { id: string; component: OverlayComponent; timeline: OverlayTimeline; units: UnitSystem; onChange: Patch }) {
   const setting = component.chart ?? DEFAULT_CHART;
   const withChart = (patch: Partial<OverlayChartSetting>) => onChange((current) => ({ ...current, chart: { ...(current.chart ?? DEFAULT_CHART), ...patch } }));
   const hasDistance = timeline.available.has('metric:distance');
-  const windowUnit = setting.axis === 'distance' ? 'metres' : 'seconds';
+  // AV-1020 (TD-089). A distance window is typed in feet where the chart is imperial, and stored in metres.
+  const imperial = effectiveUnits(component, units) === 'imperial';
+  const feet = setting.axis === 'distance' && imperial;
+  const windowUnit = setting.axis === 'distance' ? (feet ? 'feet' : 'metres') : 'seconds';
+  const usualWindow = (axis: ChartAxis) => (axis === 'distance' ? (imperial ? CHART_WINDOW_FEET_DEFAULT * METERS_PER_FOOT : 500) : 30);
   return (
     <>
       <SourceSelect id={`${id}-chart-source`} component={component} offered={CHART_METRICS} timeline={timeline} onChoose={(next) => onChange((current) => ({ ...current, source: next }))} />
@@ -214,7 +284,7 @@ export function ChartEditor({ id, component, timeline, onChange }: { id: string;
         <select id={`${id}-chart-axis`} className="select" value={setting.axis} onChange={(event) => {
             const axis = event.target.value as ChartAxis;
             // A window's number is seconds on one axis and metres on the other: it takes the new axis' usual one.
-            withChart({ axis, ...(setting.window !== undefined && axis !== setting.axis ? { window: axis === 'distance' ? 500 : 30 } : {}) });
+            withChart({ axis, ...(setting.window !== undefined && axis !== setting.axis ? { window: usualWindow(axis) } : {}) });
           }}>
           <option value="time">Time</option>
           <option value="distance" disabled={!hasDistance && setting.axis !== 'distance'}>
@@ -232,7 +302,7 @@ export function ChartEditor({ id, component, timeline, onChange }: { id: string;
             onChange((current) => {
               const chart = { ...(current.chart ?? DEFAULT_CHART) };
               if (event.target.value === 'whole') delete chart.window;
-              else chart.window = chart.axis === 'distance' ? 500 : 30;
+              else chart.window = usualWindow(chart.axis);
               return { ...current, chart };
             })
           }
@@ -246,11 +316,11 @@ export function ChartEditor({ id, component, timeline, onChange }: { id: string;
           id={`${id}-chart-window`}
           label={`Window either side of now (${windowUnit})`}
           hint="The cursor stays in the middle."
-          value={String(round(setting.window))}
+          value={String(feet ? Math.round(setting.window / METERS_PER_FOOT) : round(setting.window))}
           min={1}
-          max={CHART_WINDOW_MAX}
+          max={feet ? Math.floor(CHART_WINDOW_MAX / METERS_PER_FOOT) : CHART_WINDOW_MAX}
           step={1}
-          onCommit={(value) => value > 0 && withChart({ window: Math.min(CHART_WINDOW_MAX, value) })}
+          onCommit={(value) => value > 0 && withChart({ window: Math.min(CHART_WINDOW_MAX, feet ? value * METERS_PER_FOOT : value) })}
         />
       )}
       <ColorField id={`${id}-chart-line`} label="Line colour" value={setting.lineColor} onChange={(lineColor) => withChart({ lineColor })} />

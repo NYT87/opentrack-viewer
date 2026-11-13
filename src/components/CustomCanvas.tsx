@@ -40,6 +40,7 @@ import {
   SNAP_POSITIONS,
   describeStillComponent,
   layoutStillText,
+  groupByReason,
   parseOverlayLayout,
   serializeStillLayout,
   snapRect,
@@ -298,7 +299,7 @@ export function CustomCanvas({
 
   const add = (key: CanvasElementKey) => {
     // AV-1016. A predefined entry may build several; the first is the one selected.
-    const added = newCanvasComponents(template, key, frame, timeline);
+    const added = newCanvasComponents(template, key, frame, timeline, units);
     change([...components, ...added], added[0]?.id);
   };
 
@@ -459,9 +460,9 @@ export function CustomCanvas({
           <AddElement choices={choices} onAdd={add} />
           {unavailable.length > 0 && (
             <ul className="still-image__unavailable" aria-label="Not in this activity">
-              {unavailable.map((choice) => (
-                <li key={choice.key} className="overlay-controls__hint">
-                  {choice.label}: {choice.reason}
+              {groupByReason(unavailable).map((group) => (
+                <li key={group.reason} className="overlay-controls__hint">
+                  {group.names}: {group.reason}
                 </li>
               ))}
             </ul>
@@ -478,7 +479,7 @@ export function CustomCanvas({
             <button
               type="button"
               className="button"
-              onClick={() => change(componentsFromStart(preset, timeline, frame), undefined)}
+              onClick={() => change(componentsFromStart(preset, timeline, frame, units), undefined)}
             >
               Use this layout
             </button>
@@ -1332,8 +1333,8 @@ function ComponentEditor({
         />
       )}
 
-      {component.type === 'dial' && <DialEditor id={id} component={component} timeline={timeline} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
-      {component.type === 'chart' && <ChartEditor id={id} component={component} timeline={timeline} onChange={(patch) => update(patch)} />}
+      {component.type === 'dial' && <DialEditor id={id} component={component} timeline={timeline} units={units} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
+      {component.type === 'chart' && <ChartEditor id={id} component={component} timeline={timeline} units={units} onChange={(patch) => update(patch)} />}
       {component.type === 'gradient' && <GradientEditor id={id} component={component} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
       {component.type === 'compass' && <CompassEditor id={id} component={component} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
 

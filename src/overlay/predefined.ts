@@ -1,3 +1,4 @@
+import type { UnitSystem } from '../domain/units';
 import { newCanvasComponent, newZonesComponent, canvasTemplate, type CanvasElementKey } from './customCanvas';
 import { METRIC_MISSING, NO_ROUTE, ELEVATION_MISSING } from './missingData';
 import { OVERLAY_PRESETS, type OverlayPresetId } from './presets';
@@ -34,6 +35,8 @@ export interface PredefinedEntry {
     template: OverlayTemplate,
     size: { width: number; height: number },
     timeline: OverlayTimeline,
+    /** AV-1020. The reader's units, which a dial's range is rounded in. */
+    units?: UnitSystem,
   ) => OverlayComponent[];
 }
 
@@ -54,8 +57,8 @@ function figure(
   key: CanvasElementKey,
   extra: { smoothing?: number; label?: string; decimals?: 0 | 1 | 2; ofTotal?: boolean } = {},
 ): Build {
-  return (template, size, timeline) => {
-    const component = newCanvasComponent(template, key, size, timeline);
+  return (template, size, timeline, units) => {
+    const component = newCanvasComponent(template, key, size, timeline, units);
     const seconds = Math.min(SMOOTHING_LIMITS.max, extra.smoothing ?? 0);
     if (seconds > 0 && canSmooth(component.source)) component.smoothing = { windowSeconds: seconds };
     const display: NonNullable<OverlayComponent['display']> = {};
@@ -78,7 +81,7 @@ const zones =
 
 const plain =
   (key: CanvasElementKey): Build =>
-  (template, size, timeline) => [newCanvasComponent(template, key, size, timeline)];
+  (template, size, timeline, units) => [newCanvasComponent(template, key, size, timeline, units)];
 
 export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
   // Cycling
@@ -151,6 +154,7 @@ export function componentsFromSportLayout(
   sport: 'cycling' | 'running',
   timeline: OverlayTimeline,
   size: { width: number; height: number },
+  units: UnitSystem = 'metric',
 ): OverlayComponent[] {
   const layout = SPORT_LAYOUTS[sport];
   const aspect = size.width / size.height;
@@ -162,7 +166,7 @@ export function componentsFromSportLayout(
   // Built one by one against what is already built, so each gets its own id.
   const built: OverlayComponent[] = [];
   const make = (entry: PredefinedEntry) => {
-    const [component] = entry.build(canvasTemplate(built), size, timeline);
+    const [component] = entry.build(canvasTemplate(built), size, timeline, units);
     if (component) built.push(component);
     return component;
   };

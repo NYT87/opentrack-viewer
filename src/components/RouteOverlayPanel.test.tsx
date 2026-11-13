@@ -296,6 +296,10 @@ describe('placing figures, the date and text on the image (AV-1010)', () => {
     expect(options.find((option) => option.value === 'date')).toMatchObject({ disabled: true });
     expect(options.find((option) => option.value === 'distance')).toMatchObject({ disabled: false });
     expect(screen.getByRole('list', { name: 'Not in this activity' })).toHaveTextContent(/Moving time: This activity has no moving time/);
+    // AV-1020: a reason shared by several is written once.
+    const lines = within(screen.getByRole('list', { name: 'Not in this activity' })).getAllByRole('listitem');
+    const reasons = lines.map((line) => line.textContent!.split(': ').slice(1).join(': '));
+    expect(new Set(reasons).size).toBe(reasons.length);
   });
 
   it('saves the layout as JSON, and opens it again', async () => {

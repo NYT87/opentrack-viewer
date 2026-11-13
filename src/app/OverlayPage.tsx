@@ -17,6 +17,8 @@ import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { useInteractionStore } from '../state/interactionStore';
 import { useMapImageStore } from '../state/mapImageStore';
+import { usePersonalStore } from '../state/personalStore';
+import type { PersonalFigures } from '../overlay/template';
 import {
   hasOverlaySource,
   useOverlayStore,
@@ -91,8 +93,12 @@ export function OverlayPage() {
 
   const [videoState, setVideoState] = useState<SlotState>(IDLE);
   const [activityState, setActivityState] = useState<SlotState>(IDLE);
-  /** What Start over let go of, until the reader undoes it or chooses a file. */
-  const [cleared, setCleared] = useState<OverlaySnapshot | undefined>();
+  /**
+   * What Start over let go of, until the reader undoes it or chooses a file: the overlay's
+   * state, and the reader's own maximum heart rate and FTP (AV-1020, TD-089), which are
+   * not in the overlay store.
+   */
+  const [cleared, setCleared] = useState<{ overlay: OverlaySnapshot; personal: PersonalFigures } | undefined>();
   /** Where the preview draws its sync panel: the side column, below the files. */
   const [syncTarget, setSyncTarget] = useState<HTMLDivElement | null>(null);
   /** Whether either export holds a finished file Start over would throw away. */
@@ -286,7 +292,9 @@ export function OverlayPage() {
     letGoOfActivityRead();
     setConfirmingStartOver(false);
     setFinished({ png: false, video: false });
-    setCleared(clear());
+    const personal = usePersonalStore.getState().personal;
+    setCleared({ overlay: clear(), personal });
+    usePersonalStore.getState().clear();
     setVideoState(IDLE);
     setActivityState(IDLE);
     setAddingVideo(false);
@@ -355,16 +363,26 @@ export function OverlayPage() {
     </>
   );
 
+  const figuresLetGo = [
+    cleared?.personal.maxHeartRate !== undefined && 'maximum heart rate',
+    cleared?.personal.ftp !== undefined && 'FTP',
+  ].filter(Boolean);
+  const letGo =
+    figuresLetGo.length > 0
+      ? `both files, and your ${figuresLetGo.join(' and ')}, were let go`
+      : 'both files were let go';
   const undo = cleared && (
     <div className="panel overlay-undo" role="status">
       <p className="panel__message">
-        Started over: both files were let go. Your overlay settings are kept.
+        Started over: {letGo}. Your overlay settings are kept.
       </p>
       <button
         type="button"
         className="button"
         onClick={() => {
-          restore(cleared);
+          restore(cleared.overlay);
+          // A figure typed since Start over is the reader's newer word, and is kept.
+          usePersonalStore.getState().replace({ ...cleared.personal, ...usePersonalStore.getState().personal });
           setCleared(undefined);
           focusSlot(filesSection);
         }}

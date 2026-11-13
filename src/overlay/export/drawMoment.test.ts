@@ -137,7 +137,7 @@ describe('a dial', () => {
 
   it('draws the ticks the range and settings give: the major ones longer than the minor', () => {
     const { of } = draw(dial({ majorStep: 2.5, minorTicks: 4 }), ramp, 50);
-    const wanted = dialTicks({ min: 0, max: 10 }, { majorStep: 2.5, minorTicks: 4 });
+    const wanted = dialTicks({ min: 0, max: 10 }, { majorStep: 2.5, minorTicks: 4 }, { metric: 'speed', units: 'metric' });
     const ticks = of('lineTo').filter((call) => call.strokeStyle === DEFAULT_DIAL.trackColor);
     expect(ticks).toHaveLength(wanted.length);
     const length = (call: Call, index: number) => {
@@ -151,7 +151,8 @@ describe('a dial', () => {
 
   it('writes the label and the value in the middle, and nothing for missing data', () => {
     const { of } = draw(dial(), ramp, 50);
-    expect(of('fillText').map((call) => call.args[0])).toEqual(['SPEED', '18.0 km/h']);
+    // AV-1020: the numbers beside the ticks come first; the label and the value are the last two.
+    expect(of('fillText').slice(-2).map((call) => call.args[0])).toEqual(['SPEED', '18.0 km/h']);
     for (const call of of('fillText')) expect(call.textAlign).toBe('center');
     expect(draw(dial({}, { source: { kind: 'metric', metric: 'power' } }), ramp, 50).of('fillText')).toEqual([]);
   });
@@ -167,9 +168,70 @@ describe('a dial', () => {
 
   it('uses the activity’s own range, rounded, where none is set', () => {
     const own = dial({}, { range: undefined });
-    // 0 to 10 m/s, in steps of 2: to 10.
-    expect(apart(angleOf(needle(own, 100)!.tip), dialAngle(240, 1))).toBeCloseTo(0, 6);
-    expect(apart(angleOf(needle(own, 50)!.tip), dialAngle(240, 0.5))).toBeCloseTo(0, 6);
+    // 0 to 10 m/s is 0 to 36 km/h, rounded in km/h to 40 (AV-1020): 10 m/s is 0.9 of it.
+    expect(apart(angleOf(needle(own, 100)!.tip), dialAngle(240, 0.9))).toBeCloseTo(0, 6);
+    expect(apart(angleOf(needle(own, 50)!.tip), dialAngle(240, 0.45))).toBeCloseTo(0, 6);
+  });
+
+  describe('the numbers beside the major ticks (AV-1020, TD-089)', () => {
+    const numbers = (component: OverlayComponent, units: 'metric' | 'imperial' = 'metric') =>
+      draw(component, ramp, 50, 100, units).of('fillText').map((call) => call.args[0]);
+
+    it('are in km/h or mph, whatever the stored range, drawn inside the ticks', () => {
+      expect(numbers(dial()).slice(0, -2)).toEqual(['0', '5', '10', '15', '20', '25', '30', '35']);
+      // The same 0 to 10 m/s is 22.4 mph: steps of 5.
+      expect(numbers(dial(), 'imperial').slice(0, -2)).toEqual(['0', '5', '10', '15', '20']);
+      const { of } = draw(dial(), ramp, 50);
+      const first = of('fillText')[0]!;
+      const radius = Math.hypot((first.args[1] as number) - CENTRE.x, (first.args[2] as number) - CENTRE.y);
+      // Inside the ring of ticks, whose inner ends are 0.69 of the dial's radius from the centre.
+      expect(radius).toBeLessThan(0.69 * 240);
+      expect(first.fillStyle).toBe('#ffffff');
+    });
+
+    it('are written as m:ss for a pace, in the dial’s own units', () => {
+      const pace = dial({}, { source: { kind: 'metric', metric: 'pace' }, range: { min: 180, max: 420 }, unitMode: 'metric', rect: { x: 0.05, y: 0.02, width: 0.45, height: 0.96 } });
+      expect(numbers(pace)).toContain('3:00');
+      expect(numbers(pace)).toContain('7:00');
+      // 180 to 420 s/km is 290 to 676 s/mi: the ticks are every 60 s from 4:50.
+      const miles = dial({}, { source: { kind: 'metric', metric: 'pace' }, range: { min: 180, max: 420 }, unitMode: 'imperial', rect: { x: 0.05, y: 0.02, width: 0.45, height: 0.96 } });
+      expect(numbers(miles)[0]).toBe('4:50');
+    });
+
+    it('use the component’s units, not the reader’s, when it has its own', () => {
+      expect(numbers(dial({}, { unitMode: 'imperial' })).slice(0, -2)).toEqual(['0', '5', '10', '15', '20']);
+    });
+
+    it('are drawn on a dial of the size Add makes, for a speed and a pace', () => {
+      const added = (metric: 'speed' | 'pace') => {
+        const made = newDialComponent(canvasTemplate([]), metric, { width: 1920, height: 1080 }, buildOverlayTimeline(ramp, { video: { durationSeconds: 100 } }));
+        return draw(made, ramp, 50, 100).of('fillText').length;
+      };
+      expect(added('speed')).toBeGreaterThan(2);
+      expect(added('pace')).toBeGreaterThan(2);
+    });
+
+    it('are left out when they would touch the label and value in the middle, as on a 300 degree sweep', () => {
+      expect(numbers(dial({ sweep: 300 })).length).toBe(2);
+      expect(numbers(dial({ sweep: 240 })).length).toBeGreaterThan(2);
+    });
+
+    it('are drawn or not alike in the preview, drawn smaller than the frame, and in the export', () => {
+      const count = (width: number, height: number) => {
+        const renderer = createOverlayRenderer({ template: canvasTemplate([dial()]), timeline: buildOverlayTimeline(ramp, { video: { durationSeconds: 100 } }), activity: ramp, units: 'metric', width, height });
+        const recording = recorder();
+        renderer.drawFrame(recording.ctx, 50);
+        return recording.of('fillText').length;
+      };
+      expect(count(1000, 500)).toBe(count(500, 250));
+    });
+
+    it('are left out, all of them, on a dial too small to read them, and where they would touch', () => {
+      const tiny = dial({}, { rect: { x: 0.1, y: 0.1, width: 0.02, height: 0.04 } });
+      expect(numbers(tiny).every((text) => !/^\d+$/.test(String(text)))).toBe(true);
+      // A step of 0.1 km/h on a 36 km/h range is capped to 50 ticks: too close for their numbers.
+      expect(numbers(dial({ majorStep: 0.1 })).slice(0, -2)).toEqual([]);
+    });
   });
 });
 

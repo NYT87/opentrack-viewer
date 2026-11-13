@@ -19,6 +19,7 @@ import {
   planStillImage,
   serializeStillLayout,
   snapRect,
+  groupByReason,
   stillElementChoices,
   summaryValue,
   type MeasureText,
@@ -133,6 +134,24 @@ describe('figures from the summary (AV-1010)', () => {
     expect(choices.find((choice) => choice.key === 'elapsed')).toMatchObject({ available: false, reason: expect.stringMatching(/no timestamps/) });
     expect(choices.find((choice) => choice.key === 'date')).toMatchObject({ available: false, reason: expect.stringMatching(/no date/) });
     expect(choices.find((choice) => choice.key === 'label')).toMatchObject({ available: true });
+  });
+});
+
+describe('the reasons for what is not in an activity (AV-1020)', () => {
+  it('says each reason once after the names it rules out, in order of first appearance', () => {
+    expect(
+      groupByReason([
+        { label: 'Heart rate', reason: 'No heart rate.' },
+        { label: 'Route', reason: 'No route.' },
+        { label: 'Heart rate zones', reason: 'No heart rate.' },
+        { label: 'Own', reason: 'Its own.' },
+      ]),
+    ).toEqual([
+      { names: 'Heart rate, Heart rate zones', reason: 'No heart rate.' },
+      { names: 'Route', reason: 'No route.' },
+      { names: 'Own', reason: 'Its own.' },
+    ]);
+    expect(groupByReason([])).toEqual([]);
   });
 });
 

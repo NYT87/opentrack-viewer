@@ -755,17 +755,18 @@ function momentProps(ready: Ready, timeline: OverlayTimeline, context: ContractC
   const range = ready.range as { min: number; max: number };
   const fraction = ready.fraction as number;
   const unit = source.kind === 'metric' ? STORED_UNITS[source.metric] : timeline.sensorLabels.get(dataSourceId(source))?.unit;
+  const unitSystem = component.unitMode === 'auto' ? context.units : component.unitMode;
   return {
     section: 'dial',
     ...common,
     source: source.kind === 'metric' ? { kind: 'metric', metric: source.metric } : { kind: 'sensor', key: source.key },
     ...(unit !== undefined ? { unit } : {}),
-    unitSystem: component.unitMode === 'auto' ? context.units : component.unitMode,
+    unitSystem,
     range: { min: range.min, max: range.max },
     fraction,
     sweepDegrees: setting.sweep,
     angleDegrees: (fraction - 0.5) * setting.sweep,
-    ticks: dialTicks(range, setting).map((tick) => ({ fraction: tick.fraction, major: tick.major })),
+    ticks: dialTicks(range, setting, { metric: source.kind === 'metric' ? source.metric : undefined, units: unitSystem }).map((tick) => ({ fraction: tick.fraction, major: tick.major })),
     pointer: setting.pointer,
     trackColor: setting.trackColor,
     fillColor: setting.fillColor,

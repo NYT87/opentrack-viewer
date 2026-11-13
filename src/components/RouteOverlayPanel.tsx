@@ -17,6 +17,7 @@ import {
   dateZoneChoice,
   defaultStaticLayout,
   describeStillComponent,
+  groupByReason,
   itemAt,
   moveRect,
   newStillComponent,
@@ -502,9 +503,9 @@ function ElementList({
       </div>
       {unavailable.length > 0 && (
         <ul className="still-image__unavailable" aria-label="Not in this activity">
-          {unavailable.map((choice) => (
-            <li key={choice.key} className="overlay-controls__hint">
-              {choice.label}: {choice.reason}
+          {groupByReason(unavailable).map((group) => (
+            <li key={group.reason} className="overlay-controls__hint">
+              {group.names}: {group.reason}
             </li>
           ))}
         </ul>

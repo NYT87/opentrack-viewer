@@ -6,17 +6,19 @@ document it, and a test keeps the two in step. The decision behind it is TD-085 
 [`docs/planning/06-decisions-and-open-questions.md`](../planning/06-decisions-and-open-questions.md);
 the request is [issue #19](https://github.com/NYT87/opentrack-viewer/issues/19). The dial, the chart, the gradient indicator and the compass (TD-087, [issue #21](https://github.com/NYT87/opentrack-viewer/issues/21)) are sections too.
 
-## Status: documented, not loaded
+## Status: documented; components are added to the app's code
 
-**Loading a component you wrote is not built.** Today the contract describes the data the built-in
-components draw from, and the examples here are real files that are type-checked and run by the test
-suite. Nothing in the app loads a file of yours and runs it.
+**Decided on 12 November 2026 ([issue #19](https://github.com/NYT87/opentrack-viewer/issues/19)):
+components are added to the app's code by pull request. Nothing loads a file of yours and runs it, at
+runtime or ever.** The contract describes the data the built-in components draw from, and the examples
+here are real files that are type-checked and run by the test suite; a component you write is proposed
+by pull request and, once reviewed and merged, is one of the app's own.
 
-Why not yet: a component is code, and code someone else wrote would run on your activity (positions,
-heart rate). It has to run where it cannot reach the network, storage or the page, and the page's
-Content Security Policy deliberately blocks `blob:` scripts, so how a component is loaded is a security
-decision, left to the maintainer on the issue. Remotion, which the issue proposed as the component
-model, is not used (TD-085).
+Why: a component is code, and code someone else wrote would run on your activity (positions, heart
+rate). Running it safely means a sandbox where it cannot reach the network, storage or the page, and a
+change to the page's Content Security Policy, which deliberately blocks `blob:` scripts. The app keeps
+the smaller promise: nothing leaves the device, and nothing runs that was not reviewed. Remotion, which
+the issue proposed as the component model, is not used (TD-085, TD-089).
 
 ## What a component is
 

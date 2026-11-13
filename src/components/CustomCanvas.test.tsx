@@ -96,7 +96,11 @@ describe('the custom canvas (AV-1011)', () => {
     setup();
     const option = within(region()).getByRole('option', { name: /Heart rate \(not in this activity\)/ });
     expect(option).toBeDisabled();
-    expect(within(region()).getByRole('list', { name: 'Not in this activity' })).toHaveTextContent('Heart rate: This activity has no heart rate.');
+    const lines = within(within(region()).getByRole('list', { name: 'Not in this activity' })).getAllByRole('listitem');
+    // AV-1020: each reason once, after every name it rules out, in the Add list's order.
+    const heart = lines.find((line) => /This activity has no heart rate\.$/.test(line.textContent ?? ''))!;
+    expect(heart.textContent).toMatch(/^Heart rate, Heart rate gauge, Heart rate zones,.*Heart rate against time: This activity has no heart rate\.$/);
+    expect(lines.filter((line) => /no heart rate/.test(line.textContent ?? ''))).toHaveLength(1);
   });
 
   it('places by position fields, nudges and arrow keys, and resizes, always inside the frame', async () => {
@@ -455,6 +459,24 @@ describe('the custom canvas (AV-1011)', () => {
       expect((await saved0()).rect.width).toBeGreaterThan(before.rect.width);
     });
 
+    it('grows the shape that holds the figure with it, in one step that one Undo takes back (AV-1020)', async () => {
+      setup();
+      await add('Rounded rectangle');
+      await add('Speed');
+      await userEvent.selectOptions(field('Held by'), 'shape-1');
+      type('Width (%)', '5');
+      type('Height (%)', '3');
+      const before = (await layoutJson()).template.components as unknown as Saved[];
+      type('Value size (%)', '400');
+      const grown = (await layoutJson()).template.components as unknown as Saved[];
+      expect(grown[1]!.rect.width).toBeGreaterThan(before[1]!.rect.width);
+      expect(grown[0]!.rect.width).toBeGreaterThan(before[0]!.rect.width);
+      expect(grown[0]!.rect.x).toBe(before[0]!.rect.x);
+      await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+      const undone = (await layoutJson()).template.components as unknown as Saved[];
+      expect(undone.map((entry) => entry.rect)).toEqual(before.map((entry) => entry.rect));
+    });
+
     it('never shrinks the box, and grows no further than the frame’s edge', async () => {
       setup();
       await add('Speed');
@@ -547,7 +569,8 @@ describe('the custom canvas (AV-1011)', () => {
       await add('Speed dial');
       expect(editor()).toHaveAccessibleName('Selected: Speed dial');
       const initial = await first();
-      expect(initial).toMatchObject({ type: 'dial', range: { min: 0, max: 10 }, dial: { sweep: 240, minorTicks: 4, pointer: 'needle' } });
+      // 0 to 10 m/s is 0 to 36 km/h: rounded in km/h, to 40, and stored in m/s (AV-1020).
+      expect(initial).toMatchObject({ type: 'dial', range: { min: 0, max: expect.closeTo(40 / 3.6, 6) }, dial: { sweep: 240, minorTicks: 4, pointer: 'needle' } });
 
       await userEvent.selectOptions(field('Figure') as unknown as HTMLElement, 'metric:heartRate');
       expect(await first()).toMatchObject({ source: { metric: 'heartRate' }, range: { min: 100, max: 160 } });
@@ -582,6 +605,57 @@ describe('the custom canvas (AV-1011)', () => {
       expect((await first()).dial.sweep).toBe(180);
     });
 
+    it('types a speed dial’s range and step in km/h or mph and stores them in m/s, so units move the numbers and not the needle (AV-1020)', async () => {
+      setup(athlete());
+      await add('Speed dial');
+      expect(field('Range starts at (km/h)').value).toBe('0');
+      expect(field('Range ends at (km/h)').value).toBe('40');
+      fireEvent.change(field('Range ends at (km/h)'), { target: { value: '36' } });
+      fireEvent.change(field('Major tick every (km/h)'), { target: { value: '12' } });
+      let saved = await first();
+      expect((saved.range as { max: number }).max).toBeCloseTo(10, 9);
+      expect(saved.dial.majorStep as number).toBeCloseTo(12 / 3.6, 9);
+      // The same stored range, said in mph (leaving the fields, as choosing the units does).
+      fireEvent.blur(field('Range ends at (km/h)'));
+      fireEvent.blur(field('Major tick every (km/h)'));
+      await userEvent.selectOptions(field('Units') as unknown as HTMLElement, 'imperial');
+      expect(field('Range ends at (mph)').value).toBe('22.369');
+      expect(field('Major tick every (mph)').value).toBe('7.456');
+      saved = await first();
+      expect(saved.range).toEqual({ min: 0, max: expect.closeTo(10, 9) });
+      expect(saved.dial.majorStep as number).toBeCloseTo(12 / 3.6, 9);
+      // A range found from the activity is rounded in mph: 0 to 10 m/s is 22.4 mph, so 25.
+      await userEvent.click(within(editor()).getByRole('button', { name: 'Use this activity’s range' }));
+      expect(field('Range ends at (mph)').value).toBe('25');
+      expect(((await first()).range as { max: number }).max).toBeCloseTo(25 * 1609.344 / 3600, 6);
+      // A start at or over the end is kept as typed and not used.
+      fireEvent.change(field('Range starts at (mph)'), { target: { value: '30' } });
+      expect(((await first()).range as { min: number }).min).toBe(0);
+    });
+
+    it('types a pace dial’s range as m:ss, or as minutes, and shows it as m:ss (AV-1020)', async () => {
+      setup(athlete());
+      await add('Pace dial');
+      const start = () => field('Range starts at (min/km)');
+      fireEvent.change(start(), { target: { value: '3:30' } });
+      expect(((await first()).range as { min: number }).min).toBe(210);
+      fireEvent.change(start(), { target: { value: '4.5' } });
+      expect(((await first()).range as { min: number }).min).toBe(270);
+      // Half typed, it is left as typed and not used; left, it shows where it went.
+      fireEvent.change(start(), { target: { value: '5:' } });
+      expect(start().value).toBe('5:');
+      expect(((await first()).range as { min: number }).min).toBe(270);
+      fireEvent.blur(start());
+      expect(start().value).toBe('4:30');
+      fireEvent.change(field('Major tick every (min/km)'), { target: { value: '0:30' } });
+      fireEvent.blur(field('Major tick every (min/km)'));
+      expect((await first()).dial.majorStep).toBe(30);
+      await userEvent.selectOptions(field('Units') as unknown as HTMLElement, 'imperial');
+      expect(within(editor()).getByLabelText('Range starts at (min/mi)')).toHaveValue('7:15');
+      expect(within(editor()).getByLabelText('Major tick every (min/mi)')).toHaveValue('0:48');
+      expect(((await first()).range as { min: number }).min).toBe(270);
+    });
+
     it('lists only the figures the activity has for a dial, and offers the usual text styling', async () => {
       setup(athlete());
       await add('Speed dial');
@@ -593,6 +667,32 @@ describe('the custom canvas (AV-1011)', () => {
       }
       // A dial's text is centred in it: there is no alignment to set.
       expect(within(editor()).queryByLabelText('Alignment')).not.toBeInTheDocument();
+    });
+
+    it('types a distance window in feet when the chart is imperial, and stores metres (AV-1020)', async () => {
+      setup(athlete());
+      await add('Power chart');
+      await userEvent.selectOptions(within(editor()).getByLabelText('Along'), 'distance');
+      await userEvent.selectOptions(within(editor()).getByLabelText('Shows'), 'window');
+      expect(field('Window either side of now (metres)').value).toBe('500');
+      await userEvent.selectOptions(field('Units') as unknown as HTMLElement, 'imperial');
+      // The same window, in whole feet.
+      expect(field('Window either side of now (feet)').value).toBe('1640');
+      fireEvent.change(field('Window either side of now (feet)'), { target: { value: '1000' } });
+      fireEvent.blur(field('Window either side of now (feet)'));
+      expect(((await first()).chart as { window: number }).window).toBeCloseTo(304.8, 9);
+      // A new window starts at 1,500 ft, from either axis.
+      await userEvent.selectOptions(within(editor()).getByLabelText('Along'), 'time');
+      expect((await first()).chart).toMatchObject({ window: 30 });
+      expect(within(editor()).getByLabelText('Window either side of now (seconds)')).toHaveValue(30);
+      await userEvent.selectOptions(within(editor()).getByLabelText('Along'), 'distance');
+      expect(((await first()).chart as { window: number }).window).toBeCloseTo(457.2, 9);
+      expect(field('Window either side of now (feet)').value).toBe('1500');
+      await userEvent.selectOptions(within(editor()).getByLabelText('Shows'), 'whole');
+      await userEvent.selectOptions(within(editor()).getByLabelText('Shows'), 'window');
+      expect(((await first()).chart as { window: number }).window).toBeCloseTo(457.2, 9);
+      await userEvent.selectOptions(field('Units') as unknown as HTMLElement, 'metric');
+      expect(field('Window either side of now (metres)').value).toBe('457.2');
     });
 
     it('sets a chart’s figure, axis, window, colours and labels, and keeps a window’s unit in step with the axis', async () => {
@@ -731,7 +831,7 @@ describe('the custom canvas (AV-1011)', () => {
     it('is not offered for an activity without heart rate or power, and says why', () => {
       setup();
       expect(within(region()).getByRole('option', { name: 'Heart rate zones (not in this activity)' })).toBeDisabled();
-      expect(within(region()).getByRole('list', { name: 'Not in this activity' })).toHaveTextContent('Power zones: This activity has no power.');
+      expect(within(region()).getByRole('list', { name: 'Not in this activity' })).toHaveTextContent(/Power zones.*: This activity has no power\./);
     });
 
     it('says it needs the maximum heart rate, offers the activity’s highest as such, and then stops asking', async () => {

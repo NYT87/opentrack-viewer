@@ -258,10 +258,11 @@ export function newCanvasComponent(
   key: CanvasElementKey,
   size: { width: number; height: number },
   timeline: OverlayTimeline,
+  units: UnitSystem = 'metric',
 ): OverlayComponent {
   if (key.startsWith('predefined:')) {
     const entry = predefinedEntry(key.slice('predefined:'.length));
-    const built = entry?.build(template, size, timeline)[0];
+    const built = entry?.build(template, size, timeline, units)[0];
     if (!built) throw new Error(`No predefined component "${key}".`);
     return built;
   }
@@ -278,7 +279,7 @@ export function newCanvasComponent(
   if (key === 'zones:heartRate' || key === 'zones:power') {
     return newZonesComponent(template, key === 'zones:heartRate' ? 'heartRate' : 'power', size);
   }
-  if (key.startsWith('dial:')) return newDialComponent(template, key.slice('dial:'.length) as OverlayMetricKey, size, timeline);
+  if (key.startsWith('dial:')) return newDialComponent(template, key.slice('dial:'.length) as OverlayMetricKey, size, timeline, units);
   if (key.startsWith('chart:')) return newChartComponent(template, key.slice('chart:'.length) as OverlayMetricKey, size, timeline);
   if (key === 'gradient') return newGradientComponent(template, size);
   if (key === 'compass') return newCompassComponent(template, size);
@@ -363,6 +364,7 @@ export function newDialComponent(
   metric: OverlayMetricKey,
   size: { width: number; height: number },
   timeline: OverlayTimeline,
+  units: UnitSystem = 'metric',
 ): OverlayComponent {
   const aspect = size.width / size.height;
   const side = Math.min(0.3, 0.3 / aspect);
@@ -375,7 +377,7 @@ export function newDialComponent(
     style: {},
     rect: normalizeRect({ x: 0.04, y: 0.04, width: side, height: side * aspect }),
     source,
-    range: activityRange(timeline, source) ?? (metric === 'heartRate' ? HEART_RATE_RANGE : { min: 0, max: metric === 'speed' ? speedRangeOf(timeline) : 100 }),
+    range: activityRange(timeline, source, units) ?? (metric === 'heartRate' ? HEART_RATE_RANGE : { min: 0, max: metric === 'speed' ? speedRangeOf(timeline) : 100 }),
     dial: { ...DEFAULT_DIAL },
   };
 }
@@ -452,12 +454,13 @@ export function newCanvasComponents(
   key: CanvasElementKey,
   size: { width: number; height: number },
   timeline: OverlayTimeline,
+  units: UnitSystem = 'metric',
 ): OverlayComponent[] {
   if (key.startsWith('predefined:')) {
-    const built = predefinedEntry(key.slice('predefined:'.length))?.build(template, size, timeline) ?? [];
+    const built = predefinedEntry(key.slice('predefined:'.length))?.build(template, size, timeline, units) ?? [];
     if (built.length > 0) return built;
   }
-  return [newCanvasComponent(template, key, size, timeline)];
+  return [newCanvasComponent(template, key, size, timeline, units)];
 }
 
 /** A speed gauge's top: the fastest the activity went, rounded up, or 15 m/s (54 km/h). */
@@ -557,8 +560,14 @@ const WIDEST_VALUE: Record<OverlayMetricKey, number> = {
  * Grows a live figure's box to hold its label and value as `drawFigure` lays
  * them out (`figureLayout`), right and down and no further than the frame's
  * edges. It never moves the box and never shrinks it; text that still does
- * not fit is cut at the box when drawn. Other elements and a shape's
- * members are untouched, as a plain resize leaves them (TD-083).
+ * not fit is cut at the box when drawn. Other elements are untouched, as a
+ * plain resize leaves them (TD-083).
+ *
+ * AV-1020 (TD-089). A figure held by a shape takes the shape with it: the shape
+ * grows right and down by as much as the figure did, keeping the gap the figure
+ * had from the shape's right and bottom edges, and never past the frame. The
+ * shape never moves or shrinks and its other members are untouched. A figure
+ * whose box does not start inside the shape's leaves the shape alone.
  */
 export function growFigureToFit(
   components: OverlayComponent[],
@@ -607,9 +616,25 @@ export function growFigureToFit(
   const width = grown(layout.neededWidth / frame.width, rect.width, 1 - rect.x);
   const height = grown(layout.neededHeight / frame.height, rect.height, 1 - rect.y);
   if (width === rect.width && height === rect.height) return components;
-  return components.map((component) =>
-    component.id === id ? { ...component, rect: normalizeRect({ ...rect, width, height }) } : component,
-  );
+  const holder = found.parentId ? components.find((component) => component.id === found.parentId) : undefined;
+  const holds = holder?.type === 'shape' && rect.x >= holder.rect.x - 1e-9 && rect.y >= holder.rect.y - 1e-9;
+  // The shape's edge moves out by as much as the figure's did, plus the gap it had, to the frame at most.
+  const hold = (edge: number, start: number, figureOld: number, figureNew: number) => {
+    const end = start + edge;
+    const gap = Math.max(0, end - figureOld);
+    return figureNew + gap > end + 1e-9 ? round(clamp(figureNew + gap, end, 1)) - start : edge;
+  };
+  return components.map((component) => {
+    if (component.id === id) return { ...component, rect: normalizeRect({ ...rect, width, height }) };
+    if (holds && component.id === holder.id) {
+      const { x, y } = component.rect;
+      const wider = hold(component.rect.width, x, rect.x + rect.width, rect.x + width);
+      const taller = hold(component.rect.height, y, rect.y + rect.height, rect.y + height);
+      if (wider === component.rect.width && taller === component.rect.height) return component;
+      return { ...component, rect: normalizeRect({ ...component.rect, width: wider, height: taller }) };
+    }
+    return component;
+  });
 }
 
 /**
@@ -730,9 +755,10 @@ export function componentsFromStart(
   id: StartLayoutId,
   timeline: OverlayTimeline,
   size: { width: number; height: number },
+  units: UnitSystem = 'metric',
 ): OverlayComponent[] {
   return id === 'cycling' || id === 'running'
-    ? componentsFromSportLayout(id, timeline, size)
+    ? componentsFromSportLayout(id, timeline, size, units)
     : componentsFromPreset(id, timeline, size);
 }
 

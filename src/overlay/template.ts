@@ -965,6 +965,8 @@ export type ResolvedOverlayComponent =
       value?: number;
       /** AV-1019. A dial: the range its fraction is of, the component's own or the activity's rounded to a step. */
       range?: { min: number; max: number };
+      /** AV-1020. A dial: the unit system its ticks are numbered in (the component's own, else the reader's). */
+      unitSystem?: UnitSystem;
       /** AV-1018. `zones`: where the value falls among the zones. */
       zones?: ResolvedZones;
     };
@@ -985,7 +987,8 @@ export interface ResolvedZones {
   within: number;
 }
 
-function effectiveUnits(component: OverlayComponent, units: UnitSystem): UnitSystem {
+/** The unit system a component is shown in: its own choice, else the reader's. */
+export function effectiveUnits(component: OverlayComponent, units: UnitSystem): UnitSystem {
   return component.unitMode === 'auto' ? units : component.unitMode;
 }
 
@@ -1163,9 +1166,9 @@ export function resolveOverlayComponent(
   }
   if (component.type === 'dial') {
     // AV-1019. The range the reader set, or the activity's own rounded to a step; a value beyond it pins at its end.
-    const range = component.range ?? activityRange(timeline, source);
+    const range = component.range ?? activityRange(timeline, source, unitSystem);
     if (!range) return { status: 'hidden', reason: 'no_data', componentId };
-    return { status: 'ready', componentId, component, style, label, text, fraction: rangeFraction(shown, range), value: shown, range };
+    return { status: 'ready', componentId, component, style, label, text, fraction: rangeFraction(shown, range), value: shown, range, unitSystem };
   }
   if (component.type === 'gradient' || component.type === 'compass') {
     return { status: 'ready', componentId, component, style, label, text, value: shown };

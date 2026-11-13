@@ -1404,6 +1404,25 @@ Acceptance criteria:
   - **Layout files:** round trips.
   - **Browser:** an exported frame read for a dial and a chart.
 
+#### AV-1020: The Answers on Issues #17 to #21: a Shape Grows With Its Figure, Reasons Grouped, the Contract Only, Start Over Clears the Figures, and Dials and Chart Windows in the Reader's Units
+
+Dependencies: AV-1015, AV-1016, AV-1017, AV-1018, AV-1019, TD-088
+
+GitHub issues #17, #18, #19, #20 and #21: the answers given on 12 November 2026 to the questions each build left open. What the answers kept as built is not repeated here.
+
+Acceptance criteria:
+- **A shape grows with the figure it holds (#17).** When a live figure grows to fit its label and value (AV-1015) and it is held by a shape, the shape grows right and down with it so the figure stays inside, keeping the gap the figure had from the shape's right and bottom edges, and never past the frame's edges. The shape never moves and never shrinks, its other members are untouched, and the figure and the shape change in one step that one Undo takes back. A figure that is not held, and a plain resize by hand, behave as before.
+- **"Not in this activity" is grouped by reason (#18).** In the custom canvas (and so on the map video and the map image) and in the still image, each reason is written once, after the names of everything it rules out, in the order the Add list has them: "Heart rate, Heart rate zones, Heart rate against time: This activity has no heart rate." An entry with a reason of its own is a line of its own, as now.
+- **The contract only (#19).** Nothing loads a reader's code at runtime. The status section of `docs/components/README.md` says this is decided, not pending: components are added to the app's code by pull request. TD-085 says so too.
+- **Start over clears the maximum heart rate and FTP (#20).** The overlay page's Start over lets them go with the files, and its Undo puts them back with the files. The undo message says the figures were let go only when there were any. Nothing else clears them, and they are still never stored on the device.
+- **Dials in the reader's units (#21).**
+  - A dial's major ticks carry numbers, in the units the dial's figure is shown in (the component's own units, or the reader's): km/h or mph, min/km or min/mi as m:ss, bpm, W, rpm, spm.
+  - The range and the major step are typed in those units, and a range found from the activity, and an automatic step, are rounded in those units, so a speed dial reads 0, 10, 20 … km/h or 0, 5, 10 … mph, not steps of a whole m/s.
+  - What is stored stays in the stored units (m/s, s/km …), so a layout opens the same in either system and the contract is unchanged; switching units moves the numbers, not the needle.
+  - The numbers use the dial's text colour and size and its halo, sit inside the ticks, and are left out when the dial is too small for them to be read, rather than overlapping.
+- **A chart's window follows the unit system (#21).** On a distance axis the window is typed in feet when the chart's units are imperial and in metres when metric, stored in metres; a new window starts at 500 m or 1,500 ft. The window on a time axis stays in seconds.
+- Tests: the shape growing with a held figure (and not otherwise, and at the frame's edge), one Undo; the grouped list in both editors; Start over and its Undo with and without figures; tick values, labels and rounding in metric and imperial for speed and pace, a typed range and step round-tripping through the stored units, labels left out on a small dial, a golden render of a labelled dial; the chart window's field in feet and metres.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

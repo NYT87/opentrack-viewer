@@ -17,6 +17,7 @@ const { App } = await import('./App');
 const { useOverlayStore } = await import('../state/overlayStore');
 const { useActivityStore } = await import('../state/activityStore');
 const { useInteractionStore } = await import('../state/interactionStore');
+const { usePersonalStore } = await import('../state/personalStore');
 const { readBinaryFixture, readFixture } = await import('../test/helpers/fixtures');
 const { makeActivity } = await import('../test/helpers/activity');
 
@@ -74,6 +75,7 @@ beforeEach(() => {
   const { controls, canvasMode, canvasDraft } = useOverlayStore.getInitialState();
   useOverlayStore.setState({ controls, canvasMode, canvasDraft });
   useActivityStore.getState().clear();
+  usePersonalStore.getState().clear();
   window.location.hash = '';
   vi.resetModules();
   vi.doUnmock('../parsers/gopro/extractGpmf');
@@ -437,6 +439,57 @@ describe('choosing the files by hand (AV-1002)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(await madeFrom('morning-run.gpx')).toBeInTheDocument();
     expect(useOverlayStore.getState().source.activity).toBeDefined();
+  });
+
+  it('lets the maximum heart rate and FTP go with the files, and Undo puts them back (AV-1020, TD-089)', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('overlay-file-input'), gpxFile());
+    await madeFrom('morning-run.gpx');
+    act(() => {
+      usePersonalStore.getState().setFigure('maxHeartRate', 185);
+      usePersonalStore.getState().setFigure('ftp', 250);
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Started over: both files, and your maximum heart rate and FTP, were let go. Your overlay settings are kept.',
+    );
+    expect(usePersonalStore.getState().personal).toEqual({});
+
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(await madeFrom('morning-run.gpx')).toBeInTheDocument();
+    expect(usePersonalStore.getState().personal).toEqual({ maxHeartRate: 185, ftp: 250 });
+  });
+
+  it('keeps a figure typed between Start over and Undo (AV-1020, TD-089)', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('overlay-file-input'), gpxFile());
+    await madeFrom('morning-run.gpx');
+    act(() => {
+      usePersonalStore.getState().setFigure('maxHeartRate', 185);
+      usePersonalStore.getState().setFigure('ftp', 250);
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    act(() => usePersonalStore.getState().setFigure('ftp', 280));
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await madeFrom('morning-run.gpx');
+    expect(usePersonalStore.getState().personal).toEqual({ maxHeartRate: 185, ftp: 280 });
+  });
+
+  it('names only the figure that was set, and says nothing of them when there were none (AV-1020)', async () => {
+    window.location.hash = '#/overlays';
+    render(<App />);
+    await userEvent.upload(await screen.findByTestId('overlay-file-input'), gpxFile());
+    await madeFrom('morning-run.gpx');
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Started over: both files were let go. Your overlay settings are kept.');
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await madeFrom('morning-run.gpx');
+    act(() => usePersonalStore.getState().setFigure('ftp', 250));
+    await userEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('both files, and your FTP, were let go');
   });
 
   it('keeps the activity it has when a replacement fails to read (TD-059)', async () => {

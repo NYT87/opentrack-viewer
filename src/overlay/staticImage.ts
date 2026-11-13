@@ -285,6 +285,20 @@ export interface StillElementChoice {
   reason?: string;
 }
 
+/**
+ * AV-1020 (TD-089). The "Not in this activity" lines: each reason once, after the
+ * names of everything it rules out, in the order the Add list has them. Entries
+ * with a reason of their own are lines of their own.
+ */
+export function groupByReason(choices: readonly { label: string; reason?: string }[]): { names: string; reason: string }[] {
+  const groups = new Map<string, string[]>();
+  for (const choice of choices) {
+    const reason = choice.reason ?? '';
+    groups.set(reason, [...(groups.get(reason) ?? []), choice.label]);
+  }
+  return [...groups].map(([reason, labels]) => ({ names: labels.join(', '), reason }));
+}
+
 export function stillElementChoices(context: StillImageContext): StillElementChoice[] {
   const figures = (['distance', 'speed', 'pace', 'elapsed', 'moving', 'climb'] as const).map((stat) => {
     const value = summaryValue(stat, context.activity, context.units);

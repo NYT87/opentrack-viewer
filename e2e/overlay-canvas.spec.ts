@@ -346,8 +346,9 @@ test('a dial and a chart draw their needle, their line and their cursor where th
     await canvas.getByLabel('Background (%)').fill('0');
   };
 
-  // A speed dial, with colours that cannot be mistaken for one another. The ride's speed is 4 + 0.2 t m/s: the dial's own
-  // range is 4 to 16, so the needle is at the start of the arc at 0 s, straight up at 30 s and at the end of it at 60 s.
+  // A speed dial, with colours that cannot be mistaken for one another. The ride's speed is 4 + 0.2 t m/s, 14.4 to 57.6 km/h:
+  // the dial's own range is rounded in km/h, 10 to 60 km/h (AV-1020), so the needle is at 0.088 of the arc at 0 s, 0.52 at 30 s
+  // (10 m/s) and 0.95 at the end.
   await add(canvas, 'Speed dial');
   const dial = { x: 0.05, y: 0.05, width: 0.2, height: 0.35 };
   await place(dial);
@@ -386,10 +387,13 @@ test('a dial and a chart draw their needle, their line and their cursor where th
     const angle = dialAngle(240, fraction);
     return pixel(frameAt(at), centre.x + 0.4 * R * Math.cos(angle), centre.y + 0.4 * R * Math.sin(angle));
   };
-  for (const [seconds, fraction] of [[0, 0], [30, 0.5], [END, END / 60]] as const) {
+  const [low, high] = [10 / 3.6, 60 / 3.6];
+  const place_ = (speed: number) => (speed - low) / (high - low);
+  for (const seconds of [0, 30, END]) {
+    const fraction = place_(4 + 0.2 * seconds);
     expect(alongNeedle(fraction, seconds), `needle at ${seconds} s`).toEqual([0, 255, 0, 255]);
     // Not where it would be at the other end of the arc.
-    if (fraction !== 0.5) expect(alongNeedle(1 - fraction, seconds)).not.toEqual([0, 255, 0, 255]);
+    expect(alongNeedle(1 - fraction, seconds)).not.toEqual([0, 255, 0, 255]);
   }
   // The arc: filled up to the value in yellow, the rest of the track blue.
   const arc = (fraction: number, at: number) => {

@@ -222,8 +222,8 @@ describe('resolving them against the data', () => {
 
   it('gives a dial with no range the activity’s own, rounded', () => {
     const ready = resolve({ ...dial!, range: undefined });
-    // 0 to 10 m/s: 0 to 10 in steps of 2... 10 m/s is the top.
-    expect(ready).toMatchObject({ status: 'ready', range: { min: 0, max: 10 } });
+    // 0 to 10 m/s is 0 to 36 km/h: rounded in km/h, to 40 (AV-1020), and stored in m/s.
+    expect(ready).toMatchObject({ status: 'ready', range: { min: 0, max: expect.closeTo(40 / 3.6, 6) }, unitSystem: 'metric' });
   });
 
   it('smooths a dial’s value as a figure’s, and hides it where the moment has none', () => {
@@ -287,7 +287,7 @@ describe('the Add list', () => {
       const again = newCanvasComponent(canvasTemplate([made]), key, SIZE, timeline);
       expect(again.id).not.toBe(made.id);
     }
-    expect(newCanvasComponent(t, 'dial:speed', SIZE, timeline)).toMatchObject({ type: 'dial', range: { min: 0, max: 10 }, dial: DEFAULT_DIAL });
+    expect(newCanvasComponent(t, 'dial:speed', SIZE, timeline)).toMatchObject({ type: 'dial', range: { min: 0, max: expect.closeTo(40 / 3.6, 6) }, dial: DEFAULT_DIAL });
     expect(newCanvasComponent(t, 'dial:heartRate', SIZE, timeline).range).toEqual({ min: 100, max: 160 });
     expect(newCanvasComponent(t, 'chart:elevation', SIZE, timeline).chart!.axis).toBe('distance');
     expect(newCanvasComponent(t, 'chart:speed', SIZE, timeline).chart!.axis).toBe('time');

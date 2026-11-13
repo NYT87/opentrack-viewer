@@ -200,6 +200,23 @@ describe('custom canvas render goldens (AV-1011)', () => {
     await expect(late).toMatchFileSnapshot(snapshot('custom-profile-t4'));
   });
 
+  it('draws a dial with the numbers of its major ticks in the reader’s units, in km/h and in mph (AV-1020)', async () => {
+    const dial: OverlayComponent = {
+      ...figure('dial', 'speed', at(0.05, 0.05, 0.3, 0.55), { type: 'dial', range: { min: 0, max: 40 / 3.6 } }),
+      dial: { sweep: 240, minorTicks: 4, pointer: 'needle', trackColor: '#6b7280', fillColor: '#ff6a00', needleColor: '#ffffff' },
+    };
+    const template = { version: 2 as const, name: 'Custom', style: DEFAULT_OVERLAY_TEMPLATE_STYLE, components: [dial] };
+    const drawn = (units: 'metric' | 'imperial') => {
+      const renderer = createOverlayRenderer({ template, timeline, activity: ride, units, width: 1280, height: 720 });
+      return displayList((ctx) => renderer.drawFrame(ctx, 5));
+    };
+    const numbers = (list: string) => [...list.matchAll(/fillText\("(\d+)"/g)].map((match) => match[1]);
+    expect(numbers(drawn('metric'))).toEqual(['0', '5', '10', '15', '20', '25', '30', '35', '40']);
+    expect(numbers(drawn('imperial'))).toEqual(['0', '5', '10', '15', '20']);
+    await expect(drawn('metric')).toMatchFileSnapshot(snapshot('custom-dial-t5'));
+    await expect(drawn('imperial')).toMatchFileSnapshot(snapshot('custom-dial-imperial-t5'));
+  });
+
   it('draws shapes and texts for the whole activity where the activity does not reach, and its figures only where it does', () => {
     // A two-minute video, the minute-long ride starting 30 s in: it covers 30 s to 90 s.
     const late = buildOverlayTimeline(ride, { video: { durationSeconds: 120 }, offsetSeconds: 30 });

@@ -284,11 +284,49 @@ describe('growing a figure’s box to fit its text (AV-1015, TD-083)', () => {
     expect(grow(list, 'missing')).toBe(list);
   });
 
-  it('lets a figure held by a shape grow to the frame, not the shape, and leaves the shape as it is', () => {
+  it('grows the shape that holds a figure with it, keeping the figure’s gap, and nothing else (AV-1020, TD-089)', () => {
     const holder = card('c', { x: 0.1, y: 0.1, width: 0.06, height: 0.04 });
-    const after = grow([holder, box('a', { x: 0.1, y: 0.1, width: 0.05, height: 0.03 }, { parentId: 'c' })]);
-    expect(after[0]).toBe(holder);
-    expect(rectOf(after).width).toBeGreaterThan(holder.rect.width);
+    const other = box('b', small, { parentId: 'c' });
+    const held = box('a', { x: 0.11, y: 0.11, width: 0.04, height: 0.02 }, { parentId: 'c' });
+    const after = grow([holder, held, other]);
+    const figure = rectOf(after);
+    expect(figure.width).toBeGreaterThan(0.04);
+    const shape = rectOf(after, 'c');
+    expect(shape.x).toBe(0.1);
+    expect(shape.y).toBe(0.1);
+    // The figure's right was 0.15 and the shape's 0.16: a gap of 0.01 stays.
+    expect(shape.x + shape.width).toBeCloseTo(figure.x + figure.width + 0.01, 6);
+    expect(shape.y + shape.height).toBeCloseTo(figure.y + figure.height + 0.01, 6);
+    expect(after[2]).toBe(other);
+  });
+
+  it('grows the shape by what the figure grew, never shrinks it, and does not move it', () => {
+    const holder = card('c', { x: 0.1, y: 0.1, width: 0.5, height: 0.5 });
+    const before = { x: 0.11, y: 0.11, width: 0.04, height: 0.02 };
+    const after = grow([holder, box('a', before, { parentId: 'c' })]);
+    const grew = rectOf(after).width - before.width;
+    expect(rectOf(after, 'c').width).toBeCloseTo(0.5 + grew, 6);
+    // Made smaller again, the figure takes nothing back, so the shape keeps what it has.
+    const again = grow([after[0]!, { ...after[1]!, figure: { valueScale: 0.2, labelScale: 0.2 } }]);
+    expect(again[0]).toBe(after[0]);
+    expect(rectOf(after, 'c').x).toBe(0.1);
+  });
+
+  it('stops the shape at the frame’s edge', () => {
+    const holder = card('c', { x: 0.9, y: 0.9, width: 0.1, height: 0.1 });
+    const after = grow([holder, box('a', { x: 0.91, y: 0.91, width: 0.02, height: 0.02 }, { parentId: 'c', figure: { valueScale: 10, labelScale: 10 } })]);
+    const shape = rectOf(after, 'c');
+    expect(shape.x + shape.width).toBeLessThanOrEqual(1);
+    expect(shape.y + shape.height).toBeLessThanOrEqual(1);
+    expect(shape.width).toBeCloseTo(0.1, 6);
+  });
+
+  it('leaves a shape alone when its figure is not held by it, or starts outside it', () => {
+    const holder = card('c', { x: 0.1, y: 0.1, width: 0.06, height: 0.04 });
+    const free = grow([holder, box('a', { x: 0.1, y: 0.1, width: 0.05, height: 0.03 })]);
+    expect(free[0]).toBe(holder);
+    const outside = grow([holder, box('a', { x: 0.05, y: 0.05, width: 0.05, height: 0.03 }, { parentId: 'c' })]);
+    expect(outside[0]).toBe(holder);
   });
 
   it('sizes a sensor’s figure and an imperial one', () => {
