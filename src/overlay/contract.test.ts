@@ -422,6 +422,29 @@ describe('the contract adapter (AV-1017)', () => {
     expect((contractPropsFor(template, high, sample, timeline, context(activity)) as GaugeProps).fraction).toBe(1);
   });
 
+  it('gives a route inset only the kept part of the route, and no position in a hidden stretch (AV-1022, TD-091)', () => {
+    const route = template.components.find((c) => c.id === 'route')!;
+    const trimmed = { ...template, privacyTrim: { start: 0.3, end: 0.3 } };
+    const whole = contractPropsFor(template, route, timeline.sampleAt(30), timeline, context(activity)) as RouteProps;
+    // The template's trim is taken without the caller passing it; a context's own wins.
+    const kept = contractPropsFor(trimmed, route, timeline.sampleAt(30), timeline, context(activity)) as RouteProps;
+    const count = (props: RouteProps) => props.route!.segments.reduce((total, segment) => total + segment.length, 0);
+    expect(count(kept)).toBeLessThan(count(whole));
+    expect(kept.route!.position).toHaveLength(2);
+    for (const hidden of [1, 5, 55]) {
+      const props = contractPropsFor(trimmed, route, timeline.sampleAt(hidden), timeline, context(activity)) as RouteProps;
+      expect(props.route!.segments.length).toBeGreaterThan(0);
+      expect(props.route!.position, `at ${hidden} s`).toBeUndefined();
+    }
+    const own = contractPropsFor(template, route, timeline.sampleAt(30), timeline, context(activity, { privacyTrim: { start: 0.3, end: 0.3 } })) as RouteProps;
+    expect(count(own)).toBe(count(kept));
+    // Too little left is no route at all, though the box and the progress are still given.
+    // (The ride is 300 m: 45 % off each end leaves 30.)
+    const none = contractPropsFor({ ...template, privacyTrim: { start: 0.45, end: 0.45 } }, route, timeline.sampleAt(30), timeline, context(activity)) as RouteProps;
+    expect(none.route).toBeUndefined();
+    expect(none.progress).toBeDefined();
+  });
+
   it('gives the route in the box’s own space, the position and the profile with its cursor', () => {
     const sample = timeline.sampleAt(30)!;
     const route = contractPropsFor(template, template.components.find((c) => c.id === 'route')!, sample, timeline, context(activity)) as RouteProps;

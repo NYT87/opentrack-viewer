@@ -324,6 +324,56 @@ describe('placing figures, the date and text on the image (AV-1010)', () => {
     expect(screen.getByRole('list', { name: 'Elements on the image' })).toHaveTextContent('Text: Shimanami');
   });
 
+  describe('the privacy trim (AV-1022, TD-091)', () => {
+    const percent = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
+
+    it('is saved in the layout as the two shares, opened again with them, and an older layout opens with none', async () => {
+      const { save } = setup();
+      expect(screen.getByRole('group', { name: 'Privacy trim' })).toBeInTheDocument();
+      fireEvent.change(percent('Hide from the start (%)'), { target: { value: '8' } });
+      fireEvent.change(percent('Hide from the end (%)'), { target: { value: '12.5' } });
+      await userEvent.click(screen.getByRole('button', { name: 'Save layout' }));
+      const json = await (save.mock.calls.at(-1)![0] as Blob).text();
+      expect(JSON.parse(json).template.privacyTrim).toEqual({ start: 0.08, end: 0.125 });
+      expect(json).not.toMatch(/"(lat|lon|time)"/);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show the whole route' }));
+      expect(percent('Hide from the start (%)')).toHaveValue(0);
+      await userEvent.upload(screen.getByTestId('still-layout-input'), new File([json], 'my-layout.json', { type: 'application/json' }));
+      expect(await screen.findByRole('status', { name: 'Layout file result' })).toHaveTextContent('Opened the layout in my-layout.json.');
+      expect(percent('Hide from the start (%)')).toHaveValue(8);
+      expect(percent('Hide from the end (%)')).toHaveValue(12.5);
+
+      const older = JSON.parse(json);
+      delete older.template.privacyTrim;
+      await userEvent.upload(screen.getByTestId('still-layout-input'), new File([JSON.stringify(older)], 'older.json', { type: 'application/json' }));
+      expect(await screen.findByText(/Opened the layout in older.json/)).toBeInTheDocument();
+      expect(percent('Hide from the start (%)')).toHaveValue(0);
+      expect(percent('Hide from the end (%)')).toHaveValue(0);
+    });
+
+    it('draws only the kept part of the route in the image it saves', async () => {
+      const { stills } = setup();
+      await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+      const whole = lastPlan(stills).items.find((entry) => entry.kind === 'route');
+      fireEvent.change(percent('Hide from the start (%)'), { target: { value: '40' } });
+      await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+      const kept = lastPlan(stills).items.find((entry) => entry.kind === 'route');
+      if (whole?.kind !== 'route' || kept?.kind !== 'route') throw new Error('no route drawn');
+      // The kept 60 % is fitted to the same box, so it has its own shape, not the whole's.
+      expect(kept.plan.start).toBeDefined();
+      expect(kept.plan.runs.flat()).not.toEqual(whole.plan.runs.flat());
+    });
+
+    it('says why the route is not drawn when less than 100 m (330 ft) would be left, and draws none', async () => {
+      const tiny = makeActivity(Array.from({ length: 20 }, (_, i) => ({ lat: 10 + i * 0.00001, lon: 20 })));
+      const { stills } = setup({ activity: tiny });
+      fireEvent.change(percent('Hide from the start (%)'), { target: { value: '5' } });
+      expect(screen.getAllByText(/Less than (100 m|330 ft) of the route would be left, so it is not drawn\./).length).toBeGreaterThan(0);
+      expect(stills).toHaveLength(0);
+    });
+  });
+
   it('refuses a file that is not a layout, saying why, and keeps the layout it has', async () => {
     setup({ activity: timed() });
     await userEvent.upload(screen.getByTestId('still-layout-input'), new File(['{"hello":1}'], 'other.json', { type: 'application/json' }));

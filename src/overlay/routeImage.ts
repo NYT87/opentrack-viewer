@@ -58,6 +58,8 @@ export const ROUTE_IMAGE_ASPECTS: readonly { id: string; label: string; width: n
 export type RouteImageErrorCode =
   | 'no_location'
   | 'no_valid_coordinates'
+  /** AV-1022: the privacy trim leaves less than the shortest route. */
+  | 'trimmed_away'
   | 'invalid_dimensions'
   | 'invalid_style'
   | 'no_room'

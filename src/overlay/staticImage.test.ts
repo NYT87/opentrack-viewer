@@ -30,6 +30,7 @@ import { DEFAULT_ROUTE_IMAGE_OPTIONS, extractRoute, planRouteImage } from './rou
 import { sanitizeLabel, type OverlayComponent } from './template';
 import type { Activity } from '../domain/activity';
 import { makeActivity } from '../test/helpers/activity';
+import { activityThrough } from '../test/helpers/mapVideoRoutes';
 
 const T0 = Date.parse('2026-09-23T23:55:51Z');
 
@@ -515,5 +516,69 @@ describe('one layout for the still image and the custom canvas (AV-1011)', () =>
     const planned = planStillImage(withComponents([card, held]), contextOf(ride()), measure);
     if (!planned.ok) throw planned.error;
     expect(planned.plan.items[0]).toEqual({ kind: 'shape', id: 'shape-1', box: { x: 76.8, y: 43.2, w: 768, h: 324 }, shape: card.shape });
+  });
+});
+
+describe('the still image\u2019s route and the privacy trim (AV-1022, TD-091)', () => {
+  const withTrim = (privacyTrim: StaticImageLayout['template']['privacyTrim']): StaticImageLayout => {
+    const layout = defaultStaticLayout();
+    return { ...layout, template: { ...layout.template, ...(privacyTrim ? { privacyTrim } : {}) } };
+  };
+  const route = (layout: StaticImageLayout, activity = ride()) => {
+    const planned = planStillImage(layout, contextOf(activity), measure);
+    if (!planned.ok) throw planned.error;
+    return planned.plan;
+  };
+
+  it('draws the route as it was with no trim, or a trim of nothing', () => {
+    expect(route(withTrim({ start: 0, end: 0 }))).toEqual(route(withTrim(undefined)));
+  });
+
+  it('draws only the kept part, fitted to the box: the hidden ends leave no margin to guess from', () => {
+    // 200 m east, 600 m north, 200 m east: hiding 20 % at each end leaves the straight run north.
+    const bent = activityThrough([
+      ...Array.from({ length: 5 }, (_, i) => ({ north: 0, east: i * 50, second: i * 10 })),
+      ...Array.from({ length: 13 }, (_, i) => ({ north: (i + 1) * 50, east: 200, second: 50 + i * 10 })),
+      ...Array.from({ length: 4 }, (_, i) => ({ north: 650, east: 200 + (i + 1) * 50, second: 180 + i * 10 })),
+    ]);
+    const spread = (plan: ReturnType<typeof route>) => {
+      const item = plan.items[0]!;
+      if (item.kind !== 'route') throw new Error('not a route');
+      const xs = item.plan.runs.flat().map(([x]) => x);
+      return Math.max(...xs) - Math.min(...xs);
+    };
+    expect(spread(route(withTrim(undefined), bent))).toBeGreaterThan(100);
+    expect(spread(route(withTrim({ start: 0.2, end: 0.2 }), bent))).toBeLessThan(5);
+  });
+
+  it('is not drawn when less than 100 m would be left, and says why in the reader\u2019s units', () => {
+    const planned = planStillImage({ ...withTrim({ start: 0.45, end: 0.45 }), template: { ...withTrim({ start: 0.45, end: 0.45 }).template, components: [...defaultStaticLayout().template.components, label('Day 1')] } }, contextOf(ride()), measure);
+    if (!planned.ok) throw planned.error;
+    expect(planned.plan.items.map((item) => item.kind)).toEqual(['text']);
+    expect(planned.plan.hidden).toEqual([{ id: 'route', label: 'Route', reason: 'Less than 100 m of the route would be left, so it is not drawn.' }]);
+    const imperial = planStillImage(
+      { ...withTrim({ start: 0.45, end: 0.45 }), template: { ...withTrim({ start: 0.45, end: 0.45 }).template, components: [...defaultStaticLayout().template.components, label('Day 1')] } },
+      contextOf(ride(), { units: 'imperial' }),
+      measure,
+    );
+    expect(imperial.ok && imperial.plan.hidden[0]!.reason).toBe('Less than 330 ft of the route would be left, so it is not drawn.');
+    // With nothing else to draw, that is the error.
+    const alone = planStillImage(withTrim({ start: 0.45, end: 0.45 }), contextOf(ride()), measure);
+    expect(!alone.ok && alone.error.code).toBe('trimmed_away');
+  });
+
+  it('keeps the trim in the layout file as the two shares, and opens an older file with none', () => {
+    const layout = withTrim({ start: 0.08, end: 0.125 });
+    const json = serializeStillLayout(layout);
+    expect(JSON.parse(json).template.privacyTrim).toEqual({ start: 0.08, end: 0.125 });
+    // Never a place: nothing of the activity is in the file.
+    expect(json).not.toMatch(/"(lat|lon|time)"/);
+    const opened = parseOverlayLayout(json);
+    if (!opened.ok) throw new Error(opened.error);
+    expect(opened.layout.template.privacyTrim).toEqual({ start: 0.08, end: 0.125 });
+    const still = parseStillLayout(json);
+    expect(still.ok && still.layout.template.privacyTrim).toEqual({ start: 0.08, end: 0.125 });
+    const older = parseOverlayLayout(serializeStillLayout(withTrim(undefined)));
+    expect(older.ok && 'privacyTrim' in older.layout.template).toBe(false);
   });
 });

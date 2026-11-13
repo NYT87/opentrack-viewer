@@ -48,6 +48,8 @@ import {
 import { useInteractionStore } from '../state/interactionStore';
 import { measureText } from '../overlay/measureText';
 import { ElementRows } from './ElementRows';
+import { PrivacyTrimField } from './PrivacyTrimField';
+import type { PrivacyTrim } from '../overlay/privacyTrim';
 
 /** The long side of the preview, in pixels: the image drawn at this scale. */
 const PREVIEW_LONG_SIDE = 640;
@@ -107,6 +109,8 @@ export function RouteOverlayPanel({
   const [components, setComponents] = useState<OverlayComponent[]>(
     () => defaultStaticLayout().template.components,
   );
+  // AV-1022 (TD-091). The share of the route hidden from each end, kept in the layout with the rest.
+  const [privacyTrim, setPrivacyTrim] = useState<PrivacyTrim | undefined>();
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const [notice, setNotice] = useState<LayoutNotice | undefined>();
@@ -132,6 +136,7 @@ export function RouteOverlayPanel({
         version: OVERLAY_TEMPLATE_VERSION,
         name: 'Still image',
         style: { ...DEFAULT_OVERLAY_STYLE },
+        ...(privacyTrim ? { privacyTrim } : {}),
         components: components.map((component) =>
           component.type === 'routeInset'
             ? {
@@ -147,7 +152,7 @@ export function RouteOverlayPanel({
         ),
       },
     };
-  }, [width, height, components, color, lineWidth, paddingPercent, markers]);
+  }, [width, height, components, color, lineWidth, paddingPercent, markers, privacyTrim]);
 
   const planned = useMemo(() => planStillImage(layout, context, measureText), [layout, context]);
   const plan = planned.ok ? planned.plan : undefined;
@@ -214,6 +219,7 @@ export function RouteOverlayPanel({
     }
     if (route?.style.accentColor) setColor(route.style.accentColor);
     setComponents(next.template.components);
+    setPrivacyTrim(next.template.privacyTrim);
     setSelectedId(undefined);
     setNotice({ kind: 'loaded', message: `Opened the layout in ${file.name}.`, warnings: parsed.warnings });
   };
@@ -318,6 +324,8 @@ export function RouteOverlayPanel({
           </label>
         </fieldset>
       )}
+
+      {hasRoute && <PrivacyTrimField trim={privacyTrim} onChange={setPrivacyTrim} activity={activity} units={units} />}
 
       <ElementList
         components={components}

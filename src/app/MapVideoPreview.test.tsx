@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { routeTotalMeters } from '../overlay/privacyTrim';
 
 vi.mock('maplibre-gl', async () => {
   const { FakeMap, setWorkerUrl } = await import('../test/helpers/maplibreMock');
@@ -160,6 +161,23 @@ describe('the map video preview (AV-1204)', () => {
     await openWithRoute();
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Hide the first' }), { target: { value: '5000' } });
     expect(screen.getByRole('alert')).toHaveTextContent(/privacy trim leaves less than 100 m/);
+  });
+
+  it('writes the share of the route each end of the privacy trim hides beside it (AV-1022, TD-091)', async () => {
+    await openWithRoute();
+    const total = routeTotalMeters(useMapVideoStore.getState().activity!);
+    const first = screen.getByRole('spinbutton', { name: 'Hide the first' });
+    expect(first).toHaveAccessibleDescription(/ — 0 % of the route$/);
+    // The field is in the reader's units (feet here); what the project keeps is metres.
+    fireEvent.change(first, { target: { value: '300' } });
+    const startMeters = useMapVideoStore.getState().settings.privacyTrim.startMeters;
+    expect(startMeters).toBeGreaterThan(0);
+    const share = `${Math.round((startMeters / total) * 1000) / 10} % of the route`;
+    expect(screen.getByText(`— ${share}`)).toBeInTheDocument();
+    expect(first).toHaveAccessibleDescription(new RegExp(`${share}$`));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Hide the last' }), { target: { value: '600' } });
+    const endMeters = useMapVideoStore.getState().settings.privacyTrim.endMeters;
+    expect(screen.getByText(`— ${Math.round((endMeters / total) * 1000) / 10} % of the route`)).toBeInTheDocument();
   });
 
   it('keeps its place in the video when another basemap makes a new map', async () => {

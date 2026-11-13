@@ -456,7 +456,7 @@ export function OverlayPreview({
       {stage}
       {syncTarget ? createPortal(syncPanel, syncTarget) : !controlsElsewhere && syncPanel}
       {!controlsElsewhere && activity && !unavailable && (
-        <OverlayControls controls={controls} timeline={timeline} onChange={onControlsChange} frameAspect={frameAspect} />
+        <OverlayControls controls={controls} timeline={timeline} onChange={onControlsChange} frameAspect={frameAspect} activity={activity} units={units} />
       )}
     </>
   );

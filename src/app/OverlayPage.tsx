@@ -656,6 +656,8 @@ export function OverlayPage() {
                 timeline={timeline}
                 onChange={setControls}
                 frameAspect={media && media.height > 0 ? media.width / media.height : undefined}
+                activity={source.activity}
+                units={unitSystem}
               />
             )}
             {source.video && source.activity && !canvas && (

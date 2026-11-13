@@ -1449,6 +1449,28 @@ Acceptance criteria:
 - **Everywhere:** in the custom canvas's Add list, and as *Splits* in the Running and Cycling predefined groups (AV-1016); drawn on the map video; not offered on the map image (a still, like the dial and chart: AV-1020). Its props are a section of the component contract (`SplitsProps`, AV-1017) with a docs page and a runnable example.
 - **Tests:** distance splits at the boundaries in metric and imperial and at a set distance; laps from a TCX fixture and from a FIT fixture with lap messages; elapsed and moving split times through a stop; a segment break inside a split; the faster/slower comparison including a short last split and a tie; the editor; a golden render; the contract adapter; and a browser test that exports a frame and reads the split's region.
 
+#### AV-1022: A Privacy Trim for the Overlay's Route: Hide a Share of the Start and End, by Slider or Percentage
+
+Dependencies: AV-1004, AV-1009, AV-1010, AV-1011, AV-1013, TD-068, TD-079
+
+GitHub issue #24. The video overlay's route, the still image's route and the route image draw the whole route, both ends included, often at home. This hides a share of each end from everything drawn of *where* the activity went. It is the trim #23's moving map will use.
+
+Acceptance criteria:
+- **One trim for the overlay**, not one per component: *Hide from the start (%)* and *Hide from the end (%)*, each 0 (the default, nothing hidden) to 45 %, as shares of the route's distance.
+  - Set with a range slider with two handles along the route and two percentage inputs, kept in step both ways: moving a handle updates its input, and typing a value moves its handle. Each handle and input is labelled and works by keyboard.
+  - The distance each share hides is written beside it, in the reader's units ("8 % — 1.2 km").
+  - Offered where the route is drawn: the template overlay's controls, the custom canvas, the still image and the route image.
+- **What it hides:**
+  - the route inset's line and marker, in the overlay preview and every export (PNG sequence, transparent WebM, burned-in video);
+  - the still image's route and the route image's line and start and end markers;
+  - while the moment is in a hidden stretch, the inset shows the kept route with no marker.
+  - The figures (speed, distance, heart rate …) are not places and keep showing.
+- **The route is cut before anything is built from it**, by the map video's own cut (`trimRoute`, TD-068): the ends are interpolated exactly that far in, and the projection, the fit and the simplification see only the kept part, so in the whole-route view the inset fits only what is kept and the hidden ends cannot be guessed from an empty margin. A segment break inside a kept part stays a break.
+- **Too little left:** when less than 100 m of route would remain (`MIN_TRIMMED_ROUTE_METERS`), no route, marker or route image is drawn, and the control says why.
+- **Saved** in the layout file (and the template) as the two shares, never as places. A layout without one opens with none, within template version 2.
+- **The other trims:** the map video's and map image's trims stay in metres, as their projects save them, and now show the share they hide beside them. One cut serves all three.
+- Tests: the cut at chosen shares, at 0 %, at both ends at once, on a route with a segment break, and too little left; the fit using only the kept part; no marker in a hidden stretch; the editor's slider and inputs in step both ways and by keyboard; the layout round trip; the share beside the map video's and map image's trims; and a browser test whose exported frame has no line or marker in the hidden stretches.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

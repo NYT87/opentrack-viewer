@@ -62,6 +62,58 @@ const layoutJson = async () => {
   return JSON.parse(await saved.at(-1)!.text()) as { image: { width: number; height: number }; template: { components: Record<string, unknown>[] } };
 };
 
+describe('the custom canvas\u2019s privacy trim (AV-1022, TD-091)', () => {
+  const trimField = () => within(region()).queryByRole('group', { name: 'Privacy trim' });
+
+  it('is offered while the canvas draws a route, and not before', async () => {
+    setup();
+    expect(trimField()).toBeNull();
+    await add('Route with position');
+    expect(trimField()).not.toBeNull();
+    // Taking the route away takes the offer with it.
+    await userEvent.click(within(region()).getByRole('button', { name: /Remove/ }));
+    expect(trimField()).toBeNull();
+  });
+
+  it('is kept in the layout file as the two shares and opens again with them; a layout without one opens with none', async () => {
+    setup();
+    await add('Route with position');
+    const group = trimField()!;
+    fireEvent.change(within(group).getByLabelText('Hide from the start (%)'), { target: { value: '8' } });
+    fireEvent.change(within(group).getByLabelText('Hide from the end (%)'), { target: { value: '12.5' } });
+    const json = await layoutJson();
+    expect((json.template as { privacyTrim?: unknown }).privacyTrim).toEqual({ start: 0.08, end: 0.125 });
+    // Nothing of the activity: no place and no time.
+    expect(JSON.stringify(json)).not.toMatch(/"(lat|lon|time)"/);
+
+    // A fresh canvas opens the file with the trim in it.
+    const text = JSON.stringify(json);
+    document.body.innerHTML = '';
+    setup();
+    await add('Route with position');
+    fireEvent.change(screen.getByTestId('canvas-layout-input'), { target: { files: [new File([text], 'layout.json', { type: 'application/json' })] } });
+    expect(await screen.findByText(/Opened the layout in layout.json/)).toBeInTheDocument();
+    expect(within(trimField()!).getByLabelText('Hide from the start (%)')).toHaveValue(8);
+    expect(within(trimField()!).getByLabelText('Hide from the end (%)')).toHaveValue(12.5);
+
+    const plain = JSON.parse(text);
+    delete plain.template.privacyTrim;
+    fireEvent.change(screen.getByTestId('canvas-layout-input'), { target: { files: [new File([JSON.stringify(plain)], 'plain.json', { type: 'application/json' })] } });
+    expect(await screen.findByText(/Opened the layout in plain.json/)).toBeInTheDocument();
+    await add('Route with position');
+    expect(within(trimField()!).getByLabelText('Hide from the start (%)')).toHaveValue(0);
+  });
+
+  it('says, as the field does, when less than 100 m would be left of the 300 m ride', async () => {
+    setup();
+    await add('Route with position');
+    const group = trimField()!;
+    fireEvent.change(within(group).getByLabelText('Hide from the start (%)'), { target: { value: '45' } });
+    fireEvent.change(within(group).getByLabelText('Hide from the end (%)'), { target: { value: '45' } });
+    expect(within(group).getByRole('status')).toHaveTextContent('Less than 100 m of the route would be left, so it is not drawn.');
+  });
+});
+
 describe('the custom canvas (AV-1011)', () => {
   it('refuses an oversized layout without reading its contents', async () => {
     setup();

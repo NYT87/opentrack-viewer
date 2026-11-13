@@ -384,7 +384,9 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
     if (s.overlay !== undefined && s.overlay !== null) {
       const overlay = parseOverlayTemplate(JSON.stringify(s.overlay));
       if (!overlay.ok) throw new FieldError(`The figures over the map cannot be read. ${overlay.error}`);
-      settings.overlay = overlay.template;
+      // AV-1022 (TD-091): the map video cuts its route in metres; an overlay trim in a hand-edited file would cut it a second time.
+      settings.overlay = { ...overlay.template };
+      delete settings.overlay.privacyTrim;
       warnings.push(...overlay.warnings);
     }
     return { ok: true, project: { activity: { fileName, points }, settings }, warnings };

@@ -4,6 +4,7 @@ import type { UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from '../overlay/presets';
 import { projectProfile } from '../overlay/elevationProfile';
 import { projectRoute } from '../overlay/routeProjection';
+import { keptRoute, markerVisible, sampleActivityMs, type PrivacyTrim } from '../overlay/privacyTrim';
 import {
   needsHalo,
   resolveOverlayComponent,
@@ -47,7 +48,9 @@ export function OverlayLayer({
             key={component.id}
             resolved={resolved}
             sample={sample}
+            timeline={timeline}
             activity={activity}
+            privacyTrim={template.privacyTrim}
             frameAspect={frameAspect}
           />
         );
@@ -75,12 +78,16 @@ function boxStyle(component: OverlayComponent, resolved: Extract<ResolvedOverlay
 function OverlayItem({
   resolved,
   sample,
+  timeline,
   activity,
+  privacyTrim,
   frameAspect,
 }: {
   resolved: Extract<ResolvedOverlayComponent, { status: 'ready' }>;
   sample: OverlaySample | undefined;
+  timeline: OverlayTimeline;
   activity: Activity | undefined;
+  privacyTrim: PrivacyTrim | undefined;
   frameAspect: number;
 }) {
   const { component } = resolved;
@@ -92,6 +99,8 @@ function OverlayItem({
       <div className={base} style={style} data-component={component.id}>
         <RouteInset
           activity={activity}
+          privacyTrim={privacyTrim}
+          timeline={timeline}
           sample={sample}
           aspect={(component.rect.width * frameAspect) / component.rect.height}
         />
@@ -131,23 +140,30 @@ function OverlayItem({
 
 function RouteInset({
   activity,
+  privacyTrim,
+  timeline,
   sample,
   aspect,
 }: {
   activity: Activity | undefined;
+  privacyTrim: PrivacyTrim | undefined;
+  timeline: OverlayTimeline;
   sample: OverlaySample | undefined;
   aspect: number;
 }) {
   // The route does not change as the video plays; only the dot moves. Both
   // the projection and the point strings are built once per activity and box,
   // so a frame costs one circle, not a pass over every point.
-  const route = useMemo(() => (activity ? projectRoute(activity, aspect) : undefined), [activity, aspect]);
+  // AV-1022 (TD-091). Only the kept part of the route is projected; too little left draws no route.
+  const kept = useMemo(() => keptRoute(activity, privacyTrim), [activity, privacyTrim]);
+  const route = useMemo(() => (kept && !kept.tooShort ? projectRoute(kept.activity, aspect) : undefined), [kept, aspect]);
   const paths = useMemo(
     () => route?.segments.map((segment) => segment.map(([x, y]) => `${x * aspect},${y}`).join(' ')),
     [route, aspect],
   );
-  if (!route || !paths) return null;
-  const dot = sample?.position ? route.project(sample.position) : undefined;
+  if (!kept || kept.tooShort || !route || !paths) return null;
+  // No dot while the moment is in a hidden stretch.
+  const dot = sample?.position && markerVisible(kept, sampleActivityMs(timeline, sample)) ? route.project(sample.position) : undefined;
   return (
     <svg
       className="overlay-item__route"

@@ -123,6 +123,45 @@ describe('drawing the overlay on a canvas (AV-1006)', () => {
     expect(drawn.ops('arc').length).toBe(1);
   });
 
+  describe('the privacy trim (AV-1022, TD-091)', () => {
+    // Eleven points a second apart, about 157 m between them: 0.3 hides the first three seconds, 0.2 the last two.
+    const trimmed = { presetId: 'route-inset' as const, privacyTrim: { start: 0.3, end: 0.2 } };
+
+    it('draws the kept route with the marker, and no marker in a hidden stretch', () => {
+      expect(render({ controls: trimmed, at: 5 }).ops('arc').length).toBe(1);
+      for (const hidden of [0, 1, 2.5, 8.5, 10]) {
+        const drawn = render({ controls: trimmed, at: hidden });
+        expect(drawn.ops('arc').length, `at ${hidden} s`).toBe(0);
+        // The kept route is still drawn: only the marker goes.
+        expect(drawn.ops('stroke').length).toBe(1);
+      }
+      // Just inside each cut it is drawn again.
+      expect(render({ controls: trimmed, at: 3.1 }).ops('arc').length).toBe(1);
+      expect(render({ controls: trimmed, at: 7.9 }).ops('arc').length).toBe(1);
+    });
+
+    it('draws only the kept part of the line: fewer points, and none of the hidden ends', () => {
+      const whole = render({ controls: { presetId: 'route-inset' }, at: 5 });
+      const drawn = render({ controls: trimmed, at: 5 });
+      // The whole route is ten legs; the kept half of it, five (cut ends interpolated, a cut a hair off a vertex keeps one more).
+      expect(whole.ops('lineTo').length).toBe(10);
+      expect(drawn.ops('lineTo').length).toBeGreaterThanOrEqual(5);
+      expect(drawn.ops('lineTo').length).toBeLessThanOrEqual(6);
+    });
+
+    it('draws no route and no marker when less than 100 m would be left', () => {
+      const small = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: at(i), lat: 10 + i * 0.0001, lon: 20, distanceMeters: i * 1.5 })));
+      const drawn = render({ controls: { presetId: 'route-inset', privacyTrim: { start: 0.2, end: 0.2 } }, source: small, at: 5 });
+      expect(drawn.ops('stroke').length).toBe(0);
+      expect(drawn.ops('arc').length).toBe(0);
+    });
+
+    it('changes nothing for a trim of nothing', () => {
+      const same = render({ controls: { presetId: 'route-inset', privacyTrim: { start: 0, end: 0 } }, at: 5 });
+      expect(same.calls).toEqual(render({ controls: { presetId: 'route-inset' }, at: 5 }).calls);
+    });
+  });
+
   it('fills the progress bar to the fraction elapsed', () => {
     const drawn = render({ controls: { enabled: { progress: true } }, at: 5 });
     const component = drawn.template.components.find((c) => c.id === 'progress')!;

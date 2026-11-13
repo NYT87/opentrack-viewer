@@ -56,6 +56,13 @@ describe('the map video project file (AV-1203)', () => {
     expect(reopen(serializeMapVideoProject(saved)).project.settings.overlay?.components).toHaveLength(1);
   });
 
+  it('drops an overlay privacy trim from a file: the map video cuts its route in metres, once (AV-1022, TD-091)', () => {
+    const saved = project();
+    saved.settings.overlay = { version: OVERLAY_TEMPLATE_VERSION, name: 'Figures', style: DEFAULT_OVERLAY_STYLE, components: [], privacyTrim: { start: 0.2, end: 0.2 } };
+    const overlay = reopen(serializeMapVideoProject(saved)).project.settings.overlay!;
+    expect('privacyTrim' in overlay).toBe(false);
+  });
+
   it('holds the file name and point count of the activity, and nothing of the activity itself', () => {
     const json = serializeMapVideoProject(project());
     const made = activity();

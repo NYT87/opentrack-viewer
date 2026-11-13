@@ -9,6 +9,7 @@ import { DEFAULT_GRADIENT, gradientBand, gradientGlyph } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
 import { cardinalLetters, normalizeDegrees } from './derivedSeries';
 import { projectRoute } from './routeProjection';
+import { keptRoute, markerVisible, sampleActivityMs, type PrivacyTrim } from './privacyTrim';
 import { extractRoute } from './routeImage';
 import { zoneTimesFor } from './zones';
 import { splitEveryMeters, splitTimesFor, splitsRate, splitsView, unitMeters, type SplitRow } from './splits';
@@ -539,6 +540,12 @@ export interface ContractContext {
   /** AV-1018. The reader's own maximum heart rate and FTP, which a zones component in percent is measured against. */
   personal?: PersonalFigures;
   /**
+   * AV-1022 (TD-091). The privacy trim of the template (`contractPropsFor` takes it from the template
+   * when this is absent): a route inset's props hold only the kept part of the route, and no marker
+   * while the moment is in a hidden stretch.
+   */
+  privacyTrim?: PrivacyTrim;
+  /**
    * Width in pixels of a text in a CSS font, as the canvas that draws it measures it. A whole-activity
    * component is drawn in the box its words take, so its `box` is only exact when this is given; without
    * it `box` is the component's stored rect, which the editor keeps at the measured size.
@@ -635,10 +642,12 @@ export function contractProps(
     if (progress !== undefined) props.progress = progress;
     const box = base.box;
     if (component.type === 'routeInset' && context.activity) {
-      const route = projectRoute(context.activity, box.width / box.height);
-      if (route) {
+      // AV-1022 (TD-091). Cut before it is projected: too little left is no route, and no marker where the moment is hidden.
+      const kept = keptRoute(context.activity, context.privacyTrim);
+      const route = kept && !kept.tooShort ? projectRoute(kept.activity, box.width / box.height) : undefined;
+      if (kept && !kept.tooShort && route) {
         props.route = { segments: route.segments.map((segment) => segment.map(([x, y]) => [x, y])) };
-        if (sample.position) props.route.position = [...route.project(sample.position)];
+        if (sample.position && markerVisible(kept, sampleActivityMs(timeline, sample))) props.route.position = [...route.project(sample.position)];
       }
     }
     if (component.type === 'elevationProfile' && context.activity) {
@@ -981,5 +990,5 @@ export function contractPropsFor(
     const series = chartSeries(component, context.activity);
     if (!series || !component.source || chartMoment(series, component.source, sample, timeline).centre === undefined) return undefined;
   }
-  return contractProps(ready, sample, timeline, context);
+  return contractProps(ready, sample, timeline, context.privacyTrim ? context : { ...context, privacyTrim: template.privacyTrim });
 }

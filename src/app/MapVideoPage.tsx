@@ -18,6 +18,7 @@ import { ActivityError, toActivityError } from '../domain/errors';
 import { formatDistance, formatDuration } from '../domain/units';
 import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
+import { routeTotalMeters } from '../overlay/privacyTrim';
 import { useInteractionStore } from '../state/interactionStore';
 import {
   effectiveMapVideoSettings,
@@ -318,6 +319,7 @@ export function MapVideoPage() {
                 units={unitSystem}
                 timingNote={built?.ok ? built.model.timeline.modeNote : undefined}
                 colorBy={built?.ok ? colorByChoices(activity, built.model.route) : undefined}
+                routeMeters={routeTotalMeters(activity)}
               />
             )}
             {activity && model && (

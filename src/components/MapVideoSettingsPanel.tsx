@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from 'react';
 import type { UnitSystem } from '../domain/units';
+import { shareOfRouteText } from '../overlay/privacyTrim';
 import { MAP_VIDEO_LIMITS, outputProblem, type MapVideoColorBy, type MapVideoMarkerShape, type MapVideoSettings } from '../mapVideo/project';
 import type { ColorByChoice } from '../mapVideo/style';
 import type { MapVideoSettingsPatch } from '../state/mapVideoStore';
@@ -23,6 +24,8 @@ export interface MapVideoSettingsPanelProps {
   timingNote?: string;
   /** What the route's colour can show for this activity (AV-1205). */
   colorBy?: ColorByChoice[];
+  /** AV-1022. The route's length in metres, so each end of the privacy trim says what share of it it hides. */
+  routeMeters?: number;
 }
 
 /** A number field that only reports finite values, held to its range. */
@@ -32,6 +35,7 @@ function NumberField({
   range,
   step,
   unit,
+  share,
   onChange,
 }: {
   label: string;
@@ -39,6 +43,8 @@ function NumberField({
   range: readonly [number, number];
   step: number;
   unit?: string;
+  /** AV-1022. What the length is as a share of the route, written beside it. */
+  share?: string;
   onChange: (value: number) => void;
 }) {
   const id = useId();
@@ -54,10 +60,15 @@ function NumberField({
           min={range[0]}
           max={range[1]}
           step={step}
-          aria-describedby={unit ? `${id}-unit` : undefined}
+          aria-describedby={[unit ? `${id}-unit` : '', share ? `${id}-share` : ''].filter(Boolean).join(' ') || undefined}
           {...draft}
         />
         {unit && <span id={`${id}-unit`}>{unit}</span>}
+        {share && (
+          <span id={`${id}-share`} className="map-video-settings__share">
+            — {share}
+          </span>
+        )}
       </span>
     </div>
   );
@@ -78,7 +89,7 @@ function Group({ legend, children }: { legend: string; children: ReactNode }) {
  * styles are AV-1205's. Every value is held to TD-064's limits as it is
  * typed, so the model never sees one it would refuse.
  */
-export function MapVideoSettingsPanel({ settings, onChange, units, timingNote, colorBy }: MapVideoSettingsPanelProps) {
+export function MapVideoSettingsPanel({ settings, onChange, units, timingNote, colorBy, routeMeters = 0 }: MapVideoSettingsPanelProps) {
   const ids = { colorBy: useId(), routeColor: useId(), casingColor: useId(), markerColor: useId(), custom: useId() };
   /** Custom chosen while the size still matches a preset: its fields stay open. */
   const [customChosen, setCustomChosen] = useState(false);
@@ -311,6 +322,7 @@ export function MapVideoSettingsPanel({ settings, onChange, units, timingNote, c
         <NumberField
           label="Hide the first"
           unit={trimUnit}
+          share={shareOfRouteText(settings.privacyTrim.startMeters, routeMeters)}
           value={toShown(settings.privacyTrim.startMeters)}
           range={trimRange}
           step={imperial ? 50 : 10}
@@ -319,6 +331,7 @@ export function MapVideoSettingsPanel({ settings, onChange, units, timingNote, c
         <NumberField
           label="Hide the last"
           unit={trimUnit}
+          share={shareOfRouteText(settings.privacyTrim.endMeters, routeMeters)}
           value={toShown(settings.privacyTrim.endMeters)}
           range={trimRange}
           step={imperial ? 50 : 10}

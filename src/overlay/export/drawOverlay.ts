@@ -4,6 +4,7 @@ import { BASE_FONT_CQW } from '../presets';
 import { projectProfile, type ProjectedProfile } from '../elevationProfile';
 import type { ProjectedSeries } from '../series';
 import { projectRoute, type ProjectedRoute } from '../routeProjection';
+import { keptRoute, markerVisible, sampleActivityMs } from '../privacyTrim';
 import { FIGURE_MIN_TOP_EMS, figureLayout, haloShadow } from '../figureLayout';
 import { drawShape } from '../shapes';
 import { extractRoute } from '../routeImage';
@@ -94,10 +95,12 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
   const { template, timeline, activity, units, width, height } = input;
 
   // The route is projected once per component: it does not change as time does.
+  // AV-1022 (TD-091). It is the kept part of the route that is projected: the privacy trim cuts first, and too little left is no route.
+  const kept = keptRoute(activity, template.privacyTrim);
   const routes = new Map<string, ProjectedRoute | undefined>();
   const routeFor = (component: OverlayComponent, box: Box): ProjectedRoute | undefined => {
     if (!routes.has(component.id)) {
-      routes.set(component.id, activity ? projectRoute(activity, box.w / box.h) : undefined);
+      routes.set(component.id, kept && !kept.tooShort ? projectRoute(kept.activity, box.w / box.h) : undefined);
     }
     return routes.get(component.id);
   };
@@ -208,7 +211,8 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
-    if (sample.position) {
+    // No marker while the moment is in a hidden stretch: the kept route shows, and not where the activity is.
+    if (sample.position && kept && !kept.tooShort && markerVisible(kept, sampleActivityMs(timeline, sample))) {
       const [x, y] = route.project(sample.position);
       ctx.fillStyle = ready.style.accentColor;
       ctx.beginPath();

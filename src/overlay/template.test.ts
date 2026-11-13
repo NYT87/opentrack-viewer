@@ -487,3 +487,33 @@ describe('smoothing in a template (AV-1016)', () => {
     expect(resolveOverlayComponent(template, { ...climb, display: { decimals: 1 } }, sample, tl, 'metric')).toMatchObject({ text: '100.0 m' });
   });
 });
+
+describe('the privacy trim in a template (AV-1022, TD-091)', () => {
+  const read = (extra: object) => {
+    const parsed = parseOverlayTemplate(JSON.stringify({ version: 2, name: 'x', style: {}, components: [], ...extra }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.template;
+  };
+
+  it('round-trips as the two shares, and nothing else', () => {
+    const first = read({ privacyTrim: { start: 0.08, end: 0.125 } });
+    expect(first.privacyTrim).toEqual({ start: 0.08, end: 0.125 });
+    expect(JSON.parse(serializeOverlayTemplate(first)).privacyTrim).toEqual({ start: 0.08, end: 0.125 });
+    expect(first.version).toBe(2);
+    const again = parseOverlayTemplate(serializeOverlayTemplate(first));
+    expect(again.ok && again.template).toEqual(first);
+  });
+
+  it('opens a template without one with none, still within version 2', () => {
+    const template = read({});
+    expect('privacyTrim' in template).toBe(false);
+    expect(template.version).toBe(2);
+  });
+
+  it('clamps a share to 0..45 % and drops a trim that hides nothing or is not one', () => {
+    expect(read({ privacyTrim: { start: 0.9, end: -0.2 } }).privacyTrim).toEqual({ start: 0.45, end: 0 });
+    expect(read({ privacyTrim: { start: 0, end: 0 } }).privacyTrim).toBeUndefined();
+    expect(read({ privacyTrim: 'all' }).privacyTrim).toBeUndefined();
+    expect(read({ privacyTrim: { start: 'a', end: null } }).privacyTrim).toBeUndefined();
+  });
+});

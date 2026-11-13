@@ -59,6 +59,16 @@ const controls = (patch: Partial<OverlayControls> = {}): OverlayControls => ({
 });
 const ids = (built: ReturnType<typeof buildOverlay>) => built.template.components.map((c) => c.id);
 
+describe('the privacy trim in the built template (AV-1022, TD-091)', () => {
+  it('puts the controls\u2019 trim in the template, clamped, and nothing when it hides nothing', () => {
+    const timeline = buildOverlayTimeline(full());
+    expect(buildOverlay(controls({ privacyTrim: { start: 0.1, end: 0.2 } }), timeline).template.privacyTrim).toEqual({ start: 0.1, end: 0.2 });
+    expect(buildOverlay(controls({ privacyTrim: { start: 0.9, end: 0.2 } }), timeline).template.privacyTrim).toEqual({ start: 0.45, end: 0.2 });
+    expect('privacyTrim' in buildOverlay(controls({ privacyTrim: { start: 0, end: 0 } }), timeline).template).toBe(false);
+    expect('privacyTrim' in buildOverlay(controls(), timeline).template).toBe(false);
+  });
+});
+
 describe('overlay presets (AV-1005)', () => {
   it('offers the three templates', () => {
     expect(OVERLAY_PRESETS.map((preset) => preset.id)).toEqual([

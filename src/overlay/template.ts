@@ -21,6 +21,7 @@ import {
   withinZone,
 } from './zones';
 import { formatHeading } from './derivedSeries';
+import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial';
 import { DEFAULT_GRADIENT, GRADIENT_BAND_LIMITS, GRADIENT_FROM_LIMITS } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
@@ -457,6 +458,11 @@ export interface OverlayTemplate {
   name: string;
   style: OverlayStyle;
   components: OverlayComponent[];
+  /**
+   * AV-1022 (TD-091). The share of the route's distance hidden from each end, from everything
+   * drawn of where the activity went. Absent when nothing is hidden: a layout without one opens with none.
+   */
+  privacyTrim?: PrivacyTrim;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -892,6 +898,12 @@ function parseShape(raw: Record<string, unknown>): OverlayShapeSetting {
   };
 }
 
+/** The `privacyTrim` of a parsed template: clamped, and absent when it hides nothing. */
+const privacyTrimField = (raw: unknown): { privacyTrim?: PrivacyTrim } => {
+  const privacyTrim = readPrivacyTrim(raw);
+  return privacyTrim ? { privacyTrim } : {};
+};
+
 /**
  * Reads a template back from JSON. A malformed file is an error; a single bad
  * component is dropped with a warning, so one stale entry does not cost the
@@ -939,6 +951,7 @@ export function parseOverlayTemplate(json: string): ParseOverlayTemplateResult {
       name: typeof raw.name === 'string' && raw.name ? raw.name : 'Untitled template',
       style: { ...DEFAULT_OVERLAY_STYLE, ...parseStyle(raw.style) },
       components,
+      ...privacyTrimField(raw.privacyTrim),
     },
   };
 }

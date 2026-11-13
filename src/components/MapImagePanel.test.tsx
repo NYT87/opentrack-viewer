@@ -34,6 +34,21 @@ function setup(activity = flat) {
   return { renderImage, save, panel: screen.getByRole('region', { name: 'Map image' }) };
 }
 
+describe('the map image\u2019s privacy trim (AV-1022, TD-091)', () => {
+  it('writes the share of the route each end hides beside it, and keeps the metres', async () => {
+    const { panel } = setup();
+    const first = within(panel).getByRole('spinbutton', { name: 'Hide the first' });
+    expect(first).toHaveAccessibleDescription(/0 % of the route/);
+    fireEvent.change(first, { target: { value: '300' } });
+    // The road is 3 km: 300 m is a tenth of it.
+    await waitFor(() => expect(first).toHaveAccessibleDescription('m — 10 % of the route'));
+    expect(within(panel).getByText('— 10 % of the route')).toBeInTheDocument();
+    expect(useMapImageStore.getState().settings.privacyTrim.startMeters).toBe(300);
+    fireEvent.change(within(panel).getByRole('spinbutton', { name: 'Hide the last' }), { target: { value: '45' } });
+    await waitFor(() => expect(within(panel).getByText('— 1.5 % of the route')).toBeInTheDocument());
+  });
+});
+
 describe('MapImagePanel (AV-1013)', () => {
   it('offers the details the activity has, and the others disabled with the reason', async () => {
     const { panel } = setup();

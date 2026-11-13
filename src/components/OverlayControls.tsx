@@ -11,8 +11,11 @@ import {
   type OverlayControls as Controls,
   type OverlayPosition,
 } from '../overlay/presets';
+import type { Activity } from '../domain/activity';
+import type { UnitSystem } from '../domain/units';
 import type { OverlayUnitMode } from '../overlay/template';
 import type { OverlayTimeline } from '../overlay/timeline';
+import { PrivacyTrimField } from './PrivacyTrimField';
 
 interface OverlayControlsProps {
   controls: Controls;
@@ -21,6 +24,9 @@ interface OverlayControlsProps {
   onChange: (patch: Partial<Controls>) => void;
   /** The picture's shape, width over height: how much a strip along its edge holds. */
   frameAspect?: number;
+  /** AV-1022. The activity the privacy trim's shares are of, and the reader's units for the distance each hides. */
+  activity?: Activity;
+  units?: UnitSystem;
 }
 
 /**
@@ -28,7 +34,7 @@ interface OverlayControlsProps {
  * a design editor: three templates, a checkbox per component, where it sits,
  * how big it is, and three style choices.
  */
-export function OverlayControls({ controls, timeline, onChange, frameAspect = 16 / 9 }: OverlayControlsProps) {
+export function OverlayControls({ controls, timeline, onChange, frameAspect = 16 / 9, activity, units = 'metric' }: OverlayControlsProps) {
   const id = useId();
   const catalog = overlayCatalog(timeline);
   // TD-059. Past what one row holds at a readable size the strip wraps over the
@@ -148,6 +154,11 @@ export function OverlayControls({ controls, timeline, onChange, frameAspect = 16
         </div>
       </fieldset>
 
+      {/* AV-1022 (TD-091). One trim for the overlay, offered where the route is drawn. */}
+      {shown.some((entry) => entry.kind === 'route') && (
+        <PrivacyTrimField trim={controls.privacyTrim} onChange={(privacyTrim) => change({ privacyTrim })} activity={activity} units={units} />
+      )}
+
       <fieldset className="overlay-controls__group">
         <legend>Style</legend>
         <div className="overlay-controls__field">
@@ -201,7 +212,8 @@ export function OverlayControls({ controls, timeline, onChange, frameAspect = 16
               setBeforeReset(undefined);
             } else {
               setBeforeReset(controls);
-              onChange(DEFAULT_OVERLAY_CONTROLS);
+              // The store merges a patch, so the trim (which the defaults do not name) is cleared by name (AV-1022).
+              onChange({ ...DEFAULT_OVERLAY_CONTROLS, privacyTrim: undefined });
             }
           }}
         >

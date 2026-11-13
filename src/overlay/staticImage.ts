@@ -1,11 +1,13 @@
 import type { Activity } from '../domain/activity';
 import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
+import { keptRoute, minimumKeptText } from './privacyTrim';
 import {
   DEFAULT_ROUTE_IMAGE_OPTIONS,
   ROUTE_IMAGE_LIMITS,
   RouteImageError,
   checkImageSize,
+  extractRoute,
   isHexColor,
   planRouteImage,
   type RouteGeometry,
@@ -451,7 +453,25 @@ export function planStillImage(
         hidden.push({ id: component.id, label, reason: context.route.error.message });
         continue;
       }
-      const planned = planRouteItem(component, layout, context.route.route);
+      // AV-1022 (TD-091). The route is cut by the privacy trim before it is read for drawing, and too little left is not drawn.
+      let route = context.route.route;
+      const kept = keptRoute(context.activity, layout.template.privacyTrim);
+      if (kept?.tooShort) {
+        const reason = `Less than ${minimumKeptText(context.units)} of the route would be left, so it is not drawn.`;
+        routeError = new RouteImageError('trimmed_away', reason);
+        hidden.push({ id: component.id, label, reason });
+        continue;
+      }
+      if (kept && kept.activity !== context.activity) {
+        const extracted = extractRoute(kept.activity);
+        if (!extracted.ok) {
+          routeError = extracted.error;
+          hidden.push({ id: component.id, label, reason: extracted.error.message });
+          continue;
+        }
+        route = extracted.route;
+      }
+      const planned = planRouteItem(component, layout, route);
       if (!planned.ok) return planned;
       items.push(planned.item);
       notes.push(...planned.item.plan.notes);

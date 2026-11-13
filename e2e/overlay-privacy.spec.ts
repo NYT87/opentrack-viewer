@@ -394,3 +394,96 @@ test.describe('the privacy checks catch a leak', () => {
     expect(figureIn('max 217 bpm')).toBe(MAX_HEART_RATE);
   });
 });
+
+/**
+ * AV-1022 (TD-091). The privacy trim reaches every drawn pixel: a route that goes east, then north,
+ * then east again, with the first and last 30 % hidden, is exported as a PNG sequence, and the frames
+ * are decoded. Only the northward middle is kept, so no line is drawn east or west of it, and the
+ * marker is drawn only while the ride is in that middle: none in the hidden first and last seconds.
+ */
+const ELBOW_START = Date.UTC(2024, 0, 1, 10, 0, 0);
+function elbowGpx(): string {
+  const lat0 = 46;
+  const lon0 = 7;
+  const metersPerLat = 111_195;
+  const metersPerLon = metersPerLat * Math.cos((lat0 * Math.PI) / 180);
+  // A second a step, ten metres a step: 18 steps east, 24 north, 18 east. 600 m, so 30 % is 18 steps.
+  const points = Array.from({ length: 61 }, (_, i) => {
+    const east = i <= 18 ? i * 10 : i <= 42 ? 180 : 180 + (i - 42) * 10;
+    const north = i <= 18 ? 0 : i <= 42 ? (i - 18) * 10 : 240;
+    const time = new Date(ELBOW_START + i * 1000).toISOString().replace('.000Z', 'Z');
+    return `<trkpt lat="${(lat0 + north / metersPerLat).toFixed(7)}" lon="${(lon0 + east / metersPerLon).toFixed(7)}"><time>${time}</time></trkpt>`;
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="e2e" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Elbow</name><trkseg>${points.join('')}</trkseg></trk></gpx>`;
+}
+
+test('an exported frame has no line and no marker in the hidden stretches (AV-1022)', async ({ page }) => {
+  await page.goto('./#/overlays');
+  await page.getByTestId('overlay-file-input').setInputFiles({ name: 'elbow.gpx', mimeType: 'application/gpx+xml', buffer: Buffer.from(elbowGpx()) });
+  await page.getByRole('radio', { name: 'A custom video overlay, with no video' }).check();
+  const canvas = page.getByRole('region', { name: 'Custom canvas' });
+  await expect(canvas).toBeVisible();
+  await canvas.getByLabel('Width (px)', { exact: true }).fill('640');
+  await canvas.getByLabel('Height (px)', { exact: true }).fill('360');
+  await canvas.getByLabel('Add', { exact: true }).selectOption({ label: 'Route with position' });
+  await canvas.getByRole('button', { name: 'Add to the canvas' }).click();
+
+  const read = async (label: string) => Number(await canvas.getByLabel(label, { exact: true }).inputValue()) / 100;
+  const box = { x: await read('From the left (%)'), y: await read('From the top (%)'), width: await read('Width (%)'), height: await read('Height (%)') };
+
+  // 30 % off each end, typed; the distance each hides is written beside it.
+  await canvas.getByLabel('Hide from the start (%)', { exact: true }).fill('30');
+  await canvas.getByLabel('Hide from the end (%)', { exact: true }).fill('30');
+  await expect(canvas.getByLabel('Hide from the start (%)', { exact: true })).toHaveAccessibleDescription(/^30 % — 1[78]\d m$/);
+  await expect(canvas.getByRole('slider', { name: 'Start of the route kept' })).toHaveValue('30');
+  await expect(canvas.getByRole('slider', { name: 'End of the route kept' })).toHaveValue('70');
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-640x360-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+  expect(frames.length).toBeGreaterThan(590);
+
+  const { decodePng } = await import('./helpers/png');
+  /** The route inset's pixels in a frame: the line (white) and the marker (the accent, orange). */
+  const inspect = (index: number) => {
+    const png = decodePng(Buffer.from(frames[index]!.data));
+    let line = 0;
+    let marker = 0;
+    let minX = Infinity;
+    let maxX = -1;
+    let minY = Infinity;
+    let maxY = -1;
+    for (let y = Math.floor(box.y * png.height); y < Math.ceil((box.y + box.height) * png.height); y += 1) {
+      for (let x = Math.floor(box.x * png.width); x < Math.ceil((box.x + box.width) * png.width); x += 1) {
+        const at = (y * png.width + x) * 4;
+        const [r, g, b, a] = [png.pixels[at]!, png.pixels[at + 1]!, png.pixels[at + 2]!, png.pixels[at + 3]!];
+        const isMarker = r > 230 && g > 90 && g < 125 && b < 30 && a === 255;
+        const isLine = r > 200 && g > 200 && b > 200 && a > 150;
+        if (isMarker) marker += 1;
+        if (isLine || isMarker) {
+          line += isLine ? 1 : 0;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    return { line, marker, width: maxX - minX + 1, height: maxY - minY + 1, boxWidth: box.width * png.width, boxHeight: box.height * png.height };
+  };
+
+  // In every frame, hidden or not, the line is the kept middle only: tall and thin. The whole route
+  // is wider than it is tall, so nothing of the hidden east-west legs is drawn.
+  for (const index of [0, 100, 300, 500, frames.length - 1]) {
+    const seen = inspect(index);
+    expect(seen.line, `frame ${index}`).toBeGreaterThan(50);
+    expect(seen.height, `frame ${index}`).toBeGreaterThan(seen.width * 2);
+  }
+  // The marker: none in the first 18 s or the last 18 s, drawn in the 24 s between.
+  for (const index of [0, 50, 150, 170, 430, 450, frames.length - 1]) expect(inspect(index).marker, `frame ${index}`).toBe(0);
+  for (const index of [200, 300, 400]) expect(inspect(index).marker, `frame ${index}`).toBeGreaterThan(20);
+});

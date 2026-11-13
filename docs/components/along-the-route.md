@@ -9,7 +9,7 @@ are in the [README](README.md): `section`, `box` (`x`, `y`, `width`, `height`), 
 | --- | --- | --- | --- |
 | `part` | | never | `route`, `progress` or `elevationProfile`. |
 | `progress` | 0..1 | every frame | How far along the activity: by distance where it has one, else by time. Absent where the activity has no clock to measure by. |
-| `route` | box | `position` every frame, the rest never | `part: 'route'`: the route's shape. Absent when no activity is given or it has no route to fit. |
+| `route` | box | `position` every frame, the rest never | `part: 'route'`: the route's shape. Absent when no activity is given or it has no route to fit, or when the template's privacy trim leaves less than 100 m of it. |
 | `profile` | box | `cursor` every frame, the rest never | `part: 'elevationProfile'`: the elevation along the activity. Absent when it has no elevation along it. |
 
 `route` holds:
@@ -17,7 +17,7 @@ are in the [README](README.md): `section`, `box` (`x`, `y`, `width`, `height`), 
 | Prop | Unit | Meaning |
 | --- | --- | --- |
 | `segments` | 0..1 of the box | Runs of `[x, y]` points, x right and y down, fitted into the box with the route's aspect kept and a margin. A pause or a lost fix ends a run: never draw a line from one run to the next. |
-| `position` | 0..1 of the box | `[x, y]`, where the activity is now. Absent where it has no position. |
+| `position` | 0..1 of the box | `[x, y]`, where the activity is now. Absent where it has no position, and while the moment is in a stretch the template's privacy trim hides (the `segments` are only the part it keeps: nothing of the hidden ends is given). |
 
 `profile` holds:
 

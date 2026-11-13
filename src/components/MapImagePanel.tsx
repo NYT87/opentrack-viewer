@@ -12,6 +12,7 @@ import { usePersonalStore } from '../state/personalStore';
 import { canvasTemplate, type CanvasDraft } from '../overlay/customCanvas';
 import { OverlayExportError } from '../overlay/export/errors';
 import { measureText } from '../overlay/measureText';
+import { routeTotalMeters, shareOfRouteText } from '../overlay/privacyTrim';
 import type { OverlayComponent } from '../overlay/template';
 import { useInteractionStore } from '../state/interactionStore';
 import { effectiveMapImageSettings, useMapImageStore } from '../state/mapImageStore';
@@ -43,15 +44,16 @@ type Phase =
   | { status: 'done'; fileName: string; bytes: number; requests: number }
   | { status: 'error'; message: string };
 
-function NumberField({ label, value, range, step, unit, decimals = 0, onChange }: { label: string; value: number; range: readonly [number, number]; step: number; unit?: string; decimals?: number; onChange: (value: number) => void }) {
+function NumberField({ label, value, range, step, unit, share, decimals = 0, onChange }: { label: string; value: number; range: readonly [number, number]; step: number; unit?: string; share?: string; decimals?: number; onChange: (value: number) => void }) {
   const id = useId();
   const draft = useNumberDraft(value, decimals, onChange, range);
   return (
     <div className="map-video-settings__field">
       <label htmlFor={id}>{label}</label>
       <span className="map-video-settings__input">
-        <input id={id} type="number" min={range[0]} max={range[1]} step={step} aria-describedby={unit ? `${id}-unit` : undefined} {...draft} />
+        <input id={id} type="number" min={range[0]} max={range[1]} step={step} aria-describedby={[unit ? `${id}-unit` : '', share ? `${id}-share` : ''].filter(Boolean).join(' ') || undefined} {...draft} />
         {unit && <span id={`${id}-unit`}>{unit}</span>}
+        {share && <span id={`${id}-share`} className="map-video-settings__share">— {share}</span>}
       </span>
     </div>
   );
@@ -163,6 +165,8 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
 
   const imperial = units === 'imperial';
   const trimUnit = imperial ? 'ft' : 'm';
+  // AV-1022. Each end of the trim, as a share of the whole route.
+  const routeMeters = useMemo(() => routeTotalMeters(activity), [activity]);
   const toShown = (meters: number) => (imperial ? meters * FEET_PER_METER : meters);
   const fromShown = (value: number) => (imperial ? value / FEET_PER_METER : value);
   const trimRange = [0, toShown(MAP_VIDEO_LIMITS.trimMeters[1])] as const;
@@ -403,8 +407,8 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
               Hides the start and the end of the route from the image (the line, the map’s framing and the
               profile), so it need not show where you live.
             </p>
-            <NumberField label="Hide the first" unit={trimUnit} value={toShown(settings.privacyTrim.startMeters)} range={trimRange} step={imperial ? 50 : 10} onChange={(value) => update({ privacyTrim: { startMeters: fromShown(value) } })} />
-            <NumberField label="Hide the last" unit={trimUnit} value={toShown(settings.privacyTrim.endMeters)} range={trimRange} step={imperial ? 50 : 10} onChange={(value) => update({ privacyTrim: { endMeters: fromShown(value) } })} />
+            <NumberField label="Hide the first" unit={trimUnit} share={shareOfRouteText(settings.privacyTrim.startMeters, routeMeters)} value={toShown(settings.privacyTrim.startMeters)} range={trimRange} step={imperial ? 50 : 10} onChange={(value) => update({ privacyTrim: { startMeters: fromShown(value) } })} />
+            <NumberField label="Hide the last" unit={trimUnit} share={shareOfRouteText(settings.privacyTrim.endMeters, routeMeters)} value={toShown(settings.privacyTrim.endMeters)} range={trimRange} step={imperial ? 50 : 10} onChange={(value) => update({ privacyTrim: { endMeters: fromShown(value) } })} />
           </Group>
 
           {settings.layout === 'canvas' && plan && clock && (

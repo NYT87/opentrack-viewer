@@ -6,6 +6,7 @@ import {
   type OverlayTemplate,
   type OverlayUnitMode,
 } from './template';
+import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import type { OverlayMetricKey, OverlayTimeline } from './timeline';
 
 /**
@@ -58,6 +59,8 @@ export interface OverlayControls {
   /** 0..1 */
   backgroundOpacity: number;
   unitMode: OverlayUnitMode;
+  /** AV-1022 (TD-091). The share of the route hidden from each end; absent hides nothing. Kept for the session with the rest. */
+  privacyTrim?: PrivacyTrim;
 }
 
 export const SCALE_RANGE = { min: 0.75, max: 1.5 } as const;
@@ -449,6 +452,7 @@ export function buildOverlay(
   }
 
   const preset = OVERLAY_PRESETS.find((candidate) => candidate.id === controls.presetId);
+  const privacyTrim = readPrivacyTrim(controls.privacyTrim);
   return {
     unsupported,
     template: {
@@ -465,6 +469,7 @@ export function buildOverlay(
         fontScale: clamp(controls.scale, SCALE_RANGE.min, SCALE_RANGE.max),
       },
       components,
+      ...(privacyTrim ? { privacyTrim } : {}),
     },
   };
 }

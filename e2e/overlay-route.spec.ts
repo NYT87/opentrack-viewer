@@ -239,3 +239,72 @@ test('takes the activity from the viewer, whole by default and the focused secti
   expect(name).toBe('route-overlay-1920x1080.png');
   expect(drawnBox(png).visible).toBeGreaterThan(2000);
 });
+
+/**
+ * AV-1022 (TD-091). The route image with the overlay's privacy trim: handles and percentages in step,
+ * by keyboard and by typing, and the PNG with the hidden ends gone.
+ */
+test('the privacy trim: handles and percentages in step by keyboard, and the route image drawn without the ends (AV-1022)', async ({ page }, testInfo) => {
+  // 18 steps east, 24 north, 18 east: 600 m, 30 % of it the first east leg.
+  const lat0 = 46;
+  const lon0 = 7;
+  const perMetreLat = 1 / 111_195;
+  const perMetreLon = perMetreLat / Math.cos((lat0 * Math.PI) / 180);
+  const points = Array.from({ length: 61 }, (_, i) => {
+    const east = i <= 18 ? i * 10 : i <= 42 ? 180 : 180 + (i - 42) * 10;
+    const north = i <= 18 ? 0 : i <= 42 ? (i - 18) * 10 : 240;
+    return { lat: lat0 + north * perMetreLat, lon: lon0 + east * perMetreLon };
+  });
+  const path = writeGpx(join(testInfo.outputDir, 'elbow'), 'elbow.gpx', points);
+  const panel = await openOverlaysWith(page, path);
+
+  // The whole route is wider than it is tall.
+  const whole = drawnBox((await downloadPng(page)).png);
+  expect(whole.maxX - whole.minX).toBeGreaterThan(whole.maxY - whole.minY);
+
+  const trim = panel.getByRole('group', { name: 'Privacy trim' });
+  const startHandle = trim.getByRole('slider', { name: 'Start of the route kept' });
+  const endHandle = trim.getByRole('slider', { name: 'End of the route kept' });
+  const startInput = trim.getByLabel('Hide from the start (%)', { exact: true });
+  const endInput = trim.getByLabel('Hide from the end (%)', { exact: true });
+  await expect(startInput).toHaveValue('0');
+  await expect(endHandle).toHaveValue('100');
+
+  // A handle moved by keyboard moves its percentage; its distance is written beside it.
+  await startHandle.focus();
+  await expect(startHandle).toBeFocused();
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press('ArrowRight');
+  await expect(startInput).toHaveValue('0.5');
+  await expect(startInput).toHaveAccessibleDescription(/^0\.5 % — \d+ (m|ft)$/);
+  await page.keyboard.press('End');
+  await expect(startInput).toHaveValue('45');
+  await expect(startHandle).toHaveValue('45');
+  // The end handle works the other way: moving it towards the start hides more.
+  await endHandle.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(endInput).toHaveValue('0.1');
+  await page.keyboard.press('Home');
+  await expect(endInput).toHaveValue('45');
+  // The two cannot cross: 45 % each leaves a tenth of the route between the handles.
+  await expect(startHandle).toHaveValue('45');
+  await expect(endHandle).toHaveValue('55');
+
+  // Typing moves a handle, and stays in step.
+  await startInput.fill('30');
+  await expect(startHandle).toHaveValue('30');
+  await endInput.fill('30');
+  await expect(endHandle).toHaveValue('70');
+
+  // 30 % off each end leaves the northward middle only: a tall, thin route.
+  const kept = drawnBox((await downloadPng(page)).png);
+  expect(kept.maxY - kept.minY).toBeGreaterThan(700);
+  expect(kept.maxX - kept.minX).toBeLessThan(100);
+
+  // Down to under 100 m of route: nothing is drawn, and the control says why.
+  await startInput.fill('45');
+  await endInput.fill('45');
+  await expect(trim.getByRole('status')).toContainText(/Less than (100 m|330 ft) of the route would be left, so it is not drawn\./);
+  await trim.getByRole('button', { name: 'Show the whole route' }).click();
+  await expect(startInput).toHaveValue('0');
+  await expect(endInput).toHaveValue('0');
+});

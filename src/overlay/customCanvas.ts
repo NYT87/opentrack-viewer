@@ -29,6 +29,7 @@ import { DEFAULT_COMPASS } from './compass';
 import { DEFAULT_SPLITS, splitsContentHeight, splitsMetrics, splitsUnavailableReason } from './splits';
 import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
 import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
+import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import type { MeasureText } from './staticImage';
 import type { UnitSystem } from '../domain/units';
 
@@ -764,6 +765,8 @@ export interface CanvasDraft {
   frame: { width: number; height: number };
   state: CanvasState;
   history: CanvasState[];
+  /** AV-1022 (TD-091). The privacy trim of the canvas's template: not part of Undo, which is the layout's. */
+  privacyTrim?: PrivacyTrim;
 }
 
 export const EMPTY_CANVAS_DRAFT: CanvasDraft = {
@@ -808,11 +811,13 @@ export function componentsFromStart(
 }
 
 /** A template of these components, ready for an exporter or a layout file. */
-export function canvasTemplate(components: OverlayComponent[]): OverlayTemplate {
+export function canvasTemplate(components: OverlayComponent[], privacyTrim?: PrivacyTrim): OverlayTemplate {
+  const trim = readPrivacyTrim(privacyTrim);
   return {
     version: OVERLAY_TEMPLATE_VERSION,
     name: 'Custom canvas',
     style: { ...DEFAULT_OVERLAY_STYLE },
     components: components.map((component) => ({ ...component, rect: normalizeRect(component.rect) })),
+    ...(trim ? { privacyTrim: trim } : {}),
   };
 }

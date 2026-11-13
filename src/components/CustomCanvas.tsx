@@ -1,4 +1,6 @@
 import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
+import { PrivacyTrimField } from './PrivacyTrimField';
+import type { PrivacyTrim } from '../overlay/privacyTrim';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
@@ -208,6 +210,8 @@ export function CustomCanvas({
   const [height, setHeight] = useState(initialDraft.height);
   const [state, setState] = useState<CanvasState>(initialDraft.state);
   const [history, setHistory] = useState<CanvasState[]>(initialDraft.history);
+  // AV-1022 (TD-091). The privacy trim of the canvas's template; the layout's Undo does not hold it.
+  const [privacyTrim, setPrivacyTrim] = useState<PrivacyTrim | undefined>(initialDraft.privacyTrim);
   const [notice, setNotice] = useState<{ kind: 'status' | 'alert'; message: string; warnings?: string[] }>();
   const [preset, setPreset] = useState<StartLayoutId>('compact-hud');
   const loadInput = useRef<HTMLInputElement>(null);
@@ -233,8 +237,8 @@ export function CustomCanvas({
   // A host sets the frame: its video's size.
   const frame = host?.frame ?? ownFrame;
   useEffect(() => {
-    onDraftChange?.({ width, height, frame, state, history });
-  }, [onDraftChange, width, height, frame, state, history]);
+    onDraftChange?.({ width, height, frame, state, history, ...(privacyTrim ? { privacyTrim } : {}) });
+  }, [onDraftChange, width, height, frame, state, history, privacyTrim]);
   const setSize = (nextWidth: string, nextHeight: string) => {
     setWidth(nextWidth);
     setHeight(nextHeight);
@@ -275,7 +279,8 @@ export function CustomCanvas({
         : canvasElementChoices(timeline, stillContext),
     [timeline, stillContext, still],
   );
-  const template = useMemo(() => canvasTemplate(components), [components]);
+  // A host (the map video, the map image) cuts the route its own way, in metres, so it never carries this trim.
+  const template = useMemo(() => canvasTemplate(components, host ? undefined : privacyTrim), [components, privacyTrim, host]);
 
   /** Changes the layout, keeping what it was for Undo. */
   const commit = useCallback(
@@ -337,6 +342,7 @@ export function CustomCanvas({
       ? parsed.layout.template.components.filter((component) => !MOMENT_COMPONENT_TYPES.includes(component.type))
       : parsed.layout.template.components;
     commit({ components: opened, selectedId: undefined });
+    if (!host) setPrivacyTrim(parsed.layout.template.privacyTrim);
     const warnings = [...parsed.warnings];
     if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones, dials, charts, gradient indicators, compasses and splits were left out: this picture shows no moment of the activity.');
     if (fitted.width !== parsed.layout.width || fitted.height !== parsed.layout.height) {
@@ -441,6 +447,11 @@ export function CustomCanvas({
           <NumberInput id={`${id}-h`} label="Height (px)" value={height} onChange={(value) => setSize(width, value)} />
           <p className="overlay-controls__hint">{CANVAS_LIMITS_TEXT} The layout keeps its proportions at any size.</p>
         </fieldset>
+        )}
+
+        {/* AV-1022 (TD-091). One trim for the canvas's template, offered while it draws a route. */}
+        {!host && components.some((component) => component.type === 'routeInset') && (
+          <PrivacyTrimField trim={privacyTrim} onChange={setPrivacyTrim} activity={activity} units={units} />
         )}
 
         <fieldset className="overlay-controls__group">
