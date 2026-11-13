@@ -444,3 +444,56 @@ test('a dial and a chart draw their needle, their line and their cursor where th
   expect(pixel(frameAt(30), 4, 716)[3]).toBe(0);
   expect(pixel(frameAt(30), 1276, 716)[3]).toBe(0);
 });
+
+test('splits draw the split under way and the last one finished, in the colour of how it went: read from exported frames (AV-1021)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');
+  await expect(canvas.getByRole('group', { name: /^Canvas preview, 1280 by 720 pixels/ })).toBeVisible();
+
+  // Splits, top left, on a clear background. The ride has no laps, so they are cut by distance: every 100 m.
+  await add(canvas, 'Splits');
+  await canvas.getByLabel('Background (%)').fill('0');
+  await canvas.getByRole('button', { name: 'Snap to top left' }).click();
+  await expect(canvas.getByText('This activity’s laps cannot be used, so it is split by distance.')).toBeVisible();
+  await canvas.getByLabel('Split every (kilometres)').fill('0.1');
+  const box = await rectOf(canvas);
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-1280x720-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+  const frameAt = (seconds: number) => decodePng(Buffer.from(frames[seconds * 10]!.data));
+
+  /** Pixels in the box that are exactly this colour and fully opaque: the inside of a letter. */
+  const solid = (png: DecodedPng, [r, g, b]: number[]) => {
+    let found = 0;
+    for (let y = Math.floor(box.y * png.height); y < Math.ceil((box.y + box.height) * png.height); y += 1) {
+      for (let x = Math.floor(box.x * png.width); x < Math.ceil((box.x + box.width) * png.width); x += 1) {
+        const at = (y * png.width + x) * 4;
+        if (png.pixels[at] === r && png.pixels[at + 1] === g && png.pixels[at + 2] === b && png.pixels[at + 3] === 255) found += 1;
+      }
+    }
+    return found;
+  };
+  const GREEN = [0x4a, 0xde, 0x80];
+  const RED = [0xf8, 0x71, 0x71];
+  const WHITE = [255, 255, 255];
+
+  // The ride covers 4t + 0.1t(t - 1) metres, so 100 m is reached at 17.7 s, 200 m at 29.3 s, 300 m at 38.6 s: each split faster than the one before.
+  // At the start only the split under way is written, in the text colour.
+  expect(drawnWithin(frameAt(0), box)).toBeGreaterThan(200);
+  expect(solid(frameAt(0), WHITE)).toBeGreaterThan(100);
+  // At 25 s the first split has ended and there is nothing before it to compare it with: still the text colour, no green or red.
+  expect(solid(frameAt(25), GREEN)).toBe(0);
+  expect(solid(frameAt(25), RED)).toBe(0);
+  expect(drawnWithin(frameAt(25), box)).toBeGreaterThan(drawnWithin(frameAt(0), box));
+  // At 40 s three have ended and the third was faster than the second: its time and pace are in the faster colour.
+  expect(solid(frameAt(40), GREEN)).toBeGreaterThan(150);
+  expect(solid(frameAt(40), RED)).toBe(0);
+  expect(solid(frameAt(40), WHITE)).toBeGreaterThan(100);
+  // Nothing outside the box.
+  expect(pixel(frameAt(40), 640, 360)[3]).toBe(0);
+  expect(pixel(frameAt(40), 1276, 716)[3]).toBe(0);
+});

@@ -25,6 +25,14 @@ import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial'
 import { DEFAULT_GRADIENT, GRADIENT_BAND_LIMITS, GRADIENT_FROM_LIMITS } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
 import {
+  DEFAULT_SPLITS,
+  SPLITS_EVERY_METERS,
+  SPLITS_LIST_LIMITS,
+  SPLITS_NO_DISTANCE,
+  splitsSourceOf,
+  splitsUnavailableReason,
+} from './splits';
+import {
   OVERLAY_METRIC_KEYS,
   SMOOTHING_LIMITS,
   canSmooth,
@@ -73,7 +81,9 @@ export type OverlayComponentType =
   /** AV-1019. The slope in percent, with an up or down glyph and a colour by steepness. */
   | 'gradient'
   /** AV-1019. The direction of travel, as a rose that turns or a needle on a fixed rose. */
-  | 'compass';
+  | 'compass'
+  /** AV-1021. The split under way and the ones that finished: the file's laps, or every kilometre or mile. */
+  | 'splits';
 
 export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'text',
@@ -91,6 +101,7 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'chart',
   'gradient',
   'compass',
+  'splits',
 ];
 
 /** AV-1011. What a shape is. */
@@ -251,11 +262,38 @@ export interface OverlayCompassSetting {
   needleColor: string;
 }
 
+/** AV-1021. Where a splits component's splits come from, and which clock times them. */
+export type SplitsSource = 'laps' | 'distance';
+export type SplitsTime = 'moving' | 'elapsed';
+export type SplitsRate = 'pace' | 'speed' | 'none';
+
+/**
+ * AV-1021 (TD-090). A splits component's source, clock, what it shows and its colours.
+ * Colours are `#rrggbb`.
+ */
+export interface OverlaySplitsSetting {
+  /** `laps` falls back to the distance where the file has no usable laps. */
+  source: SplitsSource;
+  /** `distance` source only: metres in each split; absent is a kilometre or a mile, by the component's units. */
+  every?: number;
+  /** Moving time holds through a stop; elapsed time runs (TD-080). */
+  time: SplitsTime;
+  /** The last finished split, with how it compares with the one before it. */
+  showLast: boolean;
+  /** How many finished splits are listed, newest first, 0 to 10. */
+  list: number;
+  /** Absent: pace for a run, the average speed otherwise. */
+  rate?: SplitsRate;
+  /** The last split and the list when a split was faster, and slower, by pace. */
+  fasterColor: string;
+  slowerColor: string;
+}
+
 /**
  * AV-1019. The types that read one moment of the activity and mean nothing
  * without it: a picture that shows none (the map image) leaves them out.
  */
-export const MOMENT_COMPONENT_TYPES: readonly OverlayComponentType[] = ['zones', 'dial', 'chart', 'gradient', 'compass'];
+export const MOMENT_COMPONENT_TYPES: readonly OverlayComponentType[] = ['zones', 'dial', 'chart', 'gradient', 'compass', 'splits'];
 
 /**
  * AV-1010. Components that describe the whole activity rather than a moment of
@@ -410,6 +448,8 @@ export interface OverlayComponent {
   gradient?: OverlayGradientSetting;
   /** AV-1019. `compass`: the style, the labels and the colours. The source is always the heading. */
   compass?: OverlayCompassSetting;
+  /** AV-1021. `splits`: the source, the clock, what is shown and the colours. No data source: it reads the activity's laps and distance. */
+  splits?: OverlaySplitsSetting;
 }
 
 export interface OverlayTemplate {
@@ -514,6 +554,7 @@ function parseComponent(value: unknown): OverlayComponent | string {
     componentType !== 'routeInset' &&
     componentType !== 'gradient' &&
     componentType !== 'compass' &&
+    componentType !== 'splits' &&
     componentType !== 'progress' &&
     componentType !== 'elevationProfile' &&
     componentType !== 'shape' &&
@@ -602,6 +643,7 @@ function parseComponent(value: unknown): OverlayComponent | string {
   if (componentType === 'chart') component.chart = parseChartSetting(value.chart);
   if (componentType === 'gradient') component.gradient = parseGradientSetting(value.gradient);
   if (componentType === 'compass') component.compass = parseCompassSetting(value.compass);
+  if (componentType === 'splits') component.splits = parseSplitsSettings(value.splits);
   if (LABELLED_TYPES.includes(componentType) && isRecord(value.figure)) {
     const figure = parseFigure(value.figure);
     if (figure) component.figure = figure;
@@ -629,7 +671,7 @@ const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const HEX6 = /^#[0-9a-f]{6}$/i;
 
 /** The types that style a label over a value (AV-1015), and the ones whose value may be smoothed (AV-1016). */
-const LABELLED_TYPES: readonly OverlayComponentType[] = ['text', 'gauge', 'zones', 'dial', 'chart', 'gradient', 'compass'];
+const LABELLED_TYPES: readonly OverlayComponentType[] = ['text', 'gauge', 'zones', 'dial', 'chart', 'gradient', 'compass', 'splits'];
 const SMOOTHED_TYPES: readonly OverlayComponentType[] = ['text', 'gauge', 'zones', 'dial', 'gradient', 'compass'];
 
 const hex6 = (value: unknown, fallback: string): string => (typeof value === 'string' && HEX6.test(value) ? value.toLowerCase() : fallback);
@@ -706,6 +748,28 @@ export function parseCompassSetting(raw: unknown): OverlayCompassSetting {
     roseColor: hex6(record.roseColor, DEFAULT_COMPASS.roseColor),
     needleColor: hex6(record.needleColor, DEFAULT_COMPASS.needleColor),
   };
+}
+
+/**
+ * AV-1021 (TD-090). A splits component's settings as they may be drawn, by their
+ * defaults where they do not read: the source and the clock one of their two, the
+ * list a whole number from 0 to 10, a distance kept inside 0.1 km to 100 mi (in
+ * metres) or absent, the rate one of three or absent, the colours `#rrggbb`.
+ * Nothing here throws on any input.
+ */
+export function parseSplitsSettings(raw: unknown): OverlaySplitsSetting {
+  const record = isRecord(raw) ? raw : {};
+  const setting: OverlaySplitsSetting = {
+    source: record.source === 'distance' ? 'distance' : 'laps',
+    time: record.time === 'elapsed' ? 'elapsed' : 'moving',
+    showLast: record.showLast === undefined ? DEFAULT_SPLITS.showLast : record.showLast === true,
+    list: isNumber(record.list) ? Math.min(SPLITS_LIST_LIMITS.max, Math.max(SPLITS_LIST_LIMITS.min, Math.round(record.list))) : DEFAULT_SPLITS.list,
+    fasterColor: hex6(record.fasterColor, DEFAULT_SPLITS.fasterColor),
+    slowerColor: hex6(record.slowerColor, DEFAULT_SPLITS.slowerColor),
+  };
+  if (isNumber(record.every) && record.every > 0) setting.every = Math.min(SPLITS_EVERY_METERS.max, Math.max(SPLITS_EVERY_METERS.min, record.every));
+  if (record.rate === 'pace' || record.rate === 'speed' || record.rate === 'none') setting.rate = record.rate;
+  return setting;
 }
 
 /** AV-1015. A figure's settings, each kept only when it reads; `undefined` when none does. */
@@ -899,6 +963,13 @@ export function unavailableBindings(
 ): OverlayTemplateWarning[] {
   const warnings: OverlayTemplateWarning[] = [];
   for (const component of template.components) {
+    if (component.visible && component.type === 'splits') {
+      // AV-1021. Splits read no source: they need a clock, and laps or a distance to cut it by.
+      const sources = timeline.splitSources;
+      const reason = splitsUnavailableReason(timeline.unavailable !== undefined, sources) ?? (splitsSourceOf((component.splits ?? DEFAULT_SPLITS).source, sources) ? undefined : SPLITS_NO_DISTANCE);
+      if (reason) warnings.push({ componentId: component.id, source: 'splits', message: `${reason} The splits are not shown.` });
+      continue;
+    }
     if (!component.visible || !component.source) continue;
     const id = dataSourceId(component.source);
     if (!timeline.available.has(id)) {
@@ -969,7 +1040,16 @@ export type ResolvedOverlayComponent =
       unitSystem?: UnitSystem;
       /** AV-1018. `zones`: where the value falls among the zones. */
       zones?: ResolvedZones;
+      /** AV-1021. `splits`: the setting, where its splits come from here, and the units it is written in. */
+      splits?: ResolvedSplits;
     };
+
+/** AV-1021. A splits component here: its setting, and the source it really reads (the laps' fall back to the distance). */
+export interface ResolvedSplits {
+  setting: OverlaySplitsSetting;
+  source: SplitsSource;
+  unitSystem: UnitSystem;
+}
 
 /**
  * AV-1018. A zones component at one moment: the value (smoothed where it is
@@ -1121,6 +1201,13 @@ export function resolveOverlayComponent(
       label: component.display?.label?.trim() || describeSource(chartSource, timeline),
       fraction: sample.progress,
     };
+  }
+  if (component.type === 'splits') {
+    // AV-1021. Splits read the activity's laps and distance, not a source of the sample; with neither there is nothing to count.
+    const setting = component.splits ?? DEFAULT_SPLITS;
+    const splitsSource = splitsSourceOf(setting.source, timeline.splitSources);
+    if (!splitsSource) return { status: 'hidden', reason: 'no_data', componentId };
+    return { status: 'ready', componentId, component, style, label: component.display?.label?.trim() || 'Split', splits: { setting, source: splitsSource, unitSystem } };
   }
   if (component.type === 'progress') {
     return sample.progress === undefined

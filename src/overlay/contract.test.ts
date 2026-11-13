@@ -19,6 +19,7 @@ import {
   type GradientProps,
   type HeadingProps,
   type RouteProps,
+  type SplitsProps,
   type WholeActivityProps,
   type ZoneProps,
 } from './contract';
@@ -26,6 +27,7 @@ import { DEFAULT_COMPASS } from './compass';
 import { DEFAULT_DIAL, dialAngle } from './dial';
 import { DEFAULT_GRADIENT } from './gradient';
 import { defaultZonesSetting, zoneBounds } from './zones';
+import { DEFAULT_SPLITS } from './splits';
 import {
   DEFAULT_CHART,
   DEFAULT_OVERLAY_STYLE,
@@ -50,6 +52,7 @@ import { draw as drawDial } from '../../docs/components/examples/dial';
 import { draw as drawChart } from '../../docs/components/examples/chart';
 import { draw as drawGradient } from '../../docs/components/examples/gradient';
 import { draw as drawCompass } from '../../docs/components/examples/compass';
+import { draw as drawSplits } from '../../docs/components/examples/splits';
 
 const T0 = Date.parse('2026-09-24T08:00:00Z');
 const FRAME = { width: 1920, height: 1080 };
@@ -179,6 +182,12 @@ function builtIns(): OverlayComponent[] {
     component('compass', 'compass', { source: { kind: 'metric', metric: 'heading' }, compass: { ...DEFAULT_COMPASS }, smoothing: { windowSeconds: 3 } }),
     component('compass-needle', 'compass', { source: { kind: 'metric', metric: 'heading' }, compass: { ...DEFAULT_COMPASS, style: 'needle' } }),
   );
+  // AV-1021. Splits: by default (the laps, falling back to the distance), and with a list, the other clock and a rate, in each unit system.
+  list.push(
+    component('splits', 'splits', { splits: { ...DEFAULT_SPLITS } }),
+    component('splits-list', 'splits', { splits: { ...DEFAULT_SPLITS, source: 'distance', every: 60, list: 3, time: 'elapsed', rate: 'speed' }, figure: { labelScale: 1.2, labelColor: '#ff0000' } }),
+    component('splits-imperial', 'splits', { unitMode: 'imperial', splits: { ...DEFAULT_SPLITS, source: 'distance', every: 80, rate: 'none', showLast: false, list: 1, fasterColor: '#00ff00' } }),
+  );
   for (const stat of ['speed', 'pace', 'distance', 'elapsed', 'moving', 'climb'] as SummaryStatKey[]) {
     list.push(component(`summary-${stat}`, 'summary', { summary: { stat }, text: { align: 'left', weight: 'bold', caption: stat !== 'pace' } }));
   }
@@ -267,6 +276,23 @@ function checkValid(props: ContractProps): void {
     expect(props.northAngleDegrees).toBeLessThan(360);
     expect(props.needleAngleDegrees).toBeGreaterThanOrEqual(0);
     expect(props.needleAngleDegrees).toBeLessThan(360);
+  }
+  if (props.section === 'splits') {
+    expect(props.current.number).toBeGreaterThanOrEqual(1);
+    expect(props.current.seconds).toBeGreaterThanOrEqual(0);
+    expect(props.current.text).toMatch(/^\d+:\d\d(:\d\d)?$/);
+    expect(props.current.verdict).toBeUndefined();
+    expect(props.list.length).toBeLessThanOrEqual(10);
+    for (const row of [...(props.last ? [props.last] : []), ...props.list]) {
+      expect(row.number).toBeLessThan(props.current.number + 1);
+      expect(row.text).toMatch(/^\d+:\d\d(:\d\d)?$/);
+    }
+    // Newest first, and the last is the newest.
+    props.list.forEach((row, i) => i > 0 && expect(row.number).toBe(props.list[i - 1]!.number - 1));
+    if (props.last && props.list.length > 0) expect(props.list[0]!.number).toBe(props.last.number);
+    for (const color of [props.fasterColor, props.slowerColor]) expect(color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(props.source === 'distance' ? props.everyMeters !== undefined : props.everyMeters === undefined).toBe(true);
+    if (props.rate === 'none') for (const row of [props.current, ...(props.last ? [props.last] : []), ...props.list]) expect(row.rateText).toBeUndefined();
   }
   if (props.section === 'zones') {
     expect(props.zones.length).toBeGreaterThanOrEqual(2);
@@ -549,6 +575,50 @@ describe('the contract adapter (AV-1017)', () => {
       expect(props.timeInZoneSeconds, `at ${t}`).toHaveLength(5);
       const sum = props.timeInZoneSeconds!.reduce((a, b) => a + b, 0);
       expect(sum).toBeCloseTo(timeline.sampleAt(t)!.values['metric:moving']!, 6);
+    }
+  });
+
+  it('gives splits the split under way, the last and the list, from the laps where the file has them and the distance where not (AV-1021)', () => {
+    const of = (id: string, from: Activity = activity, line = timeline) =>
+      contractPropsFor(template, template.components.find((c) => c.id === id)!, line.sampleAt(30), line, context(from)) as SplitsProps;
+    // A straight run at 5 m/s, recorded: 150 m at 30 s, so with a split every 60 m two have finished and the third is under way.
+    const straight = makeActivity(Array.from({ length: 61 }, (_, i) => ({ time: new Date(T0 + i * 1000), lat: 46 + (5 * i) / 111_195, lon: 7, distanceMeters: 5 * i })));
+    const straightTimeline = buildOverlayTimeline(straight, { video: { durationSeconds: 60 } });
+    const listed = of('splits-list', straight, straightTimeline);
+    expect(listed).toMatchObject({ section: 'splits', source: 'distance', time: 'elapsed', everyMeters: 60, rate: 'speed', unitSystem: 'metric', label: 'Split' });
+    expect(listed.current).toMatchObject({ number: 3, text: '0:06', seconds: expect.closeTo(6, 6), distanceMeters: expect.closeTo(30, 6) });
+    expect(listed.last).toMatchObject({ number: 2, text: '0:12', seconds: expect.closeTo(12, 6), distanceMeters: 60, verdict: 'same', rateText: '18.0 km/h' });
+    expect(listed.list.map((row) => row.number)).toEqual([2, 1]);
+    expect(listed.list[0]!.rateText).toMatch(/km\/h$/);
+    expect(listed.figure).toEqual({ labelScale: 1.2, labelColor: '#ff0000' });
+    // The default component asks for the laps, and a ride with none is split by the distance: a short split of the whole 300 m.
+    const plain = of('splits');
+    expect(plain).toMatchObject({ source: 'distance', everyMeters: 1000, rate: 'speed', time: 'moving' });
+    expect(plain.current.number).toBe(1);
+    expect(plain.last).toBeUndefined();
+    // Imperial, no rate, no last split, a list of one.
+    const imperial = of('splits-imperial');
+    expect(imperial).toMatchObject({ unitSystem: 'imperial', rate: 'none', everyMeters: 80 });
+    expect(imperial.last).toBeUndefined();
+    expect(imperial.list).toHaveLength(1);
+    // The same ride with laps reads them: three laps starting at 0, 20 and 45 s.
+    const laps = ride([], { laps: [0, 20, 45].map((start, index) => ({ index, startTime: new Date(T0 + start * 1000) })) });
+    const lapTimeline = buildOverlayTimeline(laps, { video: { durationSeconds: 60 } });
+    const byLaps = of('splits', laps, lapTimeline);
+    expect(byLaps).toMatchObject({ source: 'laps', time: 'moving' });
+    expect(byLaps.everyMeters).toBeUndefined();
+    expect(byLaps.current).toMatchObject({ number: 2 });
+    expect(byLaps.last).toMatchObject({ number: 1, text: '0:20' });
+    // Rate: a run reads pace unless the reader chose.
+    const running = { ...laps, metadata: { ...laps.metadata, sport: 'running' as const } };
+    expect(of('splits', running, lapTimeline).rate).toBe('pace');
+  });
+
+  it('gives no props for splits that cannot be drawn: no time, or a distance source with no distance (AV-1021)', () => {
+    const noDistance = makeActivity(Array.from({ length: 5 }, (_, i) => ({ time: new Date(T0 + i * 1000) })));
+    const bare = buildOverlayTimeline(noDistance, { video: { durationSeconds: 4 } });
+    for (const id of ['splits', 'splits-list']) {
+      expect(contractPropsFor(template, template.components.find((c) => c.id === id)!, bare.sampleAt(2), bare, context(noDistance)), id).toBeUndefined();
     }
   });
 
@@ -841,6 +911,25 @@ describe('the examples in docs/components (AV-1017)', () => {
     for (const fractionInZone of [0, 1]) for (const zoneIndex of [0, 4]) drawsInside(drawZones, { ...(propsBig('zones-hr') as ZoneProps), fractionInZone, zoneIndex });
   });
 
+  it('the splits example draws the split under way, the last in its colour with the word, and the list, inside its box (AV-1021)', () => {
+    for (const t of [0, 10, 30, 60]) {
+      const splits = propsBig('splits-list', t) as SplitsProps;
+      const { points, log } = drawsInside(drawSplits, splits);
+      expect(points.length).toBeGreaterThan(3);
+      expect(log[0]).toBe(`SPLIT ${splits.current.number}`);
+      expect(log).toContain(splits.current.text);
+      if (splits.last) {
+        expect(log).toContain(splits.last.text);
+        if (splits.last.verdict && splits.last.verdict !== 'same') expect(log).toContain(`SPLIT ${splits.last.number} · ${splits.last.verdict}`.toUpperCase());
+      }
+    }
+    // A taller box holds the whole list, newest first, in the colour of how each went.
+    const tall = { ...(propsBig('splits-list', 50) as SplitsProps), box: { x: 100, y: 100, width: 600, height: 600 } };
+    const { log } = drawsInside(drawSplits, tall);
+    expect(log.filter((line) => /^\d+ {2}\d+:\d\d/.test(line))).toHaveLength(tall.list.length);
+    expect(tall.list.length).toBe(3);
+  });
+
   it('the dial example draws the track, the fill, the ticks, a needle and the value, inside its box, at the ends of the range and beyond (AV-1019)', () => {
     for (const id of ['dial', 'dial-smoothed', 'dial-own-range', 'dial-beyond']) {
       for (const t of [0, 20, 60]) {
@@ -937,6 +1026,7 @@ describe('the documentation says what the contract holds (AV-1017)', () => {
     { page: 'charts.md', ids: ['chart-time', 'chart-window', 'chart-sensor'] },
     { page: 'gradient.md', ids: ['gradient', 'gradient-no-glyph'] },
     { page: 'compass.md', ids: ['compass', 'compass-needle'] },
+    { page: 'splits.md', ids: ['splits', 'splits-list', 'splits-imperial'] },
   ];
 
   for (const { page, ids } of sections) {
@@ -965,7 +1055,7 @@ describe('the documentation says what the contract holds (AV-1017)', () => {
     expect(readme).toContain('TD-085');
     expect(readme).toContain('/issues/19');
     expect(readme).toMatch(/not built/i);
-    for (const page of ['figures.md', 'gauges.md', 'along-the-route.md', 'whole-activity.md', 'zones.md', 'dials.md', 'charts.md', 'gradient.md', 'compass.md']) {
+    for (const page of ['figures.md', 'gauges.md', 'along-the-route.md', 'whole-activity.md', 'zones.md', 'dials.md', 'charts.md', 'gradient.md', 'compass.md', 'splits.md']) {
       expect(readme).toContain(page);
     }
     expect(readme).toContain('/issues/21');

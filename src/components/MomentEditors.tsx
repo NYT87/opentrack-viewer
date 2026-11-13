@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { METERS_PER_FOOT, type UnitSystem } from '../domain/units';
-import { CHART_METRICS, DIAL_METRICS } from '../overlay/customCanvas';
+import { CHART_METRICS, DIAL_METRICS, splitsRect } from '../overlay/customCanvas';
+import { DEFAULT_SPLITS, SPLITS_EVERY_UNITS, SPLITS_LIST_LIMITS, SPLITS_NO_DISTANCE, SPLITS_NO_START_TIMES, splitsSourceOf, unitMeters } from '../overlay/splits';
 import { DEFAULT_COMPASS } from '../overlay/compass';
 import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, dialToStored, dialUnitLabel, storedToDial } from '../overlay/dial';
 import {
@@ -21,6 +22,8 @@ import {
   type OverlayComponent,
   type OverlayDialSetting,
   type OverlayGradientSetting,
+  type OverlaySplitsSetting,
+  type SplitsRate,
   effectiveUnits,
 } from '../overlay/template';
 import { dataSourceId, type OverlayDataSource, type OverlayMetricKey, type OverlayTimeline } from '../overlay/timeline';
@@ -409,6 +412,130 @@ export function CompassEditor({ id, component, smoothingField, onChange }: { id:
       <ColorField id={`${id}-compass-rose`} label="Rose colour" value={setting.roseColor} onChange={(roseColor) => withCompass({ roseColor })} />
       <ColorField id={`${id}-compass-needle`} label="Needle colour" value={setting.needleColor} onChange={(needleColor) => withCompass({ needleColor })} />
       {smoothingField}
+    </>
+  );
+}
+
+/**
+ * AV-1021 (TD-090). Splits: where they come from, the distance, the clock, what is
+ * shown and the colours. A source the activity cannot give is offered disabled and
+ * says why; one the component asks for and the activity cannot give is read as the
+ * other (laps fall back to the distance), which the note under it says. The list and
+ * the last split change how tall the lines are, so they make the box as tall as they
+ * need (`splitsRect`), as a figure's box grows to its text.
+ */
+export function SplitsEditor({
+  id,
+  component,
+  timeline,
+  units,
+  frame,
+  onChange,
+}: {
+  id: string;
+  component: OverlayComponent;
+  timeline: OverlayTimeline;
+  units: UnitSystem;
+  frame: { width: number; height: number };
+  onChange: Patch;
+}) {
+  const setting = component.splits ?? DEFAULT_SPLITS;
+  const sources = timeline.splitSources;
+  const lapsOk = sources?.laps === true;
+  const distanceOk = sources?.distance === true;
+  const effective = splitsSourceOf(setting.source, sources);
+  const shownIn = effectiveUnits(component, units);
+  const perUnit = unitMeters(shownIn);
+  const unitName = shownIn === 'imperial' ? 'miles' : 'kilometres';
+  /** A change to the setting; the box follows when what it holds changes in height. */
+  const withSplits = (patch: Partial<OverlaySplitsSetting>, fit = false) =>
+    onChange((current) => {
+      const next: OverlayComponent = { ...current, splits: { ...(current.splits ?? DEFAULT_SPLITS), ...patch } };
+      return fit ? { ...next, rect: splitsRect(next, frame) ?? next.rect } : next;
+    });
+  return (
+    <>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-splits-source`}>Splits from</label>
+        <select id={`${id}-splits-source`} className="select" value={setting.source} onChange={(event) => withSplits({ source: event.target.value === 'distance' ? 'distance' : 'laps' })}>
+          <option value="laps" disabled={!lapsOk && setting.source !== 'laps'}>
+            The file’s laps{lapsOk ? '' : ' (not usable here)'}
+          </option>
+          <option value="distance" disabled={!distanceOk && setting.source !== 'distance'}>
+            Every kilometre or mile{distanceOk ? '' : ' (this activity has no distance)'}
+          </option>
+        </select>
+        {!lapsOk && sources?.lapsIssue === 'no_start_times' && <p className="overlay-controls__hint">{SPLITS_NO_START_TIMES}</p>}
+        {!lapsOk && sources?.lapsIssue === undefined && <p className="overlay-controls__hint">The file has no laps to use: it needs two or more, each with a start time.</p>}
+        {setting.source === 'laps' && !lapsOk && effective === 'distance' && <p className="overlay-controls__hint">This activity’s laps cannot be used, so it is split by distance.</p>}
+        {effective === undefined && <p className="overlay-controls__note" role="status">{SPLITS_NO_DISTANCE} Nothing is drawn.</p>}
+      </div>
+      {effective === 'distance' && (
+        <PercentField
+          id={`${id}-splits-every`}
+          label={`Split every (${unitName})`}
+          hint={`${SPLITS_EVERY_UNITS.min} to ${SPLITS_EVERY_UNITS.max}. One is a ${shownIn === 'imperial' ? 'mile' : 'kilometre'}.`}
+          value={String(round((setting.every ?? perUnit) / perUnit, 3))}
+          min={SPLITS_EVERY_UNITS.min}
+          max={SPLITS_EVERY_UNITS.max}
+          step={0.1}
+          onCommit={(value) => {
+            if (!(value >= SPLITS_EVERY_UNITS.min)) return;
+            const typed = Math.min(SPLITS_EVERY_UNITS.max, value);
+            onChange((current) => {
+              const next = { ...(current.splits ?? DEFAULT_SPLITS) };
+              // One kilometre or mile is the default, which follows the units; anything else is the metres typed.
+              if (typed === 1) delete next.every;
+              else next.every = typed * perUnit;
+              return { ...current, splits: next };
+            });
+          }}
+        />
+      )}
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-splits-time`}>Time counted</label>
+        <select id={`${id}-splits-time`} className="select" value={setting.time} onChange={(event) => withSplits({ time: event.target.value === 'elapsed' ? 'elapsed' : 'moving' })}>
+          <option value="moving">Moving time (holds through a stop)</option>
+          <option value="elapsed">Elapsed time (runs through a stop)</option>
+        </select>
+      </div>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-splits-rate`}>Pace or speed</label>
+        <select
+          id={`${id}-splits-rate`}
+          className="select"
+          value={setting.rate ?? 'auto'}
+          onChange={(event) =>
+            onChange((current) => {
+              const next = { ...(current.splits ?? DEFAULT_SPLITS) };
+              if (event.target.value === 'auto') delete next.rate;
+              else next.rate = event.target.value as SplitsRate;
+              return { ...current, splits: next };
+            })
+          }
+        >
+          <option value="auto">By the activity’s type (pace for a run, speed otherwise)</option>
+          <option value="pace">Pace</option>
+          <option value="speed">Average speed</option>
+          <option value="none">Neither</option>
+        </select>
+      </div>
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.showLast} onChange={(event) => withSplits({ showLast: event.target.checked }, true)} />
+        <span>Show the last split, faster or slower than the one before</span>
+      </label>
+      <PercentField
+        id={`${id}-splits-list`}
+        label="Past splits listed"
+        hint={`${SPLITS_LIST_LIMITS.min} to ${SPLITS_LIST_LIMITS.max}, newest first.`}
+        value={String(setting.list)}
+        min={SPLITS_LIST_LIMITS.min}
+        max={SPLITS_LIST_LIMITS.max}
+        onCommit={(value) => withSplits({ list: Math.min(SPLITS_LIST_LIMITS.max, Math.max(SPLITS_LIST_LIMITS.min, Math.round(value))) }, true)}
+      />
+      <ColorField id={`${id}-splits-faster`} label="Faster colour" value={setting.fasterColor} onChange={(fasterColor) => withSplits({ fasterColor })} />
+      <ColorField id={`${id}-splits-slower`} label="Slower colour" value={setting.slowerColor} onChange={(slowerColor) => withSplits({ slowerColor })} />
+      <p className="overlay-controls__hint">A split is faster or slower when its pace differs from the one before it by half a second per kilometre or mile or more.</p>
     </>
   );
 }

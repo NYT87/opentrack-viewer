@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OverlayContext2D } from '../overlay/export/drawOverlay';
-import { canvasTemplate, newCanvasComponent, newZonesComponent } from '../overlay/customCanvas';
+import { canvasTemplate, newCanvasComponent, newSplitsComponent, newZonesComponent } from '../overlay/customCanvas';
 import { DEFAULT_OVERLAY_STYLE, OVERLAY_TEMPLATE_VERSION, type OverlayTemplate } from '../overlay/template';
 import { smoothedValueAt } from '../overlay/timeline';
 import { zoneBounds, zoneIndex } from '../overlay/zones';
@@ -224,6 +224,41 @@ describe('zones over the map video (AV-1018)', () => {
     expect(draw({ maxHeartRate: 190 })).toMatch(/fillText\("Z\d [A-Za-z ]+", /);
     expect(draw({ maxHeartRate: 190 })).toMatch(/fillText\("\d+ bpm"/);
     expect(draw()).toBe('\n');
+  });
+});
+
+describe('splits over the map video (AV-1021)', () => {
+  // 3 km due north at 5 m/s: 600 s, a split every kilometre of 200 s.
+  const long = activityThrough(straightNorth(3000));
+  const size = { width: 1280, height: 720 };
+  const texts = (patch: Partial<MapVideoSettings>, seconds: number, rate: 'pace' | 'speed' = 'pace') => {
+    const splits = { ...newSplitsComponent(canvasTemplate([]), size, rate), rect: { x: 0.05, y: 0.05, width: 0.3, height: 0.4 }, splits: { source: 'distance' as const, time: 'moving' as const, showLast: true, list: 0, fasterColor: '#4ade80', slowerColor: '#f87171', rate } };
+    const withOverlay = { intro: { enabled: false, seconds: 0 }, outro: { enabled: false, seconds: 0 }, summaryCard: { enabled: false }, overlay: canvasTemplate([splits]), ...patch };
+    const model = modelOf(long, withOverlay);
+    const figures = createMapVideoFigures({ activity: long, model, settings: settings(withOverlay), units: 'metric', ...size });
+    return [...displayList((ctx) => figures.drawFrame(ctx, seconds)).matchAll(/fillText\("([^"]*)"/g)].map((match) => match[1]);
+  };
+
+  it('are drawn with the split under way and its time, and the last one finished', () => {
+    // The ten-second video runs the whole route: 5 s in is half way, at 1500 m, 100 s into the second split.
+    expect(texts({}, 0)).toEqual(['SPLIT 1', '0:00']);
+    expect(texts({}, 5).slice(0, 2)).toEqual(['SPLIT 2', '1:40']);
+    // The first split ended at 200 s: it is the last, and has none before it to be faster or slower than.
+    expect(texts({}, 5)).toEqual(['SPLIT 2', '1:40', '3:20 /km', 'SPLIT 1', '3:20', '3:20 /km']);
+    expect(texts({}, 10).slice(0, 2)).toEqual(['SPLIT 3', '3:20']);
+  });
+
+  it('are numbered along the whole activity, whatever the privacy trim hides', () => {
+    // The first 1500 m are hidden, so the video starts half way along the second split, which already holds 100 s.
+    const trimmed = { privacyTrim: { startMeters: 1500, endMeters: 0 } };
+    expect(texts(trimmed, 0).slice(0, 2)).toEqual(['SPLIT 2', '1:40']);
+    expect(texts(trimmed, 10).slice(0, 2)).toEqual(['SPLIT 3', '3:20']);
+    // A trim at the end leaves the last split under way where the video stops.
+    expect(texts({ privacyTrim: { startMeters: 0, endMeters: 500 } }, 10).slice(0, 2)).toEqual(['SPLIT 3', '1:40']);
+  });
+
+  it('are written as the pace or the average speed, as asked', () => {
+    expect(texts({}, 5, 'speed')).toContain('18.0 km/h');
   });
 });
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createOverlayRenderer, type OverlayContext2D } from './drawOverlay';
 import { DEFAULT_OVERLAY_CONTROLS, buildOverlay, overlayCatalog, type OverlayControls } from '../presets';
 import { DEFAULT_OVERLAY_STYLE as DEFAULT_OVERLAY_TEMPLATE_STYLE, type OverlayComponent } from '../template';
+import { canvasTemplate, newSplitsComponent } from '../customCanvas';
+import { DEFAULT_SPLITS } from '../splits';
 import type { OverlayMetricKey } from '../timeline';
 import { buildOverlayTimeline } from '../timeline';
 import { parseGpx } from '../../parsers/gpx/parseGpx';
@@ -215,6 +217,29 @@ describe('custom canvas render goldens (AV-1011)', () => {
     expect(numbers(drawn('imperial'))).toEqual(['0', '5', '10', '15', '20']);
     await expect(drawn('metric')).toMatchFileSnapshot(snapshot('custom-dial-t5'));
     await expect(drawn('imperial')).toMatchFileSnapshot(snapshot('custom-dial-imperial-t5'));
+  });
+
+  it('draws the splits of the ride, with the last finished one in its colour, in metric and imperial (AV-1021)', async () => {
+    // The reader's minute-long ride, whole: it speeds up, so every split is faster than the one before, and at 45 s three of the 100 m splits have ended.
+    const whole = buildOverlayTimeline(ride, { video: { durationSeconds: 60 } });
+    const splits: OverlayComponent = {
+      ...newSplitsComponent(canvasTemplate([]), { width: 1280, height: 720 }),
+      rect: at(0.05, 0.05, 0.3, 0.5),
+      splits: { ...DEFAULT_SPLITS, source: 'distance', every: 100, list: 2, rate: 'pace' },
+    };
+    const drawn = (units: 'metric' | 'imperial', components = [splits]) => {
+      const template = { version: 2 as const, name: 'Custom', style: DEFAULT_OVERLAY_TEMPLATE_STYLE, components };
+      const renderer = createOverlayRenderer({ template, timeline: whole, activity: ride, units, width: 1280, height: 720 });
+      return displayList((ctx) => renderer.drawFrame(ctx, 45));
+    };
+    const list = drawn('metric');
+    expect(list).toContain('fillText("SPLIT 4"');
+    expect(list).toContain('fillText("SPLIT 3 · FASTER"');
+    // Faster than the one before it, in the green.
+    expect(list).toMatch(/fillText\("\d:\d\d", [\d.]+, [\d.]+, [\d.]+\) fill="#4ade80"/);
+    expect(list).toMatch(/\/km"/);
+    expect(drawn('imperial')).toMatch(/\/mi"/);
+    await expect(list).toMatchFileSnapshot(snapshot('custom-splits-t45'));
   });
 
   it('draws shapes and texts for the whole activity where the activity does not reach, and its figures only where it does', () => {

@@ -1423,6 +1423,32 @@ Acceptance criteria:
 - **A chart's window follows the unit system (#21).** On a distance axis the window is typed in feet when the chart's units are imperial and in metres when metric, stored in metres; a new window starts at 500 m or 1,500 ft. The window on a time axis stays in seconds.
 - Tests: the shape growing with a held figure (and not otherwise, and at the frame's edge), one Undo; the grouped list in both editors; Start over and its Undo with and without figures; tick values, labels and rounding in metric and imperial for speed and pace, a typed range and step round-tripping through the stored units, labels left out on a small dial, a golden render of a labelled dial; the chart window's field in feet and metres.
 
+#### AV-1021: A Splits Component, From the File's Laps or Every Kilometre or Mile
+
+Dependencies: AV-1015, AV-1016, AV-1017, AV-1018, AV-1020, TD-058, TD-080
+
+GitHub issue #22, split out of #18. A new component type, `splits`, drawn by the one renderer, so the canvas preview, the PNG sequence, the transparent WebM, the burned-in video and the map video all show it alike. It is placed, sized and saved like any other, with AV-1015's colours, text sizes and halo.
+
+Acceptance criteria:
+- **What it shows:**
+  - the current split's number and its time so far;
+  - the last finished split's time, with how it compares to the one before it: faster or slower, in a colour of each, compared by pace (time per distance) so splits of different lengths compare fairly; equal to the second is neither;
+  - optionally a list of the last N finished splits (0 to 10, default 0), newest first, each with its number, time and the faster/slower colour;
+  - optionally the pace or the average speed of the current and of each finished split, in the component's units; pace by default for running, speed otherwise.
+- **Where splits come from:**
+  - **The file's laps** (`activity.laps`, read from FIT lap messages and TCX `<Lap>`) where there are at least two with a start time, each lap starting at its start time;
+  - **otherwise every kilometre or mile** in the component's units, or a distance the reader sets (0.1 to 100 of those units);
+  - the reader chooses either when the file has laps; laps are the default then.
+  - Unavailable, with the reason, when the activity has no time, or (for distance splits) no distance.
+- **Rules:**
+  - Split time counts moving time (the default, as the stats do: TD-058) or elapsed time, the reader's choice.
+  - Through a stop (TD-080) the current split's clock follows that choice: elapsed keeps running, moving holds.
+  - A split boundary is where the activity's distance along (or a lap's start time) crosses it, interpolated between points; a split cut by a segment break, or by the map video's privacy trim, is still counted and numbered by the distance along the whole activity. The last split may be short and is compared by pace.
+  - The splits are found once per timeline, in O(n), and a frame costs a binary search, as the zones' time in zone is (TD-086, TD-088).
+- **Customisable:** what is shown (above), the number of past splits listed, the faster and slower colours, the source and distance, the time counted, plus the usual position, size, colours, text sizes and halo.
+- **Everywhere:** in the custom canvas's Add list, and as *Splits* in the Running and Cycling predefined groups (AV-1016); drawn on the map video; not offered on the map image (a still, like the dial and chart: AV-1020). Its props are a section of the component contract (`SplitsProps`, AV-1017) with a docs page and a runnable example.
+- **Tests:** distance splits at the boundaries in metric and imperial and at a set distance; laps from a TCX fixture and from a FIT fixture with lap messages; elapsed and moving split times through a stop; a segment break inside a split; the faster/slower comparison including a short last split and a tie; the editor; a golden render; the contract adapter; and a browser test that exports a frame and reads the split's region.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

@@ -71,12 +71,14 @@ describe('the registry of predefined components (AV-1016)', () => {
       'Heart rate zones',
       'Climb so far',
       'Elevation profile',
+      'Splits',
     ]);
     expect(PREDEFINED_ENTRIES.filter((entry) => entry.sport === 'running').map((entry) => entry.name)).toEqual([
       'Pace',
       'Heart rate',
       'Heart rate zones',
       'Running cadence',
+      'Splits',
       'Distance of the total',
     ]);
     expect(PREDEFINED_ENTRIES.filter((entry) => entry.sport === 'any').map((entry) => entry.name)).toEqual([
@@ -165,8 +167,8 @@ describe('the registry of predefined components (AV-1016)', () => {
     const activity = full(['powerWatts', 'gradePercent', 'elevationMeters']);
     const choices = canvasElementChoices(timelineOf(activity), still(activity));
     const of = (id: string) => choices.find((choice) => choice.key === `predefined:${id}`)!;
-    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(12);
-    expect(choices.filter((choice) => choice.group === 'Running')).toHaveLength(5);
+    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(13);
+    expect(choices.filter((choice) => choice.group === 'Running')).toHaveLength(6);
     expect(choices.filter((choice) => choice.group === 'Any sport')).toHaveLength(6);
     expect(of('cycling.speed')).toMatchObject({ available: true, group: 'Cycling' });
     expect(of('cycling.power-3s')).toMatchObject({ available: false, reason: 'This activity has no power.' });
@@ -188,6 +190,26 @@ describe('the registry of predefined components (AV-1016)', () => {
     expect(choices.find((choice) => choice.key === 'zones:heartRate')).toMatchObject({ available: true, label: 'Heart rate zones', group: 'Live figures' });
     expect(choices.find((choice) => choice.key === 'zones:power')).toMatchObject({ available: false, reason: 'This activity has no power.' });
     expect(of('cycling.power-3s').label).toBe('Power, 3 s average');
+    // AV-1021. Splits are in both sports' groups, told apart by sport from the plain element, and need laps or a distance.
+    expect(of('cycling.splits')).toMatchObject({ available: true, label: 'Splits (Cycling)', group: 'Cycling' });
+    expect(of('running.splits')).toMatchObject({ available: true, label: 'Splits (Running)', group: 'Running' });
+    expect(choices.find((choice) => choice.key === 'splits')).toMatchObject({ available: true, label: 'Splits', group: 'Live figures' });
+  });
+
+  it('builds splits with the rate a sport reads, and offers them only where the activity can be split (AV-1021)', () => {
+    const timeline = timelineOf(full());
+    const one = (id: string) => predefinedEntry(id)!.build(canvasTemplate([]), SIZES[0]!, timeline)[0]!;
+    expect(one('running.splits')).toMatchObject({ type: 'splits', splits: { rate: 'pace', source: 'laps', time: 'moving', showLast: true, list: 0 } });
+    expect(one('cycling.splits')).toMatchObject({ type: 'splits', splits: { rate: 'speed' } });
+    const bare = makeActivity(Array.from({ length: 4 }, (_, i) => ({ time: new Date(Date.parse('2024-01-01T10:00:00Z') + i * 10_000) })));
+    const bareTimeline = timelineOf(bare);
+    const choices = canvasElementChoices(bareTimeline, still(bare));
+    const reason = 'This activity has no distance, and no laps with start times, to split by.';
+    for (const id of ['cycling.splits', 'running.splits']) {
+      expect(predefinedAvailability(predefinedEntry(id)!, bareTimeline), id).toBe(false);
+      expect(choices.find((choice) => choice.key === `predefined:${id}`)).toMatchObject({ available: false, reason });
+    }
+    expect(choices.find((choice) => choice.key === 'splits')).toMatchObject({ available: false, reason: 'This activity has no distance to split by.' });
   });
 
   it('offers nothing when the timeline cannot sample', () => {

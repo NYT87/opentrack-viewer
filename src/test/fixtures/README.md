@@ -21,6 +21,7 @@ device identifier is committed here (plan §13, Fixture Policy).
 | `not-gpx.txt` | Plain text; must fail as `unsupported_format`. |
 | `ride-with-sensors.fit` | A cycling FIT file with GPS, elevation, HR, pedal cadence, power, temperature **and a device serial number**, so tests can prove the serial is never rendered. |
 | `treadmill-run.fit` | A running FIT file with **no GPS at all**: timestamps, a recorded distance stream, HR and stride cadence. |
+| `run-with-laps.fit` | A running FIT file with **three lap messages** (starts at 0, 50 and 90 s; 200, 200 and 90 m) over thirteen points at 4, 5 and 3 m/s, so the laps differ in pace: the one FIT fixture with laps, for splits (`AV-1021`). Synthetic, due north from a made-up place. |
 | `run-with-laps.tcx` | Two laps with HR, run cadence and calories. The second lap holds **two `<Track>` elements**, which is how TCX records a pause, and a `UnitId` **serial number** tests can prove is never shown. |
 | `ride-minimal.tcx` | The sparse end of TCX: positions and times only, no `Creator`, and a bare `<Cadence>` the schema defines as pedal revolutions. |
 | `laps-without-distance.tcx` | Two continuous laps with **no per-point `DistanceMeters`**, so distance must come from the positions — which is what makes an invented break at the lap boundary visible. |

@@ -27,6 +27,8 @@ import { drawDial } from './drawDial';
 import { drawGradient } from './drawGradient';
 import { drawZones } from './drawZones';
 import { createZoneTimes } from '../zones';
+import { drawSplits } from './drawSplits';
+import { createSplitTimes, splitEveryMeters, splitsRate, splitsView, unitMeters } from '../splits';
 
 /**
  * AV-1006. Draws a template on a canvas, at any resolution, on a transparent
@@ -109,6 +111,9 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
 
   // TD-088 (TD-086). The time in each zone, one accumulator for each zones component drawn, kept for this renderer's life.
   const zoneTimesOf = createZoneTimes(timeline);
+
+  // AV-1021 (TD-090). The splits for each source, distance, clock and unit drawn, found once for this renderer and then looked up.
+  const splitTimesOf = createSplitTimes(timeline.splitStreams);
 
   // AV-1019. A chart's series is made once per component, from the points the renderer was given (the map video's are the trimmed ones).
   const seriesOf = (component: OverlayComponent): ProjectedSeries | undefined =>
@@ -321,6 +326,16 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
               ? zoneTimesOf(component.source, resolved.bounds)?.at(sample.activityElapsedSeconds)
               : undefined;
           drawZones(ctx, box, ready, em, width, times);
+        } else if (component.type === 'splits') {
+          const resolved = ready.splits;
+          const times = resolved
+            ? splitTimesOf({ source: resolved.source, everyMeters: splitEveryMeters(resolved.setting, resolved.unitSystem), time: resolved.setting.time, unitMeters: unitMeters(resolved.unitSystem) })
+            : undefined;
+          const view =
+            resolved && times
+              ? splitsView(times, times.at(sample.activityElapsedSeconds), resolved.setting, splitsRate(resolved.setting, activity?.metadata.sport), resolved.unitSystem)
+              : undefined;
+          drawSplits(ctx, box, ready, em, width, view);
         } else if (component.type === 'dial') {
           drawDial(ctx, box, ready, em, width);
         } else if (component.type === 'gradient') {

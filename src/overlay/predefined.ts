@@ -1,6 +1,7 @@
 import type { UnitSystem } from '../domain/units';
-import { newCanvasComponent, newZonesComponent, canvasTemplate, type CanvasElementKey } from './customCanvas';
-import { METRIC_MISSING, NO_ROUTE, ELEVATION_MISSING } from './missingData';
+import { newCanvasComponent, newSplitsComponent, newZonesComponent, canvasTemplate, type CanvasElementKey } from './customCanvas';
+import { METRIC_MISSING, NO_ROUTE, ELEVATION_MISSING, SPLITS_MISSING } from './missingData';
+import { splitsUnavailableReason } from './splits';
 import { OVERLAY_PRESETS, type OverlayPresetId } from './presets';
 import { SMOOTHING_LIMITS, canSmooth, type OverlayTimeline } from './timeline';
 import { normalizeRect, type OverlayComponent, type OverlayTemplate } from './template';
@@ -14,9 +15,10 @@ import { normalizeRect, type OverlayComponent, type OverlayTemplate } from './te
  * is plain data: a sport is added by adding entries here, and the editor, which
  * only reads `PREDEFINED_ENTRIES`, does not change.
  *
- * Zones came with AV-1018 (TD-086), and the dial, the chart, the gradient
- * indicator and the compass with AV-1019 (TD-087). Splits and average-so-far
- * figures wait for their own pieces (#22, #39) and have no entry until those land.
+ * Zones came with AV-1018 (TD-086), the dial, the chart, the gradient
+ * indicator and the compass with AV-1019 (TD-087), and splits with AV-1021
+ * (TD-090). Average-so-far figures wait for their own piece (#39) and have no
+ * entry until it lands.
  */
 
 export type PredefinedSport = 'cycling' | 'running' | 'any';
@@ -26,7 +28,7 @@ export interface PredefinedEntry {
   id: string;
   name: string;
   sport: PredefinedSport;
-  /** Data source ids the activity must have: `metric:power`, `route`. Empty needs nothing. */
+  /** Data source ids the activity must have: `metric:power`, `route`, or `splits` (laps with start times, or a distance). Empty needs nothing. */
   needs: string[];
   /** Why the entry is offered disabled, in the Add list's own wording. */
   missing: string;
@@ -43,7 +45,9 @@ export interface PredefinedEntry {
 /** Whether this activity can supply an entry's data. */
 export function predefinedAvailability(entry: PredefinedEntry, timeline: OverlayTimeline): boolean {
   if (timeline.unavailable) return false;
-  return entry.needs.every((need) => (need === 'route' ? timeline.hasRoute : timeline.available.has(need)));
+  return entry.needs.every((need) =>
+    need === 'route' ? timeline.hasRoute : need === 'splits' ? splitsUnavailableReason(false, timeline.splitSources) === undefined : timeline.available.has(need),
+  );
 }
 
 export function predefinedEntry(id: string): PredefinedEntry | undefined {
@@ -79,6 +83,11 @@ const zones =
   (source: 'heartRate' | 'power'): Build =>
   (template, size) => [newZonesComponent(template, source, size)];
 
+/** AV-1021. Splits, with the rate a sport reads: a runner's pace, a rider's speed. */
+const splits =
+  (rate: 'pace' | 'speed'): Build =>
+  (template, size) => [newSplitsComponent(template, size, rate)];
+
 const plain =
   (key: CanvasElementKey): Build =>
   (template, size, timeline, units) => [newCanvasComponent(template, key, size, timeline, units)];
@@ -98,11 +107,13 @@ export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
   { id: 'cycling.heart-rate-zones', name: 'Heart rate zones', sport: 'cycling', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
   { id: 'cycling.climb', name: 'Climb so far', sport: 'cycling', needs: ['metric:climb'], missing: METRIC_MISSING.climb, build: plain('metric:climb') },
   { id: 'cycling.elevation-profile', name: 'Elevation profile', sport: 'cycling', needs: ['metric:elevation'], missing: ELEVATION_MISSING, build: plain('elevationProfile') },
+  { id: 'cycling.splits', name: 'Splits', sport: 'cycling', needs: ['splits'], missing: SPLITS_MISSING, build: splits('speed') },
   // Running
   { id: 'running.pace', name: 'Pace', sport: 'running', needs: ['metric:pace'], missing: METRIC_MISSING.pace, build: figure('metric:pace', { smoothing: 5 }) },
   { id: 'running.heart-rate', name: 'Heart rate', sport: 'running', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: plain('metric:heartRate') },
   { id: 'running.heart-rate-zones', name: 'Heart rate zones', sport: 'running', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
   { id: 'running.cadence', name: 'Running cadence', sport: 'running', needs: ['metric:runningCadence'], missing: METRIC_MISSING.runningCadence, build: figure('metric:runningCadence', { smoothing: 3 }) },
+  { id: 'running.splits', name: 'Splits', sport: 'running', needs: ['splits'], missing: SPLITS_MISSING, build: splits('pace') },
   { id: 'running.distance-total', name: 'Distance of the total', sport: 'running', needs: ['metric:distance'], missing: METRIC_MISSING.distance, build: figure('metric:distance', { ofTotal: true }) },
   // Any sport
   { id: 'any.speed-chart', name: 'Speed against time', sport: 'any', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: plain('chart:speed') },

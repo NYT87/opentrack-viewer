@@ -3,6 +3,7 @@ import { toValidCoordinate } from '../domain/activity';
 import { deriveSpeed } from '../domain/series';
 import { computeDistance, elevationClimb } from '../domain/stats';
 import { zoneIndex, type ZoneTimes } from './zones';
+import type { SplitSources, SplitStreams } from './splits';
 import { circularMeanDegrees, deriveGrade, deriveHeading, lerpDegrees } from './derivedSeries';
 
 /**
@@ -155,6 +156,17 @@ export interface OverlayTimeline {
    * Callers go through `zoneTimesFor`, which keeps the answer.
    */
   zoneTimes?: (source: OverlayDataSource, bounds: readonly number[]) => ZoneTimes | undefined;
+  /**
+   * AV-1021 (TD-090). Which ways the activity can be split: by its laps (two or more with a
+   * start time) and by distance. Absent on a timeline that cannot sample.
+   */
+  splitSources?: SplitSources;
+  /**
+   * AV-1021. The streams a split is found from: the distance, the moving time and the laps, on
+   * the activity's clock, made on first use and kept. Callers go through `splitTimesFor` (or a
+   * renderer's `createSplitTimes`), which keep the splits. Absent on a timeline that cannot sample.
+   */
+  splitStreams?: () => SplitStreams;
   /**
    * TD-059. How the video was laid against the activity, so the page can say
    * so: by the camera's own clock, or at the activity's first point because
@@ -695,6 +707,52 @@ export function buildOverlayTimeline(
     return range;
   };
 
+  /*
+   * AV-1021 (TD-090). What splits are found from. The laps are placed on the activity's clock by their
+   * start times; a lap before the first point starts there, one after the last point is dropped, and two
+   * that start together are one. A file whose laps do not all have a start has none that can be placed.
+   */
+  const laps: { startSeconds: number; meters?: number }[] = [];
+  let lapsIssue: SplitSources['lapsIssue'];
+  const fileLaps = activity.laps ?? [];
+  if (fileLaps.length >= 2) {
+    if (fileLaps.every((lap) => lap.startTime instanceof Date && Number.isFinite(lap.startTime.getTime()))) {
+      const placed = fileLaps
+        .map((lap) => ({ startSeconds: Math.max(0, ((lap.startTime as Date).getTime() - firstMs) / 1000), meters: finite(lap.distanceMeters) }))
+        .filter((lap) => lap.startSeconds <= spanSeconds)
+        .sort((a, b) => a.startSeconds - b.startSeconds);
+      for (const lap of placed) {
+        if (laps.length > 0 && laps[laps.length - 1]!.startSeconds === lap.startSeconds) continue;
+        laps.push({ startSeconds: lap.startSeconds, ...(lap.meters !== undefined ? { meters: lap.meters } : {}) });
+      }
+    } else lapsIssue = 'no_start_times';
+  }
+  const splitSources: SplitSources = {
+    laps: laps.length >= 2,
+    ...(lapsIssue ? { lapsIssue } : {}),
+    distance: available.has('metric:distance') && distanceSpan > 0,
+  };
+  let splitStreamsMade: SplitStreams | undefined;
+  const splitStreams = (): SplitStreams => {
+    if (splitStreamsMade) return splitStreamsMade;
+    const seconds: number[] = [];
+    const meters: number[] = [];
+    const movingSeconds: number[] = [];
+    let first: number | undefined;
+    let top = 0;
+    for (const timedPoint of points) {
+      const metres = finite(distance[timedPoint.index]);
+      if (metres === undefined) continue;
+      first ??= metres;
+      top = Math.max(top, metres - first);
+      seconds.push(timedPoint.seconds);
+      meters.push(top);
+      movingSeconds.push(finite(derived.moving[timedPoint.index]) ?? movingSeconds[movingSeconds.length - 1] ?? 0);
+    }
+    splitStreamsMade = { seconds, meters, moving: movingSeconds, spanSeconds, laps: splitSources.laps ? laps : [] };
+    return splitStreamsMade;
+  };
+
   const traceId = available.has('metric:speed')
     ? 'metric:speed'
     : available.has('metric:elevation')
@@ -739,6 +797,8 @@ export function buildOverlayTimeline(
     rangeOf,
     activityStartMs: firstMs,
     zoneTimes,
+    splitSources,
+    splitStreams,
     alignment,
   };
 }

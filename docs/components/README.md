@@ -4,7 +4,7 @@ What an overlay component is, what it is given, what it must and must not do, an
 contract is TypeScript in [`src/overlay/contract.ts`](../../src/overlay/contract.ts); these pages
 document it, and a test keeps the two in step. The decision behind it is TD-085 in
 [`docs/planning/06-decisions-and-open-questions.md`](../planning/06-decisions-and-open-questions.md);
-the request is [issue #19](https://github.com/NYT87/opentrack-viewer/issues/19). The dial, the chart, the gradient indicator and the compass (TD-087, [issue #21](https://github.com/NYT87/opentrack-viewer/issues/21)) are sections too.
+the request is [issue #19](https://github.com/NYT87/opentrack-viewer/issues/19). The dial, the chart, the gradient indicator and the compass (TD-087, [issue #21](https://github.com/NYT87/opentrack-viewer/issues/21)) are sections too, as are splits (TD-090, [issue #22](https://github.com/NYT87/opentrack-viewer/issues/22)).
 
 ## Status: documented; components are added to the app's code
 
@@ -49,6 +49,7 @@ There is one kind of component per **section**, each with its own props:
 | `chart` | `ChartProps` | [charts.md](charts.md) | A figure against time or distance, whole or through a window, with a cursor |
 | `gradient` | `GradientProps` | [gradient.md](gradient.md) | The slope in percent, its colour band and its glyph |
 | `compass` | `HeadingProps` | [compass.md](compass.md) | The heading in degrees, and where the rose and the needle point |
+| `splits` | `SplitsProps` | [splits.md](splits.md) | The split under way, the last one and the last few: the file's laps, or every kilometre or mile |
 
 ## The rules
 
@@ -83,7 +84,7 @@ Every component's props hold these, besides its section's (the tables below say 
 | `fontPx` | px | never | The base type size: 2.2 % of the frame's width times `style.fontScale` (smaller only for a whole-activity text that would not fit the frame). |
 | `style` | | never | The look chosen. `textColor` and `accentColor` are `#rrggbb`; `backgroundOpacity` is 0 to 1 and the host paints it behind a figure, gauge or route (not a whole-activity component); `fontScale` is a multiplier, already in `fontPx`. |
 
-A component that reads a moment (`figure`, `gauge`, `route`, `zones`, `dial`, `chart`, `gradient`, `compass`) also has:
+A component that reads a moment (`figure`, `gauge`, `route`, `zones`, `dial`, `chart`, `gradient`, `compass`, `splits`) also has:
 
 | Prop | Unit | Changes | Meaning |
 | --- | --- | --- | --- |

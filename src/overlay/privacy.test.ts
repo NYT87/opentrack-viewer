@@ -81,6 +81,9 @@ describe('the overlay code can send nothing anywhere and keeps nothing (AV-1008)
         'state/personalStore.ts',
         'overlay/zones.ts',
         'overlay/export/drawZones.ts',
+        // AV-1021 (TD-090). Splits: the laps and the distance cut into times, drawn and kept nowhere.
+        'overlay/splits.ts',
+        'overlay/export/drawSplits.ts',
       ]),
     );
     expect(overlayFiles.length).toBeGreaterThan(20);

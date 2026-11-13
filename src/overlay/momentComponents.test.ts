@@ -9,6 +9,7 @@ import {
   newCompassComponent,
   newDialComponent,
   newGradientComponent,
+  newSplitsComponent,
 } from './customCanvas';
 import { DEFAULT_COMPASS } from './compass';
 import { DEFAULT_DIAL } from './dial';
@@ -203,7 +204,16 @@ describe('the four types in a layout file', () => {
       'Gradient indicator was left out: it is drawn only on a video.',
       'Compass was left out: it is drawn only on a video.',
     ]);
-    expect(MOMENT_COMPONENT_TYPES).toEqual(['zones', 'dial', 'chart', 'gradient', 'compass']);
+    expect(MOMENT_COMPONENT_TYPES).toEqual(['zones', 'dial', 'chart', 'gradient', 'compass', 'splits']);
+  });
+
+  it('leaves splits out of a still too, with its own warning (AV-1021)', () => {
+    const text = JSON.stringify({ kind: 'opentrack-overlay-layout', version: 1, image: { width: 1280, height: 720 }, template: canvasTemplate([newSplitsComponent(canvasTemplate([]), { width: 1280, height: 720 })]) });
+    const result = parseStillLayout(text);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.layout.template.components).toEqual([]);
+    expect(result.warnings).toEqual(['Splits was left out: it is drawn only on a video.']);
   });
 });
 

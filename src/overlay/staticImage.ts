@@ -344,6 +344,8 @@ export function describeStillComponent(component: OverlayComponent): string {
       return 'Gradient indicator';
     case 'compass':
       return 'Compass';
+    case 'splits':
+      return 'Splits';
     case 'label': {
       const first = (component.content ?? '').split('\n')[0]!.trim();
       return first ? `Text: ${first.length > 24 ? `${first.slice(0, 23)}…` : first}` : 'Text';

@@ -22,6 +22,7 @@ import {
   scaleText,
   TEXT_SCALE_LIMITS,
   setHolder,
+  splitsRect,
   type CanvasElementChoice,
   type CanvasElementKey,
   ELEVATION_MISSING,
@@ -101,7 +102,7 @@ import {
 } from '../overlay/zones';
 import { ElementRows } from './ElementRows';
 import { ColorField } from './ColorField';
-import { ChartEditor, CompassEditor, DialEditor, GradientEditor } from './MomentEditors';
+import { ChartEditor, CompassEditor, DialEditor, GradientEditor, SplitsEditor } from './MomentEditors';
 
 /** The long side of the preview, in pixels: the overlay is drawn at this size by the export's renderer. */
 const PREVIEW_LONG_SIDE = 720;
@@ -269,7 +270,7 @@ export function CustomCanvas({
     () =>
       still
         ? canvasElementChoices(timeline, stillContext)
-            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && !choice.key.startsWith('predefined:') && !choice.key.startsWith('zones:') && !choice.key.startsWith('dial:') && !choice.key.startsWith('chart:') && choice.key !== 'gradient' && choice.key !== 'compass' && choice.key !== 'progress')
+            .filter((choice) => !choice.key.startsWith('metric:') && !choice.key.startsWith('gauge:') && !choice.key.startsWith('predefined:') && !choice.key.startsWith('zones:') && !choice.key.startsWith('dial:') && !choice.key.startsWith('chart:') && choice.key !== 'gradient' && choice.key !== 'compass' && choice.key !== 'splits' && choice.key !== 'progress')
             .map((choice) => (choice.group === 'Live figures' ? { ...choice, group: 'Along the route' as const } : choice))
         : canvasElementChoices(timeline, stillContext),
     [timeline, stillContext, still],
@@ -337,7 +338,7 @@ export function CustomCanvas({
       : parsed.layout.template.components;
     commit({ components: opened, selectedId: undefined });
     const warnings = [...parsed.warnings];
-    if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones, dials, charts, gradient indicators and compasses were left out: this picture shows no moment of the activity.');
+    if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones, dials, charts, gradient indicators, compasses and splits were left out: this picture shows no moment of the activity.');
     if (fitted.width !== parsed.layout.width || fitted.height !== parsed.layout.height) {
       warnings.push(
         `The layout was made at ${parsed.layout.width} × ${parsed.layout.height}; the canvas is ${fitted.width} × ${fitted.height}, the nearest size it can be. The layout keeps its proportions.`,
@@ -640,6 +641,7 @@ export function describeCanvasComponent(component: OverlayComponent): string {
     const base = source?.kind === 'metric' ? { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade', climb: 'Climb so far', heading: 'Heading' }[source.metric] : source?.kind === 'sensor' ? source.key : 'Figure';
     return `${base} ${component.type}`;
   }
+  if (component.type === 'splits') return component.display?.label?.trim() || 'Splits';
   if (component.type === 'gradient') return component.display?.label?.trim() || 'Gradient indicator';
   if (component.type === 'compass') return component.display?.label?.trim() || 'Compass';
   if (component.type === 'routeInset') return 'Route with position';
@@ -1079,16 +1081,22 @@ function ComponentEditor({
     return next;
   };
   const setFigure = (patch: { [K in keyof OverlayFigureSetting]: OverlayFigureSetting[K] | undefined }, grow = true) =>
-    (grow ? updateFigure : update)((current) => withFigure(current, patch));
+    (grow ? updateFigure : update)((current) => {
+      const next = withFigure(current, patch);
+      // AV-1021. A change to the lines' sizes or spacing changes how tall a splits component's lines are, so its box follows.
+      return grow && next.type === 'splits' ? { ...next, rect: splitsRect(next, frame) ?? next.rect } : next;
+    });
   const holders = components.filter((entry) => entry.type === 'shape' && entry.id !== component.id);
   const isData = component.type === 'text' || component.type === 'gauge';
   // AV-1018. Zones are laid out and styled as a figure is: label colour, sizes, spacing, alignment and halo.
   const isZones = component.type === 'zones';
   // AV-1019. A dial, a chart, a gradient indicator and a compass are laid out and styled as a figure is, each with settings of its own.
   const isMoment = component.type === 'dial' || component.type === 'chart' || component.type === 'gradient' || component.type === 'compass';
-  const isFigureLike = isData || isZones || isMoment;
+  // AV-1021. Splits are laid out and styled as a figure is, with settings of their own; their text sits left, with a rate at the right.
+  const isSplits = component.type === 'splits';
+  const isFigureLike = isData || isZones || isMoment || isSplits;
   // The text of a dial, a chart and a compass sits where the picture puts it; only a gradient indicator's follows the alignment.
-  const honoursAlign = !(component.type === 'dial' || component.type === 'chart' || component.type === 'compass');
+  const honoursAlign = !(component.type === 'dial' || component.type === 'chart' || component.type === 'compass' || isSplits);
   const isStill = STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
   const isLine = component.type === 'routeInset' || component.type === 'elevationProfile';
   const shape: OverlayShapeSetting | undefined = component.type === 'shape' ? (component.shape ?? DEFAULT_SHAPE) : undefined;
@@ -1241,7 +1249,7 @@ function ComponentEditor({
         </>
       )}
 
-      {(isData || isMoment) && (
+      {(isData || isMoment || isSplits) && (
         <>
           {component.type !== 'chart' && (
           <label className="overlay-controls__choice">
@@ -1256,7 +1264,7 @@ function ComponentEditor({
               id={`${id}-label`}
               className="input"
               type="text"
-              placeholder={component.type === 'gradient' ? 'Grade' : component.type === 'compass' ? 'Heading' : describeCanvasComponent({ ...component, display: undefined }).replace(/ (gauge|dial|chart)$/, '')}
+              placeholder={component.type === 'gradient' ? 'Grade' : component.type === 'compass' ? 'Heading' : isSplits ? 'Split' : describeCanvasComponent({ ...component, display: undefined }).replace(/ (gauge|dial|chart)$/, '')}
               value={component.display?.label ?? ''}
               onChange={(event) => {
                 const label = sanitizeLabel(event.target.value).split('\n')[0]!.slice(0, 40);
@@ -1336,6 +1344,7 @@ function ComponentEditor({
       {component.type === 'dial' && <DialEditor id={id} component={component} timeline={timeline} units={units} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
       {component.type === 'chart' && <ChartEditor id={id} component={component} timeline={timeline} units={units} onChange={(patch) => update(patch)} />}
       {component.type === 'gradient' && <GradientEditor id={id} component={component} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
+      {isSplits && <SplitsEditor id={id} component={component} timeline={timeline} units={units} frame={frame} onChange={(patch) => update(patch)} />}
       {component.type === 'compass' && <CompassEditor id={id} component={component} smoothingField={smoothingField} onChange={(patch) => update(patch)} />}
 
       {component.type === 'label' && (

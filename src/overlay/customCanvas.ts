@@ -26,6 +26,7 @@ import { dataSourceId, type OverlayMetricKey, type OverlayTimeline } from './tim
 import { DEFAULT_DIAL, activityRange } from './dial';
 import { DEFAULT_GRADIENT } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
+import { DEFAULT_SPLITS, splitsContentHeight, splitsMetrics, splitsUnavailableReason } from './splits';
 import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
 import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
 import type { MeasureText } from './staticImage';
@@ -89,6 +90,8 @@ export type CanvasElementKey =
   | `chart:${ChartMetric}`
   | 'gradient'
   | 'compass'
+  /** AV-1021. Splits: the file's laps, or every kilometre or mile. */
+  | 'splits'
   | 'route'
   | 'progress'
   | 'elevationProfile'
@@ -199,6 +202,11 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
     })),
     { key: 'gradient', label: 'Gradient indicator', group: 'Live figures', available: has('metric:grade'), ...(has('metric:grade') ? {} : { reason: METRIC_MISSING.grade }) },
     { key: 'compass', label: 'Compass', group: 'Live figures', available: has('metric:heading'), ...(has('metric:heading') ? {} : { reason: METRIC_MISSING.heading }) },
+    // AV-1021. Splits need a clock, and laps with start times or a distance to cut it by.
+    (() => {
+      const reason = splitsUnavailableReason(timeline.unavailable !== undefined, timeline.splitSources);
+      return { key: 'splits', label: 'Splits', group: 'Live figures', available: reason === undefined, ...(reason ? { reason } : {}) } satisfies CanvasElementChoice;
+    })(),
     { key: 'progress', label: 'Progress bar', group: 'Live figures', available: !timeline.unavailable },
     {
       key: 'elevationProfile',
@@ -283,6 +291,7 @@ export function newCanvasComponent(
   if (key.startsWith('chart:')) return newChartComponent(template, key.slice('chart:'.length) as OverlayMetricKey, size, timeline);
   if (key === 'gradient') return newGradientComponent(template, size);
   if (key === 'compass') return newCompassComponent(template, size);
+  if (key === 'splits') return newSplitsComponent(template, size);
   if (key.startsWith('shape:')) {
     const kind = key.slice('shape:'.length) as ShapeKind;
     return {
@@ -439,6 +448,42 @@ export function newCompassComponent(template: OverlayTemplate, size: { width: nu
     compass: { ...DEFAULT_COMPASS },
     smoothing: { windowSeconds: COMPASS_SMOOTHING_SECONDS },
   };
+}
+
+/**
+ * AV-1021 (TD-090). Splits: a card in the top-left, by the file's laps where it has
+ * them (else every kilometre or mile), moving time, the current split and the last
+ * with how it compares, and no list. The rate is left to the activity's type (pace
+ * for a run, speed otherwise) unless the entry asks for one.
+ */
+export function newSplitsComponent(
+  template: OverlayTemplate,
+  size: { width: number; height: number },
+  rate?: 'pace' | 'speed',
+): OverlayComponent {
+  const component: OverlayComponent = {
+    id: freshComponentId(template, 'splits'),
+    type: 'splits',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width: 0.26, height: 0.1 }),
+    splits: { ...DEFAULT_SPLITS, ...(rate ? { rate } : {}) },
+  };
+  return { ...component, rect: splitsRect(component, size) ?? component.rect };
+}
+
+/**
+ * AV-1021. A splits component's box made as tall as what it draws: the editor calls it when the
+ * list or the last split is turned on or off, so a longer list is not cut off by the box. The
+ * width and the position stay, and the box stays inside the frame; `undefined` for any other type.
+ */
+export function splitsRect(component: OverlayComponent, size: { width: number; height: number }): OverlayRect | undefined {
+  if (component.type !== 'splits') return undefined;
+  const style = { ...DEFAULT_OVERLAY_STYLE, ...component.style };
+  const em = (BASE_FONT_CQW / 100) * size.width * style.fontScale;
+  const height = splitsContentHeight(splitsMetrics(em, size.width, component.figure), component.splits ?? DEFAULT_SPLITS, em) / size.height;
+  return normalizeRect({ ...component.rect, height: Math.min(1, height) });
 }
 
 /** AV-1019. How long the grade and the heading are averaged over to start with. */

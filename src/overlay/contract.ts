@@ -11,6 +11,7 @@ import { cardinalLetters, normalizeDegrees } from './derivedSeries';
 import { projectRoute } from './routeProjection';
 import { extractRoute } from './routeImage';
 import { zoneTimesFor } from './zones';
+import { splitEveryMeters, splitTimesFor, splitsRate, splitsView, unitMeters, type SplitRow } from './splits';
 import { layoutStillText, stillFontPx, stillValue } from './staticImage';
 import {
   DEFAULT_CHART,
@@ -464,7 +465,60 @@ export interface HeadingProps extends ContractMoment {
   figure?: OverlayFigureSetting;
 }
 
-export type ContractProps = FigureProps | GaugeProps | RouteProps | WholeActivityProps | ZoneProps | DialProps | ChartProps | GradientProps | HeadingProps;
+// ---------------------------------------------------------------------------
+// Section: splits
+
+/** AV-1021 (TD-090). One line of a splits component: a split, its time and, where it can be said, its rate and how it compares. */
+export interface SplitRowProps {
+  /** From 1, at the start of the activity. */
+  number: number;
+  /** The time the split took (or has taken so far), in seconds, by the clock `time` names. */
+  seconds: number;
+  /** `seconds` written as a clock ("5:21", "1:02:03"). Draw this. */
+  text: string;
+  /** The split's length (so far, for the current one), in metres; absent where the activity has no distance for it. */
+  distanceMeters?: number;
+  /** The pace or the average speed in the reader's units ("5:21 /km", "11.2 km/h"); absent when `rate` is `none` or the split has no distance worth one. */
+  rateText?: string;
+  /** A finished split against the one before it, by pace (by time where either has no distance): faster or slower by half a second per kilometre or mile or more, else `same`. Absent on the current split and on the first. */
+  verdict?: 'faster' | 'slower' | 'same';
+}
+
+/**
+ * AV-1021 (TD-090). Splits: the split under way, the last one that finished and
+ * the last few, from the file's laps or every kilometre or mile. The splits are
+ * found once for the activity and are the same whatever the video shows; a frame
+ * only says which is current. Props change every frame (`current.seconds`), and
+ * the rest only when a split ends.
+ */
+export interface SplitsProps extends ContractMoment {
+  section: 'splits';
+  /** Where the splits come from here: the file's laps, or a distance. A component set to `laps` on a file with none reads `distance`. */
+  source: 'laps' | 'distance';
+  /** Which clock times a split: `moving` holds through a stop, `elapsed` runs. */
+  time: 'moving' | 'elapsed';
+  /** `source: 'distance'` only: how far each split is, in metres. */
+  everyMeters?: number;
+  /** The unit system the reader's pace, speed and distance are written in. */
+  unitSystem: 'metric' | 'imperial';
+  /** What `rateText` is: the pace, the average speed, or nothing. */
+  rate: 'pace' | 'speed' | 'none';
+  /** The component's name as the reader sees it ("Split", or their own wording). */
+  label: string;
+  /** The split under way: its number and the time so far. After the last split has ended, that split, with its whole time. */
+  current: SplitRowProps;
+  /** The last split that finished: absent when the reader turned it off, and before the first has finished. */
+  last?: SplitRowProps;
+  /** The last finished splits, newest first: as many as the reader asked for (0 to 10) and have finished. */
+  list: SplitRowProps[];
+  /** `#rrggbb`: the colour of a faster split, and of a slower one. A `same` split is `style.textColor`. */
+  fasterColor: string;
+  slowerColor: string;
+  /** The reader's styling of the label; absent members are the built-in look. Absent when the reader set none. */
+  figure?: OverlayFigureSetting;
+}
+
+export type ContractProps = FigureProps | GaugeProps | RouteProps | WholeActivityProps | ZoneProps | DialProps | ChartProps | GradientProps | HeadingProps | SplitsProps;
 export type ContractSection = ContractProps['section'];
 
 // ---------------------------------------------------------------------------
@@ -519,6 +573,8 @@ export function contractSectionOf(component: OverlayComponent): ContractSection 
       return 'gradient';
     case 'compass':
       return 'compass';
+    case 'splits':
+      return 'splits';
     case 'shape':
       return undefined;
   }
@@ -556,7 +612,7 @@ export function contractProps(
   sample: OverlaySample,
   timeline: OverlayTimeline,
   context: ContractContext,
-): FigureProps | GaugeProps | RouteProps | ZoneProps | DialProps | ChartProps | GradientProps | HeadingProps {
+): FigureProps | GaugeProps | RouteProps | ZoneProps | DialProps | ChartProps | GradientProps | HeadingProps | SplitsProps {
   const { component, style } = ready;
   const { frame } = context;
   const base = {
@@ -623,6 +679,7 @@ export function contractProps(
   }
 
   if (component.type === 'chart') return chartProps(ready, sample, timeline, context, base);
+  if (component.type === 'splits') return splitsProps(ready, sample, timeline, context, base);
   if (component.type === 'dial' || component.type === 'gradient' || component.type === 'compass') return momentProps(ready, timeline, context, base, sample);
 
   // A figure or a gauge: the value is read as `resolveOverlayComponent` reads it.
@@ -705,6 +762,51 @@ function chartProps(ready: Ready, sample: OverlaySample, timeline: OverlayTimeli
       xEnd: written.end,
     };
   }
+  if (component.figure) props.figure = structuredClone(component.figure);
+  return props;
+}
+
+const rowProps = (row: SplitRow): SplitRowProps => ({
+  number: row.number,
+  seconds: row.seconds,
+  text: row.text,
+  ...(row.meters !== undefined ? { distanceMeters: row.meters } : {}),
+  ...(row.rateText !== undefined ? { rateText: row.rateText } : {}),
+  ...(row.verdict !== undefined ? { verdict: row.verdict } : {}),
+});
+
+/** The splits a splits component draws at a moment, as the renderer finds them; `undefined` where there are none to draw. */
+function splitsViewOf(ready: Ready, sample: OverlaySample, timeline: OverlayTimeline, activity: Activity | undefined) {
+  const resolved = ready.splits;
+  if (!resolved) return undefined;
+  const { setting } = resolved;
+  const times = splitTimesFor(timeline, { source: resolved.source, everyMeters: splitEveryMeters(setting, resolved.unitSystem), time: setting.time, unitMeters: unitMeters(resolved.unitSystem) });
+  if (!times) return undefined;
+  const rate = splitsRate(setting, activity?.metadata.sport);
+  return { resolved, rate, view: splitsView(times, times.at(sample.activityElapsedSeconds), setting, rate, resolved.unitSystem) };
+}
+
+/** AV-1021. A splits component's props: the current split, the last, the list and what they are drawn with. */
+function splitsProps(ready: Ready, sample: OverlaySample, timeline: OverlayTimeline, context: ContractContext, base: MomentBase): SplitsProps {
+  const { component } = ready;
+  const found = splitsViewOf(ready, sample, timeline, context.activity) as NonNullable<ReturnType<typeof splitsViewOf>>;
+  const { resolved, rate, view } = found;
+  const { setting } = resolved;
+  const props: SplitsProps = {
+    section: 'splits',
+    ...base,
+    source: resolved.source,
+    time: setting.time,
+    unitSystem: resolved.unitSystem,
+    rate,
+    label: ready.label as string,
+    current: rowProps(view.current),
+    list: view.list.map(rowProps),
+    fasterColor: setting.fasterColor,
+    slowerColor: setting.slowerColor,
+  };
+  if (resolved.source === 'distance') props.everyMeters = splitEveryMeters(setting, resolved.unitSystem);
+  if (view.last) props.last = rowProps(view.last);
   if (component.figure) props.figure = structuredClone(component.figure);
   return props;
 }
@@ -872,6 +974,8 @@ export function contractPropsFor(
   if (!sample) return undefined;
   const ready = resolveOverlayComponent(template, component, sample, timeline, context.units, context.personal);
   if (ready.status !== 'ready') return undefined;
+  // Splits the renderer draws nothing for (no splits to count) have no props either.
+  if (component.type === 'splits' && !splitsViewOf(ready, sample, timeline, context.activity)) return undefined;
   // A chart the renderer draws nothing for (no activity to draw it from, or no place on its axis) has no props either.
   if (component.type === 'chart') {
     const series = chartSeries(component, context.activity);

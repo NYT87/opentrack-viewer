@@ -561,7 +561,7 @@ describe('the custom canvas (AV-1011)', () => {
       const entry = (type: string) => ({ id: type, type, visible: true, rect: { x: 0, y: 0, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, source: { kind: 'metric', metric: 'speed' } });
       const json = { kind: 'opentrack-overlay-layout', version: 1, image: { width: 1280, height: 720 }, template: { version: 2, name: 'x', style: {}, components: ['dial', 'chart', 'gradient', 'compass'].map(entry) } };
       await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'm.json', { type: 'application/json' }));
-      expect(await screen.findByText(/Zones, dials, charts, gradient indicators and compasses were left out/)).toBeInTheDocument();
+      expect(await screen.findByText(/Zones, dials, charts, gradient indicators, compasses and splits were left out/)).toBeInTheDocument();
     });
 
     it('offers a dial a figure, a range, a sweep, ticks, a pointer and three colours, each named, and saves them', async () => {
@@ -803,6 +803,163 @@ describe('the custom canvas (AV-1011)', () => {
     });
   });
 
+  describe('splits (AV-1021, TD-090)', { timeout: 20_000 }, () => {
+    // 5 m/s for a minute, with a lap every 20 s: three laps, 300 m.
+    const withLaps = () => ({ ...ride((i) => ({ distanceMeters: i * 5 })), laps: [0, 20, 40].map((start, index) => ({ index, startTime: new Date(T0 + start * 1000) })) });
+    type Saved = Record<string, unknown> & { rect: { x: number; y: number; width: number; height: number }; splits: Record<string, unknown>; unitMode: string };
+    const first = async () => (await layoutJson()).template.components[0] as Saved;
+
+    it('adds splits from the Add list, named Splits, with the file’s laps by default, and the registry’s own by sport', async () => {
+      setup(withLaps());
+      await add('Splits');
+      expect(names()).toEqual(['Splits']);
+      expect(editor()).toHaveAccessibleName('Selected: Splits');
+      expect(await first()).toMatchObject({ type: 'splits', splits: { source: 'laps', time: 'moving', showLast: true, list: 0, fasterColor: '#4ade80', slowerColor: '#f87171' } });
+      const registry = within(region()).getByLabelText('Add');
+      expect(within(registry).getByRole('option', { name: 'Splits (Running)' })).toBeEnabled();
+      expect(within(registry).getByRole('option', { name: 'Splits (Cycling)' })).toBeEnabled();
+      await add('Splits (Running)');
+      expect((await layoutJson()).template.components[1]).toMatchObject({ type: 'splits', splits: { rate: 'pace' } });
+    });
+
+    it('offers laps and distance, says when the laps cannot be used and the distance is read instead', async () => {
+      setup(ride((i) => ({ distanceMeters: i * 5 })));
+      await add('Splits');
+      expect(within(editor()).getByRole('option', { name: /The file’s laps \(not usable here\)/ })).toBeInTheDocument();
+      expect(within(editor()).getByText('This activity’s laps cannot be used, so it is split by distance.')).toBeInTheDocument();
+      expect(within(editor()).getByText('The file has no laps to use: it needs two or more, each with a start time.')).toBeInTheDocument();
+      // The distance is then the one that counts, and it can be set.
+      expect(field('Split every (kilometres)').value).toBe('1');
+    });
+
+    it('chooses between the laps and a distance, and sets the distance in kilometres or miles, stored in metres', async () => {
+      setup(withLaps());
+      await add('Splits');
+      expect(within(editor()).queryByLabelText('Split every (kilometres)')).not.toBeInTheDocument();
+      await userEvent.selectOptions(field('Splits from') as unknown as HTMLElement, 'distance');
+      expect(await first()).toMatchObject({ splits: { source: 'distance' } });
+      expect(field('Split every (kilometres)').value).toBe('1');
+      fireEvent.change(field('Split every (kilometres)'), { target: { value: '2.5' } });
+      expect((await first()).splits.every).toBe(2500);
+      // Under the least is kept as typed and not used; over the most is the most.
+      fireEvent.change(field('Split every (kilometres)'), { target: { value: '0.05' } });
+      expect((await first()).splits.every).toBe(2500);
+      expect(field('Split every (kilometres)').value).toBe('0.05');
+      fireEvent.change(field('Split every (kilometres)'), { target: { value: '500' } });
+      expect((await first()).splits.every).toBe(100_000);
+      // One is the default, which follows the units, so nothing is stored.
+      fireEvent.change(field('Split every (kilometres)'), { target: { value: '1' } });
+      expect((await first()).splits).not.toHaveProperty('every');
+      // In miles, the unit is the reader's choice and the number is typed in it.
+      await userEvent.selectOptions(field('Units') as unknown as HTMLElement, 'imperial');
+      expect(field('Split every (miles)').value).toBe('1');
+      fireEvent.change(field('Split every (miles)'), { target: { value: '2' } });
+      expect((await first()).splits.every).toBeCloseTo(3218.688, 6);
+      expect(field('Split every (miles)').value).toBe('2');
+    });
+
+    it('sets the clock, the pace or speed, the colours, the last split and the list, and saves them', async () => {
+      setup(withLaps());
+      await add('Splits');
+      await userEvent.selectOptions(field('Time counted') as unknown as HTMLElement, 'elapsed');
+      await userEvent.selectOptions(field('Pace or speed') as unknown as HTMLElement, 'speed');
+      fireEvent.change(field('Faster colour'), { target: { value: '#010203' } });
+      fireEvent.change(field('Slower colour'), { target: { value: '#040506' } });
+      expect(await first()).toMatchObject({ splits: { time: 'elapsed', rate: 'speed', fasterColor: '#010203', slowerColor: '#040506' } });
+      // The sport's own choice is the default again, and nothing is stored for it.
+      await userEvent.selectOptions(field('Pace or speed') as unknown as HTMLElement, 'auto');
+      expect((await first()).splits).not.toHaveProperty('rate');
+      await userEvent.selectOptions(field('Pace or speed') as unknown as HTMLElement, 'none');
+      expect((await first()).splits.rate).toBe('none');
+    });
+
+    it('makes the box as tall as the lines need when the list or the last split changes, inside the frame', async () => {
+      setup(withLaps());
+      await add('Splits');
+      const start = (await first()).rect;
+      fireEvent.change(field('Past splits listed'), { target: { value: '10' } });
+      const tall = (await first()).rect;
+      expect(tall.height).toBeGreaterThan(start.height);
+      expect(tall.y + tall.height).toBeLessThanOrEqual(1);
+      expect(tall.x).toBe(start.x);
+      expect(tall.width).toBe(start.width);
+      expect((await first()).splits.list).toBe(10);
+      // Over the most is the most, a fraction a whole number.
+      fireEvent.change(field('Past splits listed'), { target: { value: '40' } });
+      expect((await first()).splits.list).toBe(10);
+      fireEvent.change(field('Past splits listed'), { target: { value: '2.4' } });
+      expect((await first()).splits.list).toBe(2);
+      await userEvent.click(within(editor()).getByRole('checkbox', { name: /Show the last split/ }));
+      const short = await first();
+      expect(short.splits.showLast).toBe(false);
+      expect(short.rect.height).toBeLessThan(tall.height);
+      // Hiding the label, or a bigger label, changes the lines' height too.
+      await userEvent.click(within(editor()).getByRole('checkbox', { name: 'Show the label' }));
+      expect((await first()).rect.height).toBeLessThan(short.rect.height);
+      // Undo takes the whole change back in one step.
+      await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+      expect((await first()).rect.height).toBe(short.rect.height);
+    });
+
+    it('offers the usual position, size, label, colours, text sizes and halo, and gives every control a name', async () => {
+      setup(withLaps());
+      await add('Splits');
+      for (const label of ['From the left (%)', 'Width (%)', 'Label', 'Units', 'Value colour', 'Label colour', 'Label size (%)', 'Value size (%)', 'Spacing (% of width)', 'Halo colour', 'Halo (%)']) {
+        expect(within(editor()).getByLabelText(label), label).toBeInTheDocument();
+      }
+      expect(within(editor()).queryByLabelText('Alignment')).not.toBeInTheDocument();
+      for (const role of ['textbox', 'spinbutton', 'combobox', 'checkbox'] as const) {
+        for (const control of within(editor()).queryAllByRole(role)) expect(control, role).toHaveAccessibleName();
+      }
+      for (const control of Array.from(editor().querySelectorAll('input[type="color"]'))) expect(control).toHaveAccessibleName();
+      for (const button of within(editor()).getAllByRole('button')) expect(button).toHaveAccessibleName();
+      fireEvent.change(field('Label'), { target: { value: 'Laps' } });
+      expect(names()).toEqual(['Laps']);
+    });
+
+    it('says why an activity cannot be split, in the Add list, and does not offer it', () => {
+      // Times, but no positions and no recorded distance: nothing to cut by.
+      setup(makeActivity(Array.from({ length: 5 }, (_, i) => ({ time: new Date(T0 + i * 1000), heartRateBpm: 100 }))));
+      const option = within(region()).getByRole('option', { name: /^Splits \(not in this activity\)/ });
+      expect(option).toBeDisabled();
+      expect(within(within(region()).getByRole('list', { name: 'Not in this activity' })).getByText(/This activity has no distance to split by\./)).toHaveTextContent(/Splits/);
+    });
+
+    it('says the file’s laps have no start times, when that is why', () => {
+      const lapsWithoutStarts = { ...makeActivity(Array.from({ length: 5 }, (_, i) => ({ time: new Date(T0 + i * 1000) }))), laps: [{ index: 0 }, { index: 1 }] };
+      setup(lapsWithoutStarts);
+      expect(within(within(region()).getByRole('list', { name: 'Not in this activity' })).getByText(/The file’s laps have no start times\./)).toHaveTextContent(/Splits/);
+    });
+
+    it('is not offered in a still, and is left out of a layout opened there, with a warning', async () => {
+      const activity = withLaps();
+      const host = { title: 'Figures', intro: 'x', frame: { width: 1280, height: 720 }, timeline: buildOverlayTimeline(activity, { video: { durationSeconds: 60 } }), seconds: 0, onSeek: () => {}, onComponentsChange: () => {}, still: true };
+      render(<CustomCanvas activity={activity} offsetSeconds={0} units="metric" readerTimeZone="UTC" host={host} />);
+      const figures = within(screen.getByRole('region', { name: 'Figures' }));
+      for (const name of ['Splits', 'Splits (Running)', 'Splits (Cycling)']) expect(figures.queryByRole('option', { name })).not.toBeInTheDocument();
+      const json = { kind: 'opentrack-overlay-layout', version: 1, image: { width: 1280, height: 720 }, template: { version: 2, name: 'x', style: {}, components: [{ id: 'splits', type: 'splits', visible: true, rect: { x: 0, y: 0, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, splits: {} }] } };
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'm.json', { type: 'application/json' }));
+      expect(await screen.findByText(/Zones, dials, charts, gradient indicators, compasses and splits were left out/)).toBeInTheDocument();
+    });
+
+    it('opens a layout saved with splits, and saves it again the same', async () => {
+      setup(withLaps());
+      await add('Splits');
+      await userEvent.selectOptions(field('Splits from') as unknown as HTMLElement, 'distance');
+      fireEvent.change(field('Split every (kilometres)'), { target: { value: '0.5' } });
+      fireEvent.change(field('Past splits listed'), { target: { value: '3' } });
+      const saved = await layoutJson();
+      await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+      await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify({ kind: 'opentrack-overlay-layout', version: 1, ...saved })], 'm.json', { type: 'application/json' }));
+      expect(await within(region()).findByText('Opened the layout in m.json.')).toBeInTheDocument();
+      expect(names()).toEqual(['Splits']);
+      expect((await layoutJson()).template.components).toEqual(saved.template.components);
+      await userEvent.click(within(elements()!).getByRole('button', { name: 'Splits' }));
+      expect(field('Split every (kilometres)').value).toBe('0.5');
+      expect(field('Past splits listed').value).toBe('3');
+    });
+  });
+
   describe('zones (AV-1018, TD-086)', () => {
     const athlete = () => ride((i) => ({ heartRateBpm: 110 + i, powerWatts: 120 + 4 * i, distanceMeters: i * 5 }));
     const fresh = async () => {
@@ -1017,7 +1174,7 @@ describe('the custom canvas (AV-1011)', () => {
       expect(within(screen.getByRole('region', { name: 'Figures' })).queryByRole('option', { name: 'Heart rate zones' })).not.toBeInTheDocument();
       const json = { kind: 'opentrack-overlay-layout', version: 1, image: { width: 1280, height: 720 }, template: { version: 2, name: 'x', style: {}, components: [{ id: 'z', type: 'zones', visible: true, rect: { x: 0, y: 0, width: 0.3, height: 0.2 }, unitMode: 'auto', style: {}, source: { kind: 'metric', metric: 'heartRate' } }] } };
       await userEvent.upload(screen.getByTestId('canvas-layout-input'), new File([JSON.stringify(json)], 'z.json', { type: 'application/json' }));
-      expect(await screen.findByText('Zones, dials, charts, gradient indicators and compasses were left out: this picture shows no moment of the activity.')).toBeInTheDocument();
+      expect(await screen.findByText('Zones, dials, charts, gradient indicators, compasses and splits were left out: this picture shows no moment of the activity.')).toBeInTheDocument();
     });
 
     it('stores nothing on the device: the figures are in memory for the session, and not in any storage', async () => {

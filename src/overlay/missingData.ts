@@ -28,3 +28,6 @@ export const METRIC_MISSING: Record<OverlayMetricKey, string> = {
   climb: ELEVATION_MISSING,
   heading: 'This activity has no heading: it needs positions, and 20 m of movement.',
 };
+
+/** AV-1021. Why an activity cannot be split, for a predefined entry that needs splits: the file's laps with start times, or a distance. */
+export const SPLITS_MISSING = 'This activity has no distance, and no laps with start times, to split by.';

@@ -216,3 +216,22 @@ describe('FIT feeds the existing adapters (AV-703 / AV-704)', () => {
     expect(availabilityOf('elevation')).toBe(false);
   });
 });
+
+describe('FIT laps (AV-1021)', () => {
+  it('reads each lap message: its start, its end, its time and its distance', async () => {
+    const activity = await parse('run-with-laps.fit');
+    expect(activity.metadata.sport).toBe('running');
+    expect(activity.points).toHaveLength(13);
+    expect(activity.laps).toHaveLength(3);
+    const start = Date.parse('2024-04-06T08:00:00Z');
+    expect(activity.laps!.map((lap) => [lap.index, (lap.startTime!.getTime() - start) / 1000, (lap.endTime!.getTime() - start) / 1000, lap.durationSeconds, lap.distanceMeters])).toEqual([
+      [0, 0, 50, 50, 200],
+      [1, 50, 90, 40, 200],
+      [2, 90, 120, 30, 90],
+    ]);
+  });
+
+  it('leaves the other FIT fixtures with no laps', async () => {
+    expect((await parse('ride-with-sensors.fit')).laps ?? []).toEqual([]);
+  });
+});
