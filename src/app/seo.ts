@@ -53,6 +53,13 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
       'Read the GPS track a GoPro recorded alongside the picture, and view it as an activity. ' +
       'The video is read in this browser tab and never uploaded.',
   },
+  [ROUTES.routeBuilder]: {
+    title: `Plan a custom route — ${SITE_NAME}`,
+    // Describes what the page does, never a route someone happens to be editing.
+    description:
+      'Start a route, or edit a copy of one you have opened, and export it as a file for your ' +
+      'GPS watch or bike computer. Everything happens in this browser tab; nothing is uploaded.',
+  },
   [ROUTES.terms]: {
     title: `Terms and Conditions — ${SITE_NAME}`,
     description:

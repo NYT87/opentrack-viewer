@@ -14,6 +14,11 @@ export const ROUTES = {
    * to stop, and the viewer has nowhere to put either.
    */
   videoTelemetry: '/video-telemetry',
+  /**
+   * AV-1102. Editing a planned route is a page of its own, not a mode of the
+   * viewer: the viewer shows what was recorded and must stay unable to change it.
+   */
+  routeBuilder: '/route-builder',
 } as const;
 
 /**
@@ -23,4 +28,5 @@ export const ROUTES = {
 export const TOOLS_ITEMS = [
   { to: ROUTES.viewer, label: 'File viewer' },
   { to: ROUTES.videoTelemetry, label: 'Video telemetry' },
+  { to: ROUTES.routeBuilder, label: 'Route Builder' },
 ] as const;

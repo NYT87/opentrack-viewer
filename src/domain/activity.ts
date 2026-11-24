@@ -16,6 +16,8 @@ export type ActivitySourceFormat =
   | 'gopro'
   /** An MP4/MOV with no telemetry this app can use — a video, and only that. */
   | 'video'
+  /** AV-1101. A planned track made in Route Builder, not a recording. */
+  | 'planned'
   | 'unknown';
 
 export type ActivitySport =

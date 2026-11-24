@@ -5,6 +5,7 @@ import { SensorStreamPanel } from '../components/SensorStreamPanel';
 import { resolvePerformanceMetric } from '../domain/performance';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
+import { CustomTrackAction } from '../components/CustomTrackAction';
 import { ExportPanel } from '../components/ExportPanel';
 import { FileDropZone } from '../components/FileDropZone';
 import { LapsPanel, hasUsefulLaps } from '../components/LapsPanel';
@@ -229,6 +230,7 @@ export function ViewerPage() {
 
           <section className="box" id="activity-export" aria-label="Export activity">
             <ExportPanel activity={readyActivity} selectedRange={selectedRange} />
+            <CustomTrackAction activity={readyActivity} />
           </section>
         </div>
       </div>
