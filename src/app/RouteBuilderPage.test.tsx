@@ -349,4 +349,102 @@ describe('editing on the map (AV-1104)', () => {
 
     expect(JSON.stringify(useActivityStore.getState().activity)).toBe(snapshot);
   });
+
+  describe('discarding a section (AV-1105)', () => {
+    const five: [number, number][] = [
+      [42, -8],
+      [42.001, -8],
+      [42.002, -8],
+      [42.003, -8],
+      [42.004, -8],
+    ];
+    const selectPoint = async (map: Awaited<ReturnType<typeof openEditor>>, index: number, shift = false) => {
+      hit(map, index);
+      emit(map, 'click', { ...pointer(42 + index / 1000, -8), originalEvent: { shiftKey: shift } });
+    };
+    const rangeData = (map: { getSource: (id: string) => unknown }) =>
+      (map.getSource('draft-range') as { data: { features: { geometry: { coordinates: number[][] } }[] } }).data;
+
+    it('marks a section between two points and shows it before anything is removed', async () => {
+      const map = await openEditor(five);
+      await selectPoint(map, 1);
+      await userEvent.click(screen.getByRole('button', { name: 'Mark section start' }));
+      expect(screen.getByText(/Section starts at point 2/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Discard section' })).not.toBeInTheDocument();
+
+      await selectPoint(map, 3);
+      expect(screen.getByText(/Section: points 2 to 4 \(3 points/)).toBeInTheDocument();
+      // The stretch that would go is drawn on the map, and the draft is untouched.
+      expect(rangeData(map).features[0]!.geometry.coordinates).toHaveLength(3);
+      expect(draftPoints()).toHaveLength(5);
+    });
+
+    it('marks a section with Shift-click', async () => {
+      const map = await openEditor(five);
+      await selectPoint(map, 1);
+      await selectPoint(map, 3, true);
+      expect(screen.getByText(/Section: points 2 to 4/)).toBeInTheDocument();
+    });
+
+    it('discards the middle, joins the rest, and undoes', async () => {
+      const map = await openEditor(five);
+      await selectPoint(map, 1);
+      await userEvent.click(screen.getByRole('button', { name: 'Mark section start' }));
+      await selectPoint(map, 3);
+      await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+
+      expect(draftPoints().map((p) => p.lat)).toEqual([42, 42.004]);
+      expect(screen.queryByRole('button', { name: 'Discard section' })).not.toBeInTheDocument();
+      expect(rangeData(map).features).toEqual([]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(draftPoints()).toHaveLength(5);
+    });
+
+    it('treats a section selected backwards the same', async () => {
+      const map = await openEditor(five);
+      await selectPoint(map, 3);
+      await userEvent.click(screen.getByRole('button', { name: 'Mark section start' }));
+      await selectPoint(map, 1);
+      await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+      expect(draftPoints().map((p) => p.lat)).toEqual([42, 42.004]);
+    });
+
+    it('can leave a gap instead of joining', async () => {
+      const map = await openEditor(five);
+      await selectPoint(map, 1);
+      await userEvent.click(screen.getByRole('button', { name: 'Mark section start' }));
+      await selectPoint(map, 3);
+      await userEvent.click(screen.getByLabelText(/Leave a gap/));
+      await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+      expect(draftPoints().map((p) => p.segmentIndex)).toEqual([0, 1]);
+    });
+
+    it('handles the first point, the last point and the whole route', async () => {
+      const map = await openEditor(five);
+      await selectPoint(map, 0);
+      await userEvent.click(screen.getByRole('button', { name: 'Mark section start' }));
+      await selectPoint(map, 1);
+      await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+      expect(draftPoints().map((p) => p.lat)).toEqual([42.002, 42.003, 42.004]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Mark section start' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Next point' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Discard section' }));
+      expect(draftPoints()).toHaveLength(0);
+      expect(screen.getByText('No point selected')).toBeInTheDocument();
+    });
+
+    it('can be cancelled without changing the route', async () => {
+      const map = await openEditor(five);
+      await selectPoint(map, 1);
+      await userEvent.click(screen.getByRole('button', { name: 'Mark section start' }));
+      await selectPoint(map, 3);
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel section' }));
+      expect(screen.queryByRole('button', { name: 'Discard section' })).not.toBeInTheDocument();
+      expect(draftPoints()).toHaveLength(5);
+      expect(rangeData(map).features).toEqual([]);
+    });
+  });
 });

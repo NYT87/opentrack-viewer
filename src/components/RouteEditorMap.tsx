@@ -19,6 +19,8 @@ import { draftBounds, draftLineGeoJSON, draftPointsGeoJSON } from '../domain/rou
 const LINE_SOURCE = 'draft-line';
 const LINE_CASING_LAYER = 'draft-line-casing';
 const LINE_LAYER = 'draft-line-stroke';
+const RANGE_SOURCE = 'draft-range';
+const RANGE_LAYER = 'draft-range-stroke';
 const POINT_SOURCE = 'draft-points';
 const POINT_LAYER = 'draft-points-dot';
 
@@ -28,11 +30,16 @@ const HIT_RADIUS_PX = 10;
 export interface RouteEditorMapProps {
   points: readonly DraftPoint[];
   selectedIndex?: number;
+  /** A section marked for discarding, inclusive at both ends. */
+  range?: { start: number; end: number };
   basemapEnabled: boolean;
   /** A press on empty map: add a point there. */
   onAdd: (coordinate: Coordinate) => void;
-  /** A press on a point, or `undefined` to clear the selection. */
-  onSelect: (index: number | undefined) => void;
+  /**
+   * A press on a point, or `undefined` to clear the selection. `extend` is set
+   * when Shift was held: the press means "to here", marking a section.
+   */
+  onSelect: (index: number | undefined, options?: { extend: boolean }) => void;
   /** A point was dropped somewhere new. */
   onMove: (index: number, coordinate: Coordinate) => void;
 }
@@ -52,6 +59,7 @@ type PointerEventLike = MapMouseEvent | MapTouchEvent;
 export function RouteEditorMap({
   points,
   selectedIndex,
+  range,
   basemapEnabled,
   onAdd,
   onSelect,
@@ -65,6 +73,7 @@ export function RouteEditorMap({
   // Handlers are registered once, so they read the latest props through refs.
   const pointsRef = useRef(points);
   const selectedRef = useRef(selectedIndex);
+  const rangeRef = useRef(range);
   const callbacksRef = useRef({ onAdd, onSelect, onMove });
   const hasFittedRef = useRef(false);
   /** The point being dragged and where it is now, while a drag is in progress. */
@@ -75,8 +84,9 @@ export function RouteEditorMap({
   useEffect(() => {
     pointsRef.current = points;
     selectedRef.current = selectedIndex;
+    rangeRef.current = range;
     callbacksRef.current = { onAdd, onSelect, onMove };
-  }, [points, selectedIndex, onAdd, onSelect, onMove]);
+  }, [points, selectedIndex, range, onAdd, onSelect, onMove]);
 
   // Create the map once.
   useEffect(() => {
@@ -130,6 +140,18 @@ export function RouteEditorMap({
           source: LINE_SOURCE,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
           paint: { 'line-color': '#4aa3ff', 'line-width': 3.5 },
+        });
+      }
+      if (!map.getSource(RANGE_SOURCE)) {
+        map.addSource(RANGE_SOURCE, { type: 'geojson', data: rangeLine(pointsRef.current, rangeRef.current) });
+        // Drawn over the route in a warning colour: this is the part that
+        // disappears if the section is discarded.
+        map.addLayer({
+          id: RANGE_LAYER,
+          type: 'line',
+          source: RANGE_SOURCE,
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#ff6b6b', 'line-width': 6, 'line-opacity': 0.9 },
         });
       }
       if (!map.getSource(POINT_SOURCE)) {
@@ -191,6 +213,8 @@ export function RouteEditorMap({
     if (dots && 'setData' in dots) {
       (dots as GeoJSONSource).setData(draftPointsGeoJSON(points, selectedIndex));
     }
+    const marked = map.getSource(RANGE_SOURCE);
+    if (marked && 'setData' in marked) (marked as GeoJSONSource).setData(rangeLine(points, range));
 
     // Fitting on every edit would fight the person editing; once, on arrival,
     // is what "fits bounds to the current draft" needs.
@@ -199,7 +223,7 @@ export function RouteEditorMap({
       hasFittedRef.current = true;
       fitToBounds(map, bounds, 500);
     }
-  }, [points, selectedIndex, isStyleReady]);
+  }, [points, selectedIndex, range, isStyleReady]);
 
   // Pointer interaction: add, select, drag.
   useEffect(() => {
@@ -281,7 +305,9 @@ export function RouteEditorMap({
       }
       const index = pointAt(event);
       if (index !== undefined) {
-        callbacksRef.current.onSelect(index);
+        callbacksRef.current.onSelect(index, {
+          extend: Boolean((event.originalEvent as MouseEvent | undefined)?.shiftKey),
+        });
         return;
       }
       const wrapped = event.lngLat.wrap();
@@ -321,4 +347,9 @@ export function RouteEditorMap({
       )}
     </div>
   );
+}
+
+/** The stretch of the route a section covers, as map data. */
+function rangeLine(points: readonly DraftPoint[], range?: { start: number; end: number }) {
+  return draftLineGeoJSON(range ? points.slice(range.start, range.end + 1) : []);
 }

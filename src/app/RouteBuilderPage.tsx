@@ -3,6 +3,7 @@ import { MapPlaceholder } from '../components/MapPlaceholder';
 import type { Coordinate } from '../domain/activity';
 import {
   addPoint,
+  discardSection,
   draftDistanceMeters,
   movePoint,
   nudgePoint,
@@ -55,12 +56,28 @@ export function RouteBuilderPage() {
 
   const [selectedIndex, setSelectedIndex] = useState<number | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
+  /** Where a marked section begins; its other end is the selected point. */
+  const [sectionStart, setSectionStart] = useState<number | undefined>();
+  const [keepGap, setKeepGap] = useState(false);
 
   const distance = useMemo(() => (draft ? draftDistanceMeters(draft) : 0), [draft]);
   const pointCount = draft?.points.length ?? 0;
   // A selection that no longer exists (after undo, say) selects nothing.
   const selected =
     selectedIndex !== undefined && selectedIndex < pointCount ? selectedIndex : undefined;
+
+  // A marked section needs both ends to exist; after an undo one may not.
+  const section = useMemo(
+    () =>
+      sectionStart !== undefined && sectionStart < pointCount && selected !== undefined
+        ? { start: Math.min(sectionStart, selected), end: Math.max(sectionStart, selected) }
+        : undefined,
+    [sectionStart, selected, pointCount],
+  );
+  const sectionDistance = useMemo(() => {
+    if (!draft || !section) return 0;
+    return draftDistanceMeters({ ...draft, points: draft.points.slice(section.start, section.end + 1) });
+  }, [draft, section]);
 
   /** Applies an edit, or says why not without interrupting the editing. */
   const commit = useCallback(
@@ -93,10 +110,30 @@ export function RouteBuilderPage() {
     [draft, commit],
   );
 
-  const handleSelect = useCallback((index: number | undefined) => {
-    setNotice(undefined);
-    setSelectedIndex(index);
-  }, []);
+  const handleSelect = useCallback(
+    (index: number | undefined, options?: { extend: boolean }) => {
+      setNotice(undefined);
+      // Shift-click means "to here": the point that was selected becomes the
+      // start of a section, unless one is already being marked.
+      if (options?.extend && selected !== undefined && sectionStart === undefined) {
+        setSectionStart(selected);
+      }
+      setSelectedIndex(index);
+    },
+    [selected, sectionStart],
+  );
+
+  const handleDiscardSection = () => {
+    if (!draft || !section) return;
+    const { start } = section;
+    if (
+      commit(discardSection(draft, section.start, section.end, { keepGap }), (count) =>
+        count === 0 ? undefined : Math.min(start, count - 1),
+      )
+    ) {
+      setSectionStart(undefined);
+    }
+  };
 
   const handleDelete = () => {
     if (!draft || selected === undefined) return;
@@ -118,6 +155,7 @@ export function RouteBuilderPage() {
 
   const handleStartOver = () => {
     setSelectedIndex(undefined);
+    setSectionStart(undefined);
     setNotice(undefined);
     clear();
   };
@@ -170,6 +208,7 @@ export function RouteBuilderPage() {
                 <RouteEditorMap
                   points={draft.points}
                   selectedIndex={selected}
+                  range={section}
                   basemapEnabled={basemapEnabled}
                   onAdd={handleAdd}
                   onSelect={handleSelect}
@@ -181,7 +220,8 @@ export function RouteBuilderPage() {
             <section className="box route-tools" aria-label="Edit route">
               <p className="route-tools__help">
                 Click the map to add a point at the end. Click a point to select it, then drag it
-                to move it, or use the buttons below.
+                to move it, or use the buttons below. To remove a stretch, mark where it starts and
+                then select where it ends — or hold Shift and click the end point.
               </p>
 
               {notice && (
@@ -232,6 +272,47 @@ export function RouteBuilderPage() {
                 >
                   Delete point
                 </button>
+              </div>
+
+              <div className="route-tools__row" role="group" aria-label="Section">
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setSectionStart(selected)}
+                  disabled={selected === undefined}
+                >
+                  Mark section start
+                </button>
+                {sectionStart !== undefined && (!section || section.start === section.end) && (
+                  <span className="route-tools__status">
+                    Section starts at point {sectionStart + 1}. Select where it ends.
+                  </span>
+                )}
+                {section && section.start !== section.end && (
+                  <>
+                    <span className="route-tools__status" aria-live="polite">
+                      Section: points {section.start + 1} to {section.end + 1} (
+                      {section.end - section.start + 1} points,{' '}
+                      {formatDistance(sectionDistance, unitSystem)})
+                    </span>
+                    <label className="route-tools__status">
+                      <input
+                        type="checkbox"
+                        checked={keepGap}
+                        onChange={(event) => setKeepGap(event.target.checked)}
+                      />{' '}
+                      Leave a gap instead of joining the ends
+                    </label>
+                    <button type="button" className="button" onClick={handleDiscardSection}>
+                      Discard section
+                    </button>
+                  </>
+                )}
+                {sectionStart !== undefined && (
+                  <button type="button" className="button" onClick={() => setSectionStart(undefined)}>
+                    Cancel section
+                  </button>
+                )}
               </div>
 
               <div className="route-tools__row" role="group" aria-label="Move selected point">
