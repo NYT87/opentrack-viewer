@@ -1,8 +1,14 @@
 import { Suspense, lazy, useCallback, useMemo, useState } from 'react';
+import { FileDropZone } from '../components/FileDropZone';
 import { MapPlaceholder } from '../components/MapPlaceholder';
+import type { Activity } from '../domain/activity';
+import { toActivityError } from '../domain/errors';
+import { parseActivityFile } from '../parsers';
 import type { Coordinate } from '../domain/activity';
 import {
   addPoint,
+  appendActivity,
+  createBlankDraft,
   discardSection,
   draftDistanceMeters,
   movePoint,
@@ -10,6 +16,7 @@ import {
   removePoint,
   type EditResult,
   type NudgeDirection,
+  type RouteDraft,
 } from '../domain/routeDraft';
 import { formatDistance } from '../domain/units';
 import { useInteractionStore } from '../state/interactionStore';
@@ -59,6 +66,11 @@ export function RouteBuilderPage() {
   /** Where a marked section begins; its other end is the selected point. */
   const [sectionStart, setSectionStart] = useState<number | undefined>();
   const [keepGap, setKeepGap] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  /** An imported track that starts far from the route's end, awaiting a choice. */
+  const [pendingJoin, setPendingJoin] = useState<
+    { activity: Activity; gapMeters: number; base: RouteDraft } | undefined
+  >();
 
   const distance = useMemo(() => (draft ? draftDistanceMeters(draft) : 0), [draft]);
   const pointCount = draft?.points.length ?? 0;
@@ -153,7 +165,41 @@ export function RouteBuilderPage() {
     setSelectedIndex(Math.min(pointCount - 1, Math.max(0, from + delta)));
   };
 
+  /**
+   * AV-1106. Reads another track through the same parser registry the viewer
+   * uses, and adds its route to the end of the draft. A track that begins far
+   * from where the route ends is not joined until the user says how, because a
+   * straight line across a continent is rarely what two saved sections mean.
+   */
+  const handleImport = async (file: File) => {
+    setIsImporting(true);
+    setNotice(undefined);
+    try {
+      const { activity } = await parseActivityFile(file);
+      const base = useRouteDraftStore.getState().draft ?? createBlankDraft();
+      const result = appendActivity(base, activity);
+      if (result.farJoin && result.gapMeters !== undefined) {
+        setPendingJoin({ activity, gapMeters: result.gapMeters, base });
+        return;
+      }
+      applyEdit(result.draft);
+    } catch (error) {
+      const failure = toActivityError(error, 'unsupported_format');
+      setNotice(`${failure.message} ${failure.hint}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const resolveJoin = (breakAtJoin: boolean) => {
+    if (!pendingJoin) return;
+    const { activity, base } = pendingJoin;
+    setPendingJoin(undefined);
+    applyEdit(appendActivity(base, activity, { breakAtJoin }).draft);
+  };
+
   const handleStartOver = () => {
+    setPendingJoin(undefined);
     setSelectedIndex(undefined);
     setSectionStart(undefined);
     setNotice(undefined);
@@ -184,6 +230,13 @@ export function RouteBuilderPage() {
                 Start a new route
               </button>
             </p>
+            <p>Or begin from a file: its route becomes the start of a new one.</p>
+            {notice && (
+              <p role="status" className="route-tools__notice">
+                {notice}
+              </p>
+            )}
+            <FileDropZone onFile={(file) => void handleImport(file)} disabled={isImporting} />
           </section>
         )}
 
@@ -314,6 +367,31 @@ export function RouteBuilderPage() {
                   </button>
                 )}
               </div>
+
+              <div className="route-tools__row" role="group" aria-label="Add another track">
+                <span className="route-tools__status">
+                  Add another saved track to the end of this route:
+                </span>
+                <FileDropZone onFile={(file) => void handleImport(file)} disabled={isImporting} />
+              </div>
+
+              {pendingJoin && (
+                <div className="route-tools__row" role="alertdialog" aria-label="Join the tracks">
+                  <span className="route-tools__status">
+                    That track starts {formatDistance(pendingJoin.gapMeters, unitSystem)} from where
+                    this route ends. How should they be joined?
+                  </span>
+                  <button type="button" className="button" onClick={() => resolveJoin(false)}>
+                    Join with a straight line
+                  </button>
+                  <button type="button" className="button" onClick={() => resolveJoin(true)}>
+                    Keep them separate
+                  </button>
+                  <button type="button" className="button" onClick={() => setPendingJoin(undefined)}>
+                    Cancel
+                  </button>
+                </div>
+              )}
 
               <div className="route-tools__row" role="group" aria-label="Move selected point">
                 {NUDGES.map(({ direction, label, symbol }) => (

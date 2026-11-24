@@ -447,4 +447,94 @@ describe('editing on the map (AV-1104)', () => {
       expect(rangeData(map).features).toEqual([]);
     });
   });
+
+  describe('adding another track (AV-1106)', () => {
+    const upload = async (name: string) => {
+      const { fixtureFile } = await import('../test/helpers/fixtures');
+      await userEvent.upload(screen.getByTestId('file-input'), fixtureFile(name));
+    };
+
+    it('appends a GPX track to the end, in order', async () => {
+      await openEditor([[51.4995, 0]]);
+      await upload('simple-route.gpx');
+
+      await vi.waitFor(() => expect(draftPoints()).toHaveLength(5));
+      expect(draftPoints().map((p) => p.lat)).toEqual([51.4995, 51.5, 51.501, 51.502, 51.503]);
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+
+    it('appends a TCX track through the same registry', async () => {
+      await openEditor([[51.5, -0.1]]);
+      const { fixtureFile } = await import('../test/helpers/fixtures');
+      await userEvent.upload(
+        screen.getByTestId('file-input'),
+        fixtureFile('run-with-laps.tcx', 'application/vnd.garmin.tcx+xml'),
+      );
+      await vi.waitFor(() => expect(draftPoints().length).toBeGreaterThan(1));
+    });
+
+    it('asks how to join a track that starts far away, and can break the line', async () => {
+      await openEditor([[10, 10]]);
+      await upload('simple-route.gpx');
+
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent(/from where this route ends/);
+      // Nothing is added until the choice is made.
+      expect(draftPoints()).toHaveLength(1);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Keep them separate' }));
+      expect(draftPoints()).toHaveLength(5);
+      expect(draftPoints().map((p) => p.segmentIndex)).toEqual([0, 1, 1, 1, 1]);
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+
+    it('can join a far track with a line, or cancel', async () => {
+      await openEditor([[10, 10]]);
+      await upload('simple-route.gpx');
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(draftPoints()).toHaveLength(1);
+
+      await upload('simple-route.gpx');
+      await userEvent.click(await screen.findByRole('button', { name: 'Join with a straight line' }));
+      expect(draftPoints().map((p) => p.segmentIndex)).toEqual([0, 0, 0, 0, 0]);
+    });
+
+    it('rejects a file with no route, and a file it cannot read, leaving the draft alone', async () => {
+      await openEditor([[51.5, 0]]);
+      await upload('no-location.gpx');
+      expect(await screen.findByRole('status')).toHaveTextContent(/GPS|route points/i);
+      expect(draftPoints()).toHaveLength(1);
+
+      await upload('malformed.gpx');
+      await vi.waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/GPX/i));
+      expect(draftPoints()).toHaveLength(1);
+    });
+
+    it('can start a route from a file when entered directly', async () => {
+      useRouteDraftStore.getState().clear();
+      window.location.hash = '#/route-builder';
+      render(<App />);
+      await screen.findByRole('region', { name: 'Start a route' });
+      await upload('simple-route.gpx');
+
+      await screen.findByRole('region', { name: 'Current route' });
+      expect(draftPoints()).toHaveLength(4);
+      expect(useRouteDraftStore.getState().draft?.origin).toEqual({
+        kind: 'appended',
+        sources: ['simple-route.gpx'],
+      });
+    });
+
+    it('is one undo step, and makes no network request', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      await openEditor([[51.4995, 0]]);
+      await upload('simple-route.gpx');
+      await vi.waitFor(() => expect(draftPoints()).toHaveLength(5));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(draftPoints()).toHaveLength(1);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+  });
 });
