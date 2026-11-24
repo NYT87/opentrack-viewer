@@ -260,6 +260,46 @@ describe('route draft (AV-1101)', () => {
     });
   });
 
+  describe('large routes (AV-1108)', () => {
+    const big = (count: number): RouteDraft => ({
+      name: 'big',
+      origin: { kind: 'blank' },
+      points: Array.from({ length: count }, (_, i) => ({
+        lat: 42 + i * 1e-6,
+        lon: -8 + (i % 100) * 1e-6,
+        segmentIndex: 0,
+      })),
+    });
+
+    it('edits, appends and converts a 100,000-point route within a generous budget', () => {
+      const draft = big(100_000);
+      const started = performance.now();
+
+      const added = unwrap(addPoint(draft, { lat: 43, lon: -8 }, { position: 50_000 }));
+      const cut = unwrap(discardSection(added, 10_000, 60_000));
+      const appended = appendActivity(
+        cut,
+        activityOf(Array.from({ length: 50_000 }, (_, i) => point(i, 44 + i * 1e-6, -8))),
+      ).draft;
+      const activity = draftToActivity(appended);
+      const distance = draftDistanceMeters(appended);
+      const elapsed = performance.now() - started;
+
+      expect(appended.points).toHaveLength(100_001 - 50_001 + 50_000);
+      expect(activity.points).toHaveLength(appended.points.length);
+      expect(distance).toBeGreaterThan(0);
+      expect(elapsed).toBeLessThan(5_000);
+    });
+
+    it('keeps old drafts valid for undo without copying their points', () => {
+      const draft = big(100_000);
+      const next = unwrap(movePoint(draft, 5, { lat: 50, lon: 50 }));
+      expect(draft.points[5]!.lat).not.toBe(50);
+      // Untouched points are shared, not duplicated.
+      expect(next.points[6]).toBe(draft.points[6]);
+    });
+  });
+
   describe('export', () => {
     it('needs at least two points', () => {
       expect(canExportDraft(undefined)).toBe(false);

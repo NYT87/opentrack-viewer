@@ -981,6 +981,8 @@ test('shows the selection its own figures, leaving the activity summary alone (A
 test('renders the export panel’s secondary text as muted', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'route-with-elevation.gpx');
+  // The panel renders after the parse; reading it before then finds nothing.
+  await expect(page.getByRole('region', { name: 'Export activity' })).toBeVisible();
 
   const colours = await page.evaluate(() => {
     const read = (selector: string) => {
@@ -1739,6 +1741,11 @@ test('adds, drags and deletes points on a real map (AV-1104)', async ({ page }) 
   await expect(page.getByText('Point 3 of 3 selected')).toBeVisible();
   const before = await distanceText();
 
+  // MapLibre draws the new points on its next frame; a person takes longer than
+  // that to reach for one, a test does not.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.waitForTimeout(250);
+
   // Drag the middle point; the map underneath must not pan with it.
   await page.mouse.move(cx, cy - 40);
   await page.mouse.down();
@@ -1762,6 +1769,70 @@ test('adds, drags and deletes points on a real map (AV-1104)', async ({ page }) 
 
   // Nothing about the route left the browser.
   expect(requests.filter((r) => !r.url().startsWith(ORIGIN))).toEqual([]);
+});
+
+test('plans a route from an activity and exports it (AV-1108)', async ({ page }, testInfo) => {
+  const requests = recordRequests(page);
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+
+  await page.getByRole('button', { name: 'Create Custom Track' }).click();
+  await expect(page.getByRole('heading', { name: 'Route Builder' })).toBeVisible();
+  const count = page.getByRole('region', { name: 'Current route' }).locator('.summary__value').first();
+  await expect(count).toHaveText('4');
+
+  // Mark points 2 to 3 and discard them; the ends are joined.
+  await page.getByRole('button', { name: 'Next point' }).click();
+  await page.getByRole('button', { name: 'Next point' }).click();
+  await page.getByRole('button', { name: 'Mark section start' }).click();
+  await page.getByRole('button', { name: 'Next point' }).click();
+  await expect(page.getByText(/Section: points 2 to 3/)).toBeVisible();
+  await page.getByRole('button', { name: 'Discard section' }).click();
+  await expect(count).toHaveText('2');
+
+  // Append another saved track.
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'simple-route.gpx'));
+  await expect(count).toHaveText('6');
+
+  // Export, and read the bytes the browser received.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export as GPX' }).click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe('elevation-route-planned-route.gpx');
+  const path = testInfo.outputPath('planned.gpx');
+  await saved.saveAs(path);
+  const xml = readFileSync(path, 'utf-8');
+  expect((xml.match(/<trkpt /g) ?? []).length).toBe(6);
+  expect(xml).not.toContain('<time>');
+
+  // The viewer reads it back as a route.
+  await page.goto('./#/viewer');
+  await page.getByRole('button', { name: 'Close activity' }).click();
+  await page.getByTestId('file-input').setInputFiles(path);
+  await expect(page.getByTestId('map-placeholder')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
+
+  // The original recording was never altered, and nothing left the browser.
+  expect(requests.filter((request) => !request.url().startsWith(ORIGIN))).toEqual([]);
+});
+
+test('starts an empty route directly, and has a usable phone layout (AV-1108)', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await useRouteOnlyBasemap(page);
+  await page.goto('./#/route-builder');
+  await expect(page.getByRole('region', { name: 'Start a route' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start a new route' }).click();
+
+  for (const name of ['Undo', 'Delete point', 'Mark section start', 'Export as GPX']) {
+    await expect(page.getByRole('button', { name })).toBeVisible();
+  }
+  // Nothing forces the page to scroll sideways.
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+  // Export is not offered until there is a route to export.
+  await expect(page.getByRole('button', { name: 'Export as GPX' })).toBeDisabled();
 });
 
 test('fixture files are never read by the server', async () => {
