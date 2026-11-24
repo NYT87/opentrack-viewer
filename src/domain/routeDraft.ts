@@ -144,6 +144,36 @@ export function movePoint(draft: RouteDraft, position: number, to: Coordinate): 
   };
 }
 
+export type NudgeDirection = 'north' | 'south' | 'east' | 'west';
+
+const METERS_PER_DEGREE_LAT = 111_320;
+
+/**
+ * Moves a point a short distance in a compass direction. The keyboard (and
+ * screen-reader) alternative to dragging: anything the pointer can do to a
+ * point, a person who cannot use one can do in steps.
+ */
+export function nudgePoint(
+  draft: RouteDraft,
+  position: number,
+  direction: NudgeDirection,
+  meters: number,
+): EditResult {
+  const point = draft.points[position];
+  if (!point) return rejected('That point is not in the route.');
+  const dLat = meters / METERS_PER_DEGREE_LAT;
+  // Longitude degrees shrink toward the poles; clamp so the pole itself does
+  // not divide by zero.
+  const dLon = meters / (METERS_PER_DEGREE_LAT * Math.max(0.01, Math.cos((point.lat * Math.PI) / 180)));
+  const target = {
+    north: { lat: point.lat + dLat, lon: point.lon },
+    south: { lat: point.lat - dLat, lon: point.lon },
+    east: { lat: point.lat, lon: point.lon + dLon },
+    west: { lat: point.lat, lon: point.lon - dLon },
+  }[direction];
+  return movePoint(draft, position, target);
+}
+
 /**
  * Removes the points from `from` to `to`, inclusive, in either order (so a
  * section selected backwards behaves the same). The points either side then

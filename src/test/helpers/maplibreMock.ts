@@ -136,6 +136,13 @@ export class FakeMap {
     this.easeToCalls.push(options);
   }
 
+  /** Pan/zoom toggles the editor flips while a point is dragged. */
+  readonly dragPan = { enabled: true, enable() { this.enabled = true; }, disable() { this.enabled = false; } };
+  private readonly canvas = { style: {} as Record<string, string> };
+  getCanvas() {
+    return this.canvas;
+  }
+
   queryRenderedFeatures = vi.fn(() => [] as unknown[]);
 
   remove(): void {

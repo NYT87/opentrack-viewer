@@ -87,12 +87,12 @@ export const DEFAULT_BASEMAP_STYLE: StyleSpecification = {
  * The background layer stays visible; it is the neutral backdrop the route is
  * drawn on when there is no basemap.
  */
-function basemapLayerIdsOf(style: StyleSpecification): string[] {
+export function basemapLayerIdsOf(style: StyleSpecification): string[] {
   return style.layers.filter((layer) => layer.type !== 'background').map((layer) => layer.id);
 }
 
 /** Applies basemap visibility up front, so a disabled basemap fetches nothing. */
-function withBasemapVisibility(
+export function withBasemapVisibility(
   style: StyleSpecification,
   enabled: boolean,
 ): StyleSpecification {
@@ -111,7 +111,7 @@ function withBasemapVisibility(
  * (a single point, or a stationary track) would make fitBounds compute an
  * invalid zoom, so those centre instead.
  */
-function fitToBounds(
+export function fitToBounds(
   map: MapLibreMap,
   bounds: [number, number, number, number],
   duration: number,

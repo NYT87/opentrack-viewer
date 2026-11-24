@@ -1717,6 +1717,53 @@ test('caches the app, and nothing of the user or the tile provider (AV-802)', as
   expect(cached.some((url) => url.includes('assets/parseGopro'))).toBe(true);
 });
 
+test('adds, drags and deletes points on a real map (AV-1104)', async ({ page }) => {
+  const requests = recordRequests(page);
+  await useRouteOnlyBasemap(page);
+  await page.goto('./#/route-builder');
+  await page.getByRole('button', { name: 'Start a new route' }).click();
+
+  const map = page.getByTestId('route-editor-map');
+  await expect(map).toBeVisible();
+  const box = (await map.boundingBox())!;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const points = page.getByRole('region', { name: 'Current route' });
+  const distanceText = async () => (await points.locator('.summary__value').nth(1).textContent()) ?? '';
+
+  // Click-to-add. Clicks are spaced so none lands on a point already placed.
+  await page.mouse.click(cx - 80, cy);
+  await page.mouse.click(cx, cy - 40);
+  await page.mouse.click(cx + 80, cy);
+  await expect(points.locator('.summary__value').first()).toHaveText('3');
+  await expect(page.getByText('Point 3 of 3 selected')).toBeVisible();
+  const before = await distanceText();
+
+  // Drag the middle point; the map underneath must not pan with it.
+  await page.mouse.move(cx, cy - 40);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy - 70, { steps: 8 });
+  await page.mouse.move(cx, cy - 110, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.getByText('Point 2 of 3 selected')).toBeVisible();
+  await expect(points.locator('.summary__value').first()).toHaveText('3');
+  await expect.poll(distanceText).not.toBe(before);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
+
+  // The drop did not also add a point, and a later click still does.
+  await page.mouse.click(cx + 120, cy + 60);
+  await expect(points.locator('.summary__value').first()).toHaveText('4');
+
+  await page.getByRole('button', { name: 'Delete point' }).click();
+  await expect(points.locator('.summary__value').first()).toHaveText('3');
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(points.locator('.summary__value').first()).toHaveText('4');
+
+  // Nothing about the route left the browser.
+  expect(requests.filter((r) => !r.url().startsWith(ORIGIN))).toEqual([]);
+});
+
 test('fixture files are never read by the server', async () => {
   // Sanity check that fixtures are local test data, not network resources.
   const gpx = readFileSync(join(FIXTURE_DIR, 'simple-route.gpx'), 'utf-8');

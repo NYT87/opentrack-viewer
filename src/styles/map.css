@@ -44,3 +44,10 @@
 }
 
 .map .maplibregl-ctrl-attrib { font-size: 10px; }
+
+/* AV-1104: the Route Builder's editing controls. */
+.route-tools { display: flex; flex-direction: column; gap: 12px; }
+.route-tools__help { margin: 0; font-size: 13px; opacity: 0.8; }
+.route-tools__notice { margin: 0; font-size: 13px; color: var(--warning, #ffd166); }
+.route-tools__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.route-tools__status { font-size: 13px; margin-inline-end: 4px; }

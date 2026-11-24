@@ -10,6 +10,7 @@ import {
   draftFromActivity,
   draftToActivity,
   movePoint,
+  nudgePoint,
   removePoint,
   type EditResult,
   type RouteDraft,
@@ -128,6 +129,25 @@ describe('route draft (AV-1101)', () => {
       const draft = unwrap(movePoint(draftFromActivity(ride()), 0, { lat: 42.5, lon: -8.5 }));
       expect(draft.points[0]).toEqual({ lat: 42.5, lon: -8.5, segmentIndex: 0 });
       expect(movePoint(draftFromActivity(ride()), 0, { lat: 100, lon: 0 }).ok).toBe(false);
+    });
+  });
+
+  describe('nudging', () => {
+    it('steps a point by about the distance asked, in the direction asked', () => {
+      const base = draftFromActivity(ride());
+      const north = unwrap(nudgePoint(base, 1, 'north', 10));
+      expect(north.points[1]!.lat).toBeGreaterThan(42.001);
+      expect(north.points[1]!.lon).toBe(-8);
+      const east = unwrap(nudgePoint(base, 1, 'east', 10));
+      expect(east.points[1]!.lon).toBeGreaterThan(-8);
+      expect(unwrap(nudgePoint(base, 1, 'south', 10)).points[1]!.lat).toBeLessThan(42.001);
+      expect(unwrap(nudgePoint(base, 1, 'west', 10)).points[1]!.lon).toBeLessThan(-8);
+    });
+
+    it('rejects a missing point, and a step off the edge of the map', () => {
+      expect(nudgePoint(draftFromActivity(ride()), 9, 'north', 10).ok).toBe(false);
+      const edge = unwrap(addPoint(createBlankDraft(), { lat: 89.99999, lon: 10 }));
+      expect(nudgePoint(edge, 0, 'north', 10_000).ok).toBe(false);
     });
   });
 
