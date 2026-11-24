@@ -150,7 +150,7 @@ Outcome:
 Goal: Expand format support and offline app-shell behavior.
 
 Outcome:
-- Evaluate GeoJSON/CSV based on user need after KML.
+- Evaluate GeoJSON/CSV based on user need after KML. (Evaluated: deferred, see TD review in 06.)
 - App installability works.
 - App shell caches offline.
 - Offline maps remain a separate project.

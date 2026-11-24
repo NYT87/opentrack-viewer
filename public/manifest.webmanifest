@@ -1,7 +1,7 @@
 {
   "name": "OpenTrack Viewer",
   "short_name": "OpenTrack",
-  "description": "Open GPX activity files locally in your browser. Nothing is uploaded.",
+  "description": "Open GPX, FIT and TCX activity files, and GoPro video telemetry, locally in your browser. Nothing is uploaded.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

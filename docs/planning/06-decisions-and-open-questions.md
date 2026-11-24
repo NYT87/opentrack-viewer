@@ -426,6 +426,11 @@ question deleted, so the reasoning stays findable.
 - **Pedal cadence is a chart of its own**, offered to rides that record it, in `rpm`. It is labelled **Pedal cadence** rather than Cadence: a ride lists both entries — the running one explaining why it is empty, this one carrying the data — and two charts with the same name would be a puzzle rather than a pair.
 - **A lap row highlights its stretch of the route**, in a colour of its own, and does not move the map. That is the whole difference from a chart range selection, which does move the camera: a lap says which part of the ride this is, not take me there. A unit test asserts no `fitBounds` follows a lap selection.
 
+### Answered by M6 review
+
+- **GeoJSON and CSV are not scheduled.** M6 asked to evaluate them after KML. No user has asked for either, GeoJSON would add a geometry-only import that duplicates GPX route handling, and CSV has no standard column layout to parse against. Both remain possible later as exporters (the domain already produces route GeoJSON internally); revisit when a concrete request names a source or target tool.
+- **PWA hardening is complete.** The manifest, app-shell precache (including the map, FIT and GoPro chunks), and offline reload are built and covered by browser tests. Map tiles stay uncached by design (TD-005).
+
 ### Still open
 
 - What image should be used for Open Graph and Twitter/X previews? The 512×512 app icon stands in; a purpose-made 1200×630 image would render properly in link previews.
