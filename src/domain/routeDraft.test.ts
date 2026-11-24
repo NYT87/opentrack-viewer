@@ -4,6 +4,8 @@ import { computeStreams } from './activity';
 import {
   addPoint,
   appendActivity,
+  canExportDraft,
+  plannedFileBaseName,
   createBlankDraft,
   discardSection,
   draftDistanceMeters,
@@ -255,6 +257,24 @@ describe('route draft (AV-1101)', () => {
       const activity = draftToActivity(createBlankDraft());
       expect(activity.points).toEqual([]);
       expect(activity.streams.hasLocation).toBe(false);
+    });
+  });
+
+  describe('export', () => {
+    it('needs at least two points', () => {
+      expect(canExportDraft(undefined)).toBe(false);
+      expect(canExportDraft(createBlankDraft())).toBe(false);
+      expect(canExportDraft(unwrap(addPoint(createBlankDraft(), { lat: 1, lon: 1 })))).toBe(false);
+      expect(canExportDraft(draftFromActivity(ride()))).toBe(true);
+    });
+
+    it('names the file as a planned route, safely', () => {
+      expect(plannedFileBaseName({ ...createBlankDraft(), name: 'Morning ride' })).toBe('morning-ride-planned-route');
+      expect(plannedFileBaseName({ ...createBlankDraft(), name: 'Vuelta a Galicia: etapa 3 / ñandú' })).toBe(
+        'vuelta-a-galicia-etapa-3-nandu-planned-route',
+      );
+      expect(plannedFileBaseName({ ...createBlankDraft(), name: '../../etc' })).toBe('etc-planned-route');
+      expect(plannedFileBaseName({ ...createBlankDraft(), name: '***' })).toBe('planned-route');
     });
   });
 });

@@ -309,3 +309,27 @@ export function draftToActivity(draft: RouteDraft, id = 'route-draft'): Activity
     warnings: [],
   });
 }
+
+/** Fewest points that make a route: one point is a place, not a path. */
+export const MIN_EXPORT_POINTS = 2;
+
+/** True when the draft has enough geometry to be worth writing to a file. */
+export function canExportDraft(draft: RouteDraft | undefined): boolean {
+  return (draft?.points.length ?? 0) >= MIN_EXPORT_POINTS;
+}
+
+/**
+ * The file name, without extension, for an exported plan. Says "planned route"
+ * so it cannot be mistaken for the recording it may have been copied from, and
+ * is reduced to characters every file system accepts.
+ */
+export function plannedFileBaseName(draft: RouteDraft): string {
+  const slug = draft.name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug ? `${slug}-planned-route` : 'planned-route';
+}

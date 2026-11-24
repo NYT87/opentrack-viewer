@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useMemo, useState } from 'react';
+import { RouteExportPanel } from '../components/RouteExportPanel';
 import { FileDropZone } from '../components/FileDropZone';
 import { MapPlaceholder } from '../components/MapPlaceholder';
 import type { Activity } from '../domain/activity';
@@ -407,6 +408,10 @@ export function RouteBuilderPage() {
                   </button>
                 ))}
               </div>
+            </section>
+
+            <section className="box" aria-label="Export route">
+              <RouteExportPanel draft={draft} />
             </section>
           </>
         )}
