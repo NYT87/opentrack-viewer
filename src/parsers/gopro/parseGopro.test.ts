@@ -289,3 +289,25 @@ describe('speed for a video, recorded or derived (AV-908)', () => {
     expect(resolvePerformanceMetric(activity, 'pace')).toBe('pace');
   }, 60_000);
 });
+
+describe('large telemetry (AV-906)', () => {
+  it('interprets a long recording within a generous time budget', async () => {
+    // The fixture is ~75 KB of payload; a multi-gigabyte video yields a
+    // telemetry track of this order (a few MB), so this bounds the part that
+    // grows with video length without committing a large file.
+    const raw = new Uint8Array(readBinaryFixture('hero7.raw'));
+    const copies = 20;
+    const rawData = new Uint8Array(raw.length * copies);
+    for (let i = 0; i < copies; i += 1) rawData.set(raw, i * raw.length);
+
+    const started = performance.now();
+    const activity = await parseGopro(
+      { rawData, timing: { videoDurationSeconds: 0, frameDurationMs: 0, samples: [] } },
+      { fileName: 'GH010099.mp4', idFactory: () => 'fixed-id' },
+    );
+    const elapsed = performance.now() - started;
+
+    expect(activity.points.length).toBeGreaterThan(100);
+    expect(elapsed).toBeLessThan(30_000);
+  }, 60_000);
+});

@@ -11,6 +11,7 @@ const FORMATS: FormatSupport[] = [
   { name: 'GPX', status: 'Supported', detail: 'Tracks and planned routes, with elevation and sensor extensions.' },
   { name: 'FIT', status: 'Supported', detail: 'Garmin and Wahoo recordings, including non-GPS indoor activities.' },
   { name: 'TCX', status: 'Supported', detail: 'Training Center files, with their laps and calories.' },
+  { name: 'GoPro video', status: 'Supported', detail: 'GPS and sensor telemetry read from MP4/MOV files, on the video telemetry page.' },
 ];
 
 /**
@@ -51,6 +52,21 @@ export function HomePage() {
           <p>
             <Link className="link" to={ROUTES.terms}>
               Read the Terms and Conditions
+            </Link>
+          </p>
+        </section>
+
+        <section className="prose" aria-label="Video telemetry">
+          <h3 className="prose__title">Telemetry from GoPro videos</h3>
+          <p>
+            GoPro cameras record their GPS track and sensor data inside the video. Open a local
+            MP4 or MOV on the video telemetry page to read it out and view it as an activity. The
+            video and everything extracted from it stay in your browser and are never uploaded.
+            Videos are not opened in the file viewer; they have a page of their own.
+          </p>
+          <p>
+            <Link className="link" to={ROUTES.videoTelemetry}>
+              Open the video telemetry page
             </Link>
           </p>
         </section>

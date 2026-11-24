@@ -63,6 +63,19 @@ describe('routing (AV-006)', () => {
     expect(screen.queryByTestId('file-input')).not.toBeInTheDocument();
   });
 
+  it('describes video telemetry, with its privacy boundary, and links to its page (AV-014)', async () => {
+    render(<App />);
+
+    const section = within(screen.getByRole('region', { name: 'Video telemetry' }));
+    expect(section.getByText(/never uploaded/i)).toBeInTheDocument();
+    expect(section.getByText(/not opened in the file viewer/i)).toBeInTheDocument();
+
+    await userEvent.click(section.getByRole('link', { name: /video telemetry page/i }));
+    expect(await screen.findByRole('heading', { name: 'Video telemetry' })).toBeInTheDocument();
+    // The primary action is still the activity viewer.
+    window.location.hash = '#/';
+  });
+
   it('describes the privacy model and the supported formats', () => {
     render(<App />);
 
@@ -71,7 +84,7 @@ describe('routing (AV-006)', () => {
     expect(screen.getByText('FIT')).toBeInTheDocument();
     expect(screen.getByText('TCX')).toBeInTheDocument();
     // Every format the plan named is now readable, so none is listed as planned.
-    expect(screen.getAllByText('Supported')).toHaveLength(3);
+    expect(screen.getAllByText('Supported')).toHaveLength(4);
     expect(screen.queryByText('Planned')).not.toBeInTheDocument();
   });
 
