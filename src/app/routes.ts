@@ -19,6 +19,8 @@ export const ROUTES = {
    * viewer: the viewer shows what was recorded and must stay unable to change it.
    */
   routeBuilder: '/route-builder',
+  /** AV-1002. Overlays are made on their own page, not in the viewer. */
+  overlays: '/overlays',
 } as const;
 
 /**
@@ -29,4 +31,5 @@ export const TOOLS_ITEMS = [
   { to: ROUTES.viewer, label: 'File viewer' },
   { to: ROUTES.videoTelemetry, label: 'Video telemetry' },
   { to: ROUTES.routeBuilder, label: 'Route Builder' },
+  { to: ROUTES.overlays, label: 'Overlays' },
 ] as const;

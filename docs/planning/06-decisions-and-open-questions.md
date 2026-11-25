@@ -366,6 +366,20 @@ ISC and MIT are both permissive and near-identical in effect, so nothing turns o
 
 **One semantic trap, recorded before it bites.** `TMPC` is the *camera's* temperature, not the air's. It must not become `temperatureCelsius` unremarked — that field means ambient temperature everywhere else in this app, and a camera in the sun reads far above it. The same class of mistake as GPX cadence with no unit.
 
+### TD-037: Overlay Export Is Phased; the Route PNG Ships First (AV-1001, recommendation only)
+
+Status: **recommendation, not a verified decision.** The browser-encoding spike AV-1001 asks for has not been run; nothing below was measured, and the capability claims need checking in the target browsers before the later phases are built on them.
+
+Decision, as built: the first overlay output is the activity route as a transparent PNG (AV-1009), drawn with Canvas 2D from a Web Mercator projection and encoded with `canvas.toBlob`. It needs no video, no codec and no new dependency, so it is available in every supported browser, and it is already useful in any video editor.
+
+Recommended order for what follows, to be confirmed by the spike:
+1. **PNG/WebP frame sequence** for telemetry overlays. Canvas can always produce it; it carries alpha everywhere editors accept it; its only costs are file count and a zip. This is the fallback every other mode degrades to.
+2. **Transparent WebM** through WebCodecs `VideoEncoder` and a muxer, only if the spike shows VP8/VP9 *with alpha* encodes in current Chromium and what Firefox/Safari do. Likely Chromium-only; offered where detected.
+3. **Chroma-key video** as the broadly compatible single-file option for editors that cannot read WebM alpha.
+4. **Burned-in video** last, and only if the spike shows a decode → composite → encode path (WebCodecs, or ffmpeg.wasm) finishes realistic GoPro clips within acceptable memory and time. Audio handling and file-size limits must be decided first. Not recommended to start before 1–3.
+
+Spike questions still to answer: alpha support in `VideoEncoder` per browser; memory for a 5-minute 1080p30 overlay (≈9,000 frames); whether `ffmpeg.wasm` is acceptable at its bundle size; mobile limits.
+
 ## 17. Open Questions
 
 ### Answered by what was built

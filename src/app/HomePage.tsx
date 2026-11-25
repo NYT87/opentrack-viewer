@@ -71,6 +71,22 @@ export function HomePage() {
           </p>
         </section>
 
+        <section className="prose" aria-label="More tools">
+          <h3 className="prose__title">Plan routes and make overlays</h3>
+          <p>
+            <Link className="link" to={ROUTES.routeBuilder}>
+              Route Builder
+            </Link>{' '}
+            lets you edit a copy of a route, or draw a new one, and save it as a GPX file for a
+            watch or bike computer.{' '}
+            <Link className="link" to={ROUTES.overlays}>
+              Overlays
+            </Link>{' '}
+            draws a route as a transparent image to lay over a video. Both work in this tab, and
+            nothing is uploaded.
+          </p>
+        </section>
+
         <section className="prose">
           <h3 className="prose__title">Formats</h3>
           <ul className="format-list">

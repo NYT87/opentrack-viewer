@@ -1835,6 +1835,56 @@ test('starts an empty route directly, and has a usable phone layout (AV-1108)', 
   await expect(page.getByRole('button', { name: 'Export as GPX' })).toBeDisabled();
 });
 
+test('saves the route as a transparent PNG of the requested size (AV-1009)', async ({ page }, testInfo) => {
+  const requests = recordRequests(page);
+  await page.goto('./#/overlays');
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
+  await expect(page.getByTestId('overlay-canvas')).toBeVisible();
+
+  // A portrait size, so the dimensions are not the default by accident.
+  await page.getByLabel(/^Size/).selectOption('portrait');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save as PNG' }).click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe('elevation-route-route-overlay.png');
+
+  const path = testInfo.outputPath('overlay.png');
+  await saved.saveAs(path);
+  const image = decodePng(readFileSync(path));
+  expect([image.width, image.height]).toEqual([1080, 1920]);
+
+  const alphaAt = (x: number, y: number) => image.pixels[(y * image.width + x) * 4 + 3]!;
+  // Nothing but the route is drawn: every corner is fully transparent.
+  for (const [x, y] of [[0, 0], [image.width - 1, 0], [0, image.height - 1], [image.width - 1, image.height - 1]] as const) {
+    expect(alphaAt(x, y)).toBe(0);
+  }
+  let opaque = 0;
+  let translucentOrOpaque = 0;
+  let white = 0;
+  for (let i = 0; i < image.pixels.length; i += 4) {
+    const a = image.pixels[i + 3]!;
+    if (a > 0) translucentOrOpaque += 1;
+    if (a === 255) opaque += 1;
+    if (a === 255 && image.pixels[i] === 255 && image.pixels[i + 1] === 255 && image.pixels[i + 2] === 255) white += 1;
+  }
+  // The route is there, in the default colour, and is a small part of the frame.
+  expect(white).toBeGreaterThan(500);
+  expect(opaque).toBeGreaterThan(500);
+  expect(translucentOrOpaque).toBeLessThan(image.width * image.height * 0.2);
+
+  expect(requests.filter((request) => !request.url().startsWith(ORIGIN))).toEqual([]);
+});
+
+test('hands the viewer\'s activity to the overlay page (AV-1009)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-with-elevation.gpx');
+  await page.getByRole('button', { name: 'Create route overlay' }).click();
+  await expect(page.getByTestId('overlay-canvas')).toBeVisible();
+  await expect(page.getByText('Elevation Route')).toBeVisible();
+  // No viewer panels on the overlay page.
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+});
+
 test('fixture files are never read by the server', async () => {
   // Sanity check that fixtures are local test data, not network resources.
   const gpx = readFileSync(join(FIXTURE_DIR, 'simple-route.gpx'), 'utf-8');

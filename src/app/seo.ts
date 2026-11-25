@@ -60,6 +60,13 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
       'Start a route, or edit a copy of one you have opened, and export it as a file for your ' +
       'GPS watch or bike computer. Everything happens in this browser tab; nothing is uploaded.',
   },
+  [ROUTES.overlays]: {
+    title: `Make a route overlay — ${SITE_NAME}`,
+    // Describes what the page does, never a route someone happens to open.
+    description:
+      'Draw a route as a transparent image to lay over a video in your editor. It is made in ' +
+      'this browser tab from a file on your device; nothing is uploaded.',
+  },
   [ROUTES.terms]: {
     title: `Terms and Conditions — ${SITE_NAME}`,
     description:
