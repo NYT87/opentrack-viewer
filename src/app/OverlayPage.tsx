@@ -206,14 +206,14 @@ export function OverlayPage() {
     setCleared(undefined);
     setVideoState(IDLE);
     try {
-      const { activity, timing, activityError } = await read(file);
+      const { activity, timing, timecode, activityError } = await read(file);
       if (generation !== videoRead.current) return;
       readingVideo.current = undefined;
       // Whatever the reader returned is a video to draw over — it decides
       // which outcomes still are — and what the video could not supply is
       // noted beside it. The store decides whether its telemetry becomes the
       // activity: not over one the reader chose by hand (TD-040).
-      setVideo({ file, timing, telemetryNote: activityError?.message });
+      setVideo({ file, timing, ...(timecode ? { timecode } : {}), telemetryNote: activityError?.message });
       // The still image gives way to the video workspace; a later still image starts without the slot.
       setAddingVideo(false);
       if (activity) offerVideoActivity(activity);

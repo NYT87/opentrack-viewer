@@ -1538,6 +1538,20 @@ Acceptance criteria:
 - A layout holding the new figures opens in an earlier build with those components left out and a warning, and the version stays 2.
 - Tests cover each figure against a hand-computed fixture including through a stop and a segment break, vertical speed's smoothing, the stopwatch's start (cut, activity, chosen), the clock in two time zones and both formats, the registry entries and their reasons, the layout round trip, and a golden render of a figure with a stopwatch and a clock.
 
+#### AV-1026: Timecode in the Overlay Exports
+
+Dependencies: AV-1002, AV-1003, TD-081
+
+GitHub issue #35, part of M12. The exports carry the source video's timecode, so an editor places the overlay exactly over the clip without nudging. The MOV exports (#34) and the editor guides (#38) are not built yet; this task covers the exports that exist.
+
+Acceptance criteria:
+- **Read the source's timecode** from its timecode track (`tmcd`) in the same pass that reads the telemetry, with its exact frame rate and whether it is drop-frame, as the source states it. A source with no timecode track uses the container's creation time (time of day), marked as such; a source with neither has none, and says so.
+- **PNG sequence:** the metadata file holds the start timecode, the exact frame rate (as a fraction), drop-frame or not, where the timecode came from, and the cut's start (TD-081) already added in. An option numbers the frame files by source frame (`frame_012345.png`) instead of from 1, offered only where the export's frame rate is the source's.
+- **Video with the overlay drawn in and the transparent WebM:** each says in its panel what timecode the picture starts at (the cut's start added). Where the container library cannot write a timecode track, the panel says the file does not hold it rather than implying it.
+- **Rules:** drop-frame counting at 29.97 and 59.94 as the source states it; the start timecode moves with the cut; a source with no timecode exports none and says so, in the metadata file and the panel.
+- **Privacy:** the timecode stays in the reader's own export; nothing is sent anywhere.
+- Tests cover: timecode read from fixture clips (with a `tmcd` track, without one, drop-frame and non-drop), drop-frame arithmetic against known values, the start moving with the cut, the metadata file's fields, frame naming by source frame and its refusal at another frame rate, and the panels' wording.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

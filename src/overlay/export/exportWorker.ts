@@ -70,6 +70,8 @@ async function run(request: ExportRequest, controller: AbortController): Promise
       telemetryOffsetSeconds: request.offsetSeconds,
       videoStartSeconds: from,
       templateName: request.template.name,
+      startTimecode: request.startTimecode,
+      numberFramesBySource: request.numberFramesBySource,
       signal: controller.signal,
       sink: archive.sink,
       renderFrame: async (index, videoTime) => {

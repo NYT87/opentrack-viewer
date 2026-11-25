@@ -1,5 +1,11 @@
 import { ActivityError } from '../../domain/errors';
 import type { Mp4Buffer, Mp4File, Mp4Info, Mp4SampleInfo, Mp4TrackInfo } from 'mp4box';
+import {
+  makeSourceTimecode,
+  reduceRate,
+  timecodeFromCreationTime,
+  type SourceTimecode,
+} from '../../overlay/timecode';
 
 /**
  * Timing the container reports alongside the payload: how long the video runs,
@@ -16,8 +22,25 @@ export interface GpmfTiming {
   frameIntervalSeconds: number;
   /** Wall-clock start, where the container states one. */
   start?: Date;
+  /** AV-1026. The video's timecode: its timecode track, or failing that the creation time. */
+  timecode?: SourceTimecode;
   /** One entry per metadata sample: `cts` is milliseconds from the first frame. */
   samples: { cts: number; duration: number }[];
+}
+
+/**
+ * AV-1026. A video with no GoPro telemetry track, said with what the same pass
+ * learned about its timecode: a camera that is not a GoPro still has one, and
+ * the overlay exports carry it.
+ */
+export class NoTelemetryTrackError extends ActivityError {
+  readonly timecode?: SourceTimecode;
+
+  constructor(message: string, timecode?: SourceTimecode) {
+    super('no_telemetry_track', message);
+    this.name = 'NoTelemetryTrackError';
+    this.timecode = timecode;
+  }
 }
 
 export interface GpmfPayload {
@@ -122,19 +145,91 @@ export async function extractGpmf(
   const info = await describeTracks(createFile(), file, boxes, signal);
 
   const track = info.tracks.find((entry) => entry.codec === 'gpmd');
+  const video = info.tracks.find((entry) => entry.type === 'video');
+  const videoSamples = video ? (info.file.getTrackSamplesInfo(video.id) ?? []) : [];
+  // AV-1026. The timecode is read in this pass, from the tracks already described.
+  const timecode = await readTimecode(file, info, videoSamples, track ?? video, signal);
   if (!track) {
-    throw new ActivityError(
-      'no_telemetry_track',
+    throw new NoTelemetryTrackError(
       'This video has no GoPro telemetry track, so there is no activity to read from it.',
+      timecode,
     );
   }
 
   const samples = info.file.getTrackSamplesInfo(track.id) ?? [];
-  const video = info.tracks.find((entry) => entry.type === 'video');
-  const videoSamples = video ? (info.file.getTrackSamplesInfo(video.id) ?? []) : [];
   const rawData = await readSamples(file, samples, { onProgress, signal });
 
-  return { rawData, timing: toTiming(videoSamples, track, samples) };
+  return { rawData, timing: { ...toTiming(videoSamples, track, samples), ...(timecode ? { timecode } : {}) } };
+}
+
+/** A frame rate no camera records at is not one this reads a timecode for. */
+const MAX_TIMECODE_RATE = 240;
+
+/**
+ * AV-1026 (TD-095). The video's timecode: the first sample of its `tmcd` track
+ * (a 32-bit frame counter) with the rate and drop-frame flag its sample entry
+ * states; failing that the creation time as a time of day. `mp4box` has no box
+ * for `tmcd`, so the entry's bytes are read here: reserved, flags (bit 0 =
+ * drop frame), timescale, frame duration, frames a second. The last is not
+ * trusted: the HERO8 fixture states 29 for its 29.97, so the label counts to
+ * the rate rounded, which is what an editor shows.
+ */
+async function readTimecode(
+  file: ReadableVideo,
+  info: Mp4Info & { file: Mp4File },
+  videoSamples: Mp4SampleInfo[],
+  creationTrack: Mp4TrackInfo | undefined,
+  signal: AbortSignal | undefined,
+): Promise<SourceTimecode | undefined> {
+  const fromTrack = await readTimecodeTrack(file, info, signal);
+  if (fromTrack) return fromTrack;
+  const { frameIntervalSeconds } = videoFigures(videoSamples);
+  const created = creationTrack?.created;
+  return timecodeFromCreationTime(
+    created instanceof Date && !Number.isNaN(created.getTime()) ? created : undefined,
+    frameIntervalSeconds,
+  );
+}
+
+async function readTimecodeTrack(
+  file: ReadableVideo,
+  info: Mp4Info & { file: Mp4File },
+  signal: AbortSignal | undefined,
+): Promise<SourceTimecode | undefined> {
+  const track = info.tracks.find((entry) => entry.codec === 'tmcd');
+  if (!track) return undefined;
+  const entry = info.file.getTrackById(track.id)?.mdia?.minf?.stbl?.stsd?.entries?.[0];
+  const data = entry?.type === 'tmcd' ? entry.data : undefined;
+  if (!data || data.byteLength < 16) return undefined;
+  const fields = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const flags = fields.getUint32(4);
+  const timescale = fields.getUint32(8);
+  const frameDuration = fields.getUint32(12);
+  if (timescale === 0 || frameDuration === 0) return undefined;
+  const rate = reduceRate(timescale, frameDuration);
+  const fps = rate.numerator / rate.denominator;
+  if (!(fps >= 1 && fps <= MAX_TIMECODE_RATE)) return undefined;
+
+  const first = info.file.getTrackSamplesInfo(track.id)?.[0];
+  if (!first || first.size < 4 || first.offset < 0 || first.offset + 4 > file.size) return undefined;
+  throwIfAborted(signal);
+  let counter: DataView;
+  try {
+    counter = new DataView(await file.slice(first.offset, first.offset + 4).arrayBuffer());
+  } catch {
+    throwIfAborted(signal);
+    // A counter that cannot be read is a track that is absent, not a video that cannot be read.
+    return undefined;
+  }
+  throwIfAborted(signal);
+  if (counter.byteLength < 4) return undefined;
+  return makeSourceTimecode({
+    startFrame: counter.getUint32(0),
+    rate,
+    timebase: Math.round(fps),
+    dropFrame: (flags & 1) === 1,
+    source: 'timecode-track',
+  });
 }
 
 interface TopLevelBox {
@@ -320,13 +415,7 @@ function toTiming(
   track: Mp4TrackInfo,
   samples: Mp4SampleInfo[],
 ): GpmfTiming {
-  const videoDurationSeconds = videoSamples.reduce(
-    (end, sample) =>
-      sample.timescale > 0 ? Math.max(end, (sample.dts + sample.duration) / sample.timescale) : end,
-    0,
-  );
-  const frameIntervalSeconds =
-    videoSamples.length > 0 ? videoDurationSeconds / videoSamples.length : 0;
+  const { videoDurationSeconds, frameIntervalSeconds } = videoFigures(videoSamples);
 
   return {
     videoDurationSeconds,
@@ -342,6 +431,17 @@ function toTiming(
       duration: toMilliseconds(sample.duration, sample.timescale),
     })),
   };
+}
+
+function videoFigures(videoSamples: Mp4SampleInfo[]) {
+  const videoDurationSeconds = videoSamples.reduce(
+    (end, sample) =>
+      sample.timescale > 0 ? Math.max(end, (sample.dts + sample.duration) / sample.timescale) : end,
+    0,
+  );
+  const frameIntervalSeconds =
+    videoSamples.length > 0 ? videoDurationSeconds / videoSamples.length : 0;
+  return { videoDurationSeconds, frameIntervalSeconds };
 }
 
 function toMilliseconds(value: number, timescale: number): number {

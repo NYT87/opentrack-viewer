@@ -108,9 +108,19 @@ export function layoutGoproMp4({
   sampleDurationMs = 1001,
   videoFrames = 0,
   createdAt = new Date('2024-06-01T10:00:00Z'),
+  /**
+   * AV-1026. A `tmcd` track like a camera's: the frame counter at the first
+   * frame, the rate as timescale over frame duration, the flags word (bit 0 is
+   * drop frame) and the frames a second the entry states.
+   */
+  timecode,
+  /** AV-1026. Leave the `gpmd` track out, as a camera that is not a GoPro does. */
+  omitTelemetryTrack = false,
 }) {
   const samples = splitDevcChunks(payload);
-  const sampleData = concat(samples.flatMap((sample) => [zeros(gapBytes), sample]));
+  // The timecode's one sample, a 32-bit counter, leads the data.
+  const counterSample = timecode ? u32(timecode.counter) : new Uint8Array(0);
+  const sampleData = concat([counterSample, ...samples.flatMap((sample) => [zeros(gapBytes), sample])]);
   const ftyp = box('ftyp', ascii('mp41'), u32(0), ascii('mp41'));
   const mdatSize = 8 + sampleData.length + fillerBytes;
   const mdatHeader =
@@ -118,7 +128,8 @@ export function layoutGoproMp4({
       ? concat([u32(mdatSize), ascii('mdat')])
       : // A large mdat uses the 64-bit size form: size 1, then the real size.
         concat([u32(1), ascii('mdat'), u64(mdatSize + 8)]);
-  const dataOffset = ftyp.length + mdatHeader.length;
+  const counterOffset = ftyp.length + mdatHeader.length;
+  const dataOffset = counterOffset + counterSample.length;
 
   const timescale = 1000;
   const durationMs = samples.length * sampleDurationMs;
@@ -134,7 +145,7 @@ export function layoutGoproMp4({
     zeros(10),
     u32(0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000), // unity matrix
     zeros(24), // pre-defined
-    u32(3), // next track id
+    u32(4), // next track id
   );
 
   const trackHeader = (id, duration, width, height) =>
@@ -239,7 +250,43 @@ export function layoutGoproMp4({
     ),
   );
 
-  const moov = box('moov', mvhd, videoTrack, metaTrack, box('udta', box('FIRM', ascii('HD7.01.01.90.00'))));
+  // AV-1026. The timecode track: handler `tmcd`, sample entry `tmcd` (reserved,
+  // flags, timescale, frame duration, frames a second, reserved).
+  const timecodeEntry = timecode
+    ? box(
+        'tmcd',
+        zeros(6),
+        u16(1),
+        u32(0, timecode.flags ?? 0, timecode.timescale, timecode.frameDuration),
+        new Uint8Array([timecode.framesPerSecond, 0]),
+      )
+    : undefined;
+  const timecodeTrack = timecodeEntry
+    ? box(
+        'trak',
+        trackHeader(3, durationMs, 0, 0),
+        box(
+          'mdia',
+          mediaHeader(timecode.timescale, timecode.frameDuration),
+          handler('tmcd', 'Timecode'),
+          box(
+            'minf',
+            box('gmhd', fullBox('gmin', 0, 0, u16(0x40, 0x8000, 0x8000, 0x8000, 0))),
+            dinf,
+            sampleTable(timecodeEntry, [4], timecode.frameDuration, [counterOffset]),
+          ),
+        ),
+      )
+    : new Uint8Array(0);
+
+  const moov = box(
+    'moov',
+    mvhd,
+    videoTrack,
+    ...(omitTelemetryTrack ? [] : [metaTrack]),
+    timecodeTrack,
+    box('udta', box('FIRM', ascii('HD7.01.01.90.00'))),
+  );
 
   return {
     head: concat([ftyp, mdatHeader, sampleData]),

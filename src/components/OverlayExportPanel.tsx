@@ -26,6 +26,7 @@ import { probeWebmSupport, type WebmSupport } from '../overlay/export/webmSuppor
 import type { ArchiveStorage } from '../overlay/export/protocol';
 import { ZIP_MAX_BYTES } from '../overlay/export/zip';
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
+import { addSeconds, sameFrameRate } from '../overlay/timecode';
 import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
 import { buildOverlayTimeline } from '../overlay/timeline';
 import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
@@ -36,6 +37,7 @@ import { checkInsetExportCached } from '../overlay/insetExportCheck';
 import { hasMapInset } from '../overlay/insetCamera';
 import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
 import { CleanupNote } from './CleanupPanel';
+import { TimecodeNote } from './TimecodeNote';
 
 interface OverlayExportPanelProps {
   /**
@@ -89,6 +91,8 @@ type Phase =
       frameCount: number;
       /** The rate it was drawn at, for the note on setting the editor to match. */
       fps: number;
+      /** AV-1026. Whether the frames are named by the source's frame numbers. */
+      bySource: boolean;
       /** Things the reader should know about the file. */
       notes?: string[];
       /** What it was made from, to tell when the page has since moved on. */
@@ -148,6 +152,9 @@ export function OverlayExportPanel({
   const [loading, setLoading] = useState<{ done: number; total: number } | undefined>(undefined);
   const [storageState, setStorageState] = useState<StorageState>({ status: 'checking' });
   const [format, setFormat] = useState<ExportFormat>('png');
+  // AV-1026. Off unless asked for; the session's own, never stored.
+  // The clip it was asked for, so another clip starts with it off.
+  const [numberFor, setNumberFor] = useState<File | undefined>(undefined);
   const [webmState, setWebmState] = useState<WebmState>({ status: 'checking' });
   const job = useRef<ExportJob | undefined>(undefined);
   const output = useRef<ExportOutput | undefined>(undefined);
@@ -230,6 +237,15 @@ export function OverlayExportPanel({
     height: exportHeight,
   });
   const fits = asWebm ? webmPlan.fits : plan.fitsArchive;
+  // AV-1026 (TD-095). The source's timecode at the first frame: the cut's start added, in whole source frames.
+  const startTimecode = video?.timecode ? addSeconds(video.timecode, range?.trimmed ? range.start : 0) : undefined;
+  const numberingOffered = startTimecode !== undefined && sameFrameRate(plan.fps, startTimecode);
+  const bySource = numberFor !== undefined && numberFor === video?.file && numberingOffered && !asWebm;
+  // Off again once the rate leaves the source's, so it cannot switch itself back on when it returns.
+  const changeFps = (rate: number) => {
+    setFps(rate);
+    if (!startTimecode || !sameFrameRate(rate, startTimecode)) setNumberFor(undefined);
+  };
   const built = useMemo(
     () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, exportWidth / exportHeight)),
     [customTemplate, controls, timeline, exportWidth, exportHeight],
@@ -254,7 +270,7 @@ export function OverlayExportPanel({
   const sessionFigures = usePersonalStore((state) => state.personal);
   const personal = built.template.components.some((component) => component.type === 'zones') ? sessionFigures : {};
   // Everything that changes the picture. A finished export is compared with it.
-  const signature = JSON.stringify([built.template, personal, units, effectiveOffset, range?.start, range?.end, plan.fps, plan.width, plan.height, asWebm]);
+  const signature = JSON.stringify([built.template, personal, units, effectiveOffset, range?.start, range?.end, plan.fps, plan.width, plan.height, asWebm, startTimecode?.startFrame, bySource]);
   const fallbackFps = plan.fitsArchive || asWebm
     ? undefined
     : highestFittingFrameRate({
@@ -327,6 +343,8 @@ export function OverlayExportPanel({
         videoStart,
         offsetSeconds: effectiveOffset,
         ...(range?.trimmed ? { trimStartSeconds: range.start } : {}),
+        ...(startTimecode ? { startTimecode } : {}),
+        ...(bySource ? { numberFramesBySource: true } : {}),
         units,
         template: built.template,
         activity,
@@ -366,6 +384,7 @@ export function OverlayExportPanel({
           url: URL.createObjectURL(result.file),
           fileName: `${baseName(video?.file.name ?? activity.source.fileName ?? 'activity')}-overlay-${plan.width}x${plan.height}-${formatFrameRate(plan.fps)}fps.${madeAs === 'webm' ? 'webm' : 'zip'}`,
           fps: plan.fps,
+          bySource,
           notes: result.notes,
           bytes: result.bytes,
           frameCount: result.frameCount,
@@ -453,7 +472,7 @@ export function OverlayExportPanel({
                 id={`${id}-fps`}
                 value={fps}
                 disabled={running}
-                onChange={(event) => setFps(Number(event.target.value))}
+                onChange={(event) => changeFps(Number(event.target.value))}
               >
                 {EXPORT_FRAME_RATES.map((rate) => (
                   <option key={rate} value={rate}>
@@ -508,6 +527,28 @@ export function OverlayExportPanel({
             </p>
           )}
 
+          {video && <TimecodeNote timecode={startTimecode} kind={asWebm ? 'webm' : 'png-sequence'} />}
+          {!asWebm && video && (
+            <div className="overlay-controls__field">
+              <label className="editor__mode">
+                <input
+                  type="checkbox"
+                  checked={bySource}
+                  disabled={running || !numberingOffered}
+                  aria-describedby={`${id}-by-source`}
+                  onChange={(event) => setNumberFor(event.target.checked ? video?.file : undefined)}
+                />
+                Number the frames by the source’s frames
+              </label>
+              <p className="overlay-controls__hint" id={`${id}-by-source`}>
+                {numberingOffered
+                  ? 'Names the files frame_012345.png by the source’s own frame counter, not from 1.'
+                  : startTimecode
+                    ? `Only at the source’s own frame rate, ${formatFrameRate(startTimecode.rate.numerator / startTimecode.rate.denominator)} fps.`
+                    : 'The source has no timecode, so there are no source frames to number by.'}
+              </p>
+            </div>
+          )}
           {asWebm && !webmPlan.fits && (
             <p role="alert">
               This recording could be more than the {formatBytes(webmPlan.limitBytes)} a tab can hold. Choose a
@@ -520,7 +561,7 @@ export function OverlayExportPanel({
                 ? `This browser can store about ${formatBytes(storageLimitBytesNow)} of export, and this is more than that.`
                 : 'This is more than one ZIP file can hold.'}{' '}
               {fallbackFps !== undefined ? (
-                <button type="button" className="button" onClick={() => setFps(fallbackFps)}>
+                <button type="button" className="button" onClick={() => changeFps(fallbackFps)}>
                   Use {formatFrameRate(fallbackFps)} fps
                 </button>
               ) : (
@@ -599,7 +640,8 @@ export function OverlayExportPanel({
       {phase.status === 'done' && phase.format === 'png' && (
         <p className="overlay-export__import">
           In your editor, set the sequence to {formatFrameRate(phase.fps)} fps and place the first
-          frame at the start of the clip; the frames are numbered from there.
+          frame at the start of the clip;{' '}
+          {phase.bySource ? 'the files are named by the source’s own frame numbers.' : 'the frames are numbered from there.'}
         </p>
       )}
       {phase.status === 'done' && phase.format === 'webm' && (

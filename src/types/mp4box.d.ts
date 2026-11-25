@@ -39,7 +39,19 @@ declare module 'mp4box' {
   /** An `ArrayBuffer` tagged with where in the file its bytes came from. */
   export type Mp4Buffer = ArrayBuffer & { fileStart: number };
 
+  /** The sample entry of a track the library has no box for: its payload bytes, undecoded. */
+  export interface Mp4SampleEntry {
+    type: string;
+    data?: Uint8Array;
+  }
+
+  /** What `getTrackById` returns, as far as the timecode reader walks it. */
+  export interface Mp4Trak {
+    mdia?: { minf?: { stbl?: { stsd?: { entries?: Mp4SampleEntry[] } } } };
+  }
+
   export interface Mp4File {
+    getTrackById(trackId: number): Mp4Trak | undefined;
     onReady?: (info: Mp4Info) => void;
     onError?: (error: string) => void;
     appendBuffer(buffer: Mp4Buffer): number;

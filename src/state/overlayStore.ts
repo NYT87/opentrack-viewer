@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { VideoTrim } from '../overlay/trim';
+import type { SourceTimecode } from '../overlay/timecode';
 import type { Activity } from '../domain/activity';
 import { DEFAULT_OVERLAY_CONTROLS, type OverlayControls } from '../overlay/presets';
 import { EMPTY_CANVAS_DRAFT, type CanvasDraft } from '../overlay/customCanvas';
@@ -22,6 +23,12 @@ export interface OverlayVideo {
   file: File;
   /** Absent for a video whose container carried no telemetry track. */
   timing?: OverlayVideoTiming;
+  /**
+   * AV-1026. The video's timecode, from its timecode track or the container's
+   * creation time; absent when it has neither. Read where the telemetry is, so
+   * it is known even for a video that has no telemetry track.
+   */
+  timecode?: SourceTimecode;
   /**
    * Why this video supplies no activity of its own, when it does not: no
    * telemetry track, or a track with no usable fix. Shown beside the file, so
