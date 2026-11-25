@@ -1771,6 +1771,9 @@ test('caches the app, and nothing of the user or the tile provider (AV-802)', as
   expect(cached.some((url) => url.includes('maplibre-gl-worker'))).toBe(true);
   // The FIT parser chunk too, so a .fit file still opens offline.
   expect(cached.some((url) => url.includes('assets/parseFit'))).toBe(true);
+  // And the GoPro extraction chunks, so a video's telemetry can be read offline.
+  expect(cached.some((url) => url.includes('assets/extractGpmf'))).toBe(true);
+  expect(cached.some((url) => url.includes('assets/parseGopro'))).toBe(true);
 });
 
 test('fixture files are never read by the server', async () => {

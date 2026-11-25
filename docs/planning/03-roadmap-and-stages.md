@@ -150,7 +150,7 @@ Outcome:
 Goal: Expand format support and offline app-shell behavior.
 
 Outcome:
-- Evaluate GeoJSON/CSV based on user need after KML.
+- Evaluate GeoJSON/CSV based on user need after KML. Evaluated: **CSV** is now planned under M11 (import of data logs, issue #29) and M12 (per-frame CSV/JSON export, issues #36 and #37), so it is not a separate M6 task; **GeoJSON** has no issue and is not scheduled.
 - App installability works.
 - App shell caches offline.
 - Offline maps remain a separate project.
