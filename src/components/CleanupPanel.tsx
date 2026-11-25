@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent, type FocusEvent, type KeyboardEvent } from 'react';
 import type { Activity } from '../domain/activity';
 import {
   CLEANUP_STRENGTH_LIMITS,
@@ -8,7 +8,6 @@ import {
 } from '../domain/cleanup';
 import { formatDistance, formatDuration, formatElevation, formatSpeed, type UnitSystem } from '../domain/units';
 import { useCleanupReport, useCleanupStore } from '../state/cleanupStore';
-import { useNumberDraft } from './useNumberDraft';
 
 interface CleanupPanelProps {
   /** The activity as the file gave it: the clean-up is a view of it, and this is the before. */
@@ -24,6 +23,60 @@ const METHODS: { value: SmoothingMethod; label: string }[] = [
   { value: 'movingAverage', label: 'Moving average' },
   { value: 'kalman', label: 'Kalman filter' },
 ];
+
+/** How long a numeric field waits after the last keystroke before it re-cleans the activity. */
+export const CLEANUP_FIELD_DEBOUNCE_MS = 400;
+
+/**
+ * AV-1024 (TD-093). A number field for a setting whose change re-cleans the whole activity (a second
+ * or more at a quarter of a million points). The text is the reader's while the field is typed in; the
+ * value is passed on when the field is left, on Enter, or when typing has paused for a moment, and
+ * only when it is a number within `range` and not the value already held (a value outside the range
+ * waits for the blur, which holds it to the range). Checkboxes and selects stay immediate.
+ */
+function useCommittedNumber(value: number, decimals: number, onCommit: (value: number) => void, range: readonly [number, number]) {
+  const [draft, setDraft] = useState<string>();
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const latest = useRef({ value, onCommit });
+  useEffect(() => {
+    latest.current = { value, onCommit };
+  });
+  const cancel = () => {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+  };
+  useEffect(() => cancel, []);
+  const commit = (next: number, clamp: boolean) => {
+    const within = next >= range[0] && next <= range[1];
+    if (!within && !clamp) return;
+    const held = Math.min(range[1], Math.max(range[0], next));
+    if (held !== latest.current.value) latest.current.onCommit(held);
+  };
+  return {
+    value: draft ?? String(Number(value.toFixed(decimals))),
+    onChange: (event: ChangeEvent<HTMLInputElement>) => {
+      const field = event.target;
+      setDraft(field.value);
+      cancel();
+      timer.current = setTimeout(() => {
+        timer.current = undefined;
+        if (Number.isFinite(field.valueAsNumber)) commit(field.valueAsNumber, false);
+      }, CLEANUP_FIELD_DEBOUNCE_MS);
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== 'Enter') return;
+      cancel();
+      if (Number.isFinite(event.currentTarget.valueAsNumber)) commit(event.currentTarget.valueAsNumber, true);
+      setDraft(undefined);
+    },
+    onBlur: (event: FocusEvent<HTMLInputElement>) => {
+      cancel();
+      // Only text that was typed is committed: a field shown rounded is not a change.
+      if (draft !== undefined && Number.isFinite(event.target.valueAsNumber)) commit(event.target.valueAsNumber, true);
+      setDraft(undefined);
+    },
+  };
+}
 
 function NumberField({
   id,
@@ -44,7 +97,7 @@ function NumberField({
   disabled: boolean;
   onChange: (value: number) => void;
 }) {
-  const draft = useNumberDraft(value, decimals, onChange, range);
+  const draft = useCommittedNumber(value, decimals, onChange, range);
   return (
     <div className="export__field">
       <label className="export__label" htmlFor={id}>
@@ -174,7 +227,8 @@ export function CleanupPanel({ activity, units }: CleanupPanelProps) {
       </div>
       <p className="export__note">
         A stop shorter than the shortest stop counts as moving. Moving time, the overlay's stops and its
-        pauses all follow these two settings.
+        pauses all follow these two settings. A typed number applies when you leave the field, press Enter
+        or stop typing for a moment.
       </p>
 
       <p className="export__saved cleanup__dropped" aria-live="polite" aria-atomic="true" data-testid="cleanup-dropped">

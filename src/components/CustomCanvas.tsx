@@ -261,16 +261,18 @@ export function CustomCanvas({
     [activity],
   );
   const durationSeconds = host ? host.timeline.durationSeconds : video ? (video.timing?.durationSeconds ?? media?.durationSeconds ?? 0) : activitySpan;
-  const ownTimeline = useMemo(
+  const builtTimeline = useMemo(
     () =>
       buildOverlayTimeline(activity, {
         video: { durationSeconds, start: video?.timing?.start },
         offsetSeconds: video ? offsetSeconds : 0,
-        // AV-1025. A stopwatch counts from the cut's start here as it does in the exports.
-        cutStartSeconds: video ? trim?.startSeconds : undefined,
       }),
-    [activity, durationSeconds, video, offsetSeconds, trim?.startSeconds],
+    [activity, durationSeconds, video, offsetSeconds],
   );
+  // AV-1025. A stopwatch counts from the cut's start here as it does in the exports; applied to the
+  // built timeline, so dragging the trim handle does not rebuild it.
+  const cutStartSeconds = video ? trim?.startSeconds : undefined;
+  const ownTimeline = useMemo(() => builtTimeline.withCutStart?.(cutStartSeconds) ?? builtTimeline, [builtTimeline, cutStartSeconds]);
   const timeline = host?.timeline ?? ownTimeline;
   const reportComponents = host?.onComponentsChange;
   useEffect(() => {

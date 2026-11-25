@@ -709,6 +709,19 @@ describe('figures so far (AV-1025)', () => {
     expect(valueAt(late, 'stopwatch', 30)).toBe(10);
   });
 
+  it('moves the cut on a built timeline with withCutStart, as building with it would', () => {
+    const activity = withStop();
+    const base = buildOverlayTimeline(activity, { video: { durationSeconds: 65 }, offsetSeconds: 10 });
+    const wrapped = base.withCutStart!(20);
+    const built = buildOverlayTimeline(activity, { video: { durationSeconds: 65 }, offsetSeconds: 10, cutStartSeconds: 20 });
+    for (const t of [0, 10, 20, 30, 42, 64]) expect(wrapped.sampleAt(t)).toEqual(built.sampleAt(t));
+    expect(valueAt(base.withCutStart!(undefined), 'stopwatch', 30)).toBe(valueAt(base, 'stopwatch', 30));
+    // The base is untouched, and a wrapper can be moved again.
+    expect(valueAt(base, 'stopwatch', 30)).toBe(20);
+    expect(valueAt(wrapped.withCutStart!(30), 'stopwatch', 30)).toBe(0);
+    expect(valueAt(wrapped.withCutStart!(30), 'stopwatch', 40)).toBe(10);
+  });
+
   it('carries the wall-clock time of the moment, in seconds since 1970, from the activity’s start', () => {
     const timeline = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 } });
     expect(valueAt(timeline, 'clock', 0)).toBe(T0.getTime() / 1000);

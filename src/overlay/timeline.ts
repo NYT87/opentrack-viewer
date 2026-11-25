@@ -4,7 +4,7 @@ import { deriveSpeed } from '../domain/series';
 import { computeDistance, elevationClimb } from '../domain/stats';
 import { zoneIndex, type ZoneTimes } from './zones';
 import type { SplitSources, SplitStreams } from './splits';
-import { DEFAULT_PAUSE_SETTINGS, isBelowPauseSpeed, isStopped, movingSteps, type PauseSettings, type PauseStep } from '../domain/pause';
+import { BRIDGE_GAP_SECONDS, DEFAULT_PAUSE_SETTINGS, isBelowPauseSpeed, isStopped, movingSteps, type PauseSettings, type PauseStep } from '../domain/pause';
 import { circularMeanDegrees, deriveGrade, deriveHeading, lerpDegrees } from './derivedSeries';
 
 /**
@@ -133,7 +133,7 @@ export interface OverlaySensorInfo {
   max: number;
 }
 
-export const DEFAULT_MAX_INTERPOLATION_GAP_SECONDS = 10;
+export const DEFAULT_MAX_INTERPOLATION_GAP_SECONDS = BRIDGE_GAP_SECONDS;
 
 /** Why a timeline has nothing to sample. */
 export type OverlayTimelineUnavailable = 'no_activity' | 'no_timestamps';
@@ -174,6 +174,12 @@ export interface OverlayTimeline {
    * absent. A source that is a total or a rate (the figures so far, pace) always gets the whole sample.
    */
   sampleAt: (videoTimeSeconds: number, only?: string) => OverlaySample | undefined;
+  /**
+   * AV-1025 (TD-094). The same timeline with the stopwatch counting from another cut start, in video
+   * seconds, at the cost of a wrapper: only the stopwatch's zero depends on the cut, so a trim handle
+   * dragged in the preview does not rebuild the timeline. Absent on a timeline that cannot sample.
+   */
+  withCutStart?: (cutStartSeconds: number | undefined) => OverlayTimeline;
   /**
    * AV-1024 (TD-093). The pause setting this timeline reads its stops, its moving time and its
    * "standing still" pace from: the activity's own (a cleaned one carries it), else the defaults.
@@ -802,7 +808,7 @@ export function buildOverlayTimeline(
   };
 
   /** The seconds of the activity's clock where the exported cut starts: a stopwatch with no start of its own counts from there. */
-  const cutStartActivitySeconds = finite(options.cutStartSeconds) !== undefined ? toActivitySeconds(options.cutStartSeconds as number) : 0;
+  const cutStartActivityOf = (cutStartSeconds: number | undefined) => (finite(cutStartSeconds) !== undefined ? toActivitySeconds(cutStartSeconds as number) : 0);
   const startEpochSeconds = firstMs / 1000;
   /** The maxima and the extremes that the activity has, found once: each with the stream it holds and the reading it is compared with. */
   const extremes = (
@@ -837,7 +843,7 @@ export function buildOverlayTimeline(
     return (low.point.elevationMeters as number) + ((high.point.elevationMeters as number) - (low.point.elevationMeters as number)) * fraction;
   };
 
-  const sampleAt = (videoTimeSeconds: number, only?: string): OverlaySample | undefined => {
+  const sampleWithCut = (videoTimeSeconds: number, only: string | undefined, cutStartActivitySeconds: number): OverlaySample | undefined => {
     if (!Number.isFinite(videoTimeSeconds)) return undefined;
     // There is no picture outside the video, whatever the activity holds.
     if (hasVideo && (videoTimeSeconds < 0 || videoTimeSeconds > durationSeconds)) return undefined;
@@ -939,6 +945,8 @@ export function buildOverlayTimeline(
       progress: progress === undefined ? undefined : Math.min(1, Math.max(0, progress)),
     };
   };
+
+  const sampleAt = (videoTimeSeconds: number, only?: string) => sampleWithCut(videoTimeSeconds, only, cutStartActivityOf(options.cutStartSeconds));
 
   const hasRoute = points.some(({ point }) => toValidCoordinate(point.lat, point.lon) !== undefined);
 
@@ -1119,7 +1127,7 @@ export function buildOverlayTimeline(
       }
     : undefined;
 
-  return {
+  const timeline: OverlayTimeline = {
     durationSeconds,
     offsetSeconds,
     available,
@@ -1135,4 +1143,9 @@ export function buildOverlayTimeline(
     splitStreams,
     alignment,
   };
+  timeline.withCutStart = (cutStartSeconds) => {
+    const cut = cutStartActivityOf(cutStartSeconds);
+    return { ...timeline, sampleAt: (videoTimeSeconds, only) => sampleWithCut(videoTimeSeconds, only, cut) };
+  };
+  return timeline;
 }

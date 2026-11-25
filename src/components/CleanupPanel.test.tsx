@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CleanupNote, CleanupPanel } from './CleanupPanel';
 import { cleanActivity, DEFAULT_CLEANUP_SETTINGS } from '../domain/cleanup';
@@ -69,6 +69,7 @@ describe('CleanupPanel (AV-1024)', () => {
     const minStop = screen.getByLabelText('Shortest stop (s)');
     await user.clear(minStop);
     await user.type(minStop, '12');
+    await user.tab();
     expect(useCleanupStore.getState().settings.pause.minStopSeconds).toBe(12);
 
     await user.selectOptions(screen.getByLabelText('Smoothing'), 'movingAverage');
@@ -76,11 +77,57 @@ describe('CleanupPanel (AV-1024)', () => {
     const window = screen.getByLabelText('Window (seconds, 0 to 30)');
     await user.clear(window);
     await user.type(window, '20');
+    await user.tab();
     expect(useCleanupStore.getState().settings.smoothing.strength).toBe(20);
     expect(screen.getByTestId('cleanup-table').querySelector('caption')).toHaveTextContent('moving average over 20 s');
 
     await user.selectOptions(screen.getByLabelText('Smoothing'), 'kalman');
     expect(screen.getByLabelText('Strength (0 to 30)')).toBeInTheDocument();
+  });
+
+  it('re-cleans a typed number when the field is left, on Enter or after a pause in typing, not on each key (TD-093)', async () => {
+    const user = userEvent.setup();
+    render(<CleanupPanel activity={ride()} units="metric" />);
+    await user.click(screen.getByRole('switch', { name: 'Clean up the telemetry' }));
+    const stops = () => useCleanupStore.getState().settings.pause.minStopSeconds;
+    const minStop = screen.getByLabelText('Shortest stop (s)');
+
+    // The text follows every key; the setting does not.
+    await user.clear(minStop);
+    await user.type(minStop, '12');
+    expect(minStop).toHaveValue(12);
+    expect(stops()).toBe(0);
+    await user.keyboard('{Enter}');
+    expect(stops()).toBe(12);
+
+    // Leaving the field applies it, held to the range.
+    await user.clear(minStop);
+    await user.type(minStop, '9999');
+    expect(stops()).toBe(12);
+    await user.tab();
+    expect(stops()).toBe(600);
+    expect(minStop).toHaveValue(600);
+
+    // Typing that stops for a moment applies too, so the arrow keys need no blur.
+    await user.clear(minStop);
+    await user.type(minStop, '30');
+    expect(stops()).toBe(600);
+    await waitFor(() => expect(stops()).toBe(30), { timeout: 2000 });
+
+    // A value shown rounded is not a change when the field is only visited.
+    const speed = screen.getByLabelText('Stopped below (m/s)');
+    await user.clear(speed);
+    await user.type(speed, '0.123');
+    await user.tab();
+    expect(useCleanupStore.getState().settings.pause.speedThresholdMps).toBe(0.123);
+    await user.click(speed);
+    await user.tab();
+    expect(useCleanupStore.getState().settings.pause.speedThresholdMps).toBe(0.123);
+    // A number that did not change leaves the settings (and the interaction state) alone.
+    const before = useCleanupStore.getState().settings;
+    await user.click(minStop);
+    await user.tab();
+    expect(useCleanupStore.getState().settings).toBe(before);
   });
 
   it('says so when the outlier filter is off, and counts nothing dropped', async () => {

@@ -9,6 +9,7 @@ import {
 } from './cleanup';
 import { haversineMeters } from './stats';
 import { deriveSpeed } from './series';
+import { buildOverlayTimeline } from '../overlay/timeline';
 import { exportActivity } from '../exporters';
 import { makeActivity } from '../test/helpers/activity';
 import { useCleanupStore } from '../state/cleanupStore';
@@ -357,6 +358,73 @@ describe('the smoothing methods (AV-1024)', () => {
     const out = cleanActivity(gap, on({ outliers: false, smoothing: { method: 'movingAverage', strength: 30 } })).activity;
     expect(out.points[10]!.lat).toBeCloseTo(LAT0 + 0.01, 6);
     expect(out.points[9]!.lat).toBeCloseTo(LAT0, 6);
+  });
+});
+
+describe('smoothing and an auto-pause inside one segment (TD-093)', () => {
+  // A straight 6 m/s ride at 1 Hz that stops for a minute: the clock jumps 60 s with the position held.
+  const PAUSE_AT = 60;
+  const PAUSE_SECONDS = 60;
+  const paused = () =>
+    makeActivity(
+      Array.from({ length: 120 }, (_, i) => {
+        const moved = i < PAUSE_AT ? i : PAUSE_AT - 1 + (i - PAUSE_AT);
+        return { time: at(i < PAUSE_AT ? i : i + PAUSE_SECONDS - 1), lat: LAT0, lon: LON0 + (moved * 6) / M_PER_DEG_LON };
+      }),
+    );
+  const GAP_MID = PAUSE_AT - 1 + PAUSE_SECONDS / 2;
+  const settings = [
+    ['movingAverage 5 s', { method: 'movingAverage', strength: 5 }],
+    ['movingAverage 30 s', { method: 'movingAverage', strength: 30 }],
+    ['kalman', { method: 'kalman', strength: 5 }],
+  ] as const;
+
+  it.each(settings)('%s keeps the moving time and invents no distance across the pause', (_name, smoothing) => {
+    const raw = paused();
+    const { activity } = cleanActivity(raw, on({ outliers: false, smoothing }));
+    expect(activity.derived!.movingDurationSeconds!).toBeCloseTo(raw.derived!.movingDurationSeconds!, 0);
+    expect(activity.derived!.distanceMeters!).toBeCloseTo(raw.derived!.distanceMeters!, -1);
+    // The two points either side of the pause stay where they were, a minute apart in time.
+    const before = activity.points[PAUSE_AT - 1]!;
+    const after = activity.points[PAUSE_AT]!;
+    expect(haversineMeters(before.lat!, before.lon!, after.lat!, after.lon!)).toBeLessThan(0.5);
+  });
+
+  it.each([['none', { method: 'none', strength: 0 }], ...settings] as const)('%s leaves the pause a stop on the overlay timeline', (_name, smoothing) => {
+    const { activity } = cleanActivity(paused(), on({ outliers: false, smoothing }));
+    const timeline = buildOverlayTimeline(activity);
+    const held = timeline.sampleAt(GAP_MID)!;
+    expect(held.values['metric:speed']).toBe(0);
+    const stillAt = timeline.sampleAt(PAUSE_AT - 1)!.position!;
+    expect(held.position!.lat).toBeCloseTo(stillAt.lat, 8);
+    expect(held.position!.lon).toBeCloseTo(stillAt.lon, 8);
+    // Riding on either side is still riding.
+    expect(timeline.sampleAt(30)!.values['metric:speed']).toBeGreaterThan(5);
+    expect(timeline.sampleAt(GAP_MID + PAUSE_SECONDS)!.values['metric:speed']).toBeGreaterThan(5);
+  });
+
+  it('splits at a pause by the file’s distance, and whatever the minimum stop', () => {
+    const withDistance = makeActivity(
+      Array.from({ length: 120 }, (_, i) => {
+        const moved = i < PAUSE_AT ? i : PAUSE_AT - 1 + (i - PAUSE_AT);
+        // The GPS drifts 60 m across the pause while the file's distance stands still.
+        const drift = i >= PAUSE_AT ? 60 : 0;
+        return {
+          time: at(i < PAUSE_AT ? i : i + PAUSE_SECONDS - 1),
+          lat: LAT0,
+          lon: LON0 + (moved * 6 + drift) / M_PER_DEG_LON,
+          distanceMeters: moved * 6,
+        };
+      }),
+    );
+    const smoothing = { method: 'movingAverage', strength: 30 } as const;
+    const a = cleanActivity(withDistance, on({ outliers: false, smoothing })).activity;
+    expect(a.points[PAUSE_AT]!.lon).toBeCloseTo(withDistance.points[PAUSE_AT]!.lon!, 7);
+    // A minimum stop longer than the gap does not make smoothing reach across it.
+    const long = cleanActivity(paused(), on({ outliers: false, smoothing, pause: { speedThresholdMps: 0.5, minStopSeconds: 120 } })).activity;
+    const before = long.points[PAUSE_AT - 1]!;
+    const after = long.points[PAUSE_AT]!;
+    expect(haversineMeters(before.lat!, before.lon!, after.lat!, after.lon!)).toBeLessThan(0.5);
   });
 });
 

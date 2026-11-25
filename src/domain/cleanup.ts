@@ -8,7 +8,7 @@ import {
   type ActivitySport,
   type ActivityWarning,
 } from './activity';
-import { DEFAULT_PAUSE_SETTINGS, type PauseSettings } from './pause';
+import { DEFAULT_PAUSE_SETTINGS, isPauseGap, type PauseSettings } from './pause';
 import { computeDistance, computeStats, haversineMeters } from './stats';
 import { deriveSpeed } from './series';
 import { deriveGrade } from '../overlay/derivedSeries';
@@ -293,17 +293,37 @@ function smoothScalar(method: SmoothingMethod, strength: number, times: number[]
   return values;
 }
 
-/** Runs of consecutive entries in one recorded segment: smoothing never reaches across a recording gap. */
-function segmentRuns(points: ActivityPoint[], positions: number[]): number[][] {
+/**
+ * Runs of consecutive entries in one recorded segment: smoothing never reaches across a recording
+ * gap, nor across an auto-pause (a time gap inside a segment that the overlay reads as a stop,
+ * TD-093), so the window shrinks at both sides of it as at the ends of a segment, and the Kalman
+ * filter starts again after it rather than carrying its velocity over a pause.
+ */
+function segmentRuns(points: ActivityPoint[], positions: number[], pause: PauseSettings): number[][] {
   const runs: number[][] = [];
   let segment: number | undefined;
+  let before: ActivityPoint | undefined;
   for (const position of positions) {
-    const own = points[position]!.segmentIndex ?? 0;
-    if (own !== segment) runs.push([]);
+    const point = points[position]!;
+    const own = point.segmentIndex ?? 0;
+    if (own !== segment || (before && crossesPause(before, point, pause))) runs.push([]);
     segment = own;
+    before = point;
     runs[runs.length - 1]!.push(position);
   }
   return runs;
+}
+
+/** True when the step from one point to the next is an auto-pause by the shared pause rule. */
+function crossesPause(a: ActivityPoint, b: ActivityPoint, pause: PauseSettings): boolean {
+  const seconds = ((timeMs(b) as number) - (timeMs(a) as number)) / 1000;
+  const from = toValidCoordinate(a.lat, a.lon);
+  const to = toValidCoordinate(b.lat, b.lon);
+  // The file's own distance where both points have it, as the stats and the timeline read it.
+  const step = finite(a.distanceMeters) && finite(b.distanceMeters) ? b.distanceMeters - a.distanceMeters : undefined;
+  const recorded = step !== undefined && step >= 0 ? step : undefined;
+  const meters = recorded ?? (from && to ? haversineMeters(from.lat, from.lon, to.lat, to.lon) : 0);
+  return isPauseGap(meters, seconds, pause);
 }
 
 /** The positions of the points that have a valid location and a time. */
@@ -316,7 +336,7 @@ function locatedPositions(points: ActivityPoint[]): number[] {
 }
 
 /** The route smoothed, in metres on a plane tangent at the first fix (equirectangular), and back. */
-function smoothRoute(points: ActivityPoint[], method: SmoothingMethod, strength: number): ActivityPoint[] {
+function smoothRoute(points: ActivityPoint[], method: SmoothingMethod, strength: number, pause: PauseSettings): ActivityPoint[] {
   const located = locatedPositions(points);
   if (located.length === 0) return points;
   const first = points[located[0]!]!;
@@ -324,7 +344,7 @@ function smoothRoute(points: ActivityPoint[], method: SmoothingMethod, strength:
   const lon0 = first.lon as number;
   const kx = METERS_PER_DEGREE * Math.cos((lat0 * Math.PI) / 180);
   const out = points.slice();
-  for (const run of segmentRuns(points, located)) {
+  for (const run of segmentRuns(points, located, pause)) {
     const times = run.map((position) => (timeMs(points[position]!) as number) / 1000);
     // Longitude is unwrapped about the first fix, so a route over the antimeridian is one piece.
     const xs = run.map((position) => ((((points[position]!.lon as number) - lon0 + 540) % 360) - 180) * kx);
@@ -353,13 +373,14 @@ function smoothField(
   field: 'speedMetersPerSecond' | 'gradePercent',
   method: SmoothingMethod,
   strength: number,
+  pause: PauseSettings,
   clamp: (value: number) => number,
 ): void {
   const timed: number[] = [];
   points.forEach((point, position) => {
     if (finite(values[position]) && timeMs(point) !== undefined) timed.push(position);
   });
-  for (const run of segmentRuns(points, timed)) {
+  for (const run of segmentRuns(points, timed, pause)) {
     const times = run.map((position) => (timeMs(points[position]!) as number) / 1000);
     const smoothed = smoothScalar(method, strength, times, run.map((position) => values[position] as number));
     run.forEach((position, k) => {
@@ -373,15 +394,15 @@ function smoothField(
  * the points' own fields so every reader of them (the charts, the overlay's timeline, the exports)
  * sees the same numbers. The heading, the pace and the distance are derived from the smoothed route.
  */
-function smoothPoints(activity: Activity, points: ActivityPoint[], method: SmoothingMethod, strength: number): ActivityPoint[] {
+function smoothPoints(activity: Activity, points: ActivityPoint[], method: SmoothingMethod, strength: number, pause: PauseSettings): ActivityPoint[] {
   if (method === 'none' || !(strength > 0)) return points;
-  const routed = smoothRoute(points, method, strength);
+  const routed = smoothRoute(points, method, strength, pause);
   const speeds = deriveSpeed({ ...activity, points: routed });
   const distance = computeDistance(routed).cumulativeMeters;
   const grades = deriveGrade(routed, distance);
   const out = routed.slice();
-  smoothField(out, speeds, 'speedMetersPerSecond', method, strength, (value) => Math.min(MAX_PLAUSIBLE_CYCLING_SPEED_MPS, Math.max(0, value)));
-  smoothField(out, grades, 'gradePercent', method, strength, (value) => value);
+  smoothField(out, speeds, 'speedMetersPerSecond', method, strength, pause, (value) => Math.min(MAX_PLAUSIBLE_CYCLING_SPEED_MPS, Math.max(0, value)));
+  smoothField(out, grades, 'gradePercent', method, strength, pause, (value) => value);
   return out;
 }
 
@@ -459,7 +480,7 @@ export function cleanActivity(raw: Activity, settings: CleanupSettings): Cleanup
     ? dropOutliers(raw.points, speedCeilingMps(raw.metadata.sport))
     : { kept: raw.points.map((_, position) => position), speed: 0, elevation: 0 };
   const survivors = outcome.kept.map((position) => raw.points[position]!);
-  const smoothed = smoothPoints(raw, survivors, smoothing.method, Math.min(CLEANUP_STRENGTH_LIMITS.max, Math.max(0, smoothing.strength)));
+  const smoothed = smoothPoints(raw, survivors, smoothing.method, Math.min(CLEANUP_STRENGTH_LIMITS.max, Math.max(0, smoothing.strength)), pause);
   const points = smoothed.map((point, index) => (point.index === index ? point : { ...point, index }));
 
   const info: ActivityCleanup = {

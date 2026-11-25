@@ -33,6 +33,22 @@ export function isStopped(meters: number, seconds: number, pause: PauseSettings)
   return isBelowPauseSpeed(meters / seconds, pause) && seconds >= pause.minStopSeconds;
 }
 
+/**
+ * A gap between two samples longer than this is not bridged by the overlay (TD-080): it is a stop
+ * or a dropout. The overlay's interpolation and the clean-up's smoothing both read it from here.
+ */
+export const BRIDGE_GAP_SECONDS = 10;
+
+/**
+ * A time gap too long to bridge across which the position barely moved (slow by the speed threshold,
+ * whatever the minimum stop: a gap beside a sampled stop may be one by the run rule). The clean-up's
+ * smoothing never reaches across it (TD-093), so the pause the overlay's timeline reads as a stop
+ * stays one; a gap covered at speed is a dropout the track moved across, and is not one.
+ */
+export function isPauseGap(meters: number, seconds: number, pause: PauseSettings): boolean {
+  return seconds > BRIDGE_GAP_SECONDS && isBelowPauseSpeed(meters / seconds, pause);
+}
+
 export interface PauseStep {
   seconds: number;
   meters: number;
