@@ -474,15 +474,30 @@ question deleted, so the reasoning stays findable.
 - **GeoJSON and CSV are not scheduled.** M6 asked to evaluate them after KML. No user has asked for either, GeoJSON would add a geometry-only import that duplicates GPX route handling, and CSV has no standard column layout to parse against. Both remain possible later as exporters (the domain already produces route GeoJSON internally); revisit when a concrete request names a source or target tool.
 - **PWA hardening is complete.** The manifest, app-shell precache (including the map, FIT and GoPro chunks), and offline reload are built and covered by browser tests. Map tiles stay uncached by design (TD-005).
 
+### Answered by the shipped behaviour (GoPro, Route Builder)
+
+These were open while the features were being planned. Each is now settled by how the feature was built. They were settled **by the implementation rather than by an explicit owner decision**, so treat them as the current default and change any of them if the owner disagrees.
+
+**GoPro video telemetry**
+
+- **Parsing strategy:** a JavaScript stack, not WebAssembly and not a hand-written reader. `gpmf-extract` locates the metadata track and `gopro-telemetry` interprets the payload; GoPro's own `gpmf-parser` is kept as the specification reference only (see the `gpmf-extract`/`gopro-telemetry` decision, `AV-901`). An internal minimal MP4/GPMF reader was not written.
+- **Supported scope:** GPS (`GPS5` and `GPS9`) with derived speed and altitude, plus three camera streams that are charted — acceleration, rotation rate and camera temperature. Every other recognised stream is declared but not carried, and unrecognised ones are named in a warning (`TD-034`). Tested against a HERO7 (`GPS5`) and a HERO11 (`GPS9`) payload, and a real HERO8 clip (which has no GPS fix, so it tests the rejection path rather than a route).
+- **IMU representation:** point-aligned named streams, not extra fields on `ActivityPoint`. A stream is reduced to one value per activity point (the mean of the magnitude over each point's interval), so it plots on the same axis as every other chart and nothing downstream needs a GoPro-specific branch (`TD-034`).
+- **Fixtures:** `hero7.raw` and `hero11.raw` (GPMF payloads, MIT, from `gopro-telemetry`), `hero8.mp4` (a real clip, Apache-2.0/MIT, from `gopro/gpmf-parser`), and two generated MP4 containers for detection. See `src/test/fixtures/README.md`. **Gap:** no redistributable clip has a real GPS fix — `hero8.mp4` was recorded indoors — so the extraction-to-Overlays handoff has no real-browser test (see Still open).
+
+**Route Builder**
+
+- **Editing model:** manual, straight-line point editing only: click to add at the end, click to select, drag to move, delete, nudge by 10 m, and discard a section. Road or path snapping was **not built and is not scheduled**: it would mean sending coordinates to a routing service, which conflicts with the no-upload rule unless it were an explicit, optional, clearly labelled step.
+- **Viewer action label:** `Create Custom Track`.
+- **Timestamps in planned exports:** omitted. A planned route has no clock, and inventing one would make a file claim a pace nobody rode. The same reason is why FIT and TCX, which are keyed by time, are offered as disabled options with the reason (`AV-1101`, `AV-1107`).
+- **Undo/redo:** built, up to 100 steps, in addition to the section preview. Discarding a section shows the stretch in red on the map before anything is removed, and can leave a gap instead of joining the ends.
+- **Far-apart appended tracks:** the user is asked. If the new track starts more than 1 km from where the route ends, a choice appears — join with a straight line, keep them separate, or cancel. Nearer than that, it is joined without asking.
+
 ### Still open
 
-- What image should be used for Open Graph and Twitter/X previews? The 512×512 app icon stands in; a purpose-made 1200×630 image would render properly in link previews.
-- For GoPro video telemetry, should the first implementation use a WebAssembly build of GoPro's `gpmf-parser`, a JavaScript stack such as `gopro-telemetry` plus raw GPMF extraction, or an internal minimal MP4/GPMF reader?
-- What GoPro models and telemetry streams are in the first supported scope: GPS only, GPS plus speed/altitude, or GPS plus IMU/camera streams?
-- How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
-- What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
-- For Route Builder, should the first implementation support manual straight-line point editing only, or should road/path snapping be added later through an optional routing provider?
-- Which user-facing label should ship for the viewer action: `Create Custom Track`, `Plan Route from Activity`, or another phrase?
-- Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?
-- Should Route Builder support undo/redo in the first milestone, or only confirmation for destructive section discard?
-- Should far-apart appended tracks be joined by a visible straight segment, kept as separate segments, or require the user to confirm the join?
+- **Link-preview image.** What image should be used for Open Graph and Twitter/X previews? The 512×512 app icon stands in; a purpose-made 1200×630 image would render properly in link previews.
+- **Burned-in export outside Chromium.** The recorder was measured in Chromium only (`TD-038`). Firefox and Safari have the APIs but their behaviour — supported formats, audio capture through WebAudio, throttling of hidden tabs — is unverified.
+- **A GoPro clip with a real GPS fix.** Needed to test the extraction-to-Overlays handoff in a real browser, and to measure extraction on footage that actually produces a route. It must be small and redistributable.
+- **HEVC clips.** Many newer GoPro clips are HEVC, which Chromium cannot play without an operating-system decoder. The preview and burned-in export say so, but cannot work with such a clip. Is that acceptable, or is a fallback worth building?
+- **Faster burned-in export.** The export runs at the video's own speed. An offline WebCodecs pipeline would be 2–3× faster at 1080p but needs an MP4 demuxer dependency (`TD-038`). Worth revisiting only if long exports turn out to be common.
+- **Frame-sequence export as one file.** A long overlay frame export arrives as several zip files. Streaming straight to disk with the File System Access API would avoid that, but it is Chromium-only.
