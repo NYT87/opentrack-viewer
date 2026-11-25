@@ -212,6 +212,14 @@ Add browser tests or request interception checks for:
 - No Route Builder operation uploads source activity points, imported track contents, route draft points, edit operations, generated planned tracks, or exported route files.
 - Map tile requests are limited to configured tile provider URLs.
 
+### Overlay Regression Tests (AV-1008)
+
+- **Golden frames are draw-call logs, not pixels.** `renderGolden.test.ts` renders each built-in template from real fixture files at fixed video times and snapshots the exact sequence of canvas calls. Pixels depend on the machine's fonts and anti-aliasing, so a pixel golden would pass locally and fail elsewhere for reasons unrelated to the overlay. A changed snapshot is a visible change to what users see: review it like a screenshot diff and update it only if the new frame is intended.
+- **Real-canvas geometry is measured by colour.** The browser test loads `overlay-project-test-pattern.json` (pure colours, no text) and asserts where each component is drawn at fixed timestamps — progress fill proportional to elapsed time, the marker moving along the route, gauge track and arc, nothing drawn past the telemetry — plus that the same moment reached by different seeks is the same picture.
+- **Scale is guarded by ratios.** `scale.test.ts` simulates day-long telemetry directly (no large video committed) and asserts that four to eight times the data costs about four to eight times as long, which holds on any machine. Absolute budgets are deliberately very loose. Both ratio guards were checked by temporarily introducing a linear scan and confirming they fail.
+- **Privacy is checked three ways.** A static test (`privacy.test.ts`) reads the overlay source and fails on any network, storage, worker or remote-URL API. A browser test drives every overlay flow — route image, video preview, template editing, project save/load, frame export — while watching both the browser's request log (service worker included) and wrappers around `fetch`/XHR/beacon/WebSocket/EventSource, and asserts only plain bodiless GETs for the app's own files, nothing identifying in any URL, and nothing stored beyond the theme. A canary test misbehaves on purpose to prove the watch sees a leak.
+- **Known gap:** there is no real-browser test of the GoPro-extraction-to-Overlays handoff, because the only real GoPro sample (`hero8.mp4`) was recorded indoors and has no GPS fix, so no activity can be extracted from it. The handoff is covered in jsdom with extraction mocked.
+
 ### Fixture Policy
 
 - Use small synthetic fixtures for unit tests.

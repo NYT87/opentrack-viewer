@@ -32,6 +32,9 @@ device identifier is committed here (plan §13, Fixture Policy).
 | `gopro-with-telemetry.mp4` | An MP4 container whose tail carries GoPro's `gpmd` and `GoPro` markers, where a camera actually writes them. Generated: detection reads boxes, not pictures, so it holds no video. |
 | `plain-video.mp4` | The same container with no telemetry track — the "recognized, but not for us" case. |
 | `overlay-sync.gpx` | Eleven points one second apart, with elevation and heart rate rising a unit a second, so an overlay's values at a given video time are exactly predictable. Pairs with `sync-test.webm`. |
+| `overlay-gaps.gpx` | Two recorded segments (seconds 0–4 and 8–11) with a pause between them, a **missing heart-rate reading at second 2**, and power throughout. For overlays that must go blank across a pause and drop one readout without dropping the rest. |
+| `overlay-project-test-pattern.json` | An overlay project file with a progress bar, a route inset and a heart-rate gauge, each in a distinct pure colour and with no panel or text, so a real canvas can be measured by colour. |
+| `overlay-project-invalid.json` | A project file with an unknown unit system, an unknown metric, a colour that is a URL and a box off the edge of the frame, so the loader's error list can be checked. |
 | `sync-test.webm` | A 4-second, 160×90, 10 fps VP8 test pattern with no audio (27 KB), for the overlay preview's play and seek tests. Generated, with ffmpeg: `ffmpeg -f lavfi -i testsrc=size=160x90:rate=10:duration=4 -c:v libvpx -b:v 40k -g 5 -an sync-test.webm`. VP8 so a headless Chromium can decode it. |
 | `malformed.tcx` | Unclosed elements; must fail as `invalid_tcx_xml`. |
 

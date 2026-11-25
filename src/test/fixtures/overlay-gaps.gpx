@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="fixture" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">
+  <metadata><name>Overlay Gaps</name></metadata>
+  <trk>
+    <name>Overlay Gaps</name>
+    <trkseg>
+      <trkpt lat="51.500000" lon="0.000000"><ele>30.0</ele><time>2024-01-01T10:00:00Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>110</gpxtpx:hr></gpxtpx:TrackPointExtension><power>200</power></extensions></trkpt>
+      <trkpt lat="51.500036" lon="0.000020"><ele>31.0</ele><time>2024-01-01T10:00:01Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>111</gpxtpx:hr></gpxtpx:TrackPointExtension><power>201</power></extensions></trkpt>
+      <trkpt lat="51.500072" lon="0.000040"><ele>32.0</ele><time>2024-01-01T10:00:02Z</time><extensions><gpxtpx:TrackPointExtension></gpxtpx:TrackPointExtension><power>202</power></extensions></trkpt>
+      <trkpt lat="51.500108" lon="0.000060"><ele>33.0</ele><time>2024-01-01T10:00:03Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>113</gpxtpx:hr></gpxtpx:TrackPointExtension><power>203</power></extensions></trkpt>
+      <trkpt lat="51.500144" lon="0.000080"><ele>34.0</ele><time>2024-01-01T10:00:04Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>114</gpxtpx:hr></gpxtpx:TrackPointExtension><power>204</power></extensions></trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="51.500288" lon="0.000160"><ele>38.0</ele><time>2024-01-01T10:00:08Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>118</gpxtpx:hr></gpxtpx:TrackPointExtension><power>208</power></extensions></trkpt>
+      <trkpt lat="51.500324" lon="0.000180"><ele>39.0</ele><time>2024-01-01T10:00:09Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>119</gpxtpx:hr></gpxtpx:TrackPointExtension><power>209</power></extensions></trkpt>
+      <trkpt lat="51.500360" lon="0.000200"><ele>40.0</ele><time>2024-01-01T10:00:10Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>120</gpxtpx:hr></gpxtpx:TrackPointExtension><power>210</power></extensions></trkpt>
+      <trkpt lat="51.500396" lon="0.000220"><ele>41.0</ele><time>2024-01-01T10:00:11Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>121</gpxtpx:hr></gpxtpx:TrackPointExtension><power>211</power></extensions></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

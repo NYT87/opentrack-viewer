@@ -2168,6 +2168,329 @@ test('stops an export when asked, and says what was kept (AV-1006)', async ({ pa
   await expect(panel.getByRole('button', { name: 'Save PNG frames (zip)' })).toBeEnabled();
 });
 
+
+interface WireRequest {
+  url: string;
+  method: string;
+  body: string | null;
+}
+interface PageNetworkCall {
+  api: string;
+  url: string;
+  method: string;
+  hasBody: boolean;
+}
+
+/**
+ * Watches every way a page can reach the network. Two views, because each
+ * misses something the other sees: the browser's own request log (which includes
+ * the service worker's fetches), and wrappers around the page's `fetch`, XHR,
+ * beacon, WebSocket and EventSource, which see a call even if it fails to leave.
+ * Must be set up before a navigation, since an init script runs per document.
+ */
+async function watchNetwork(page: Page) {
+  await page.addInitScript({
+    content: `
+      (() => {
+        const calls = [];
+        window.__net = calls;
+        const origFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+          const request = typeof Request !== 'undefined' && input instanceof Request ? input : undefined;
+          calls.push({
+            api: 'fetch',
+            url: String(request ? request.url : input),
+            method: String((init && init.method) || (request && request.method) || 'GET').toUpperCase(),
+            hasBody: Boolean((init && init.body) || (request && request.body)),
+          });
+          return origFetch(input, init);
+        };
+        const open = XMLHttpRequest.prototype.open;
+        const send = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+          this.__m = method;
+          this.__u = String(url);
+          return open.call(this, method, url, ...rest);
+        };
+        XMLHttpRequest.prototype.send = function (body) {
+          calls.push({ api: 'xhr', url: this.__u || '', method: String(this.__m || 'GET').toUpperCase(), hasBody: body != null });
+          return send.call(this, body);
+        };
+        navigator.sendBeacon = (url) => {
+          calls.push({ api: 'sendBeacon', url: String(url), method: 'POST', hasBody: true });
+          return false;
+        };
+        for (const name of ['WebSocket', 'EventSource']) {
+          const Original = window[name];
+          if (!Original) continue;
+          window[name] = function (...args) {
+            calls.push({ api: name, url: String(args[0]), method: 'GET', hasBody: false });
+            return new Original(...args);
+          };
+        }
+      })();
+    `,
+  });
+  const wire: WireRequest[] = [];
+  page.context().on('request', (request) => {
+    wire.push({ url: request.url(), method: request.method(), body: request.postData() });
+  });
+  return {
+    wire,
+    isLive: () => page.evaluate(() => Array.isArray((window as unknown as { __net?: unknown }).__net)),
+    calls: () => page.evaluate(() => (window as unknown as { __net: PageNetworkCall[] }).__net),
+  };
+}
+
+/** Requests that are not a plain GET, with no body, for this site's own files (or a `blob:` the page made). */
+function outsideTheSite(wire: WireRequest[]): WireRequest[] {
+  const site = `${ORIGIN}${BASE_PATH}`;
+  return wire.filter(
+    ({ url, method, body }) =>
+      !(url.startsWith('blob:') || url.startsWith('data:')) && !(url.startsWith(site) && method === 'GET' && body === null),
+  );
+}
+
+/** Moves the preview video to `seconds` and waits for it to land there. */
+async function seekPreview(page: Page, seconds: number) {
+  await page.getByLabel('Video position').evaluate((node, value) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(node as HTMLInputElement, String(value));
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+  }, seconds);
+  await expect
+    .poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime))
+    .toBeCloseTo(seconds, 1);
+  // The overlay is redrawn on `seeked`, a moment after the clock moves.
+  await page.waitForTimeout(80);
+}
+
+/**
+ * Pixels of one pure colour on the overlay canvas, within a region given as
+ * fractions of the frame. Measuring by colour makes the checks independent of
+ * fonts and anti-aliasing, which differ between machines.
+ */
+async function colourStats(
+  page: Page,
+  rgb: [number, number, number],
+  region: { x0: number; y0: number; x1: number; y1: number } = { x0: 0, y0: 0, x1: 1, y1: 1 },
+) {
+  return page.getByTestId('overlay-video-canvas').evaluate(
+    (node, args) => {
+      const canvas = node as HTMLCanvasElement;
+      const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+      const { rgb, region } = args;
+      let count = 0;
+      let sumX = 0;
+      let sumY = 0;
+      for (let y = Math.floor(region.y0 * canvas.height); y < Math.ceil(region.y1 * canvas.height); y += 1) {
+        for (let x = Math.floor(region.x0 * canvas.width); x < Math.ceil(region.x1 * canvas.width); x += 1) {
+          const i = (y * canvas.width + x) * 4;
+          const close =
+            Math.abs(data[i]! - rgb[0]) < 60 && Math.abs(data[i + 1]! - rgb[1]) < 60 && Math.abs(data[i + 2]! - rgb[2]) < 60;
+          if (close && data[i + 3]! > 20) {
+            count += 1;
+            sumX += x;
+            sumY += y;
+          }
+        }
+      }
+      return { count, x: count ? sumX / count : NaN, y: count ? sumY / count : NaN };
+    },
+    { rgb, region },
+  );
+}
+
+test('draws each component where and how big it should be, at fixed timestamps (AV-1008)', async ({ page }) => {
+  await openOverlayPreview(page);
+  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-test-pattern.json'));
+  await expect(page.getByRole('option', { name: 'Test pattern (loaded)' })).toBeAttached();
+
+  const BAR = { x0: 0.05, y0: 0.85, x1: 0.55, y1: 0.93 };
+  const MAP = { x0: 0.6, y0: 0.1, x1: 0.95, y1: 0.65 };
+  const DIAL = { x0: 0.05, y0: 0.1, x1: 0.5, y1: 0.75 };
+  const MAGENTA: [number, number, number] = [255, 0, 255];
+  const YELLOW: [number, number, number] = [255, 255, 0];
+  const ORANGE: [number, number, number] = [255, 136, 0];
+  const GREEN: [number, number, number] = [0, 255, 0];
+  const CYAN: [number, number, number] = [0, 255, 255];
+
+  // The telemetry is ten seconds long; the video shows the first four.
+  await seekPreview(page, 1);
+  const bar1 = await colourStats(page, MAGENTA, BAR);
+  const marker1 = await colourStats(page, YELLOW, MAP);
+  await seekPreview(page, 3);
+  const bar3 = await colourStats(page, MAGENTA, BAR);
+  const marker3 = await colourStats(page, YELLOW, MAP);
+
+  // Progress: 10% then 30% of the way through, so about three times the fill.
+  expect(bar1.count).toBeGreaterThan(20);
+  expect(bar3.count / bar1.count).toBeGreaterThan(2);
+  expect(bar3.count / bar1.count).toBeLessThan(4);
+  // And the fill grows from the left edge of the bar.
+  expect(bar3.x).toBeGreaterThan(bar1.x);
+
+  // The marker is on the route, and moves up and to the right along it.
+  expect(marker1.count).toBeGreaterThan(5);
+  expect(marker3.count).toBeGreaterThan(5);
+  expect(marker3.x).toBeGreaterThan(marker1.x);
+  expect(marker3.y).toBeLessThan(marker1.y);
+  // The route line itself is drawn in its own colour inside its own box.
+  expect((await colourStats(page, CYAN, MAP)).count).toBeGreaterThan(20);
+
+  // The dial: a track and a value arc, in the left block only.
+  expect((await colourStats(page, GREEN, DIAL)).count).toBeGreaterThan(20);
+  expect((await colourStats(page, ORANGE, DIAL)).count).toBeGreaterThan(10);
+  expect((await colourStats(page, ORANGE, { x0: 0.5, y0: 0, x1: 1, y1: 1 })).count).toBe(0);
+
+  // The same moment reached by different routes is the same picture.
+  const fingerprint = () =>
+    page.getByTestId('overlay-video-canvas').evaluate((node) => {
+      const canvas = node as HTMLCanvasElement;
+      const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+      let hash = 0;
+      for (let i = 0; i < data.length; i += 1) hash = (hash * 31 + data[i]!) >>> 0;
+      return hash;
+    });
+  await seekPreview(page, 2);
+  const direct = await fingerprint();
+  await seekPreview(page, 3.5);
+  await seekPreview(page, 0.5);
+  await seekPreview(page, 2);
+  expect(await fingerprint()).toBe(direct);
+
+  // Past the telemetry, none of it is drawn.
+  await page.getByLabel('Offset (seconds)').fill('100');
+  await expect.poll(async () => (await colourStats(page, YELLOW)).count).toBe(0);
+  for (const colour of [MAGENTA, ORANGE, GREEN]) {
+    expect((await colourStats(page, colour)).count).toBe(0);
+  }
+  // Except the route line, which never depended on the clock.
+  expect((await colourStats(page, CYAN, MAP)).count).toBeGreaterThan(20);
+});
+
+test('explains a broken project file in a real browser, and keeps the current template (AV-1008)', async ({ page }) => {
+  await openOverlayPreview(page);
+  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-invalid.json'));
+  const alert = page.getByRole('alert').filter({ hasText: 'could not be loaded' });
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText(/units: must be/);
+  await expect(alert).toContainText(/metric: must be one of/);
+  await expect(alert).toContainText(/must be a colour/);
+  // Nothing changed: still the shipped template, with nothing loaded.
+  await expect(page.getByRole('combobox', { name: /^Template/ })).toHaveValue('compact-hud');
+  await expect(page.getByRole('option', { name: /\(loaded\)/ })).toHaveCount(0);
+});
+
+test('keeps video, telemetry, frames and file names off the network in every overlay flow (AV-1008)', async ({ page }, testInfo) => {
+  const network = await watchNetwork(page);
+
+  // A real navigation, not a hash change on the page the suite opened: an init
+  // script only runs when a new document loads.
+  await page.goto('about:blank');
+  await page.goto('./#/overlays');
+  expect(await network.isLive()).toBe(true);
+
+  // 1. A route image from a file.
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
+  const pngDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save as PNG' }).click();
+  const png = await pngDownload;
+
+  // 2. The video preview: choose, seek, play, line up.
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'sync-test.webm'));
+  await expect(page.getByText(/\/ 0:04/)).toBeVisible();
+  await seekPreview(page, 2);
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect.poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(2.1);
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await page.getByLabel('Offset (seconds)').fill('2');
+
+  // 3. Customize, save the project, and load one back.
+  await page.getByLabel('Show Speed readout').uncheck();
+  const projectDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save project file' }).click();
+  const project = await projectDownload;
+  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-test-pattern.json'));
+  await expect(page.getByRole('option', { name: 'Test pattern (loaded)' })).toBeAttached();
+
+  // 4. Export frames.
+  const panel = page.getByRole('region', { name: 'Export overlay frames' });
+  await panel.getByLabel(/Frame rate/).fill('5');
+  await panel.getByLabel('Export to').fill('2');
+  const zipDownload = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
+  const zip = await zipDownload;
+  await expect(panel.getByText(/Saved 10 frames/)).toBeVisible();
+
+  // The route image is named after the route, as the viewer's exports are: a
+  // local file name the user will recognise. The sequence and project file sit
+  // beside a video and are named generically, never after it or the telemetry.
+  expect(png.suggestedFilename()).toBe('overlay-sync-route-overlay.png');
+  for (const name of [project, zip].map((d) => d.suggestedFilename())) {
+    expect(name).not.toMatch(/overlay-sync|sync-test|test-pattern/i);
+  }
+
+  // Every request is for the app's own static files: a plain GET, no body, to
+  // this site (or a blob: the page made itself), and naming nothing of the user's.
+  const { wire } = network;
+  expect(outsideTheSite(wire)).toEqual([]);
+  const identifying = /overlay-sync|sync-test|test-pattern|Overlay(%20| )Sync|51\.5/i;
+  expect(wire.filter(({ url }) => !url.startsWith('blob:') && identifying.test(url))).toEqual([]);
+
+  // Nothing the page itself did could have sent anything either.
+  const calls = await network.calls();
+  expect(calls.filter((c) => c.api !== 'fetch' && c.api !== 'xhr')).toEqual([]);
+  for (const call of calls) {
+    expect(call.method).toBe('GET');
+    expect(call.hasBody).toBe(false);
+    expect(new URL(call.url, ORIGIN).origin).toBe(ORIGIN);
+  }
+
+  // And the session left nothing behind on the device.
+  const stored = await page.evaluate(async () => ({
+    local: Object.keys(localStorage),
+    session: Object.keys(sessionStorage),
+    databases: (await indexedDB.databases?.())?.map((d) => d.name) ?? [],
+  }));
+  expect(stored.session).toEqual([]);
+  expect(stored.databases).toEqual([]);
+  // Only the theme preference is ever written (§5); nothing about an overlay.
+  expect(stored.local.filter((key) => !/theme/i.test(key))).toEqual([]);
+  void testInfo;
+});
+
+test('the network watch actually sees a leak when there is one (AV-1008)', async ({ page }) => {
+  // A check that cannot fail proves nothing. This makes the page misbehave on
+  // purpose, in each way the privacy test guards against, and expects it caught.
+  const network = await watchNetwork(page);
+  await page.goto('about:blank');
+  await page.goto('./#/overlays');
+  expect(await network.isLive()).toBe(true);
+
+  await page.evaluate(async (origin) => {
+    await fetch(`${origin}/leak`, { method: 'POST', body: 'telemetry' }).catch(() => undefined);
+    const request = new XMLHttpRequest();
+    request.open('PUT', `${origin}/leak-xhr`);
+    request.send('frames');
+    navigator.sendBeacon(`${origin}/leak-beacon`, 'video');
+    try {
+      new WebSocket('ws://localhost:1/leak').close();
+    } catch {
+      /* the attempt is what is recorded */
+    }
+  }, ORIGIN);
+  await page.waitForTimeout(200);
+
+  const calls = await network.calls();
+  expect(calls.map((c) => c.api)).toEqual(expect.arrayContaining(['fetch', 'xhr', 'sendBeacon', 'WebSocket']));
+  expect(calls.find((c) => c.api === 'fetch')).toMatchObject({ method: 'POST', hasBody: true });
+  expect(calls.find((c) => c.api === 'xhr')).toMatchObject({ method: 'PUT', hasBody: true });
+  // And on the wire, outside the "plain GET for our own files" rule.
+  const leaked = outsideTheSite(network.wire).map((r) => `${r.method} ${r.url}`);
+  expect(leaked).toEqual(expect.arrayContaining([expect.stringContaining('POST'), expect.stringContaining('PUT')]));
+});
+
 test('fixture files are never read by the server', async () => {
   // Sanity check that fixtures are local test data, not network resources.
   const gpx = readFileSync(join(FIXTURE_DIR, 'simple-route.gpx'), 'utf-8');
