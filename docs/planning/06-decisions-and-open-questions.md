@@ -378,6 +378,12 @@ Recommended order for what follows, to be confirmed by the spike:
 3. **Chroma-key video** as the broadly compatible single-file option for editors that cannot read WebM alpha.
 4. **Burned-in video** last, and only if the spike shows a decode → composite → encode path (WebCodecs, or ffmpeg.wasm) finishes realistic GoPro clips within acceptable memory and time. Audio handling and file-size limits must be decided first. Not recommended to start before 1–3.
 
+Owner decisions (answers to the open questions below):
+- **First overlay-only export is a PNG frame sequence**, delivered as a zip. Transparent WebM and chroma-key video follow only if the spike supports them.
+- **Burned-in video export is deferred** until overlays have shipped, then revisited after a feasibility spike.
+- **First templates: compact HUD, route/map inset and gauge dashboard.** The metric strip is not in the first set.
+- **Overlay settings can be imported and exported as a project JSON file**, so templates are reusable across videos. The app still stores nothing itself: the file is the user's.
+
 Spike questions still to answer: alpha support in `VideoEncoder` per browser; memory for a 5-minute 1080p30 overlay (≈9,000 frames); whether `ffmpeg.wasm` is acceptable at its bundle size; mobile limits.
 
 ## 17. Open Questions
@@ -452,10 +458,7 @@ question deleted, so the reasoning stays findable.
 - What GoPro models and telemetry streams are in the first supported scope: GPS only, GPS plus speed/altitude, or GPS plus IMU/camera streams?
 - How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
 - What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
-- Which overlay-only export format should ship first: transparent WebM, chroma-key video, PNG/WebP image sequence, or a combination?
 - Is burned-in browser-side video export viable for realistic GoPro clips with acceptable quality, memory usage, duration limits, browser support, and audio handling?
-- What first overlay templates are most useful for activity videos: compact HUD, route/map inset, metric strip, gauge dashboard, or sport-specific presets?
-- Should overlay configuration be exported as project JSON so users can reuse templates between videos?
 - For Route Builder, should the first implementation support manual straight-line point editing only, or should road/path snapping be added later through an optional routing provider?
 - Which user-facing label should ship for the viewer action: `Create Custom Track`, `Plan Route from Activity`, or another phrase?
 - Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?
