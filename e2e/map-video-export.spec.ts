@@ -479,6 +479,24 @@ test('nothing of the ride, a photo, the project or the video leaves the page; on
 });
 
 /** The browser's processes together, resident, in megabytes: the browser, its GPU process and its pages, as TD-064 measured. */
+/**
+ * Whether this browser has a hardware H.264 encoder. The software one every machine has makes the
+ * long and the terrain exports below too slow for their limits (they were measured with hardware), so
+ * those say so and skip where there is none, as the burned-in specs do (TD-097).
+ */
+async function hasHardwareEncoder(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    try {
+      const { supported } = await VideoEncoder.isConfigSupported({
+        codec: 'avc1.640028', width: 1920, height: 1080, bitrate: 8_000_000, hardwareAcceleration: 'prefer-hardware',
+      });
+      return supported === true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function browserMegabytes(page: Page): Promise<number> {
   const cdp = await page.context().browser()!.newBrowserCDPSession();
   const { processInfo } = (await cdp.send('SystemInfo.getProcessInfo')) as { processInfo: { id: number }[] };
@@ -506,6 +524,7 @@ test('makes a 60-second 1080p video in steady memory (AV-1210)', async ({ page }
   await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
   const refusal = await panel.getByRole('alert').allTextContents();
   test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+  test.skip(!(await hasHardwareEncoder(page)), 'Without a hardware H.264 encoder 1,800 frames at 1080p do not finish in this test\'s time (TD-097).');
 
   const before = await browserMegabytes(page);
   const samples: number[] = [];
@@ -557,6 +576,7 @@ async function countTiles(page: Page, ride: string, { pitch, zoom, terrain = fal
   await expect(panel.getByRole('combobox', { name: 'Format' }).or(panel.getByRole('alert')).first()).toBeVisible({ timeout: 30_000 });
   const refusal = await panel.getByRole('alert').allTextContents();
   test.skip(refusal.length > 0, `This machine cannot encode here: ${refusal.join(' ')}`);
+  test.skip(terrain && !(await hasHardwareEncoder(page)), 'Without a hardware H.264 encoder the terrain export does not finish in this test\'s time (TD-097).');
   await expect(panel).toContainText(/About [\d,]+ map tiles from OpenFreeMap/);
   const estimate = Number(/About ([\d,]+) map tiles/.exec((await panel.textContent())!)![1]!.replace(/,/g, ''));
   // The preview's own map has settled: from here, what is asked is the export's.
