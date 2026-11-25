@@ -474,7 +474,9 @@ Left for later: the MOV exports (#34) will write their own timecode track from t
 
 Tests: unit tests for the drop-frame arithmetic against known values (29.97 and 59.94 at the minute, the tenth minute, an hour, a day and its wrap, and a round trip over every frame of an hour and ten minutes), non-drop at 25 fps, the label's text, a refused dropped label, the flag at a rate with no drop-frame, the cut moving the start (rounded to a source frame, across a drop-frame minute and past midnight), the creation time as a time of day; the extractor against the real HERO8 clip (counter 1,692,868, 15:40:28:28) and generated fixtures with a `tmcd` track (drop-frame at 29.97 and 59.94, non-drop at 25 fps, the flag at 25, no track with the creation time, neither, the track over the creation time, no telemetry track with the timecode kept, four bytes read for it); `readVideoTelemetry` and the overlay page keeping a timecode with and without telemetry; the metadata file's fields, `null` and its note, the cut added in, every existing field unchanged, frame names from 1 and by the source, refused at another rate and with no timecode, one width across a digit; the panels' lines for the three cases in the PNG, WebM and burned-in panels with the cut, the checkbox's states and reasons, and a stale file when it changes; and a browser test that exports the HERO8 clip's sequence and checks the metadata file's timecode and the checkbox disabled at 10 fps.
 
-### TD-025: GoPro Extraction Is a Separate Tool Page
+### TD-096: GoPro Extraction Is a Separate Tool Page
+
+*(Recorded under the number TD-025 as well, which AV-901's decision below keeps; renumbered here so each number names one decision.)*
 
 Decision: GoPro MP4/MOV telemetry extraction should live on a dedicated extraction page, reachable from the header `Tools` dropdown. After extraction succeeds, that page should show a button that opens the existing viewer with the normalized activity loaded through client-side state.
 
