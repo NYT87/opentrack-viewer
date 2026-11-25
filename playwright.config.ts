@@ -23,7 +23,22 @@ export default defineConfig({
     locale: 'en-GB',
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', testIgnore: /overlay-burn(-canvas)?\.spec|map-video-export\.spec/, use: { ...devices['Desktop Chrome'] } },
+    /*
+     * AV-1007. Burned-in video needs an H.264 encoder, and Playwright's default
+     * Chromium is the headless *shell*, which has none (TD-039 flagged this).
+     * The full Chromium, still headless, has the hardware encoder on a desktop
+     * machine; the burned-in spec runs there and says so when a machine has no
+     * encoder, rather than failing on one.
+     */
+    {
+      name: 'chromium-codecs',
+      // AV-1209: the map video's export needs the same encoders.
+      testMatch: /overlay-burn(-canvas)?\.spec|map-video-export\.spec/,
+      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
+    },
+  ],
   webServer: {
     command: 'npm run build && npm run preview -- --port 4173 --strictPort',
     url: baseURL,

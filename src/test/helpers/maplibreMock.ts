@@ -92,7 +92,11 @@ export class FakeMap {
     this.layers.length = 0;
   }
 
+  /** Every source as it was added, for what a test needs beyond its data. */
+  readonly sourceSpecs = new Map<string, Record<string, unknown>>();
+
   addSource(id: string, source: { data: unknown }): void {
+    this.sourceSpecs.set(id, source as Record<string, unknown>);
     const entry = {
       data: source.data,
       setData: (data: unknown) => {
@@ -114,6 +118,25 @@ export class FakeMap {
 
   setLayoutProperty(id: string, name: string, value: unknown): void {
     if (name === 'visibility') this.layoutProperties[id] = value;
+    else this.layoutProperties[`${id}.${name}`] = value;
+  }
+
+  /** The terrain last set, as the map video sets it. */
+  terrain: unknown = undefined;
+  setTerrain(terrain: unknown): this {
+    this.terrain = terrain;
+    return this;
+  }
+
+  readonly images = new Map<string, unknown>();
+  hasImage(id: string): boolean {
+    return this.images.has(id);
+  }
+  addImage(id: string, image: unknown): void {
+    this.images.set(id, image);
+  }
+  removeImage(id: string): void {
+    this.images.delete(id);
   }
 
   setPaintProperty(id: string, name: string, value: unknown): void {
@@ -136,11 +159,29 @@ export class FakeMap {
     this.easeToCalls.push(options);
   }
 
-  /** Pan/zoom toggles the editor flips while a point is dragged. */
-  readonly dragPan = { enabled: true, enable() { this.enabled = true; }, disable() { this.enabled = false; } };
-  private readonly canvas = { style: {} as Record<string, string> };
-  getCanvas() {
-    return this.canvas;
+  /** Every camera set with jumpTo, in order. */
+  readonly jumps: Record<string, unknown>[] = [];
+
+  jumpTo(options: Record<string, unknown>): this {
+    this.jumps.push(options);
+    this.view = { ...this.view, ...options };
+    return this;
+  }
+
+  /** The camera as the reader left it: the last jump, or what a test moved it to. */
+  view: Record<string, unknown> = {};
+  getCenter() {
+    const [lng, lat] = (this.view.center as [number, number] | undefined) ?? [0, 0];
+    return { lng, lat };
+  }
+  getZoom(): number {
+    return (this.view.zoom as number | undefined) ?? 0;
+  }
+  getPitch(): number {
+    return (this.view.pitch as number | undefined) ?? 0;
+  }
+  getBearing(): number {
+    return (this.view.bearing as number | undefined) ?? 0;
   }
 
   queryRenderedFeatures = vi.fn(() => [] as unknown[]);

@@ -1,0 +1,541 @@
+import { useState, type ReactNode } from 'react';
+import { METERS_PER_FOOT, type UnitSystem } from '../domain/units';
+import { CHART_METRICS, DIAL_METRICS, splitsRect } from '../overlay/customCanvas';
+import { DEFAULT_SPLITS, SPLITS_EVERY_UNITS, SPLITS_LIST_LIMITS, SPLITS_NO_DISTANCE, SPLITS_NO_START_TIMES, splitsSourceOf, unitMeters } from '../overlay/splits';
+import { DEFAULT_COMPASS } from '../overlay/compass';
+import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, dialToStored, dialUnitLabel, storedToDial } from '../overlay/dial';
+import {
+  DEFAULT_GRADIENT,
+  GRADIENT_BAND_LIMITS,
+  GRADIENT_FROM_LIMITS,
+  addGradientBand,
+  removeLastGradientBand,
+  setGradientBand,
+} from '../overlay/gradient';
+import { STORED_UNITS } from '../overlay/contract';
+import {
+  CHART_WINDOW_MAX,
+  DEFAULT_CHART,
+  type ChartAxis,
+  type OverlayChartSetting,
+  type OverlayCompassSetting,
+  type OverlayComponent,
+  type OverlayDialSetting,
+  type OverlayGradientSetting,
+  type OverlaySplitsSetting,
+  type SplitsRate,
+  effectiveUnits,
+} from '../overlay/template';
+import { dataSourceId, type OverlayDataSource, type OverlayMetricKey, type OverlayTimeline } from '../overlay/timeline';
+import { ColorField } from './ColorField';
+import { PercentField } from './RouteOverlayPanel';
+
+/**
+ * AV-1019 (TD-087). The settings of the four components that came with it, one
+ * editor each, in the way ZonesEditor holds a zones component's: every control
+ * is a labelled field of the page's own kind (a select, a number, a colour, a
+ * checkbox), so it is reachable and named for a screen reader and moves by the
+ * keyboard, and a value that cannot be used is kept as typed until it can.
+ */
+
+type Patch = (change: (current: OverlayComponent) => OverlayComponent) => void;
+
+const FIGURE_NAMES: Record<string, string> = {
+  speed: 'Speed',
+  pace: 'Pace',
+  heartRate: 'Heart rate',
+  power: 'Power',
+  cyclingCadence: 'Cycling cadence',
+  runningCadence: 'Running cadence',
+  elevation: 'Elevation',
+  grade: 'Grade',
+  temperature: 'Temperature',
+};
+
+/** The figures a dial or chart can be of: the offered ones the activity has, and the one the component already reads. */
+function sourceChoices(
+  offered: readonly OverlayMetricKey[],
+  current: OverlayDataSource | undefined,
+  timeline: OverlayTimeline,
+): { value: string; label: string; disabled: boolean }[] {
+  const choices = offered.map((metric) => ({
+    value: `metric:${metric}`,
+    label: FIGURE_NAMES[metric] ?? metric,
+    disabled: !timeline.available.has(`metric:${metric}`),
+  }));
+  if (current && !choices.some((choice) => choice.value === dataSourceId(current))) {
+    choices.unshift({
+      value: dataSourceId(current),
+      label: current.kind === 'metric' ? (FIGURE_NAMES[current.metric] ?? current.metric) : (timeline.sensorLabels.get(dataSourceId(current))?.label ?? current.key),
+      disabled: false,
+    });
+  }
+  return choices;
+}
+
+const sourceOf = (value: string): OverlayDataSource =>
+  value.startsWith('sensor:') ? { kind: 'sensor', key: value.slice('sensor:'.length) } : { kind: 'metric', metric: value.slice('metric:'.length) as OverlayMetricKey };
+
+function SourceSelect({
+  id,
+  component,
+  offered,
+  timeline,
+  onChoose,
+}: {
+  id: string;
+  component: OverlayComponent;
+  offered: readonly OverlayMetricKey[];
+  timeline: OverlayTimeline;
+  onChoose: (source: OverlayDataSource) => void;
+}) {
+  const current = component.source;
+  return (
+    <div className="overlay-controls__field">
+      <label htmlFor={id}>Figure</label>
+      <select id={id} className="select" value={current ? dataSourceId(current) : ''} onChange={(event) => onChoose(sourceOf(event.target.value))}>
+        {sourceChoices(offered, current, timeline).map((choice) => (
+          <option key={choice.value} value={choice.value} disabled={choice.disabled}>
+            {choice.label}
+            {choice.disabled ? ' (not in this activity)' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+const round = (value: number, places = 2) => Math.round(value * 10 ** places) / 10 ** places;
+
+/** Seconds as m:ss. */
+const minutesSeconds = (seconds: number) => {
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+};
+
+/** Seconds from "m:ss" or a plain number of minutes ("5.5" is 5:30); `undefined` while it reads as neither. */
+export function parsePace(text: string): number | undefined {
+  const clock = /^\s*(\d+):(\d{1,2})\s*$/.exec(text);
+  if (clock) return Number(clock[2]) < 60 ? Number(clock[1]) * 60 + Number(clock[2]) : undefined;
+  if (!/^\s*\d*[.,]?\d+\s*$/.test(text)) return undefined;
+  return Math.round(Number(text.replace(',', '.')) * 60);
+}
+
+/**
+ * AV-1020. A pace typed as m:ss, or as a number of minutes, and shown as m:ss. Like
+ * the other fields it passes on what reads as a pace as it is typed, and shows
+ * where it really went when the field is left (TD-074).
+ */
+function PaceField({ id, label, hint, seconds, onCommit }: { id: string; label: string; hint?: string; seconds: number; onCommit: (seconds: number) => void }) {
+  const [draft, setDraft] = useState<string | undefined>();
+  return (
+    <div className="overlay-controls__field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        className="input"
+        type="text"
+        autoComplete="off"
+        placeholder="m:ss"
+        value={draft ?? minutesSeconds(seconds)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          const parsed = parsePace(event.target.value);
+          if (parsed !== undefined) onCommit(parsed);
+        }}
+        onBlur={() => setDraft(undefined)}
+      />
+      {hint && (
+        <p id={`${id}-hint`} className="overlay-controls__hint">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A dial: the figure, the range, the arc and its ticks, the pointer and the colours. */
+export function DialEditor({ id, component, timeline, units, smoothingField, onChange }: { id: string; component: OverlayComponent; timeline: OverlayTimeline; units: UnitSystem; smoothingField: ReactNode; onChange: Patch }) {
+  const setting = component.dial ?? DEFAULT_DIAL;
+  const source = component.source;
+  // AV-1020 (TD-089). What is typed and shown is in the units the figure is shown in; what is stored is not.
+  const shownIn = effectiveUnits(component, units);
+  const metric = source?.kind === 'metric' ? source.metric : undefined;
+  const unit = dialUnitLabel(metric, shownIn) ?? (source?.kind === 'metric' ? STORED_UNITS[source.metric] : timeline.sensorLabels.get(source ? dataSourceId(source) : '')?.unit);
+  const own = source ? activityRange(timeline, source, shownIn) : undefined;
+  const isPace = metric === 'pace';
+  const shown = (stored: number) => storedToDial(metric, stored, shownIn);
+  const stored = (typed: number) => dialToStored(metric, typed, shownIn);
+  /** A field of the dial's units: minutes and seconds for a pace, a number for the rest. */
+  const unitField = (props: { id: string; label: string; hint?: string; stored: number; nonNegative?: boolean; onCommit: (stored: number) => void }) =>
+    isPace ? (
+      <PaceField id={props.id} label={props.label} hint={props.hint} seconds={shown(props.stored)} onCommit={(seconds) => props.onCommit(stored(seconds))} />
+    ) : (
+      <PercentField
+        id={props.id}
+        label={props.label}
+        hint={props.hint}
+        value={String(round(shown(props.stored), 3))}
+        min={props.nonNegative ? 0 : -100000}
+        max={100000}
+        step={0.1}
+        onCommit={(value) => props.onCommit(stored(value))}
+      />
+    );
+  const range = component.range ?? own ?? { min: 0, max: 100 };
+  const withDial = (patch: Partial<OverlayDialSetting>) => onChange((current) => ({ ...current, dial: { ...(current.dial ?? DEFAULT_DIAL), ...patch } }));
+  const setRange = (next: { min: number; max: number }) => onChange((current) => ({ ...current, range: next }));
+  return (
+    <>
+      <SourceSelect
+        id={`${id}-dial-source`}
+        component={component}
+        offered={DIAL_METRICS}
+        timeline={timeline}
+        onChoose={(next) =>
+          onChange((current) => {
+            const found = activityRange(timeline, next, shownIn);
+            const changed: OverlayComponent = { ...current, source: next };
+            if (found) changed.range = found;
+            return changed;
+          })
+        }
+      />
+      {unitField({
+        id: `${id}-dial-min`,
+        label: `Range starts at${unit ? ` (${unit})` : ''}`,
+        hint: 'Below the end. A value outside the range sits at its end.',
+        stored: range.min,
+        onCommit: (value) => value < range.max && setRange({ min: value, max: range.max }),
+      })}
+      {unitField({
+        id: `${id}-dial-max`,
+        label: `Range ends at${unit ? ` (${unit})` : ''}`,
+        stored: range.max,
+        onCommit: (value) => value > range.min && setRange({ min: range.min, max: value }),
+      })}
+      <p className="video__actions">
+        <button type="button" className="button" disabled={!own} onClick={() => own && setRange(own)}>
+          Use this activity’s range
+        </button>
+      </p>
+      <PercentField
+        id={`${id}-dial-sweep`}
+        label="Sweep (degrees)"
+        hint={`${DIAL_LIMITS.sweep.min} to ${DIAL_LIMITS.sweep.max}. The arc is centred at the top.`}
+        value={String(setting.sweep)}
+        min={DIAL_LIMITS.sweep.min}
+        max={DIAL_LIMITS.sweep.max}
+        onCommit={(value) => withDial({ sweep: Math.min(DIAL_LIMITS.sweep.max, Math.max(DIAL_LIMITS.sweep.min, Math.round(value))) })}
+      />
+      {unitField({
+        id: `${id}-dial-major`,
+        label: `Major tick every${unit ? ` (${unit})` : ''}`,
+        hint: '0 finds a step that suits the range.',
+        stored: setting.majorStep ?? 0,
+        nonNegative: true,
+        onCommit: (value) =>
+          onChange((current) => {
+            const dial = { ...(current.dial ?? DEFAULT_DIAL) };
+            if (value > 0) dial.majorStep = value;
+            else delete dial.majorStep;
+            return { ...current, dial };
+          }),
+      })}
+      <PercentField
+        id={`${id}-dial-minor`}
+        label="Minor ticks between major ones"
+        value={String(setting.minorTicks)}
+        min={DIAL_LIMITS.minorTicks.min}
+        max={DIAL_LIMITS.minorTicks.max}
+        onCommit={(value) => withDial({ minorTicks: Math.min(DIAL_LIMITS.minorTicks.max, Math.max(DIAL_LIMITS.minorTicks.min, Math.round(value))) })}
+      />
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-dial-pointer`}>Pointer</label>
+        <select id={`${id}-dial-pointer`} className="select" value={setting.pointer} onChange={(event) => withDial({ pointer: event.target.value === 'marker' ? 'marker' : 'needle' })}>
+          <option value="needle">Needle</option>
+          <option value="marker">Marker on the arc</option>
+        </select>
+      </div>
+      <ColorField id={`${id}-dial-track`} label="Track colour" value={setting.trackColor} onChange={(trackColor) => withDial({ trackColor })} />
+      <ColorField id={`${id}-dial-fill`} label="Filled part colour" value={setting.fillColor} onChange={(fillColor) => withDial({ fillColor })} />
+      <ColorField id={`${id}-dial-needle`} label="Needle colour" value={setting.needleColor} onChange={(needleColor) => withDial({ needleColor })} />
+      {smoothingField}
+    </>
+  );
+}
+
+/** AV-1020. A new distance window in an imperial chart starts at this many feet (457.2 m). */
+const CHART_WINDOW_FEET_DEFAULT = 1500;
+
+/** A chart: the figure, the axis, the window, the colours and the labels. */
+export function ChartEditor({ id, component, timeline, units, onChange }: { id: string; component: OverlayComponent; timeline: OverlayTimeline; units: UnitSystem; onChange: Patch }) {
+  const setting = component.chart ?? DEFAULT_CHART;
+  const withChart = (patch: Partial<OverlayChartSetting>) => onChange((current) => ({ ...current, chart: { ...(current.chart ?? DEFAULT_CHART), ...patch } }));
+  const hasDistance = timeline.available.has('metric:distance');
+  // AV-1020 (TD-089). A distance window is typed in feet where the chart is imperial, and stored in metres.
+  const imperial = effectiveUnits(component, units) === 'imperial';
+  const feet = setting.axis === 'distance' && imperial;
+  const windowUnit = setting.axis === 'distance' ? (feet ? 'feet' : 'metres') : 'seconds';
+  const usualWindow = (axis: ChartAxis) => (axis === 'distance' ? (imperial ? CHART_WINDOW_FEET_DEFAULT * METERS_PER_FOOT : 500) : 30);
+  return (
+    <>
+      <SourceSelect id={`${id}-chart-source`} component={component} offered={CHART_METRICS} timeline={timeline} onChoose={(next) => onChange((current) => ({ ...current, source: next }))} />
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-chart-axis`}>Along</label>
+        <select id={`${id}-chart-axis`} className="select" value={setting.axis} onChange={(event) => {
+            const axis = event.target.value as ChartAxis;
+            // A window's number is seconds on one axis and metres on the other: it takes the new axis' usual one.
+            withChart({ axis, ...(setting.window !== undefined && axis !== setting.axis ? { window: usualWindow(axis) } : {}) });
+          }}>
+          <option value="time">Time</option>
+          <option value="distance" disabled={!hasDistance && setting.axis !== 'distance'}>
+            Distance{hasDistance || setting.axis === 'distance' ? '' : ' (this activity has none)'}
+          </option>
+        </select>
+      </div>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-chart-span`}>Shows</label>
+        <select
+          id={`${id}-chart-span`}
+          className="select"
+          value={setting.window === undefined ? 'whole' : 'window'}
+          onChange={(event) =>
+            onChange((current) => {
+              const chart = { ...(current.chart ?? DEFAULT_CHART) };
+              if (event.target.value === 'whole') delete chart.window;
+              else chart.window = usualWindow(chart.axis);
+              return { ...current, chart };
+            })
+          }
+        >
+          <option value="whole">The whole activity</option>
+          <option value="window">A window either side of now</option>
+        </select>
+      </div>
+      {setting.window !== undefined && (
+        <PercentField
+          id={`${id}-chart-window`}
+          label={`Window either side of now (${windowUnit})`}
+          hint="The cursor stays in the middle."
+          value={String(feet ? Math.round(setting.window / METERS_PER_FOOT) : round(setting.window))}
+          min={1}
+          max={feet ? Math.floor(CHART_WINDOW_MAX / METERS_PER_FOOT) : CHART_WINDOW_MAX}
+          step={1}
+          onCommit={(value) => value > 0 && withChart({ window: Math.min(CHART_WINDOW_MAX, feet ? value * METERS_PER_FOOT : value) })}
+        />
+      )}
+      <ColorField id={`${id}-chart-line`} label="Line colour" value={setting.lineColor} onChange={(lineColor) => withChart({ lineColor })} />
+      <ColorField id={`${id}-chart-fill`} label="Fill colour" value={setting.fillColor} onChange={(fillColor) => withChart({ fillColor })} />
+      <PercentField
+        id={`${id}-chart-fill-opacity`}
+        label="Fill opacity (%)"
+        value={String(Math.round(setting.fillOpacity * 100))}
+        onCommit={(value) => withChart({ fillOpacity: Math.min(1, Math.max(0, value / 100)) })}
+      />
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.labels} onChange={(event) => withChart({ labels: event.target.checked })} />
+        <span>Axis labels</span>
+      </label>
+    </>
+  );
+}
+
+/** The gradient indicator: its bands, each with where it starts and its colour, and the glyph. */
+export function GradientEditor({ id, component, smoothingField, onChange }: { id: string; component: OverlayComponent; smoothingField: ReactNode; onChange: Patch }) {
+  const setting = component.gradient ?? DEFAULT_GRADIENT;
+  const withGradient = (change: (current: OverlayGradientSetting) => OverlayGradientSetting) =>
+    onChange((current) => ({ ...current, gradient: change(current.gradient ?? DEFAULT_GRADIENT) }));
+  return (
+    <>
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.glyph} onChange={(event) => withGradient((current) => ({ ...current, glyph: event.target.checked }))} />
+        <span>Show the up or down glyph</span>
+      </label>
+      <div role="group" aria-label="Colour bands" className="zones-editor">
+        {setting.bands.map((band, i) => (
+          <div key={i} role="group" aria-label={`Band ${i + 1}`} className="overlay-controls__field">
+            {i > 0 ? (
+              <PercentField
+                id={`${id}-band-${i}-from`}
+                label={`Band ${i + 1} starts at (%)`}
+                value={String(band.from)}
+                min={GRADIENT_FROM_LIMITS.min}
+                max={GRADIENT_FROM_LIMITS.max}
+                step={0.5}
+                onCommit={(from) => withGradient((current) => setGradientBand(current, i, { from }))}
+              />
+            ) : (
+              <p className="overlay-controls__hint">Band 1 is everything below band 2.</p>
+            )}
+            <ColorField id={`${id}-band-${i}-color`} label={`Band ${i + 1} colour`} value={band.color} onChange={(color) => withGradient((current) => setGradientBand(current, i, { color }))} />
+          </div>
+        ))}
+      </div>
+      <p className="video__actions">
+        <button type="button" className="button" disabled={addGradientBand(setting) === setting} onClick={() => withGradient(addGradientBand)}>
+          Add a band
+        </button>
+        <button type="button" className="button" disabled={setting.bands.length <= GRADIENT_BAND_LIMITS.min} onClick={() => withGradient(removeLastGradientBand)}>
+          Remove the last band
+        </button>
+        <button type="button" className="button" onClick={() => withGradient((current) => ({ ...DEFAULT_GRADIENT, bands: DEFAULT_GRADIENT.bands.map((band) => ({ ...band })), glyph: current.glyph }))}>
+          Reset the bands
+        </button>
+      </p>
+      <p className="overlay-controls__hint">
+        {GRADIENT_BAND_LIMITS.min} to {GRADIENT_BAND_LIMITS.max} bands. The grade is the file’s own where it has one, and otherwise the climb over the last 50 m.
+      </p>
+      {smoothingField}
+    </>
+  );
+}
+
+/** The compass: rose or needle, the cardinal labels and the colours. */
+export function CompassEditor({ id, component, smoothingField, onChange }: { id: string; component: OverlayComponent; smoothingField: ReactNode; onChange: Patch }) {
+  const setting = component.compass ?? DEFAULT_COMPASS;
+  const withCompass = (patch: Partial<OverlayCompassSetting>) => onChange((current) => ({ ...current, compass: { ...(current.compass ?? DEFAULT_COMPASS), ...patch } }));
+  return (
+    <>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-compass-style`}>Style</label>
+        <select id={`${id}-compass-style`} className="select" value={setting.style} onChange={(event) => withCompass({ style: event.target.value === 'needle' ? 'needle' : 'rose' })}>
+          <option value="rose">A rose that turns, heading up</option>
+          <option value="needle">A needle on a fixed rose, north up</option>
+        </select>
+      </div>
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.labels} onChange={(event) => withCompass({ labels: event.target.checked })} />
+        <span>Label the cardinal points</span>
+      </label>
+      <ColorField id={`${id}-compass-rose`} label="Rose colour" value={setting.roseColor} onChange={(roseColor) => withCompass({ roseColor })} />
+      <ColorField id={`${id}-compass-needle`} label="Needle colour" value={setting.needleColor} onChange={(needleColor) => withCompass({ needleColor })} />
+      {smoothingField}
+    </>
+  );
+}
+
+/**
+ * AV-1021 (TD-090). Splits: where they come from, the distance, the clock, what is
+ * shown and the colours. A source the activity cannot give is offered disabled and
+ * says why; one the component asks for and the activity cannot give is read as the
+ * other (laps fall back to the distance), which the note under it says. The list and
+ * the last split change how tall the lines are, so they make the box as tall as they
+ * need (`splitsRect`), as a figure's box grows to its text.
+ */
+export function SplitsEditor({
+  id,
+  component,
+  timeline,
+  units,
+  frame,
+  onChange,
+}: {
+  id: string;
+  component: OverlayComponent;
+  timeline: OverlayTimeline;
+  units: UnitSystem;
+  frame: { width: number; height: number };
+  onChange: Patch;
+}) {
+  const setting = component.splits ?? DEFAULT_SPLITS;
+  const sources = timeline.splitSources;
+  const lapsOk = sources?.laps === true;
+  const distanceOk = sources?.distance === true;
+  const effective = splitsSourceOf(setting.source, sources);
+  const shownIn = effectiveUnits(component, units);
+  const perUnit = unitMeters(shownIn);
+  const unitName = shownIn === 'imperial' ? 'miles' : 'kilometres';
+  /** A change to the setting; the box follows when what it holds changes in height. */
+  const withSplits = (patch: Partial<OverlaySplitsSetting>, fit = false) =>
+    onChange((current) => {
+      const next: OverlayComponent = { ...current, splits: { ...(current.splits ?? DEFAULT_SPLITS), ...patch } };
+      return fit ? { ...next, rect: splitsRect(next, frame) ?? next.rect } : next;
+    });
+  return (
+    <>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-splits-source`}>Splits from</label>
+        <select id={`${id}-splits-source`} className="select" value={setting.source} onChange={(event) => withSplits({ source: event.target.value === 'distance' ? 'distance' : 'laps' })}>
+          <option value="laps" disabled={!lapsOk && setting.source !== 'laps'}>
+            The file’s laps{lapsOk ? '' : ' (not usable here)'}
+          </option>
+          <option value="distance" disabled={!distanceOk && setting.source !== 'distance'}>
+            Every kilometre or mile{distanceOk ? '' : ' (this activity has no distance)'}
+          </option>
+        </select>
+        {!lapsOk && sources?.lapsIssue === 'no_start_times' && <p className="overlay-controls__hint">{SPLITS_NO_START_TIMES}</p>}
+        {!lapsOk && sources?.lapsIssue === undefined && <p className="overlay-controls__hint">The file has no laps to use: it needs two or more, each with a start time.</p>}
+        {setting.source === 'laps' && !lapsOk && effective === 'distance' && <p className="overlay-controls__hint">This activity’s laps cannot be used, so it is split by distance.</p>}
+        {effective === undefined && <p className="overlay-controls__note" role="status">{SPLITS_NO_DISTANCE} Nothing is drawn.</p>}
+      </div>
+      {effective === 'distance' && (
+        <PercentField
+          id={`${id}-splits-every`}
+          label={`Split every (${unitName})`}
+          hint={`${SPLITS_EVERY_UNITS.min} to ${SPLITS_EVERY_UNITS.max}. One is a ${shownIn === 'imperial' ? 'mile' : 'kilometre'}.`}
+          value={String(round((setting.every ?? perUnit) / perUnit, 3))}
+          min={SPLITS_EVERY_UNITS.min}
+          max={SPLITS_EVERY_UNITS.max}
+          step={0.1}
+          onCommit={(value) => {
+            if (!(value >= SPLITS_EVERY_UNITS.min)) return;
+            const typed = Math.min(SPLITS_EVERY_UNITS.max, value);
+            onChange((current) => {
+              const next = { ...(current.splits ?? DEFAULT_SPLITS) };
+              // One kilometre or mile is the default, which follows the units; anything else is the metres typed.
+              if (typed === 1) delete next.every;
+              else next.every = typed * perUnit;
+              return { ...current, splits: next };
+            });
+          }}
+        />
+      )}
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-splits-time`}>Time counted</label>
+        <select id={`${id}-splits-time`} className="select" value={setting.time} onChange={(event) => withSplits({ time: event.target.value === 'elapsed' ? 'elapsed' : 'moving' })}>
+          <option value="moving">Moving time (holds through a stop)</option>
+          <option value="elapsed">Elapsed time (runs through a stop)</option>
+        </select>
+      </div>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-splits-rate`}>Pace or speed</label>
+        <select
+          id={`${id}-splits-rate`}
+          className="select"
+          value={setting.rate ?? 'auto'}
+          onChange={(event) =>
+            onChange((current) => {
+              const next = { ...(current.splits ?? DEFAULT_SPLITS) };
+              if (event.target.value === 'auto') delete next.rate;
+              else next.rate = event.target.value as SplitsRate;
+              return { ...current, splits: next };
+            })
+          }
+        >
+          <option value="auto">By the activity’s type (pace for a run, speed otherwise)</option>
+          <option value="pace">Pace</option>
+          <option value="speed">Average speed</option>
+          <option value="none">Neither</option>
+        </select>
+      </div>
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.showLast} onChange={(event) => withSplits({ showLast: event.target.checked }, true)} />
+        <span>Show the last split, faster or slower than the one before</span>
+      </label>
+      <PercentField
+        id={`${id}-splits-list`}
+        label="Past splits listed"
+        hint={`${SPLITS_LIST_LIMITS.min} to ${SPLITS_LIST_LIMITS.max}, newest first.`}
+        value={String(setting.list)}
+        min={SPLITS_LIST_LIMITS.min}
+        max={SPLITS_LIST_LIMITS.max}
+        onCommit={(value) => withSplits({ list: Math.min(SPLITS_LIST_LIMITS.max, Math.max(SPLITS_LIST_LIMITS.min, Math.round(value))) }, true)}
+      />
+      <ColorField id={`${id}-splits-faster`} label="Faster colour" value={setting.fasterColor} onChange={(fasterColor) => withSplits({ fasterColor })} />
+      <ColorField id={`${id}-splits-slower`} label="Slower colour" value={setting.slowerColor} onChange={(slowerColor) => withSplits({ slowerColor })} />
+      <p className="overlay-controls__hint">A split is faster or slower when its pace differs from the one before it by half a second per kilometre or mile or more.</p>
+    </>
+  );
+}

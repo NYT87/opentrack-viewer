@@ -28,6 +28,13 @@ const EMPTY_COLLECTION: FeatureCollection<LineString, RouteLineProperties> = {
   features: [],
 };
 
+/** A route with nothing in it: what a blank draft draws until its first point (AV-1104). */
+export const EMPTY_ROUTE_GEOMETRY: RouteGeometry = {
+  featureCollection: EMPTY_COLLECTION,
+  sourceIndices: [],
+  isEmpty: true,
+};
+
 interface SegmentRun {
   segmentIndex: number;
   coordinates: Position[];

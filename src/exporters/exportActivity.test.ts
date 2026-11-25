@@ -335,3 +335,137 @@ describe('a format that would refuse is never offered (AV-555)', () => {
     }
   });
 });
+
+describe('KML conversion (AV-762): KML → Activity → registered exporter', async () => {
+  const { parseKml } = await import('../parsers/kml/parseKml');
+  const { parseTcx } = await import('../parsers/tcx/parseTcx');
+  const { parseFit } = await import('../parsers/fit/parseFit');
+  const kml = (fixture: string) => parseKml(readFixture(fixture), { fileName: fixture });
+
+  const positions = (points: { lat?: number; lon?: number }[]) =>
+    points.map((point) => [point.lat?.toFixed(5), point.lon?.toFixed(5)]);
+
+  it('offers GPX for an untimed route, and withholds the formats that need a clock', () => {
+    const availability = getExportAvailability(kml('route-linestring.kml'));
+
+    expect(availability).toEqual([
+      { format: 'gpx', label: 'GPX', available: true },
+      expect.objectContaining({ format: 'fit', available: false, reason: expect.stringMatching(/timestamps/) }),
+      expect.objectContaining({ format: 'tcx', available: false, reason: expect.stringMatching(/timestamps/) }),
+    ]);
+  });
+
+  it('offers every registered target for a timed track', () => {
+    expect(getExportAvailability(kml('track-timed.kml')).every((entry) => entry.available)).toBe(true);
+  });
+
+  it('never offers KML itself: there is no KML writer', () => {
+    expect(EXPORT_FORMATS.map((entry) => entry.format)).not.toContain('kml');
+  });
+
+  it('refuses to write FIT or TCX from an untimed route rather than inventing times', async () => {
+    const route = kml('route-linestring.kml');
+
+    await expect(exportActivity(route, { format: 'tcx' })).rejects.toBeInstanceOf(ActivityError);
+    await expect(exportActivity(route, { format: 'fit' })).rejects.toBeInstanceOf(ActivityError);
+  });
+
+  it('converts a LineString to GPX that reads back as the same route', async () => {
+    const route = kml('route-linestring.kml');
+    const result = await exportActivity(route, { format: 'gpx' });
+
+    expect(result.fileName).toBe('Riverside-loop.gpx');
+    const back = await roundTrip(result.blob, result.fileName);
+    expect(positions(back.points)).toEqual(positions(route.points));
+    expect(back.points.map((point) => point.elevationMeters)).toEqual(
+      route.points.map((point) => point.elevationMeters),
+    );
+    expect(back.metadata.name).toBe('Riverside loop');
+    expect(back.metadata.description).toBe('A planned route. Drawn by hand.');
+  });
+
+  it('keeps segment boundaries through a GPX conversion', async () => {
+    const route = kml('multi-segment.kml');
+    const back = await roundTrip((await exportActivity(route, { format: 'gpx' })).blob);
+
+    expect(back.points.map((point) => point.segmentIndex)).toEqual(
+      route.points.map((point) => point.segmentIndex),
+    );
+    expect(back.derived?.distanceMeters).toBeCloseTo(route.derived?.distanceMeters ?? 0, 0);
+  });
+
+  it('converts a timed track to TCX that reads back with its clock and sensors', async () => {
+    const track = kml('track-timed.kml');
+    const result = await exportActivity(track, { format: 'tcx' });
+    const back = parseTcx(await result.blob.text(), { fileName: result.fileName });
+
+    expect(positions(back.points)).toEqual(positions(track.points));
+    expect(back.points.map((point) => point.time?.toISOString())).toEqual(
+      track.points.map((point) => point.time?.toISOString()),
+    );
+    expect(back.points.map((point) => point.heartRateBpm)).toEqual([120, 130, 140, 150, 160]);
+    expect(back.points.map((point) => point.powerWatts)).toEqual([200, 210, 220, 230, 240]);
+  });
+
+  it('converts a timed track to FIT that reads back as the same track', async () => {
+    const track = kml('track-timed.kml');
+    const result = await exportActivity(track, { format: 'fit' });
+    const back = await parseFit(await result.blob.arrayBuffer(), { fileName: result.fileName });
+
+    expect(positions(back.points)).toEqual(positions(track.points));
+    expect(back.points.map((point) => point.heartRateBpm)).toEqual([120, 130, 140, 150, 160]);
+    expect(back.derived?.durationSeconds).toBe(120);
+  });
+
+  it('converts the paused track with its pause intact', async () => {
+    const track = kml('paused-track.kml');
+    const result = await exportActivity(track, { format: 'tcx' });
+    const back = parseTcx(await result.blob.text(), { fileName: result.fileName });
+
+    expect(back.points.map((point) => point.segmentIndex)).toEqual([0, 0, 0, 1, 1]);
+  });
+
+  it('writes a section of a KML track like any other activity', async () => {
+    const track = kml('track-timed.kml');
+    const result = await exportActivity(track, {
+      format: 'gpx',
+      range: { startIndex: 1, endIndex: 3 },
+    });
+
+    expect(result.fileName).toBe('Morning-track-section.gpx');
+    expect((await roundTrip(result.blob)).points).toHaveLength(3);
+  });
+});
+
+describe('GPX keeps a recorded distance (AV-1109)', () => {
+  it('writes each point’s distance from the start in a GPXDATA extension, and reads it back as the distance', async () => {
+    // An odometer that is well ahead of the positions, as a wheel sensor is,
+    // and that does not start at zero, as a section's readings do not.
+    const activity = makeActivity(
+      Array.from({ length: 5 }, (_, i) => ({
+        time: new Date(Date.UTC(2026, 8, 24, 8, 0, i)),
+        lat: 46 + (i * 0.5) / 111_320,
+        lon: 7,
+        distanceMeters: 1_000 + i * 8,
+      })),
+    );
+    const result = await exportActivity(activity, { format: 'gpx' });
+    const xml = await result.blob.text();
+    expect(xml).toContain('xmlns:gpxdata="http://www.cluetrust.com/XML/GPXDATA/1/0"');
+    expect(xml.match(/<gpxdata:distance>([\d.]+)<\/gpxdata:distance>/g)).toEqual([0, 8, 16, 24, 32].map((d) => `<gpxdata:distance>${d}</gpxdata:distance>`));
+    expect(result.warnings.find((warning) => warning.code === 'export_extension_fields')?.message).toMatch(/distance/);
+
+    const back = await roundTrip(result.blob);
+    expect(back.derived!.distanceMeters).toBe(32);
+    expect(back.streams.hasDistance).toBe(true);
+  });
+
+  it('writes no distance where the activity has none, so the GPS decides as before', async () => {
+    const activity = makeActivity([
+      { time: new Date(Date.UTC(2026, 8, 24, 8)), lat: 46, lon: 7 },
+      { time: new Date(Date.UTC(2026, 8, 24, 8, 0, 1)), lat: 46.0001, lon: 7 },
+    ]);
+    const xml = await (await exportActivity(activity, { format: 'gpx' })).blob.text();
+    expect(xml).not.toContain('<gpxdata:distance>');
+  });
+});

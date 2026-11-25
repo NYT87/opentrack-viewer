@@ -103,7 +103,7 @@ function fitFile(records) {
 }
 
 // Global message numbers from the FIT profile.
-const MSG = { fileId: 0, sport: 12, record: 20, session: 18, deviceInfo: 23 };
+const MSG = { fileId: 0, sport: 12, record: 20, session: 18, deviceInfo: 23, lap: 19 };
 // Enum values used below: file type 4 is an activity; sport 1 is running, 2 cycling.
 const FILE_TYPE_ACTIVITY = 4;
 const SPORT_RUNNING = 1;
@@ -279,7 +279,76 @@ function buildImpossibleCoordinates() {
   return fitFile(w.bytes);
 }
 
+/**
+ * AV-1021. A run in three laps, with lap messages: the one FIT fixture with laps.
+ * Thirteen points ten seconds apart, due north from a made-up place, at 4 m/s for the first
+ * 50 s, 5 m/s for the next 40 and 3 m/s for the last 30, so the laps differ in pace.
+ * Laps start at 0, 50 and 90 s and are 200, 200 and 90 m: they are in the file
+ * at their ends, as a watch writes them, with a start time, a timestamp (the end), an
+ * elapsed and a timer time, and a distance, so a reader can place them either way.
+ */
+function buildRunWithLaps() {
+  const w = new Writer();
+  const start = '2024-04-06T08:00:00Z';
+  const t0 = secondsToFit(start);
+
+  const fileId = define(w, 0, MSG.fileId, FILE_ID_FIELDS);
+  data(w, 0, fileId, {
+    type: FILE_TYPE_ACTIVITY,
+    manufacturer: MANUFACTURER_GARMIN,
+    product: 2697,
+    serialNumber: 1357924680,
+    timeCreated: t0,
+  });
+
+  const sport = define(w, 1, MSG.sport, SPORT_FIELDS);
+  data(w, 1, sport, { sport: SPORT_RUNNING, subSport: SUB_SPORT_ROAD });
+
+  const record = define(w, 2, MSG.record, [
+    ['timestamp', 253, T.uint32],
+    ['positionLat', 0, T.sint32],
+    ['positionLong', 1, T.sint32],
+    ['heartRate', 3, T.uint8],
+    ['distance', 5, T.uint32],
+    ['speed', 6, T.uint16],
+  ]);
+  // Metres covered at each ten-second point, from 0 to 120 s.
+  const metres = [0, 40, 80, 120, 160, 200, 250, 300, 350, 400, 430, 460, 490];
+  const speeds = [4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 3, 3, 3];
+  metres.forEach((m, i) => {
+    data(w, 2, record, {
+      timestamp: t0 + i * 10,
+      positionLat: degreesToSemicircles(47 + m / 111320),
+      positionLong: degreesToSemicircles(8),
+      heartRate: 140 + i,
+      distance: m * 100, // scale 100
+      speed: speeds[i] * 1000, // scale 1000
+    });
+  });
+
+  const lap = define(w, 3, MSG.lap, [
+    ['timestamp', 253, T.uint32],
+    ['startTime', 2, T.uint32],
+    ['totalElapsedTime', 7, T.uint32],
+    ['totalTimerTime', 8, T.uint32],
+    ['totalDistance', 9, T.uint32],
+  ]);
+  // [start, seconds, metres] of each lap.
+  for (const [from, seconds, m] of [[0, 50, 200], [50, 40, 200], [90, 30, 90]]) {
+    data(w, 3, lap, {
+      timestamp: t0 + from + seconds,
+      startTime: t0 + from,
+      totalElapsedTime: seconds * 1000, // scale 1000
+      totalTimerTime: seconds * 1000,
+      totalDistance: m * 100, // scale 100
+    });
+  }
+
+  return fitFile(w.bytes);
+}
+
 const FIXTURES = {
+  'run-with-laps.fit': buildRunWithLaps(),
   'ride-with-sensors.fit': buildRide(),
   'treadmill-run.fit': buildTreadmillRun(),
   'impossible-coordinates.fit': buildImpossibleCoordinates(),

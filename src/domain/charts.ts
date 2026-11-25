@@ -181,3 +181,15 @@ export function getVisibleCharts(
     (kind) => availability.find((entry) => entry.kind === kind)!,
   );
 }
+
+/**
+ * AV-516. Whether the chart panel has anything to draw. Without one, the
+ * viewer omits the whole charts section and its link, rather than leaving a
+ * box of axis switches over nothing.
+ */
+export function hasAnyChart(activity: Activity, metric?: PerformanceMetric): boolean {
+  return (
+    getChartAvailability(activity, metric).some((chart) => chart.available) ||
+    (activity.sensorStreams ?? []).some((stream) => stream.display === 'chart')
+  );
+}

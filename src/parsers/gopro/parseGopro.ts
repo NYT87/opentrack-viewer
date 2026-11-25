@@ -65,7 +65,7 @@ export async function parseGopro(
     rawData: payload.rawData,
     timing: {
       videoDuration: payload.timing.videoDurationSeconds,
-      frameDuration: payload.timing.frameDurationMs,
+      frameDuration: payload.timing.frameIntervalSeconds,
       start: payload.timing.start ?? new Date(0),
       samples: payload.timing.samples,
     },

@@ -1,6 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 import { countPixelsNear, decodePng } from './helpers/png';
@@ -43,9 +41,13 @@ async function openTools(page: Page) {
   return page.getByRole('menu', { name: 'Tools' });
 }
 
-/** Settings is a modal (AV-007): it neither navigates nor unmounts the viewer. */
+/**
+ * Settings is a modal (AV-007): it neither navigates nor unmounts the viewer.
+ * The header's control, specifically: the homepage's privacy copy has a
+ * "Settings" button of its own that opens the same dialog.
+ */
 async function openSettings(page: Page) {
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   return page.getByRole('dialog');
 }
 
@@ -227,15 +229,16 @@ test('charts pace and cadence for a running activity (AV-505, AV-506)', async ({
   );
 });
 
-test('explains why run charts are unavailable for other activities (AV-507)', async ({ page }) => {
+test('draws no run chart, and no message about one, for other activities (AV-507, AV-516)', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'route-with-elevation.gpx');
 
-  // The fixture is a hike, so pace and cadence do not apply.
-  await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText(
-    /shown for running activities/i,
-  );
+  // The fixture is a hike, so pace and cadence do not apply: they take no
+  // title, no message and no space (TD-028).
   await expect(page.getByRole('region', { name: 'Elevation chart' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Pace chart' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Cadence chart' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Activity charts' })).not.toContainText(/is shown for|has no .* data/i);
 });
 
 test('keeps the upload layout when a parse fails (AV-004)', async ({ page }) => {
@@ -275,7 +278,7 @@ test('centres the loaded viewer in a max-width column (AV-011)', async ({ page }
   expect(Math.abs(content.x - (1800 - content.x - content.width))).toBeLessThan(4);
 });
 
-test('offers a section sidebar on large screens only (AV-011)', async ({ page }) => {
+test('offers a section sidebar on large screens, and a row of the same links below (AV-011, TD-056)', async ({ page }) => {
   await page.setViewportSize({ width: 1500, height: 900 });
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'run-with-cadence.gpx');
@@ -291,8 +294,16 @@ test('offers a section sidebar on large screens only (AV-011)', async ({ page })
   const sections = (await page.locator('.viewer__sections').boundingBox())!;
   expect(navBox.x + navBox.width).toBeLessThanOrEqual(sections.x + 1);
 
+  // Narrower, the same links run as one row above the content, so Export is
+  // a tap away rather than a long scroll.
   await page.setViewportSize({ width: 900, height: 900 });
-  await expect(nav).toBeHidden();
+  await expect(nav).toBeVisible();
+  const row = (await nav.boundingBox())!;
+  const below = (await page.locator('.viewer__sections').boundingBox())!;
+  expect(row.y + row.height).toBeLessThanOrEqual(below.y + 1);
+  expect(row.height).toBeLessThan(60);
+  await nav.getByRole('button', { name: 'Export' }).click();
+  await expect(page.locator('#activity-export')).toBeFocused();
 });
 
 test('section links scroll without navigating or clearing the activity (AV-011)', async ({
@@ -469,7 +480,9 @@ test('redraws the charts for the selected section and back (AV-511, AV-512)', as
   await page.mouse.up();
 
   // The charts now show the section, and say so without implying an edit.
-  await expect(page.getByText(/file is unchanged/i)).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Selected section summary' }).getByText(/file is unchanged/i),
+  ).toBeVisible();
   expect(await plotted()).not.toBe(whole);
 
   await page.getByRole('button', { name: 'Reset View' }).click();
@@ -511,7 +524,8 @@ test('marks chart axes at real intervals and keeps labels clear (AV-514)', async
   expect(Math.abs(boxWidth - attrWidth)).toBeLessThan(2);
 
   // A 334 m activity has no whole-kilometre tick, so the ends carry the scale.
-  await expect(chart.locator('.is-endpoint')).toHaveCount(2);
+  // The shared axis is written once, under the last chart (TD-056).
+  await expect(page.getByRole('slider').last().locator('.is-endpoint')).toHaveCount(2);
 
   await page.getByRole('button', { name: 'Time' }).click();
   await expect(chart.getByText(/x-axis: elapsed time/)).toBeVisible();
@@ -623,7 +637,7 @@ test('opens Settings from the homepage header (AV-007)', async ({ page }) => {
   await page.goto('./');
 
   // TD-008: an app-wide choice should not require opening a file to find.
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('radio', { name: 'Dark' })).toBeVisible();
@@ -678,6 +692,54 @@ test('offers video telemetry in the Tools menu (AV-907)', async ({ page }) => {
   await expect(page.getByRole('region', { name: 'Activity summary' })).toHaveCount(0);
 });
 
+test('offers overlays in the Tools menu, and takes files by hand after a reload (AV-1002)', async ({
+  page,
+}) => {
+  const requests = recordRequests(page);
+  await page.goto('./');
+
+  await page.getByRole('button', { name: 'Tools' }).click();
+  await page.getByRole('menuitem', { name: 'Overlays' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Overlays' })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe('#/overlays');
+
+  // Nothing of the viewer, before or after there is something to draw over.
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Activity charts' })).toHaveCount(0);
+
+  // A reload loses the memory-only handoff: the page opens on its one empty input.
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Files', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start over' })).toHaveCount(0);
+  await page.getByTestId('overlay-file-input').setInputFiles('src/test/fixtures/simple-route.gpx');
+  // An activity alone makes the still image, which takes the file slots' place.
+  await expect(page.getByText(/Made from simple-route\.gpx/)).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+
+  // The real HERO8 clip, added from there: it carries telemetry but no fix,
+  // so it cannot supply the activity — but it is still a video, and the
+  // GPX chosen a moment ago is what gets drawn over it. The page says why.
+  await page.getByRole('button', { name: 'Add a video' }).click();
+  await page.getByTestId('overlay-file-input').setInputFiles('src/test/fixtures/hero8.mp4');
+  const video = page.getByRole('group', { name: 'Video', exact: true });
+  await expect(video).toContainText('hero8.mp4', { timeout: 60_000 });
+  await expect(video).toContainText('0:13');
+  await expect(video).toContainText(/usable satellite fix/i);
+  await expect(page.getByRole('group', { name: 'Activity', exact: true })).toContainText('simple-route.gpx');
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+
+  // Nothing left the device, whatever the outcome. The preview (AV-1004) plays
+  // the chosen file through a `blob:` URL — a reference to bytes already in this
+  // tab, which the browser resolves without a network request — so those are
+  // the one local scheme set aside; anything else off this origin still fails.
+  expect(
+    requests
+      .map((request) => request.url())
+      .filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
+  ).toEqual([]);
+});
+
 test('navigates to the viewer from the Tools menu (AV-012)', async ({ page }) => {
   await page.goto('./');
 
@@ -716,7 +778,7 @@ test('keeps the Tools menu clear of the title and settings icon (AV-012)', async
 
   const title = (await page.getByRole('heading', { level: 1 }).boundingBox())!;
   const tools = (await page.getByRole('button', { name: /Tools/ }).boundingBox())!;
-  const settings = (await page.getByRole('button', { name: 'Settings' }).boundingBox())!;
+  const settings = (await page.getByRole('banner').getByRole('button', { name: 'Settings' }).boundingBox())!;
 
   // Beside the title, not on top of it, and clear of the settings icon.
   expect(tools.x).toBeGreaterThanOrEqual(title.x + title.width - 1);
@@ -767,7 +829,8 @@ test('focuses the map on the selected section, then leaves it alone (AV-604)', a
     page
       .locator('.maplibregl-canvas')
       .screenshot()
-      .then((shot) => countPixelsNear(decodePng(shot), [0xff, 0xd1, 0x66], 40));
+      // Selection Violet: the chart-selected section (DESIGN.md, TD-056).
+      .then((shot) => countPixelsNear(decodePng(shot), [0xc7, 0x7d, 0xff], 40));
   expect(await focusPixels()).toBe(0);
 
   // Measured after the screenshot: taking one scrolls its target into view,
@@ -822,13 +885,9 @@ test('charts speed for a ride, not pace or run cadence (AV-513, AV-515)', async 
   // ~8 m/s is around 29 km/h.
   await expect(speed).toContainText(/2[5-9]\.\d|3[0-2]\.\d/);
 
-  // Run-specific charts explain that they do not apply to a ride.
-  await expect(page.getByRole('region', { name: 'Pace chart' })).toContainText(
-    /shown for running activities/i,
-  );
-  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText(
-    /shown for running activities/i,
-  );
+  // Run-specific charts do not apply to a ride, so they are not drawn (AV-516).
+  await expect(page.getByRole('region', { name: 'Pace chart' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toHaveCount(0);
 });
 
 test('labels running cadence in strides per minute (AV-515)', async ({ page }) => {
@@ -839,10 +898,8 @@ test('labels running cadence in strides per minute (AV-515)', async ({ page }) =
   await expect(cadence).toContainText('Cadence (spm)');
   await expect(cadence).not.toContainText('rpm');
 
-  // A run gets no speed chart.
-  await expect(page.getByRole('region', { name: 'Speed chart' })).toContainText(
-    /shown for cycling activities/i,
-  );
+  // A run gets no speed chart, and no message about one (AV-516).
+  await expect(page.getByRole('region', { name: 'Speed chart' })).toHaveCount(0);
 });
 
 test('highlights a lap from its row, and lets go again (§17)', async ({ page }) => {
@@ -851,18 +908,14 @@ test('highlights a lap from its row, and lets go again (§17)', async ({ page })
 
   const laps = page.getByRole('region', { name: 'Laps' });
   await laps.getByRole('button', { name: 'Highlight lap 1' }).click();
-  await expect(laps.getByRole('button', { name: 'Stop highlighting lap 1' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
+  // One name throughout; the state is in aria-pressed alone.
+  const lap1 = laps.getByRole('button', { name: 'Highlight lap 1' });
+  await expect(lap1).toHaveAttribute('aria-pressed', 'true');
 
   // Pressing again puts the route back, and no other lap is left pressed.
-  await laps.getByRole('button', { name: 'Stop highlighting lap 1' }).click();
-  await expect(laps.getByRole('button', { name: 'Highlight lap 1' })).toHaveAttribute(
-    'aria-pressed',
-    'false',
-  );
-  await expect(laps.getByRole('button', { name: /^Stop highlighting/ })).toHaveCount(0);
+  await lap1.click();
+  await expect(lap1).toHaveAttribute('aria-pressed', 'false');
+  await expect(laps.getByRole('button', { pressed: true })).toHaveCount(0);
 });
 
 test('offers no control for a lap with no stretch of route to draw (§17)', async ({ page }) => {
@@ -873,7 +926,7 @@ test('offers no control for a lap with no stretch of route to draw (§17)', asyn
   // press used to do nothing at all, with nothing said about why.
   const laps = page.getByRole('region', { name: 'Laps' });
   await expect(laps.getByRole('button', { name: 'Highlight lap 2' })).toHaveCount(0);
-  await expect(laps.getByTitle(/either side of a recording gap/i)).toHaveText('2');
+  await expect(laps).toContainText("Lap 2 can't be highlighted on the map: its points sit either side of a recording gap.");
 
   // Its figures are unaffected: only the control is absent.
   await expect(laps).toContainText('11');
@@ -888,11 +941,8 @@ test('charts pedal cadence for a ride that records it', async ({ page }) => {
   await expect(pedal).toContainText('rpm');
   await expect(pedal).toContainText(/pedal revolutions per minute/i);
 
-  // The running cadence chart is still listed, saying why it is empty — the
-  // same way a run is told that speed is a cycling chart.
-  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toContainText(
-    /shown for running activities/i,
-  );
+  // The running cadence chart does not apply to a ride: not drawn (AV-516).
+  await expect(page.getByRole('region', { name: 'Cadence chart', exact: true })).toHaveCount(0);
 });
 
 test('exports the loaded activity as a real download (AV-554)', async ({ page }) => {
@@ -983,8 +1033,6 @@ test('shows the selection its own figures, leaving the activity summary alone (A
 test('renders the export panel’s secondary text as muted', async ({ page }) => {
   await useRouteOnlyBasemap(page);
   await loadFixture(page, 'route-with-elevation.gpx');
-  // The panel renders after the parse; reading it before then finds nothing.
-  await expect(page.getByRole('region', { name: 'Export activity' })).toBeVisible();
 
   const colours = await page.evaluate(() => {
     const read = (selector: string) => {
@@ -1166,11 +1214,11 @@ test('opens an indoor FIT run with no GPS at all (AV-703)', async ({ page }) => 
   // being no GPS, because the treadmill recorded it.
   await expect(summary).toContainText('Avg pace');
   await expect(summary).toContainText('133 m');
-  // The map box explains itself rather than showing an empty map, and MapLibre
-  // is never downloaded because there is nothing to draw.
-  const map = page.getByRole('region', { name: 'Route map' });
-  await expect(map).toContainText('No route to display');
-  await expect(map.locator('canvas')).toHaveCount(0);
+  // No map box held open to say there is no map: the overview says it once,
+  // and MapLibre is never downloaded because there is nothing to draw.
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+  await expect(page.getByTestId('no-route-note')).toContainText('no GPS coordinates');
+  await expect(page.locator('.maplibregl-canvas')).toHaveCount(0);
 
   // Charts that need no position still work.
   await expect(page.getByRole('region', { name: 'Pace chart' })).toBeVisible();
@@ -1248,7 +1296,8 @@ test('shows a useful error for a malformed GPX file', async ({ page }) => {
   await loadFixture(page, 'malformed.gpx');
 
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('Could not open this file');
+  // Named, so a reader who has tried several files knows which one failed.
+  await expect(alert).toContainText('Could not open malformed.gpx');
   await expect(alert).toContainText('invalid_gpx_xml');
 });
 
@@ -1303,10 +1352,11 @@ test('hovering the chart highlights the corresponding map point', async ({ page 
   expect(await page.getByTestId('chart-cursor').count()).toBeGreaterThan(1);
 });
 
-test('shows a placeholder instead of a map for an activity with no GPS', async ({ page }) => {
+test('says there is no route, instead of showing a map, for an activity with no GPS', async ({ page }) => {
   await loadFixture(page, 'no-location.gpx');
 
-  await expect(page.getByTestId('map-placeholder')).toContainText('No route to display');
+  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Activity overview' }).getByTestId('no-route-note')).toBeVisible();
   await expect(page.locator('.maplibregl-canvas')).toHaveCount(0);
   // The activity is still usable.
   await expect(page.getByTestId('elevation-chart-svg')).toBeVisible();
@@ -1504,7 +1554,7 @@ test('keeps the footer reachable on a narrow screen', async ({ page }) => {
 
 test('credits nyt87 in the footer on every page', async ({ page }) => {
   const credit = page.getByRole('link', { name: 'nyt87' });
-  const repo = page.getByRole('link', { name: 'GitHub' });
+  const repo = page.getByRole('contentinfo').getByRole('link', { name: 'GitHub' });
 
   await expect(credit).toHaveAttribute('href', 'https://nyt87.github.io/');
   await expect(repo).toHaveAttribute('href', 'https://github.com/NYT87/opentrack-viewer');
@@ -1547,7 +1597,7 @@ test('deep-links into the viewer under the sub-path', async ({ page }) => {
   await page.goto('./#/viewer');
 
   await expect(page.getByTestId('file-input')).toBeAttached();
-  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Settings' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'nyt87' })).toBeVisible();
 });
 
@@ -1565,12 +1615,12 @@ test('falls back to the homepage for an unknown hash route (AV-006)', async ({ p
   await expect(page.getByRole('link', { name: 'Read the Terms and Conditions' })).toBeVisible();
 
   // The chrome is intact, so the reader can go somewhere real from here.
-  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Settings' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'nyt87' })).toBeVisible();
 
   // The title falls back to the site default rather than naming a route that
   // does not exist (AV-013).
-  await expect(page).toHaveTitle(/open GPX, FIT and TCX activity files/);
+  await expect(page).toHaveTitle(/open GPX, FIT, TCX and KML activity files/);
   expect(errors).toEqual([]);
 
   // ...and navigating on from it works.
@@ -1599,8 +1649,13 @@ test('serves SEO metadata a crawler can read without running the app (AV-013)', 
   expect(html).toMatch(/<meta\s+name="description"/);
   expect(html).toMatch(/property="og:title"/);
   expect(html).toMatch(/property="og:image"/);
-  expect(html).toMatch(/name="twitter:card"/);
+  expect(html).toMatch(/name="twitter:card" content="summary_large_image"/);
   expect(html).toMatch(/rel="canonical"/);
+
+  // The preview image it names is served, as a PNG.
+  const image = await page.request.get(`${ORIGIN}${BASE_PATH}social/preview-1200x630.png`);
+  expect(image.status()).toBe(200);
+  expect(image.headers()['content-type']).toBe('image/png');
 });
 
 test('publishes robots.txt and a sitemap that agree on the site URL (AV-013)', async ({
@@ -1630,7 +1685,7 @@ test('updates the title on navigation, and never names the open file (AV-013)', 
 
   // Navigating changes it, with no reload: the brand is the link home.
   await page.getByRole('link', { name: 'OpenTrack Viewer', exact: true }).click();
-  await expect(page).toHaveTitle(/open GPX, FIT and TCX activity files/);
+  await expect(page).toHaveTitle(/open GPX, FIT, TCX and KML activity files/);
 
   await page.getByRole('link', { name: 'Open an activity' }).first().click();
   await loadFixture(page, 'route-with-elevation.gpx');
@@ -1716,1021 +1771,172 @@ test('caches the app, and nothing of the user or the tile provider (AV-802)', as
   expect(cached.some((url) => url.includes('maplibre-gl-worker'))).toBe(true);
   // The FIT parser chunk too, so a .fit file still opens offline.
   expect(cached.some((url) => url.includes('assets/parseFit'))).toBe(true);
-  // And the GoPro extraction chunks, so video telemetry reads offline too.
-  expect(cached.some((url) => url.includes('assets/extractGpmf'))).toBe(true);
-  expect(cached.some((url) => url.includes('assets/parseGopro'))).toBe(true);
-});
-
-test('adds, drags and deletes points on a real map (AV-1104)', async ({ page }) => {
-  const requests = recordRequests(page);
-  await useRouteOnlyBasemap(page);
-  await page.goto('./#/route-builder');
-  await page.getByRole('button', { name: 'Start a new route' }).click();
-
-  const map = page.getByTestId('route-editor-map');
-  await expect(map).toBeVisible();
-  const box = (await map.boundingBox())!;
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height / 2;
-  const points = page.getByRole('region', { name: 'Current route' });
-  const distanceText = async () => (await points.locator('.summary__value').nth(1).textContent()) ?? '';
-
-  // Click-to-add. Clicks are spaced so none lands on a point already placed.
-  await page.mouse.click(cx - 80, cy);
-  await page.mouse.click(cx, cy - 40);
-  await page.mouse.click(cx + 80, cy);
-  await expect(points.locator('.summary__value').first()).toHaveText('3');
-  await expect(page.getByText('Point 3 of 3 selected')).toBeVisible();
-  const before = await distanceText();
-
-  // MapLibre draws the new points on its next frame; a person takes longer than
-  // that to reach for one, a test does not.
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  await page.waitForTimeout(250);
-
-  // Drag the middle point; the map underneath must not pan with it.
-  await page.mouse.move(cx, cy - 40);
-  await page.mouse.down();
-  await page.mouse.move(cx, cy - 70, { steps: 8 });
-  await page.mouse.move(cx, cy - 110, { steps: 8 });
-  await page.mouse.up();
-
-  await expect(page.getByText('Point 2 of 3 selected')).toBeVisible();
-  await expect(points.locator('.summary__value').first()).toHaveText('3');
-  await expect.poll(distanceText).not.toBe(before);
-  await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
-
-  // The drop did not also add a point, and a later click still does.
-  await page.mouse.click(cx + 120, cy + 60);
-  await expect(points.locator('.summary__value').first()).toHaveText('4');
-
-  await page.getByRole('button', { name: 'Delete point' }).click();
-  await expect(points.locator('.summary__value').first()).toHaveText('3');
-  await page.getByRole('button', { name: 'Undo' }).click();
-  await expect(points.locator('.summary__value').first()).toHaveText('4');
-
-  // Nothing about the route left the browser.
-  expect(requests.filter((r) => !r.url().startsWith(ORIGIN))).toEqual([]);
-});
-
-test('plans a route from an activity and exports it (AV-1108)', async ({ page }, testInfo) => {
-  const requests = recordRequests(page);
-  await useRouteOnlyBasemap(page);
-  await loadFixture(page, 'route-with-elevation.gpx');
-
-  await page.getByRole('button', { name: 'Create Custom Track' }).click();
-  await expect(page.getByRole('heading', { name: 'Route Builder' })).toBeVisible();
-  const count = page.getByRole('region', { name: 'Current route' }).locator('.summary__value').first();
-  await expect(count).toHaveText('4');
-
-  // Mark points 2 to 3 and discard them; the ends are joined.
-  await page.getByRole('button', { name: 'Next point' }).click();
-  await page.getByRole('button', { name: 'Next point' }).click();
-  await page.getByRole('button', { name: 'Mark section start' }).click();
-  await page.getByRole('button', { name: 'Next point' }).click();
-  await expect(page.getByText(/Section: points 2 to 3/)).toBeVisible();
-  await page.getByRole('button', { name: 'Discard section' }).click();
-  await expect(count).toHaveText('2');
-
-  // Append another saved track.
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'simple-route.gpx'));
-  await expect(count).toHaveText('6');
-
-  // Export, and read the bytes the browser received.
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export as GPX' }).click();
-  const saved = await download;
-  expect(saved.suggestedFilename()).toBe('elevation-route-planned-route.gpx');
-  const path = testInfo.outputPath('planned.gpx');
-  await saved.saveAs(path);
-  const xml = readFileSync(path, 'utf-8');
-  expect((xml.match(/<trkpt /g) ?? []).length).toBe(6);
-  expect(xml).not.toContain('<time>');
-
-  // The viewer reads it back as a route.
-  await page.goto('./#/viewer');
-  await page.getByRole('button', { name: 'Close activity' }).click();
-  await page.getByTestId('file-input').setInputFiles(path);
-  await expect(page.getByTestId('map-placeholder')).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Activity summary' })).toBeVisible();
-
-  // The original recording was never altered, and nothing left the browser.
-  expect(requests.filter((request) => !request.url().startsWith(ORIGIN))).toEqual([]);
-});
-
-test('starts an empty route directly, and has a usable phone layout (AV-1108)', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 700 });
-  await useRouteOnlyBasemap(page);
-  await page.goto('./#/route-builder');
-  await expect(page.getByRole('region', { name: 'Start a route' })).toBeVisible();
-  await page.getByRole('button', { name: 'Start a new route' }).click();
-
-  for (const name of ['Undo', 'Delete point', 'Mark section start', 'Export as GPX']) {
-    await expect(page.getByRole('button', { name })).toBeVisible();
-  }
-  // Nothing forces the page to scroll sideways.
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(0);
-  // Export is not offered until there is a route to export.
-  await expect(page.getByRole('button', { name: 'Export as GPX' })).toBeDisabled();
-});
-
-test('saves the route as a transparent PNG of the requested size (AV-1009)', async ({ page }, testInfo) => {
-  const requests = recordRequests(page);
-  await page.goto('./#/overlays');
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'route-with-elevation.gpx'));
-  await expect(page.getByTestId('overlay-canvas')).toBeVisible();
-
-  // A portrait size, so the dimensions are not the default by accident.
-  await page.getByLabel(/^Size/).selectOption('portrait');
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save as PNG' }).click();
-  const saved = await download;
-  expect(saved.suggestedFilename()).toBe('elevation-route-route-overlay.png');
-
-  const path = testInfo.outputPath('overlay.png');
-  await saved.saveAs(path);
-  const image = decodePng(readFileSync(path));
-  expect([image.width, image.height]).toEqual([1080, 1920]);
-
-  const alphaAt = (x: number, y: number) => image.pixels[(y * image.width + x) * 4 + 3]!;
-  // Nothing but the route is drawn: every corner is fully transparent.
-  for (const [x, y] of [[0, 0], [image.width - 1, 0], [0, image.height - 1], [image.width - 1, image.height - 1]] as const) {
-    expect(alphaAt(x, y)).toBe(0);
-  }
-  let opaque = 0;
-  let translucentOrOpaque = 0;
-  let white = 0;
-  for (let i = 0; i < image.pixels.length; i += 4) {
-    const a = image.pixels[i + 3]!;
-    if (a > 0) translucentOrOpaque += 1;
-    if (a === 255) opaque += 1;
-    if (a === 255 && image.pixels[i] === 255 && image.pixels[i + 1] === 255 && image.pixels[i + 2] === 255) white += 1;
-  }
-  // The route is there, in the default colour, and is a small part of the frame.
-  expect(white).toBeGreaterThan(500);
-  expect(opaque).toBeGreaterThan(500);
-  expect(translucentOrOpaque).toBeLessThan(image.width * image.height * 0.2);
-
-  expect(requests.filter((request) => !request.url().startsWith(ORIGIN))).toEqual([]);
-});
-
-test('hands the viewer\'s activity to the overlay page (AV-1009)', async ({ page }) => {
-  await useRouteOnlyBasemap(page);
-  await loadFixture(page, 'route-with-elevation.gpx');
-  await page.getByRole('button', { name: 'Create route overlay' }).click();
-  await expect(page.getByTestId('overlay-canvas')).toBeVisible();
-  await expect(page.getByText('Elevation Route')).toBeVisible();
-  // No viewer panels on the overlay page.
-  await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
-});
-
-/** What the overlay canvas currently holds: how much is drawn, and a fingerprint of it. */
-async function overlayPixels(page: Page) {
-  return page.getByTestId('overlay-video-canvas').evaluate((node) => {
-    const canvas = node as HTMLCanvasElement;
-    const context = canvas.getContext('2d')!;
-    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-    let drawn = 0;
-    let fingerprint = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3]! > 0) {
-        drawn += 1;
-        fingerprint = (fingerprint * 31 + data[i]! + data[i + 1]! * 3 + data[i + 3]! * 7 + i) >>> 0;
-      }
-    }
-    return { drawn, fingerprint, width: canvas.width, height: canvas.height };
-  });
-}
-
-async function openOverlayPreview(page: Page) {
-  await page.goto('./#/overlays');
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
-  await expect(page.getByRole('region', { name: 'Video overlay' })).toBeVisible();
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'sync-test.webm'));
-  await expect(page.getByTestId('overlay-video')).toBeVisible();
-  // Metadata has loaded once the duration is known.
-  await expect(page.getByText(/\/ 0:04/)).toBeVisible();
-}
-
-test('draws the overlay over a playing video and follows a seek (AV-1004)', async ({ page }) => {
-  const requests = recordRequests(page);
-  await openOverlayPreview(page);
-
-  const scrub = page.getByLabel('Video position');
-  const seekTo = async (seconds: number) => {
-    await scrub.evaluate((node, value) => {
-      const input = node as HTMLInputElement;
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-      setter.call(input, String(value));
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }, seconds);
-    await expect.poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeCloseTo(seconds, 0);
-  };
-
-  // The canvas takes the video's own size, so overlays match the picture.
-  await seekTo(1);
-  const at1 = await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100).then(() => overlayPixels(page));
-  expect([at1.width, at1.height]).toEqual([160, 90]);
-
-  // A different moment shows different figures.
-  await seekTo(3);
-  await expect.poll(async () => (await overlayPixels(page)).fingerprint).not.toBe(at1.fingerprint);
-
-  // Playing advances the clock, and the overlay keeps pace with it.
-  await seekTo(0);
-  const before = (await overlayPixels(page)).fingerprint;
-  await page.getByRole('button', { name: 'Play' }).click();
-  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
-  await expect.poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0.5);
-  await expect.poll(async () => (await overlayPixels(page)).fingerprint).not.toBe(before);
-  await page.getByRole('button', { name: 'Pause' }).click();
-
-  // Nothing about the video or the telemetry left the browser. The video's own
-  // object URL is this tab reading a local file, not a network request.
-  expect(
-    requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
-  ).toEqual([]);
-  expect(requests.some((request) => request.url().startsWith('blob:'))).toBe(true);
-});
-
-test('lines the telemetry up with an offset, and blanks outside it (AV-1004)', async ({ page }) => {
-  await openOverlayPreview(page);
-  const scrub = page.getByLabel('Video position');
-  await scrub.evaluate((node) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-    setter.call(node as HTMLInputElement, '1');
-    node.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100);
-  const baseline = await overlayPixels(page);
-
-  // Four seconds later in the telemetry: different figures at the same frame.
-  const offset = page.getByLabel('Offset (seconds)');
-  await offset.fill('4');
-  await expect.poll(async () => (await overlayPixels(page)).fingerprint).not.toBe(baseline.fingerprint);
-  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100);
-
-  // Shifted past the end of the recording, nothing is drawn.
-  await offset.fill('100');
-  await expect.poll(async () => (await overlayPixels(page)).drawn).toBe(0);
-
-  // And the buttons move it by a second each way.
-  await offset.fill('0');
-  await page.getByRole('button', { name: 'Telemetry earlier 1 s' }).click();
-  await expect(offset).toHaveValue('1');
-  await page.getByRole('button', { name: 'Telemetry later 1 s' }).click();
-  await page.getByRole('button', { name: 'Telemetry later 1 s' }).click();
-  await expect(offset).toHaveValue('-1');
-});
-
-test('customizes the overlay and restores the look from a project file (AV-1005)', async ({ page }, testInfo) => {
-  const requests = recordRequests(page);
-  await openOverlayPreview(page);
-  const scrub = page.getByLabel('Video position');
-  await scrub.evaluate((node) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-    setter.call(node as HTMLInputElement, '2');
-    node.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100);
-
-  // Switch every readout off: nothing is left to draw.
-  for (const name of ['Speed', 'Distance', 'Time', 'Elevation']) {
-    await page.getByLabel(`Show ${name} readout`).uncheck();
-  }
-  await expect.poll(async () => (await overlayPixels(page)).drawn).toBe(0);
-
-  // Move one back on, and it is drawn where the sliders put it.
-  await page.getByLabel('Show Distance readout').check();
-  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(50);
-  // The position controls live inside the component's own section: open it.
-  await page.locator('details', { has: page.getByLabel('Show Distance readout') }).evaluate((node) => {
-    (node as HTMLDetailsElement).open = true;
-  });
-  await page.getByLabel('Distance readout left').fill('60');
-
-  // Save the look.
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save project file' }).click();
-  const file = await download;
-  expect(file.suggestedFilename()).toBe('compact-hud-overlay-template.json');
-  const path = testInfo.outputPath('look.json');
-  await file.saveAs(path);
-  const project = JSON.parse(readFileSync(path, 'utf-8'));
-  expect(project.template.components.filter((c: { visible: boolean }) => c.visible).map((c: { id: string }) => c.id)).toEqual(['distance']);
-  expect(readFileSync(path, 'utf-8')).not.toMatch(/overlay-sync|Overlay Sync|"lat"/);
-
-  // Throw the edits away: the shipped template is back.
-  await page.getByRole('button', { name: 'Reset template' }).click();
-  await expect(page.getByLabel('Show Speed readout')).toBeChecked();
-
-  // Load the file: the saved look is restored, and the edits are in force again.
-  await page.getByTestId('project-input').setInputFiles(path);
-  await expect(page.getByRole('option', { name: 'Compact HUD (loaded)' })).toBeAttached();
-  await expect(page.getByLabel('Show Speed readout')).not.toBeChecked();
-  await expect(page.getByLabel('Show Distance readout')).toBeChecked();
-  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(50);
-
-  // Nothing was stored on the device or sent anywhere.
-  expect(await page.evaluate(() => localStorage.length)).toBeLessThanOrEqual(1);
-  expect(
-    requests.map((r) => r.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
-  ).toEqual([]);
-});
-
-test('keeps the template controls usable on a phone (AV-1005)', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 800 });
-  await openOverlayPreview(page);
-  await page.locator('details', { has: page.getByLabel('Show Speed readout') }).evaluate((node) => {
-    (node as HTMLDetailsElement).open = true;
-  });
-  for (const name of ['Speed readout left', 'Speed readout colour', 'Speed readout background']) {
-    await expect(page.getByLabel(name)).toBeVisible();
-  }
-  await expect(page.getByRole('button', { name: 'Save project file' })).toBeVisible();
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(0);
-});
-
-/** Unzips with the system tool, returning the folder; also proves the archive is valid. */
-function unzipTo(path: string): string {
-  execFileSync('unzip', ['-tq', path]);
-  const dir = mkdtempSync(join(tmpdir(), 'overlay-frames-'));
-  execFileSync('unzip', ['-oq', path, '-d', dir]);
-  return dir;
-}
-
-test('saves the overlay as real transparent PNG frames in a valid zip (AV-1006)', async ({ page }, testInfo) => {
-  const requests = recordRequests(page);
-  await openOverlayPreview(page);
-  const panel = page.getByRole('region', { name: 'Export overlay frames' });
-
-  // Defaults come from the video itself.
-  await expect(panel.getByLabel('Frame width')).toHaveValue('160');
-  await expect(panel.getByLabel('Frame height')).toHaveValue('90');
-  await expect(panel.getByLabel('Export to')).toHaveValue('4');
-
-  // Telemetry shifted so it runs out at video second 2: the second half is empty.
-  await page.getByLabel('Offset (seconds)').fill('8');
-  await panel.getByLabel(/Frame rate/).fill('10');
-  await expect(panel.getByText(/40 frames, in one zip file/)).toBeVisible();
-
-  const download = page.waitForEvent('download');
-  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
-  const file = await download;
-  expect(file.suggestedFilename()).toBe('overlay-frames-part-01.zip');
-  await expect(panel.getByText(/Saved 40 frames/)).toBeVisible();
-
-  const path = testInfo.outputPath('frames.zip');
-  await file.saveAs(path);
-  const dir = unzipTo(path);
-  const names = execFileSync('unzip', ['-Z1', path]).toString().trim().split('\n');
-  expect(names.filter((n) => n.endsWith('.png'))).toHaveLength(40);
-  expect(names).toContain('README.txt');
-  const readme = readFileSync(join(dir, 'README.txt'), 'utf-8');
-  expect(readme).toContain('10 fps');
-  expect(readme).toContain('160 x 90');
-  expect(readme).not.toMatch(/sync-test|overlay-sync/);
-
-  const frame = (n: number) => decodePng(readFileSync(join(dir, `overlay_${String(n).padStart(6, '0')}.png`)));
-  const stats = (image: ReturnType<typeof decodePng>) => {
-    let drawn = 0;
-    for (let i = 3; i < image.pixels.length; i += 4) if (image.pixels[i]! > 0) drawn += 1;
-    return { drawn, corner: image.pixels[3]! };
-  };
-
-  const first = frame(1);
-  expect([first.width, first.height]).toEqual([160, 90]);
-  // A real RGBA PNG with a transparent background and something drawn on it.
-  expect(stats(first).corner).toBe(0);
-  expect(stats(first).drawn).toBeGreaterThan(100);
-  // Past the end of the telemetry nothing is drawn: fully transparent.
-  expect(stats(frame(40)).drawn).toBe(0);
-  // The figures differ from frame to frame.
-  expect(Buffer.compare(frame(1).pixels, frame(15).pixels)).not.toBe(0);
-
-  expect(
-    requests.map((r) => r.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
-  ).toEqual([]);
-});
-
-test('splits a long export across zip files without gaps in the numbering (AV-1006)', async ({ page }, testInfo) => {
-  await openOverlayPreview(page);
-  const panel = page.getByRole('region', { name: 'Export overlay frames' });
-  await panel.getByLabel(/Frame rate/).fill('100');
-  await panel.getByLabel('Export to').fill('20');
-  await expect(panel.getByText(/2,000 frames, in at least 2 zip files/)).toBeVisible();
-
-  const downloads: { name: string; path: string }[] = [];
-  page.on('download', async (download) => {
-    const path = testInfo.outputPath(download.suggestedFilename());
-    await download.saveAs(path);
-    downloads.push({ name: download.suggestedFilename(), path });
-  });
-  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
-  await expect(panel.getByText(/Saved 2,000 frames/)).toBeVisible({ timeout: 60_000 });
-  await expect.poll(() => downloads.length).toBe(2);
-
-  downloads.sort((a, b) => a.name.localeCompare(b.name));
-  expect(downloads.map((d) => d.name)).toEqual(['overlay-frames-part-01.zip', 'overlay-frames-part-02.zip']);
-  const frames: number[] = [];
-  for (const { path } of downloads) {
-    execFileSync('unzip', ['-tq', path]);
-    for (const name of execFileSync('unzip', ['-Z1', path]).toString().trim().split('\n')) {
-      const match = /^overlay_(\d{6})\.png$/.exec(name);
-      if (match) frames.push(Number(match[1]));
-    }
-  }
-  frames.sort((a, b) => a - b);
-  expect(frames).toHaveLength(2000);
-  expect(frames[0]).toBe(1);
-  expect(frames.at(-1)).toBe(2000);
-  expect(new Set(frames).size).toBe(2000);
-});
-
-test('stops an export when asked, and says what was kept (AV-1006)', async ({ page }) => {
-  await openOverlayPreview(page);
-  const panel = page.getByRole('region', { name: 'Export overlay frames' });
-  // Large frames, so the export is slow enough to interrupt.
-  await panel.getByLabel('Frame width').fill('3840');
-  await panel.getByLabel('Frame height').fill('2160');
-  await panel.getByLabel(/Frame rate/).fill('60');
-
-  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
-  await expect(panel.getByRole('progressbar', { name: 'Export progress' })).toBeVisible();
-  await panel.getByRole('button', { name: 'Stop' }).click();
-  await expect(panel.getByText(/^Stopped\./)).toBeVisible();
-  await expect(panel.getByRole('button', { name: 'Save PNG frames (zip)' })).toBeEnabled();
-});
-
-
-interface WireRequest {
-  url: string;
-  method: string;
-  body: string | null;
-}
-interface PageNetworkCall {
-  api: string;
-  url: string;
-  method: string;
-  hasBody: boolean;
-}
-
-/**
- * Watches every way a page can reach the network. Two views, because each
- * misses something the other sees: the browser's own request log (which includes
- * the service worker's fetches), and wrappers around the page's `fetch`, XHR,
- * beacon, WebSocket and EventSource, which see a call even if it fails to leave.
- * Must be set up before a navigation, since an init script runs per document.
- */
-async function watchNetwork(page: Page) {
-  await page.addInitScript({
-    content: `
-      (() => {
-        const calls = [];
-        window.__net = calls;
-        const origFetch = window.fetch.bind(window);
-        window.fetch = (input, init) => {
-          const request = typeof Request !== 'undefined' && input instanceof Request ? input : undefined;
-          calls.push({
-            api: 'fetch',
-            url: String(request ? request.url : input),
-            method: String((init && init.method) || (request && request.method) || 'GET').toUpperCase(),
-            hasBody: Boolean((init && init.body) || (request && request.body)),
-          });
-          return origFetch(input, init);
-        };
-        const open = XMLHttpRequest.prototype.open;
-        const send = XMLHttpRequest.prototype.send;
-        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-          this.__m = method;
-          this.__u = String(url);
-          return open.call(this, method, url, ...rest);
-        };
-        XMLHttpRequest.prototype.send = function (body) {
-          calls.push({ api: 'xhr', url: this.__u || '', method: String(this.__m || 'GET').toUpperCase(), hasBody: body != null });
-          return send.call(this, body);
-        };
-        navigator.sendBeacon = (url) => {
-          calls.push({ api: 'sendBeacon', url: String(url), method: 'POST', hasBody: true });
-          return false;
-        };
-        for (const name of ['WebSocket', 'EventSource']) {
-          const Original = window[name];
-          if (!Original) continue;
-          window[name] = function (...args) {
-            calls.push({ api: name, url: String(args[0]), method: 'GET', hasBody: false });
-            return new Original(...args);
-          };
-        }
-      })();
-    `,
-  });
-  const wire: WireRequest[] = [];
-  page.context().on('request', (request) => {
-    wire.push({ url: request.url(), method: request.method(), body: request.postData() });
-  });
-  return {
-    wire,
-    isLive: () => page.evaluate(() => Array.isArray((window as unknown as { __net?: unknown }).__net)),
-    calls: () => page.evaluate(() => (window as unknown as { __net: PageNetworkCall[] }).__net),
-  };
-}
-
-/** Requests that are not a plain GET, with no body, for this site's own files (or a `blob:` the page made). */
-function outsideTheSite(wire: WireRequest[]): WireRequest[] {
-  const site = `${ORIGIN}${BASE_PATH}`;
-  return wire.filter(
-    ({ url, method, body }) =>
-      !(url.startsWith('blob:') || url.startsWith('data:')) && !(url.startsWith(site) && method === 'GET' && body === null),
-  );
-}
-
-/** Moves the preview video to `seconds` and waits for it to land there. */
-async function seekPreview(page: Page, seconds: number) {
-  await page.getByLabel('Video position').evaluate((node, value) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-    setter.call(node as HTMLInputElement, String(value));
-    node.dispatchEvent(new Event('input', { bubbles: true }));
-  }, seconds);
-  await expect
-    .poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime))
-    .toBeCloseTo(seconds, 1);
-  // The overlay is redrawn on `seeked`, a moment after the clock moves.
-  await page.waitForTimeout(80);
-}
-
-/**
- * Pixels of one pure colour on the overlay canvas, within a region given as
- * fractions of the frame. Measuring by colour makes the checks independent of
- * fonts and anti-aliasing, which differ between machines.
- */
-async function colourStats(
-  page: Page,
-  rgb: [number, number, number],
-  region: { x0: number; y0: number; x1: number; y1: number } = { x0: 0, y0: 0, x1: 1, y1: 1 },
-) {
-  return page.getByTestId('overlay-video-canvas').evaluate(
-    (node, args) => {
-      const canvas = node as HTMLCanvasElement;
-      const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
-      const { rgb, region } = args;
-      let count = 0;
-      let sumX = 0;
-      let sumY = 0;
-      for (let y = Math.floor(region.y0 * canvas.height); y < Math.ceil(region.y1 * canvas.height); y += 1) {
-        for (let x = Math.floor(region.x0 * canvas.width); x < Math.ceil(region.x1 * canvas.width); x += 1) {
-          const i = (y * canvas.width + x) * 4;
-          const close =
-            Math.abs(data[i]! - rgb[0]) < 60 && Math.abs(data[i + 1]! - rgb[1]) < 60 && Math.abs(data[i + 2]! - rgb[2]) < 60;
-          if (close && data[i + 3]! > 20) {
-            count += 1;
-            sumX += x;
-            sumY += y;
-          }
-        }
-      }
-      return { count, x: count ? sumX / count : NaN, y: count ? sumY / count : NaN };
-    },
-    { rgb, region },
-  );
-}
-
-test('draws each component where and how big it should be, at fixed timestamps (AV-1008)', async ({ page }) => {
-  await openOverlayPreview(page);
-  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-test-pattern.json'));
-  await expect(page.getByRole('option', { name: 'Test pattern (loaded)' })).toBeAttached();
-
-  const BAR = { x0: 0.05, y0: 0.85, x1: 0.55, y1: 0.93 };
-  const MAP = { x0: 0.6, y0: 0.1, x1: 0.95, y1: 0.65 };
-  const DIAL = { x0: 0.05, y0: 0.1, x1: 0.5, y1: 0.75 };
-  const MAGENTA: [number, number, number] = [255, 0, 255];
-  const YELLOW: [number, number, number] = [255, 255, 0];
-  const ORANGE: [number, number, number] = [255, 136, 0];
-  const GREEN: [number, number, number] = [0, 255, 0];
-  const CYAN: [number, number, number] = [0, 255, 255];
-
-  // The telemetry is ten seconds long; the video shows the first four.
-  await seekPreview(page, 1);
-  const bar1 = await colourStats(page, MAGENTA, BAR);
-  const marker1 = await colourStats(page, YELLOW, MAP);
-  await seekPreview(page, 3);
-  const bar3 = await colourStats(page, MAGENTA, BAR);
-  const marker3 = await colourStats(page, YELLOW, MAP);
-
-  // Progress: 10% then 30% of the way through, so about three times the fill.
-  expect(bar1.count).toBeGreaterThan(20);
-  expect(bar3.count / bar1.count).toBeGreaterThan(2);
-  expect(bar3.count / bar1.count).toBeLessThan(4);
-  // And the fill grows from the left edge of the bar.
-  expect(bar3.x).toBeGreaterThan(bar1.x);
-
-  // The marker is on the route, and moves up and to the right along it.
-  expect(marker1.count).toBeGreaterThan(5);
-  expect(marker3.count).toBeGreaterThan(5);
-  expect(marker3.x).toBeGreaterThan(marker1.x);
-  expect(marker3.y).toBeLessThan(marker1.y);
-  // The route line itself is drawn in its own colour inside its own box.
-  expect((await colourStats(page, CYAN, MAP)).count).toBeGreaterThan(20);
-
-  // The dial: a track and a value arc, in the left block only.
-  expect((await colourStats(page, GREEN, DIAL)).count).toBeGreaterThan(20);
-  expect((await colourStats(page, ORANGE, DIAL)).count).toBeGreaterThan(10);
-  expect((await colourStats(page, ORANGE, { x0: 0.5, y0: 0, x1: 1, y1: 1 })).count).toBe(0);
-
-  // The same moment reached by different routes is the same picture.
-  const fingerprint = () =>
-    page.getByTestId('overlay-video-canvas').evaluate((node) => {
-      const canvas = node as HTMLCanvasElement;
-      const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
-      let hash = 0;
-      for (let i = 0; i < data.length; i += 1) hash = (hash * 31 + data[i]!) >>> 0;
-      return hash;
-    });
-  await seekPreview(page, 2);
-  const direct = await fingerprint();
-  await seekPreview(page, 3.5);
-  await seekPreview(page, 0.5);
-  await seekPreview(page, 2);
-  expect(await fingerprint()).toBe(direct);
-
-  // Past the telemetry, none of it is drawn.
-  await page.getByLabel('Offset (seconds)').fill('100');
-  await expect.poll(async () => (await colourStats(page, YELLOW)).count).toBe(0);
-  for (const colour of [MAGENTA, ORANGE, GREEN]) {
-    expect((await colourStats(page, colour)).count).toBe(0);
-  }
-  // Except the route line, which never depended on the clock.
-  expect((await colourStats(page, CYAN, MAP)).count).toBeGreaterThan(20);
-});
-
-test('explains a broken project file in a real browser, and keeps the current template (AV-1008)', async ({ page }) => {
-  await openOverlayPreview(page);
-  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-invalid.json'));
-  const alert = page.getByRole('alert').filter({ hasText: 'could not be loaded' });
-  await expect(alert).toBeVisible();
-  await expect(alert).toContainText(/units: must be/);
-  await expect(alert).toContainText(/metric: must be one of/);
-  await expect(alert).toContainText(/must be a colour/);
-  // Nothing changed: still the shipped template, with nothing loaded.
-  await expect(page.getByRole('combobox', { name: /^Template/ })).toHaveValue('compact-hud');
-  await expect(page.getByRole('option', { name: /\(loaded\)/ })).toHaveCount(0);
-});
-
-test('keeps video, telemetry, frames and file names off the network in every overlay flow (AV-1008)', async ({ page }, testInfo) => {
-  const network = await watchNetwork(page);
-
-  // A real navigation, not a hash change on the page the suite opened: an init
-  // script only runs when a new document loads.
-  await page.goto('about:blank');
-  await page.goto('./#/overlays');
-  expect(await network.isLive()).toBe(true);
-
-  // 1. A route image from a file.
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
-  const pngDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save as PNG' }).click();
-  const png = await pngDownload;
-
-  // 2. The video preview: choose, seek, play, line up.
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'sync-test.webm'));
-  await expect(page.getByText(/\/ 0:04/)).toBeVisible();
-  await seekPreview(page, 2);
-  await page.getByRole('button', { name: 'Play' }).click();
-  await expect.poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(2.1);
-  await page.getByRole('button', { name: 'Pause' }).click();
-  await page.getByLabel('Offset (seconds)').fill('2');
-
-  // 3. Customize, save the project, and load one back.
-  await page.getByLabel('Show Speed readout').uncheck();
-  const projectDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Save project file' }).click();
-  const project = await projectDownload;
-  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-test-pattern.json'));
-  await expect(page.getByRole('option', { name: 'Test pattern (loaded)' })).toBeAttached();
-
-  // 4. Export frames.
-  const panel = page.getByRole('region', { name: 'Export overlay frames' });
-  await panel.getByLabel(/Frame rate/).fill('5');
-  await panel.getByLabel('Export to').fill('2');
-  const zipDownload = page.waitForEvent('download');
-  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
-  const zip = await zipDownload;
-  await expect(panel.getByText(/Saved 10 frames/)).toBeVisible();
-
-  // The route image is named after the route, as the viewer's exports are: a
-  // local file name the user will recognise. The sequence and project file sit
-  // beside a video and are named generically, never after it or the telemetry.
-  expect(png.suggestedFilename()).toBe('overlay-sync-route-overlay.png');
-  for (const name of [project, zip].map((d) => d.suggestedFilename())) {
-    expect(name).not.toMatch(/overlay-sync|sync-test|test-pattern/i);
-  }
-
-  // Every request is for the app's own static files: a plain GET, no body, to
-  // this site (or a blob: the page made itself), and naming nothing of the user's.
-  const { wire } = network;
-  expect(outsideTheSite(wire)).toEqual([]);
-  const identifying = /overlay-sync|sync-test|test-pattern|Overlay(%20| )Sync|51\.5/i;
-  expect(wire.filter(({ url }) => !url.startsWith('blob:') && identifying.test(url))).toEqual([]);
-
-  // Nothing the page itself did could have sent anything either.
-  const calls = await network.calls();
-  expect(calls.filter((c) => c.api !== 'fetch' && c.api !== 'xhr')).toEqual([]);
-  for (const call of calls) {
-    expect(call.method).toBe('GET');
-    expect(call.hasBody).toBe(false);
-    expect(new URL(call.url, ORIGIN).origin).toBe(ORIGIN);
-  }
-
-  // And the session left nothing behind on the device.
-  const stored = await page.evaluate(async () => ({
-    local: Object.keys(localStorage),
-    session: Object.keys(sessionStorage),
-    databases: (await indexedDB.databases?.())?.map((d) => d.name) ?? [],
-  }));
-  expect(stored.session).toEqual([]);
-  expect(stored.databases).toEqual([]);
-  // Only the theme preference is ever written (§5); nothing about an overlay.
-  expect(stored.local.filter((key) => !/theme/i.test(key))).toEqual([]);
-  void testInfo;
-});
-
-test('the network watch actually sees a leak when there is one (AV-1008)', async ({ page }) => {
-  // A check that cannot fail proves nothing. This makes the page misbehave on
-  // purpose, in each way the privacy test guards against, and expects it caught.
-  const network = await watchNetwork(page);
-  await page.goto('about:blank');
-  await page.goto('./#/overlays');
-  expect(await network.isLive()).toBe(true);
-
-  await page.evaluate(async (origin) => {
-    await fetch(`${origin}/leak`, { method: 'POST', body: 'telemetry' }).catch(() => undefined);
-    const request = new XMLHttpRequest();
-    request.open('PUT', `${origin}/leak-xhr`);
-    request.send('frames');
-    navigator.sendBeacon(`${origin}/leak-beacon`, 'video');
-    try {
-      new WebSocket('ws://localhost:1/leak').close();
-    } catch {
-      /* the attempt is what is recorded */
-    }
-  }, ORIGIN);
-  await page.waitForTimeout(200);
-
-  const calls = await network.calls();
-  expect(calls.map((c) => c.api)).toEqual(expect.arrayContaining(['fetch', 'xhr', 'sendBeacon', 'WebSocket']));
-  expect(calls.find((c) => c.api === 'fetch')).toMatchObject({ method: 'POST', hasBody: true });
-  expect(calls.find((c) => c.api === 'xhr')).toMatchObject({ method: 'PUT', hasBody: true });
-  // And on the wire, outside the "plain GET for our own files" rule.
-  const leaked = outsideTheSite(network.wire).map((r) => `${r.method} ${r.url}`);
-  expect(leaked).toEqual(expect.arrayContaining([expect.stringContaining('POST'), expect.stringContaining('PUT')]));
-});
-
-interface MediaProbe {
-  video?: { codec: string; width: number; height: number };
-  audio?: { codec: string };
-  durationSeconds?: number;
-}
-
-/** What `ffprobe` finds in a saved video. */
-function probeMedia(path: string): MediaProbe {
-  const out = JSON.parse(
-    execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path]).toString(),
-  ) as { streams: { codec_type: string; codec_name: string; width?: number; height?: number }[]; format: { duration?: string } };
-  const video = out.streams.find((st) => st.codec_type === 'video');
-  const audio = out.streams.find((st) => st.codec_type === 'audio');
-  const duration = Number(out.format.duration);
-  return {
-    ...(video ? { video: { codec: video.codec_name, width: video.width!, height: video.height! } } : {}),
-    ...(audio ? { audio: { codec: audio.codec_name } } : {}),
-    ...(Number.isFinite(duration) ? { durationSeconds: duration } : {}),
-  };
-}
-
-/** One decoded frame of a video, at `seconds`. */
-function frameAt(path: string, seconds: number) {
-  const dir = mkdtempSync(join(tmpdir(), 'burn-frame-'));
-  const png = join(dir, 'frame.png');
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', String(seconds), '-i', path, '-frames:v', '1', png]);
-  return decodePng(readFileSync(png));
-}
-
-/** Pixels of one colour in a region (fractions of the frame), and their centroid. */
-function colourIn(
-  image: ReturnType<typeof decodePng>,
-  rgb: [number, number, number],
-  region: { x0: number; y0: number; x1: number; y1: number },
-  tolerance = 90,
-) {
-  let count = 0;
-  for (let y = Math.floor(region.y0 * image.height); y < Math.ceil(region.y1 * image.height); y += 1) {
-    for (let x = Math.floor(region.x0 * image.width); x < Math.ceil(region.x1 * image.width); x += 1) {
-      const i = (y * image.width + x) * 4;
-      if (
-        Math.abs(image.pixels[i]! - rgb[0]) < tolerance &&
-        Math.abs(image.pixels[i + 1]! - rgb[1]) < tolerance &&
-        Math.abs(image.pixels[i + 2]! - rgb[2]) < tolerance
-      ) {
-        count += 1;
-      }
-    }
-  }
-  return count;
-}
-
-/** Mean absolute difference between two frames over a region, per channel. */
-function regionDifference(
-  a: ReturnType<typeof decodePng>,
-  b: ReturnType<typeof decodePng>,
-  region: { x0: number; y0: number; x1: number; y1: number },
-) {
-  let total = 0;
-  let n = 0;
-  for (let y = Math.floor(region.y0 * a.height); y < Math.ceil(region.y1 * a.height); y += 1) {
-    for (let x = Math.floor(region.x0 * a.width); x < Math.ceil(region.x1 * a.width); x += 1) {
-      const i = (y * a.width + x) * 4;
-      for (let c = 0; c < 3; c += 1) {
-        total += Math.abs(a.pixels[i + c]! - b.pixels[i + c]!);
-        n += 1;
-      }
-    }
-  }
-  return total / n;
-}
-
-/** Mean volume of a file's sound in dB, or undefined if it has none. */
-function meanVolume(path: string): number | undefined {
-  const out = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', path, '-af', 'volumedetect', '-vn', '-f', 'null', '-']);
-  const match = /mean_volume: (-?[\d.]+) dB/.exec(out.stderr.toString());
-  return match ? Number(match[1]) : undefined;
-}
-
-const BURN_IN = { name: 'Save video with overlay' };
-
-test('records the video with the overlay burned into the picture (AV-1007)', async ({ page }, testInfo) => {
-  const requests = recordRequests(page);
-  await openOverlayPreview(page);
-  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-test-pattern.json'));
-  await expect(page.getByRole('option', { name: 'Test pattern (loaded)' })).toBeAttached();
-
-  const panel = page.getByRole('region', BURN_IN);
-  await expect(panel.getByLabel('Video width')).toHaveValue('160');
-  await panel.getByLabel('Video frame rate').fill('10');
-  await expect(panel.getByText(/Takes about 4 s/)).toBeVisible();
-
-  const download = page.waitForEvent('download');
-  await panel.getByRole('button', { name: 'Save video with overlay' }).click();
-  // The preview steps aside while the export plays the video itself.
-  await expect(page.getByRole('button', { name: 'Play' })).toBeDisabled();
-  await expect(panel.getByRole('progressbar', { name: 'Recording progress' })).toBeVisible();
-  const file = await download;
-  expect(file.suggestedFilename()).toBe('video-with-overlay.webm');
-  await expect(panel.getByText(/Saved/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Play' })).toBeEnabled();
-
-  const path = testInfo.outputPath('burned.webm');
-  await file.saveAs(path);
-
-  // A real video of the right size and length (the length is the patched header).
-  const media = probeMedia(path);
-  expect(media.video).toMatchObject({ codec: 'vp9', width: 160, height: 90 });
-  expect(media.durationSeconds).toBeGreaterThan(3.5);
-  expect(media.durationSeconds).toBeLessThan(5);
-  // The source had no sound, so there is none, and the panel says so.
-  expect(media.audio).toBeUndefined();
-  await expect(panel.getByText(/It has no sound/)).toBeVisible();
-  // It decodes end to end.
-  execFileSync('ffmpeg', ['-v', 'error', '-i', path, '-f', 'null', '-']);
-
-  const BAR = { x0: 0.05, y0: 0.85, x1: 0.55, y1: 0.93 };
-  const STRIP = { x0: 0, y0: 0.94, x1: 1, y1: 1 };
-  const MAGENTA: [number, number, number] = [255, 0, 255];
-  const early = frameAt(path, 1);
-  const late = frameAt(path, 3);
-
-  // The overlay is in the picture, and moves with the video: the progress bar fills.
-  expect(colourIn(early, MAGENTA, BAR)).toBeGreaterThan(10);
-  expect(colourIn(late, MAGENTA, BAR)).toBeGreaterThan(colourIn(early, MAGENTA, BAR) * 1.5);
-  expect(colourIn(late, [255, 255, 0], { x0: 0.6, y0: 0.1, x1: 0.95, y1: 0.65 })).toBeGreaterThan(3);
-
-  // And the video is still there under it: a strip the overlay never touches matches the source.
-  const source = frameAt(join(FIXTURE_DIR, 'sync-test.webm'), 3);
-  expect(regionDifference(late, source, STRIP)).toBeLessThan(30);
-  // ...and is not simply a blank canvas with an overlay on it.
-  expect(colourIn(late, [0, 0, 0], { x0: 0, y0: 0, x1: 1, y1: 1 }, 30)).toBeLessThan(late.width * late.height * 0.5);
-
-  // Nothing left the browser.
-  expect(
-    requests.map((r) => r.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
-  ).toEqual([]);
-});
-
-test('carries the video\'s sound across, or leaves it out when asked (AV-1007)', async ({ page }, testInfo) => {
-  await page.goto('./#/overlays');
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
-  // The same input first takes the route and then the video: wait for the swap.
-  await expect(page.getByRole('region', { name: 'Video overlay' })).toBeVisible();
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'sync-test-audio.webm'));
-  await expect(page.getByText(/\/ 0:04/)).toBeVisible();
-  const panel = page.getByRole('region', BURN_IN);
-  await panel.getByLabel('Video frame rate').fill('10');
-
-  const record = async (name: string) => {
-    const download = page.waitForEvent('download');
-    await panel.getByRole('button', { name: 'Save video with overlay' }).click();
-    const file = await download;
-    await expect(panel.getByText(/Saved/)).toBeVisible({ timeout: 20_000 });
-    const path = testInfo.outputPath(name);
-    await file.saveAs(path);
-    return path;
-  };
-
-  // With sound: it is really there, and about as loud as the source (a muted
-  // element would record silence at about -91 dB).
-  const withSound = await record('with-sound.webm');
-  expect(probeMedia(withSound).audio).toMatchObject({ codec: 'opus' });
-  const sourceVolume = meanVolume(join(FIXTURE_DIR, 'sync-test-audio.webm'))!;
-  const recordedVolume = meanVolume(withSound)!;
-  expect(recordedVolume).toBeGreaterThan(-40);
-  expect(Math.abs(recordedVolume - sourceVolume)).toBeLessThan(6);
-  await expect(panel.getByText(/It has no sound/)).toHaveCount(0);
-
-  // Without: no audio stream at all.
-  await panel.getByLabel(/Include the video's sound/).uncheck();
-  const withoutSound = await record('without-sound.webm');
-  expect(probeMedia(withoutSound).audio).toBeUndefined();
-  expect(probeMedia(withoutSound).video).toBeDefined();
-});
-
-test('records a real GoPro clip, a range of it, with its sound (AV-1007)', async ({ page }, testInfo) => {
-  // Recording runs at the video's own speed and decodes and encodes as it goes,
-  // so on a loaded machine it takes longer than the clip. Allow for that.
-  test.setTimeout(120_000);
-  // The real HERO8 sample: 848x480 H.264 with AAC sound, 12.6 s. The overlay
-  // comes from a separate telemetry file, as it would for a clip with no GPS fix.
-  await page.goto('./#/overlays');
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
-  // The same input first takes the route and then the video: wait for the swap.
-  await expect(page.getByRole('region', { name: 'Video overlay' })).toBeVisible();
-  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
-  await expect(page.getByText(/\/ 0:1[23]/)).toBeVisible({ timeout: 60_000 });
-
-  const panel = page.getByRole('region', BURN_IN);
-  await expect(panel.getByLabel('Video width')).toHaveValue('848');
-  await expect(panel.getByLabel('Video height')).toHaveValue('480');
-  // Two seconds in, for four seconds: the range is honoured.
-  await panel.getByLabel('Video from').fill('2');
-  await panel.getByLabel('Video to').fill('6');
-  await expect(panel.getByText(/Takes about 4 s/)).toBeVisible();
-
-  const download = page.waitForEvent('download');
-  await panel.getByRole('button', { name: 'Save video with overlay' }).click();
-  const file = await download;
-  await expect(panel.getByText(/Saved/)).toBeVisible({ timeout: 90_000 });
-  const path = testInfo.outputPath('gopro.webm');
-  await file.saveAs(path);
-
-  const media = probeMedia(path);
-  expect(media.video).toMatchObject({ width: 848, height: 480 });
-  expect(media.durationSeconds).toBeGreaterThan(3.4);
-  expect(media.durationSeconds).toBeLessThan(5.5);
-  expect(media.audio).toMatchObject({ codec: 'opus' });
-  // The camera's own sound came through.
-  expect(meanVolume(path)!).toBeGreaterThan(-70);
-  // The overlay is drawn over real footage: text-sized panels in the corner, so
-  // some of the frame is overlay-dark and the rest is varied picture.
-  const frame = frameAt(path, 1.5);
-  const distinct = new Set<number>();
-  for (let i = 0; i < frame.pixels.length; i += 4 * 97) {
-    distinct.add((frame.pixels[i]! >> 4) * 256 + (frame.pixels[i + 1]! >> 4) * 16 + (frame.pixels[i + 2]! >> 4));
-  }
-  expect(distinct.size).toBeGreaterThan(40);
-  // The source file itself was not touched.
-  expect(readFileSync(join(FIXTURE_DIR, 'hero8.mp4')).length).toBe(4_402_730);
-});
-
-test('stops a recording when asked, saving nothing (AV-1007)', async ({ page }) => {
-  await openOverlayPreview(page);
-  const panel = page.getByRole('region', BURN_IN);
-  let downloads = 0;
-  page.on('download', () => (downloads += 1));
-
-  await panel.getByRole('button', { name: 'Save video with overlay' }).click();
-  await expect(panel.getByRole('progressbar', { name: 'Recording progress' })).toBeVisible();
-  await panel.getByRole('button', { name: 'Stop' }).click();
-  await expect(panel.getByText(/Stopped\. Nothing was saved\./)).toBeVisible();
-  await expect(panel.getByRole('button', { name: 'Save video with overlay' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Play' })).toBeEnabled();
-  expect(downloads).toBe(0);
 });
 
 test('fixture files are never read by the server', async () => {
   // Sanity check that fixtures are local test data, not network resources.
   const gpx = readFileSync(join(FIXTURE_DIR, 'simple-route.gpx'), 'utf-8');
   expect(gpx).toContain('<gpx');
+});
+
+test('opens a KML file and lists what it held that the route does not (AV-761, AV-762)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  const requests = recordRequests(page);
+
+  // A file that points at the network in four places, holds a polygon, an
+  // overlay, a model, a tour and a network link — and one three-point route.
+  await loadFixture(page, 'unsupported-features.kml');
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toContainText('KML');
+  await expect(summary).toContainText('The actual route');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+
+  // The conversion review: every loss said, before any export.
+  const warnings = page.locator('details.warnings');
+  await expect(warnings).toContainText(/parser warning/);
+  await warnings.locator('summary').click();
+  await expect(warnings).toContainText(/Not read: 1 polygon, 1 image overlay, 1 3D model, 1 tour and 1 network link/);
+  await expect(warnings).toContainText(/4 external resources/);
+
+  // No URL from the file reaches the page, as text or as a request.
+  await expect(page.locator('body')).not.toContainText('example.invalid');
+  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
+    [],
+  );
+  expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+});
+
+test('converts an untimed KML route to GPX, and withholds the formats that need a clock (AV-762)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'route-linestring.kml');
+
+  // KML is not written, so there is no rewrite: the default is a conversion.
+  await expect(page.getByLabel('Format')).toHaveValue('gpx');
+  await expect(page.getByRole('option', { name: /KML/ })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: /^FIT/ })).toBeDisabled();
+  await expect(page.getByRole('option', { name: /^TCX/ })).toBeDisabled();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to GPX' }).click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe('Riverside-loop.gpx');
+
+  const stream = await saved.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const xml = Buffer.concat(chunks);
+  expect(xml.toString('utf-8')).toContain('<gpx');
+
+  // Hand it straight back to the app: the real proof it is readable GPX.
+  await page.getByRole('button', { name: 'Close activity' }).click();
+  await page.getByTestId('file-input').setInputFiles({
+    name: saved.suggestedFilename(),
+    mimeType: 'application/gpx+xml',
+    buffer: xml,
+  });
+
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toContainText('GPX');
+  await expect(summary).toContainText('Riverside loop');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+});
+
+test('converts a timed KML track to TCX and to FIT (AV-762)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'track-timed.kml');
+
+  // A gx:Track has a clock, so every registered target is on offer.
+  await expect(page.getByRole('option', { name: /^FIT/ })).toBeEnabled();
+  await expect(page.getByRole('option', { name: /^TCX/ })).toBeEnabled();
+  await expect(page.getByRole('region', { name: 'Heart rate chart' })).toBeVisible();
+
+  await page.getByLabel('Format').selectOption('tcx');
+  const tcx = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to TCX' }).click();
+  expect((await tcx).suggestedFilename()).toBe('Morning-track.tcx');
+
+  await page.getByLabel('Format').selectOption('fit');
+  const fit = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Convert to FIT' }).click();
+  expect((await fit).suggestedFilename()).toBe('Morning-track.fit');
+});
+
+test('reads a GoPro video with a fix and maps it through the viewer (AV-906)', async ({
+  page,
+}) => {
+  await useRouteOnlyBasemap(page);
+  const requests = recordRequests(page);
+
+  await page.goto('./#/video-telemetry');
+  // A real HERO7 payload, recorded outdoors with a fix, inside a generated
+  // container: the one video fixture that produces a route.
+  await page.getByTestId('file-input').setInputFiles('src/test/fixtures/hero7-synthetic.mp4');
+
+  const result = page.getByRole('region', { name: 'Extraction result' });
+  await expect(result).toBeVisible({ timeout: 60_000 });
+  await expect(result).toContainText('Telemetry found');
+  await expect(result).toContainText(/hero7/i);
+
+  await result.getByRole('button', { name: 'Open in viewer' }).click();
+  expect(new URL(page.url()).hash).toBe('#/viewer');
+
+  // The same viewer every other format gets: summary, map, charts, export.
+  const summary = page.getByRole('region', { name: 'Activity summary' });
+  await expect(summary).toContainText('GOPRO');
+  await expect(summary).toContainText('Avg speed');
+  await expect(page.getByRole('region', { name: 'Route map' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Speed chart' })).toBeVisible();
+  await expect(page.getByRole('option', { name: /^GPX/ })).toBeEnabled();
+
+  // Nothing about the video, its payload or its route left the tab.
+  expect(requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN))).toEqual(
+    [],
+  );
+  expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+});
+
+test('reads and selects along the charts by keyboard alone, from the title it lands on (TD-056)', async ({ page }) => {
+  await useRouteOnlyBasemap(page);
+  await loadFixture(page, 'run-with-cadence.gpx');
+
+  // Opening a file puts focus on what was opened, and says so.
+  await expect(page.locator('#activity-title')).toBeFocused();
+  await expect(page.locator('.viewer [role="status"][aria-live="polite"]')).toContainText(/^Activity opened: distance /);
+
+  // Tab reaches the first chart, which is a slider over the activity.
+  const chart = page.getByRole('slider', { name: 'Elevation chart' });
+  for (let i = 0; i < 40 && !(await chart.evaluate((element) => element === document.activeElement)); i += 1) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(chart).toBeFocused();
+  const ring = await chart.evaluate((element) => getComputedStyle(element).outlineStyle);
+  expect(ring).not.toBe('none');
+
+  // The arrows move the cursor, and the readout names every chart's value at it.
+  const readout = page.getByRole('region', { name: 'Values at the cursor' });
+  await expect(readout).toContainText('Point at a chart');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(readout.getByRole('term').first()).toHaveText('At');
+  await expect(readout).toContainText('Elevation');
+  await expect(chart).toHaveAttribute('aria-valuetext', /^at .+, elevation \d+ m$/);
+  await expect(page.getByTestId('chart-cursor').first()).toBeVisible();
+
+  // Shift extends a section, Enter keeps it, Escape lets it go.
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('Enter');
+  // The section is said where the reader is looking: in the sticky readout,
+  // with its figures and the way back out, and nothing inserted above the charts.
+  await expect(page.getByRole('button', { name: 'Reset View' })).toBeVisible();
+  const scope = page.locator('.chart-readout').getByRole('region', { name: 'Selected section summary' });
+  await expect(scope).toContainText('Your file is unchanged');
+  await expect(chart).toHaveAttribute('aria-valuetext', /^at .+, elevation \d+ m$/);
+  await page.getByRole('slider', { name: 'Elevation chart' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Reset View' })).toHaveCount(0);
 });

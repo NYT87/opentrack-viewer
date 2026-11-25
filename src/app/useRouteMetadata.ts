@@ -3,6 +3,9 @@ import { useLocation } from 'react-router-dom';
 import {
   CANONICAL_URL,
   PREVIEW_IMAGE,
+  PREVIEW_IMAGE_ALT,
+  PREVIEW_IMAGE_HEIGHT,
+  PREVIEW_IMAGE_WIDTH,
   SITE_NAME,
   metadataForRoute,
 } from './seo';
@@ -54,11 +57,16 @@ export function useRouteMetadata(): void {
     upsertMeta('property', 'og:description', description);
     upsertMeta('property', 'og:url', CANONICAL_URL);
     upsertMeta('property', 'og:image', PREVIEW_IMAGE);
+    upsertMeta('property', 'og:image:width', String(PREVIEW_IMAGE_WIDTH));
+    upsertMeta('property', 'og:image:height', String(PREVIEW_IMAGE_HEIGHT));
+    upsertMeta('property', 'og:image:alt', PREVIEW_IMAGE_ALT);
 
-    upsertMeta('name', 'twitter:card', 'summary');
+    // The wide image, drawn large above the title rather than as a thumbnail.
+    upsertMeta('name', 'twitter:card', 'summary_large_image');
     upsertMeta('name', 'twitter:title', title);
     upsertMeta('name', 'twitter:description', description);
     upsertMeta('name', 'twitter:image', PREVIEW_IMAGE);
+    upsertMeta('name', 'twitter:image:alt', PREVIEW_IMAGE_ALT);
 
     upsertCanonical(CANONICAL_URL);
   }, [pathname]);

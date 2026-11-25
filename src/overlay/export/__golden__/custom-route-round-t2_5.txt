@@ -1,0 +1,19 @@
+clearRect(0, 0, 1280, 720)
+save()
+beginPath()
+arc(256, 216, 180, 0, 6.28) fill="#000000" alpha=1
+clip()
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+beginPath()
+moveTo(256, 234.67)
+lineTo(256, 227.48)
+lineTo(256, 219.95)
+lineTo(256, 216)
+stroke() stroke="#ffffff" width=10.8 alpha=0.85
+beginPath()
+arc(256, 216, 18, 0, 6.28) fill="#ff6a00" alpha=1
+fill() fill="#ff6a00" alpha=1
+beginPath()
+arc(256, 216, 180, 0, 6.28) fill="#ff6a00" alpha=1
+stroke() stroke="#ffcc00" width=5.76 alpha=1
+restore()

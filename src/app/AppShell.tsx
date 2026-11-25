@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { SettingsIconButton } from '../components/SettingsIconButton';
 import { ToolsMenu } from '../components/ToolsMenu';
@@ -8,6 +8,14 @@ import { useActivityStore } from '../state/activityStore';
 import { ROUTES, TOOLS_ITEMS } from './routes';
 import { useAppTheme } from './useAppTheme';
 import { useRouteMetadata } from './useRouteMetadata';
+
+/**
+ * What the shell offers the page it routes to. Home names Settings in its
+ * privacy copy, and the name should open the dialog it names.
+ */
+export interface ShellContext {
+  openSettings: () => void;
+}
 
 /**
  * AV-003 / AV-006. Layout chrome shared by every page: header with navigation,
@@ -21,12 +29,39 @@ export function AppShell() {
   const location = useLocation();
   const isHome = location.pathname === ROUTES.home;
 
+  /*
+   * A route change scrolls to the top and moves focus to the new page's title, so a screen reader
+   * hears where it is and Tab starts from the page, not the top of the shell.
+   * Only when the page left focus nowhere useful (the body, or the header that
+   * navigated): a page that puts focus somewhere itself keeps it. Not on the
+   * first load, where the browser's own start is right.
+   */
+  const firstRoute = useRef(true);
+  useEffect(() => {
+    if (firstRoute.current) {
+      firstRoute.current = false;
+      return;
+    }
+    // A new page starts at its top, not wherever the last one was scrolled to.
+    window.scrollTo(0, 0);
+    const timer = setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && !active.closest('.shell__header')) return;
+      const title = document.querySelector<HTMLElement>('main h2');
+      if (!title) return;
+      if (!title.hasAttribute('tabindex')) title.setAttribute('tabindex', '-1');
+      title.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [location.pathname]);
+
   const activity = useActivityStore((state) => state.activity);
   const clear = useActivityStore((state) => state.clear);
 
   // Modal state lives here rather than in the router, so opening settings
   // leaves the route and the mounted viewer untouched (AV-007).
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const shellContext: ShellContext = { openSettings: () => setIsSettingsOpen(true) };
 
   return (
     <div className="shell">
@@ -34,8 +69,12 @@ export function AppShell() {
         {/* AV-010: the brand is the way home, so there is no Home nav item. */}
         <div className="shell__lead">
           <h1 className="shell__title">
-            <Link className="shell__brand" to={ROUTES.home}>
-              OpenTrack Viewer
+            {/*
+              On a phone the brand shortens to the product's short name, so the
+              header holds one line; the link keeps its full name throughout.
+            */}
+            <Link className="shell__brand" to={ROUTES.home} aria-label="OpenTrack Viewer">
+              OpenTrack<span className="shell__brand-rest"> Viewer</span>
             </Link>
           </h1>
 
@@ -54,7 +93,7 @@ export function AppShell() {
             activity state, so the control would act on nothing.
           */}
           {!isHome && activity && (
-            <button type="button" className="button" onClick={clear}>
+            <button type="button" className="button shell__close" onClick={clear}>
               Close activity
             </button>
           )}
@@ -76,7 +115,7 @@ export function AppShell() {
       */}
       <div className="shell__scroll">
         <div className="shell__body">
-          <Outlet />
+          <Outlet context={shellContext} />
         </div>
 
         <SiteFooter />

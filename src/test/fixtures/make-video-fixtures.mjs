@@ -8,9 +8,10 @@
  *
  * Run `node src/test/fixtures/make-video-fixtures.mjs` after changing this.
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildGoproMp4 } from '../helpers/goproMp4.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -56,6 +57,18 @@ const FIXTURES = {
   ]),
   // The same container with no telemetry track at all.
   'plain-video.mp4': concat([ftyp, filler, box('moov', ascii('hdlrvide'))]),
+  /*
+   * AV-906. A real `gpmd` track around the HERO7 payload, which — unlike the
+   * HERO8 clip — was recorded outdoors with a satellite fix. The picture is
+   * 4 KB of zeros declared as 510 empty frames: enough for the extractor to
+   * derive a duration and a frame rate, and nothing that could be watched.
+   * The one video fixture a browser test can open and see a route from.
+   */
+  'hero7-synthetic.mp4': buildGoproMp4({
+    payload: new Uint8Array(readFileSync(join(HERE, 'hero7.raw'))),
+    fillerBytes: 4096,
+    videoFrames: 510,
+  }),
 };
 
 for (const [name, bytes] of Object.entries(FIXTURES)) {

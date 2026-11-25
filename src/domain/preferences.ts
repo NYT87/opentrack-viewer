@@ -2,10 +2,11 @@ import type { UnitSystem } from './units';
 import { THEME_MODES, type ThemeMode } from './theme';
 
 /**
- * The one key this app writes to `localStorage`. Namespaced because a GitHub
+ * Display and privacy preference keys. Namespaced because a GitHub
  * Pages sub-path shares an origin with every other project published there.
  */
 export const THEME_STORAGE_KEY = 'opentrack-viewer:theme';
+export const BASEMAP_STORAGE_KEY = 'opentrack-viewer:basemap';
 
 /**
  * Locales whose *distance* convention is miles, used only when the browser
@@ -59,9 +60,7 @@ export function readStoredTheme(): ThemeMode | undefined {
 }
 
 /**
- * Persists the theme preference. Deliberately the only thing this app stores:
- * a theme is a display choice, not activity data, and storing it is what keeps
- * a reader from re-picking dark mode on every visit.
+ * Persists a display choice, never activity data.
  */
 export function storeTheme(mode: ThemeMode): void {
   try {
@@ -69,5 +68,22 @@ export function storeTheme(mode: ThemeMode): void {
   } catch {
     // Storage being unavailable is not an error worth surfacing: the app
     // works, it simply forgets.
+  }
+}
+
+/** Missing or inaccessible storage keeps the existing enabled default. */
+export function readStoredBasemap(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(BASEMAP_STORAGE_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function storeBasemap(enabled: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(BASEMAP_STORAGE_KEY, String(enabled));
+  } catch {
+    // A denied preference store does not prevent route-only mode this session.
   }
 }

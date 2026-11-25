@@ -2,10 +2,35 @@ import { useCallback, useId, useRef, useState } from 'react';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 
 export interface FileDropZoneProps {
-  onFile: (file: File) => void;
+  onFile?: (file: File) => void;
+  /** Takes the accepted files of one pick or drop together, in place of `onFile` for each. */
+  onFiles?: (files: File[]) => void;
   /** Lowercase extensions accepted by the current build. */
   acceptedExtensions?: string[];
   disabled?: boolean;
+  /** For a page with more than one drop zone, so tests can tell them apart. */
+  testId?: string;
+  /**
+   * AV-1109. Take several files at once, from the picker or a drop: each
+   * accepted file is handed to `onFile` in turn, and the ones refused are
+   * named together.
+   */
+  multiple?: boolean;
+  /** AV-1014. What the page says it wants, in place of the formats' own wording. */
+  title?: string;
+  subtitle?: string;
+  /**
+   * AV-1014. Hears why files were refused, or `undefined` when none were, on
+   * every pick or drop, in place of showing it here: a page that may remove
+   * the zone shows the reason where it stays.
+   */
+  onRefused?: (message: string | undefined) => void;
+  /**
+   * TD-088 (AV-1014). How the zone sorts what it is given: by `extension` (the default), refusing what is
+   * not in `acceptedExtensions` here, or `none`, handing every file on to the page, which sorts them by
+   * their content and refuses with a reason of its own. The picker's `accept` keeps the extensions either way, as a hint.
+   */
+  classify?: 'extension' | 'none';
 }
 
 /**
@@ -15,8 +40,15 @@ export interface FileDropZoneProps {
  */
 export function FileDropZone({
   onFile,
+  onFiles,
   acceptedExtensions = SUPPORTED_FORMATS,
   disabled = false,
+  testId = 'file-input',
+  multiple = false,
+  title,
+  subtitle,
+  onRefused,
+  classify = 'extension',
 }: FileDropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
@@ -25,22 +57,26 @@ export function FileDropZone({
 
   const accept = acceptedExtensions.map((extension) => `.${extension}`).join(',');
 
-  const handleFile = useCallback(
-    (file: File | undefined) => {
-      if (!file) return;
-      const extension = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
-      if (!acceptedExtensions.includes(extension)) {
-        setRejection(
-          `"${file.name}" is not supported. Choose a ${acceptedExtensions
-            .map((value) => `.${value}`)
-            .join(' or ')} file.`,
-        );
-        return;
-      }
-      setRejection(undefined);
-      onFile(file);
+  const handleFiles = useCallback(
+    (list: FileList | null | undefined) => {
+      const files = Array.from(list ?? []).slice(0, multiple ? undefined : 1);
+      if (files.length === 0) return;
+      const accepted = (file: File) =>
+        classify === 'none' ||
+        acceptedExtensions.includes(file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase());
+      const refused = files.filter((file) => !accepted(file));
+      const reason =
+        refused.length === 0
+          ? undefined
+          : `${refused.map((file) => `"${file.name}"`).join(', ')} ${refused.length === 1 ? 'is' : 'are'} not supported. Choose ${describeFormats(acceptedExtensions)}.`;
+      if (onRefused) onRefused(reason);
+      else setRejection(reason);
+      const taken = files.filter(accepted);
+      if (taken.length === 0) return;
+      if (onFiles) onFiles(taken);
+      else taken.forEach((file) => onFile?.(file));
     },
-    [acceptedExtensions, onFile],
+    [acceptedExtensions, classify, onFile, onFiles, onRefused, multiple],
   );
 
   const onDrop = useCallback(
@@ -48,9 +84,9 @@ export function FileDropZone({
       event.preventDefault();
       setIsDragging(false);
       if (disabled) return;
-      handleFile(event.dataTransfer.files[0]);
+      handleFiles(event.dataTransfer.files);
     },
-    [disabled, handleFile],
+    [disabled, handleFiles],
   );
 
   return (
@@ -75,21 +111,37 @@ export function FileDropZone({
         aria-disabled={disabled}
         aria-describedby={`${inputId}-hint`}
       >
-        <span className="dropzone__title">Drop {describeFormats(acceptedExtensions)} here</span>
-        <span className="dropzone__subtitle">or click to choose one</span>
+        <span className="dropzone__title">
+          {title ?? (
+            <>
+              Drop{' '}
+              {multiple
+                ? describeFormats(acceptedExtensions)
+                    .replace(/^an? /, '')
+                    .replace(/ file$/, ' files')
+                : describeFormats(acceptedExtensions)}{' '}
+              here
+            </>
+          )}
+        </span>
+        {/* "Choose", not "click": it is pressed, tapped or chosen with Enter. */}
+        <span className="dropzone__subtitle">
+          {subtitle ?? (multiple ? 'or choose them' : 'or choose one')}
+        </span>
         <input
           ref={inputRef}
           id={inputId}
           type="file"
           accept={accept}
+          multiple={multiple}
           className="dropzone__input"
           disabled={disabled}
           onChange={(event) => {
-            handleFile(event.target.files?.[0]);
+            handleFiles(event.target.files);
             // Reset so re-selecting the same file fires change again.
             event.target.value = '';
           }}
-          data-testid="file-input"
+          data-testid={testId}
         />
       </div>
 
@@ -114,5 +166,7 @@ export function describeFormats(extensions: readonly string[]): string {
     names.length === 1
       ? names[0]!
       : `${names.slice(0, -1).join(', ')} or ${names.at(-1)!}`;
-  return `a ${joined} file`;
+  // Said as it is read aloud: "an MP4", spelled out, but "a GPX" and "a FIT".
+  const article = /^(?:[AEIOU]|MP|M4)/.test(joined) ? 'an' : 'a';
+  return `${article} ${joined} file`;
 }

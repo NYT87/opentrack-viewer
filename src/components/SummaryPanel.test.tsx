@@ -5,8 +5,14 @@ import { makeActivity } from '../test/helpers/activity';
 import { resolvePerformanceMetric } from '../domain/performance';
 import type { ActivitySport } from '../domain/activity';
 
+/**
+ * The value under a caption. The primary metric is captioned "(moving)" when it
+ * is averaged over moving time (TD-058); these tests are about which metric
+ * leads and how it reads, so that qualifier is accepted where it applies.
+ */
 const statValue = (label: string): string => {
-  const term = screen.getByText(label);
+  const pattern = new RegExp(`^${label.replace(/[()]/g, '\\$&')}( \\(moving\\))?$`);
+  const term = screen.getByText(pattern);
   const definition = term.parentElement?.querySelector('dd');
   return definition?.textContent ?? '';
 };
@@ -25,7 +31,9 @@ describe('SummaryPanel (AV-404)', () => {
     expect(statValue('Distance')).toMatch(/km$/);
     expect(statValue('Duration')).toBe('1:00:00');
     expect(statValue('Elevation gain')).toBe('50 m');
-    expect(statValue('Points')).toBe('2');
+    // The point count describes the file, so it sits on the source line (TD-057).
+    expect(screen.getByText(/· 2 points$/)).toHaveClass('summary__source');
+    expect(screen.queryByText('Points')).not.toBeInTheDocument();
   });
 
   it('explains missing values instead of showing a bare dash', () => {
@@ -237,5 +245,64 @@ describe('the chosen metric in the overview (AV-908)', () => {
 
     expect(statValue('Avg pace')).toMatch(/^5:0\d \/km$/);
     expect(screen.queryByText('Avg speed')).not.toBeInTheDocument();
+  });
+});
+
+describe('the overview leads with three figures (TD-057)', () => {
+  it('sets distance, duration and the sport\'s primary metric apart, ahead of the rest', () => {
+    const run = makeActivity([
+      { lat: 0, lon: 0.0001, elevationMeters: 10, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 0.01, lon: 0.0001, elevationMeters: 20, time: new Date('2024-01-01T10:05:00Z') },
+    ]);
+    run.metadata.sport = 'running';
+    const { container } = render(<SummaryPanel activity={run} metric={resolvePerformanceMetric(run)} />);
+
+    const lead = container.querySelector('.summary__grid--lead')!;
+    expect(within(lead as HTMLElement).getAllByRole('term').map((term) => term.textContent)).toEqual([
+      'Distance',
+      'Duration',
+      'Avg pace (moving)',
+    ]);
+    // Each appears once: led, not repeated in the grid below.
+    expect(screen.getAllByText('Distance')).toHaveLength(1);
+    expect(screen.getByText('Elevation gain')).toBeInTheDocument();
+  });
+
+  it('leads with the figures an indoor session has, not with dashes', () => {
+    const indoor = makeActivity([
+      { elevationMeters: 10, heartRateBpm: 120, time: new Date('2024-01-01T10:00:00Z') },
+      { elevationMeters: 30, heartRateBpm: 140, time: new Date('2024-01-01T10:02:00Z') },
+    ]);
+    const { container } = render(<SummaryPanel activity={indoor} />);
+    const lead = container.querySelector('.summary__grid--lead') as HTMLElement;
+    const terms = within(lead).getAllByRole('term').map((term) => term.textContent);
+    expect(terms[0]).toBe('Duration');
+    expect(terms).not.toContain('Distance');
+    expect(within(lead).queryByText('—')).not.toBeInTheDocument();
+    // Distance still says why it is missing, in the grid below.
+    expect(screen.getByText('Distance')).toBeInTheDocument();
+  });
+});
+
+describe('the average leads over moving time, the elapsed one follows (TD-058)', () => {
+  // Two minutes moving, then five standing still at the same place.
+  const withStop = makeActivity([
+    { lat: 0, lon: 0.0001, time: new Date('2024-01-01T10:00:00Z') },
+    { lat: 0.0045, lon: 0.0001, time: new Date('2024-01-01T10:02:00Z') },
+    { lat: 0.0045, lon: 0.0001, time: new Date('2024-01-01T10:07:00Z') },
+  ]);
+  withStop.metadata.sport = 'running';
+
+  it('labels each, and the moving one is the faster', () => {
+    render(<SummaryPanel activity={withStop} metric={resolvePerformanceMetric(withStop)} />);
+    const moving = statValue('Avg pace (moving)');
+    const elapsed = screen.getByText('Avg pace (elapsed)').parentElement!.querySelector('dd')!.textContent!;
+    const seconds = (pace: string) => {
+      const [m, s] = pace.split(' ')[0]!.split(':').map(Number);
+      return m! * 60 + s!;
+    };
+    expect(seconds(moving)).toBeLessThan(seconds(elapsed));
+    // About 500 m in the two minutes of moving: 4:00 a kilometre.
+    expect(moving).toMatch(/^4:0\d \/km$/);
   });
 });

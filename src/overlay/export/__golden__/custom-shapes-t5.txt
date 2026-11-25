@@ -1,0 +1,31 @@
+clearRect(0, 0, 1280, 720)
+save()
+beginPath()
+roundRect(67.6, 39.6, 376.8, 136.8, 21.6)
+fill() fill="#102030" alpha=0.5
+beginPath()
+roundRect(67.6, 39.6, 376.8, 136.8, 21.6)
+stroke() stroke="#ffcc00" width=7.2 alpha=0.8
+restore()
+save()
+beginPath()
+rect(515.6, 39.6, 248.8, 136.8)
+fill() fill="#102030" alpha=0.5
+beginPath()
+rect(515.6, 39.6, 248.8, 136.8)
+stroke() stroke="#ffcc00" width=7.2 alpha=0.8
+restore()
+save()
+beginPath()
+ellipse(1024, 108, 188.4, 68.4, 0, 0, 6.28)
+fill() fill="#102030" alpha=0.5
+beginPath()
+ellipse(1024, 108, 188.4, 68.4, 0, 0, 6.28)
+stroke() stroke="#ffcc00" width=7.2 alpha=0.8
+restore()
+save()
+beginPath()
+moveTo(67.6, 291.6)
+lineTo(1212.4, 320.4)
+stroke() stroke="#ffcc00" width=7.2 alpha=0.8
+restore()

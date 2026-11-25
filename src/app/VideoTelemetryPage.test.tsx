@@ -6,9 +6,9 @@ import userEvent from '@testing-library/user-event';
 vi.mock('maplibre-gl', async () => {
   const { FakeMap, setWorkerUrl } = await import('../test/helpers/maplibreMock');
   return {
-    default: { Map: FakeMap, NavigationControl: class {}, setWorkerUrl },
+    default: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class { setUnit() {} }, setWorkerUrl },
     Map: FakeMap,
-    NavigationControl: class {},
+    NavigationControl: class {}, ScaleControl: class { setUnit() {} },
     setWorkerUrl,
   };
 });
@@ -36,7 +36,7 @@ function mockExtractionFrom(fixture: string) {
       options?.onProgress?.(1);
       return Promise.resolve({
         rawData: new Uint8Array(readBinaryFixture(fixture)),
-        timing: { videoDurationSeconds: 12, frameDurationMs: 33, samples: [] },
+        timing: { videoDurationSeconds: 12, frameIntervalSeconds: 1 / 30, samples: [] },
       });
     },
   }));
@@ -113,26 +113,6 @@ describe('reading a video, and handing it over (AV-907)', () => {
     expect(within(summary).getByRole('button', { name: 'Open in viewer' })).toBeInTheDocument();
   }, 60_000);
 
-  it('hands the activity and its video to the overlay page (AV-1002)', async () => {
-    mockExtractionFrom('hero7.raw');
-    const { App: Fresh } = await import('./App');
-    const { useOverlayStore: freshOverlay } = await import('../state/overlayStore');
-    render(<Fresh />);
-    await goToTool();
-    const video = heroVideo();
-    await userEvent.upload(await screen.findByTestId('file-input'), video);
-
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Make an overlay' }, { timeout: 30_000 }),
-    );
-
-    await waitFor(() => expect(window.location.hash).toBe('#/overlays'));
-    expect(freshOverlay.getState().activity?.source.format).toBe('gopro');
-    // The very file the user chose, still local, for the preview to play.
-    expect(freshOverlay.getState().video).toBe(video);
-    expect(await screen.findByRole('region', { name: 'Overlay settings' })).toBeInTheDocument();
-  }, 60_000);
-
   it('opens the extracted activity in the viewer', async () => {
     mockExtractionFrom('hero7.raw');
     const { App: Fresh } = await import('./App');
@@ -151,6 +131,24 @@ describe('reading a video, and handing it over (AV-907)', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/viewer'));
     expect(await screen.findByRole('region', { name: 'Activity summary' })).toBeInTheDocument();
     expect(freshStore.getState().activity?.source.format).toBe('gopro');
+  }, 60_000);
+
+  it('hands the extracted activity to the map video page (AV-1202)', async () => {
+    mockExtractionFrom('hero7.raw');
+    const { App: Fresh } = await import('./App');
+    const { useMapVideoStore: freshStore } = await import('../state/mapVideoStore');
+    render(<Fresh />);
+    await goToTool();
+    await userEvent.upload(await screen.findByTestId('file-input'), heroVideo());
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Make a map video' }, { timeout: 30_000 }),
+    );
+
+    await waitFor(() => expect(window.location.hash).toBe('#/map-video'));
+    expect(await screen.findByText('From the video telemetry page.')).toBeInTheDocument();
+    expect(freshStore.getState().activity?.source.format).toBe('gopro');
+    expect(freshStore.getState().origin).toBe('videoTelemetry');
   }, 60_000);
 
   it('explains a video it cannot read, and offers another go', async () => {

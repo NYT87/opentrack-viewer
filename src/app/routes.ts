@@ -15,12 +15,21 @@ export const ROUTES = {
    */
   videoTelemetry: '/video-telemetry',
   /**
-   * AV-1102. Editing a planned route is a page of its own, not a mode of the
-   * viewer: the viewer shows what was recorded and must stay unable to change it.
+   * AV-1002. Overlays are made on a page of their own: neither the viewer nor
+   * the extraction page draws anything over a picture, and this one shows no
+   * map, charts or export controls of the viewer's.
+   */
+  overlays: '/overlays',
+  /**
+   * AV-1102. Planned tracks are edited on a page of their own, never inside the
+   * viewer: the viewer shows what was recorded, and a draft is what is intended.
    */
   routeBuilder: '/route-builder',
-  /** AV-1002. Overlays are made on their own page, not in the viewer. */
-  overlays: '/overlays',
+  /**
+   * AV-1202. Map videos are made on a page of their own (TD-064): the map, its
+   * camera and its tiles have no place on the overlay page.
+   */
+  mapVideo: '/map-video',
 } as const;
 
 /**
@@ -30,6 +39,7 @@ export const ROUTES = {
 export const TOOLS_ITEMS = [
   { to: ROUTES.viewer, label: 'File viewer' },
   { to: ROUTES.videoTelemetry, label: 'Video telemetry' },
-  { to: ROUTES.routeBuilder, label: 'Route Builder' },
   { to: ROUTES.overlays, label: 'Overlays' },
+  { to: ROUTES.routeBuilder, label: 'Route Builder' },
+  { to: ROUTES.mapVideo, label: 'Map video' },
 ] as const;

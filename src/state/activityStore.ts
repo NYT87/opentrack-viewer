@@ -36,13 +36,24 @@ interface ActivityState extends ActivitySnapshot {
    * behaviour that task asks for and the privacy model requires (§5).
    */
   setActivity: (activity: Activity) => void;
+  /**
+   * TD-056. Opens a file in place of the activity already open, but only once
+   * it has parsed: until then, and if it fails, the open activity is left
+   * exactly as it was. Resolves to the error when it fails, for the caller to
+   * show beside the activity it kept.
+   */
+  replaceFile: (file: File) => Promise<ActivityError | undefined>;
   clear: () => void;
 }
+
+// Invalidated by every new intent, including closing and explicit handoffs.
+let loadGeneration = 0;
 
 export const useActivityStore = create<ActivityState>((set) => ({
   status: 'empty',
 
   async loadFile(file: File) {
+    const generation = ++loadGeneration;
     // Loading a new file resets every derived interaction (AV-601).
     useInteractionStore.getState().reset();
     set({ status: 'readingFile', error: undefined, activity: undefined, fileName: file.name });
@@ -51,11 +62,16 @@ export const useActivityStore = create<ActivityState>((set) => ({
       const { activity } = await parseActivityFile(file, {
         // Reading bytes and parsing them are separate waits; a large file
         // spends most of its time in the second.
-        onPhase: (phase) =>
-          set({ status: phase === 'reading' ? 'readingFile' : 'processingFile' }),
+        onPhase: (phase) => {
+          if (generation === loadGeneration) {
+            set({ status: phase === 'reading' ? 'readingFile' : 'processingFile' });
+          }
+        },
       });
+      if (generation !== loadGeneration) return;
       set({ status: 'ready', activity, error: undefined });
     } catch (error) {
+      if (generation !== loadGeneration) return;
       set({
         status: 'error',
         activity: undefined,
@@ -64,12 +80,28 @@ export const useActivityStore = create<ActivityState>((set) => ({
     }
   },
 
+  async replaceFile(file: File) {
+    const generation = ++loadGeneration;
+    try {
+      const { activity } = await parseActivityFile(file);
+      if (generation !== loadGeneration) return undefined;
+      useInteractionStore.getState().reset();
+      set({ status: 'ready', activity, error: undefined, fileName: file.name });
+      return undefined;
+    } catch (error) {
+      if (generation !== loadGeneration) return undefined;
+      return toActivityError(error, 'unsupported_format');
+    }
+  },
+
   setActivity(activity: Activity) {
+    loadGeneration += 1;
     useInteractionStore.getState().reset();
     set({ status: 'ready', activity, error: undefined, fileName: activity.source.fileName });
   },
 
   clear() {
+    loadGeneration += 1;
     useInteractionStore.getState().reset();
     set({ status: 'empty', activity: undefined, error: undefined, fileName: undefined });
   },

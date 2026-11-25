@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document>
+    <Placemark>
+      <name>Line with bad tuples</name>
+      <LineString>
+        <coordinates>
+          0.0000,51.5000,10
+          abc,def
+          200.0,51.5000
+          0.0000,91.0000
+          0,0
+          0.0010
+          0.0010,51.5010,NaN
+          0.0020,51.5020,20
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Track with mismatched arrays</name>
+      <gx:Track>
+        <when>2024-03-02T08:00:00Z</when>
+        <when>2024-03-02T08:00:30Z</when>
+        <when>2024-03-02T08:01:00Z</when>
+        <when>2024-03-02T08:01:30Z</when>
+        <gx:coord>0.0000 51.5000</gx:coord>
+        <gx:coord></gx:coord>
+        <gx:coord>0.0000 51.5020</gx:coord>
+        <ExtendedData>
+          <SchemaData schemaUrl="#schema">
+            <gx:SimpleArrayData name="heartrate">
+              <gx:value>120</gx:value>
+            </gx:SimpleArrayData>
+          </SchemaData>
+        </ExtendedData>
+      </gx:Track>
+    </Placemark>
+  </Document>
+</kml>

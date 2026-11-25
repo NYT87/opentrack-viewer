@@ -1,0 +1,223 @@
+import { useMemo, type CSSProperties } from 'react';
+import type { Activity } from '../domain/activity';
+import type { UnitSystem } from '../domain/units';
+import { BASE_FONT_CQW } from '../overlay/presets';
+import { projectProfile } from '../overlay/elevationProfile';
+import { projectRoute } from '../overlay/routeProjection';
+import { keptRoute, markerVisible, sampleActivityMs, type PrivacyTrim } from '../overlay/privacyTrim';
+import {
+  needsHalo,
+  resolveOverlayComponent,
+  type OverlayComponent,
+  type OverlayTemplate,
+  type ResolvedOverlayComponent,
+} from '../overlay/template';
+import type { OverlaySample, OverlayTimeline } from '../overlay/timeline';
+
+interface OverlayLayerProps {
+  template: OverlayTemplate;
+  timeline: OverlayTimeline;
+  sample: OverlaySample | undefined;
+  activity: Activity | undefined;
+  units: UnitSystem;
+  /** Width over height of the video frame, so insets are not stretched. */
+  frameAspect: number;
+}
+
+/**
+ * AV-1004. Draws a template's components over a video frame at one sample.
+ * Pure of the video element: it takes a sample, so seeking, scrubbing and
+ * playback all reach the same drawing. A component with no data for this
+ * moment renders nothing — never a dash or an empty box (AV-1003).
+ */
+export function OverlayLayer({
+  template,
+  timeline,
+  sample,
+  activity,
+  units,
+  frameAspect,
+}: OverlayLayerProps) {
+  return (
+    <div className="overlay-layer" data-testid="overlay-layer">
+      {template.components.map((component) => {
+        const resolved = resolveOverlayComponent(template, component, sample, timeline, units);
+        if (resolved.status !== 'ready') return null;
+        return (
+          <OverlayItem
+            key={component.id}
+            resolved={resolved}
+            sample={sample}
+            timeline={timeline}
+            activity={activity}
+            privacyTrim={template.privacyTrim}
+            frameAspect={frameAspect}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function boxStyle(component: OverlayComponent, resolved: Extract<ResolvedOverlayComponent, { status: 'ready' }>): CSSProperties {
+  const { rect } = component;
+  const { style } = resolved;
+  return {
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.width * 100}%`,
+    height: `${rect.height * 100}%`,
+    color: style.textColor,
+    background: `rgb(0 0 0 / ${style.backgroundOpacity})`,
+    fontSize: `calc(${style.fontScale} * ${BASE_FONT_CQW}cqw)`,
+    ['--overlay-accent' as string]: style.accentColor,
+    ...(needsHalo(style) ? { textShadow: '0 0 0.2em rgb(0 0 0 / 0.8), 0 0 0.06em rgb(0 0 0 / 0.9)' } : {}),
+  };
+}
+
+function OverlayItem({
+  resolved,
+  sample,
+  timeline,
+  activity,
+  privacyTrim,
+  frameAspect,
+}: {
+  resolved: Extract<ResolvedOverlayComponent, { status: 'ready' }>;
+  sample: OverlaySample | undefined;
+  timeline: OverlayTimeline;
+  activity: Activity | undefined;
+  privacyTrim: PrivacyTrim | undefined;
+  frameAspect: number;
+}) {
+  const { component } = resolved;
+  const style = boxStyle(component, resolved);
+  const base = `overlay-item overlay-item--${component.type}`;
+
+  if (component.type === 'routeInset') {
+    return (
+      <div className={base} style={style} data-component={component.id}>
+        <RouteInset
+          activity={activity}
+          privacyTrim={privacyTrim}
+          timeline={timeline}
+          sample={sample}
+          aspect={(component.rect.width * frameAspect) / component.rect.height}
+        />
+      </div>
+    );
+  }
+  if (component.type === 'elevationProfile') {
+    return (
+      <div className={base} style={style} data-component={component.id}>
+        <ElevationProfile
+          activity={activity}
+          progress={resolved.fraction ?? 0}
+          aspect={(component.rect.width * frameAspect) / component.rect.height}
+        />
+      </div>
+    );
+  }
+  if (component.type === 'progress') {
+    return (
+      <div className={base} style={style} data-component={component.id}>
+        <div className="overlay-item__bar" style={{ width: `${(resolved.fraction ?? 0) * 100}%` }} />
+      </div>
+    );
+  }
+  return (
+    <div className={base} style={style} data-component={component.id}>
+      <span className="overlay-item__label">{resolved.label}</span>
+      <span className="overlay-item__value">{resolved.text}</span>
+      {resolved.fraction !== undefined && (
+        <div className="overlay-item__track">
+          <div className="overlay-item__bar" style={{ width: `${resolved.fraction * 100}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RouteInset({
+  activity,
+  privacyTrim,
+  timeline,
+  sample,
+  aspect,
+}: {
+  activity: Activity | undefined;
+  privacyTrim: PrivacyTrim | undefined;
+  timeline: OverlayTimeline;
+  sample: OverlaySample | undefined;
+  aspect: number;
+}) {
+  // The route does not change as the video plays; only the dot moves. Both
+  // the projection and the point strings are built once per activity and box,
+  // so a frame costs one circle, not a pass over every point.
+  // AV-1022 (TD-091). Only the kept part of the route is projected; too little left draws no route.
+  const kept = useMemo(() => keptRoute(activity, privacyTrim), [activity, privacyTrim]);
+  const route = useMemo(() => (kept && !kept.tooShort ? projectRoute(kept.activity, aspect) : undefined), [kept, aspect]);
+  const paths = useMemo(
+    () => route?.segments.map((segment) => segment.map(([x, y]) => `${x * aspect},${y}`).join(' ')),
+    [route, aspect],
+  );
+  if (!kept || kept.tooShort || !route || !paths) return null;
+  // No dot while the moment is in a hidden stretch.
+  const dot = sample?.position && markerVisible(kept, sampleActivityMs(timeline, sample)) ? route.project(sample.position) : undefined;
+  return (
+    <svg
+      className="overlay-item__route"
+      viewBox={`0 0 ${aspect} 1`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+    >
+      {paths.map((points, index) => (
+        <polyline
+          key={index}
+          points={points}
+          fill="none"
+          stroke="currentColor"
+          strokeOpacity="0.8"
+          strokeWidth="0.03"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      ))}
+      {dot && <circle cx={dot[0] * aspect} cy={dot[1]} r="0.05" fill="var(--overlay-accent)" />}
+    </svg>
+  );
+}
+
+/**
+ * AV-1211. The activity's elevation along it, stretched to the box, with a
+ * cursor at the moment shown: the canvas renderer's `drawProfile`, as SVG, in
+ * the same box-height units.
+ */
+function ElevationProfile({ activity, progress, aspect }: { activity: Activity | undefined; progress: number; aspect: number }) {
+  // The profile does not change as the video plays; only the cursor moves.
+  const profile = useMemo(() => (activity ? projectProfile(activity) : undefined), [activity]);
+  const runs = useMemo(
+    () =>
+      profile?.runs.map((run) => {
+        const line = run.map(([x, y]) => `${x * aspect},${y}`).join(' ');
+        return { line, area: `${line} ${run[run.length - 1]![0] * aspect},1 ${run[0]![0] * aspect},1` };
+      }),
+    [profile, aspect],
+  );
+  if (!profile || !runs) return null;
+  const point = profile.at(progress);
+  // The cursor is as wide as a fiftieth of the box's height, as the canvas draws it.
+  const cursor = 0.02;
+  return (
+    <svg className="overlay-item__profile" viewBox={`0 0 ${aspect} 1`} preserveAspectRatio="none" aria-hidden="true">
+      {runs.map(({ line, area }, index) => (
+        <g key={index}>
+          <polygon points={area} fill="currentColor" fillOpacity="0.25" />
+          <polyline points={line} fill="none" stroke="currentColor" strokeOpacity="0.9" strokeWidth="0.025" strokeLinejoin="round" strokeLinecap="round" />
+        </g>
+      ))}
+      <rect x={progress * aspect - cursor / 2} y="0" width={cursor} height="1" fill="var(--overlay-accent)" />
+      {point && <circle className="overlay-item__profile-dot" cx={point[0] * aspect} cy={point[1]} r="0.06" fill="var(--overlay-accent)" />}
+    </svg>
+  );
+}

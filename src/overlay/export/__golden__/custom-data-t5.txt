@@ -1,0 +1,159 @@
+clearRect(0, 0, 1280, 720)
+save()
+beginPath()
+roundRect(25.6, 14.4, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 14.4, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("SPEED", 42.5, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("18.0 km/h", 42.5, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(307.2, 14.4, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(307.2, 14.4, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("PACE", 324.1, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("3:20 /km", 324.1, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(588.8, 14.4, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(588.8, 14.4, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("RIDDEN", 605.7, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0.02 km", 605.7, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(870.4, 14.4, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(870.4, 14.4, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("TIME", 887.3, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:05", 887.3, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(25.6, 144, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 144, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("MOVING TIME", 42.5, 160.87) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:05", 42.5, 179.46) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(307.2, 144, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(307.2, 144, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("SPEED", 324.1, 154.53) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("18.0 km/h", 324.1, 173.12) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillRect(324.1, 212.83, 222.21, 7.04) fill="rgb(255 255 255 / 0.25)" alpha=1
+fillRect(324.1, 212.83, 111.1, 7.04) fill="#ff6a00" alpha=1
+restore()
+save()
+beginPath()
+roundRect(588.8, 144, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(588.8, 144, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("HEART RATE", 605.7, 154.53) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("105 bpm", 605.7, 173.12) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+fillRect(605.7, 212.83, 222.21, 7.04) fill="rgb(255 255 255 / 0.25)" alpha=1
+fillRect(605.7, 212.83, 81.48, 7.04) fill="#ff6a00" alpha=1
+restore()
+save()
+beginPath()
+roundRect(896, 144, 320, 288, 11.26)
+clip()
+beginPath()
+roundRect(896, 144, 320, 288, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+beginPath()
+moveTo(1056, 408.96)
+lineTo(1056, 407.33)
+lineTo(1056, 405.62)
+lineTo(1056, 403.83)
+lineTo(1056, 401.95)
+lineTo(1056, 400)
+lineTo(1056, 397.96)
+lineTo(1056, 395.85)
+lineTo(1056, 393.65)
+lineTo(1056, 391.37)
+lineTo(1056, 389)
+lineTo(1056, 386.56)
+lineTo(1056, 384.03)
+lineTo(1056, 381.43)
+lineTo(1056, 378.74)
+lineTo(1056, 375.97)
+lineTo(1056, 373.12)
+lineTo(1056, 370.19)
+lineTo(1056, 367.17)
+lineTo(1056, 364.08)
+lineTo(1056, 360.9)
+lineTo(1056, 357.65)
+lineTo(1056, 354.3)
+lineTo(1056, 350.88)
+lineTo(1056, 347.38)
+lineTo(1056, 343.8)
+lineTo(1056, 340.13)
+lineTo(1056, 336.38)
+lineTo(1056, 332.56)
+lineTo(1056, 328.64)
+lineTo(1056, 324.65)
+lineTo(1056, 320.58)
+lineTo(1056, 316.43)
+lineTo(1056, 312.19)
+lineTo(1056, 307.88)
+lineTo(1056, 303.48)
+lineTo(1056, 299)
+lineTo(1056, 294.44)
+lineTo(1056, 289.79)
+lineTo(1056, 285.07)
+lineTo(1056, 280.26)
+lineTo(1056, 275.37)
+lineTo(1056, 270.41)
+lineTo(1056, 265.36)
+lineTo(1056, 260.23)
+lineTo(1056, 255.01)
+lineTo(1056, 249.72)
+lineTo(1056, 244.34)
+lineTo(1056, 238.88)
+lineTo(1056, 233.34)
+lineTo(1056, 227.72)
+lineTo(1056, 222.02)
+lineTo(1056, 216.24)
+lineTo(1056, 210.37)
+lineTo(1056, 204.43)
+lineTo(1056, 198.4)
+lineTo(1056, 192.29)
+lineTo(1056, 186.1)
+lineTo(1056, 179.83)
+lineTo(1056, 173.48)
+lineTo(1056, 167.04)
+stroke() stroke="#ffffff" width=8.64 alpha=0.8
+beginPath()
+arc(1056, 400, 14.4, 0, 6.28) fill="#ff6a00" alpha=1
+fill() fill="#ff6a00" alpha=1
+restore()
+save()
+beginPath()
+roundRect(25.6, 648, 1228.8, 14.4, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 648, 1228.8, 14.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillRect(25.6, 648, 1228.8, 14.4) fill="rgb(255 255 255 / 0.25)" alpha=1
+fillRect(25.6, 648, 45.52, 14.4) fill="#ff6a00" alpha=1
+restore()

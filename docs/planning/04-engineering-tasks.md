@@ -1139,6 +1139,366 @@ Acceptance criteria:
 - Generated overlays and source activity data remain in the browser; no file contents, coordinates, preview pixels, or exported images are uploaded.
 - Unit tests cover route projection/bounds, transparent pixels, styling options, deterministic dimensions, and error handling; browser tests cover GPX selection or viewer handoff, preview, and download.
 
+#### AV-1010: Customize Static Overlay Image Layout, Text, and Activity Stats
+
+Dependencies: AV-1003, AV-1005, AV-1009
+
+Acceptance criteria:
+- The static (no-video) overlay export lets the user choose where each element sits on the image: the route, each stat, and each text block. Position is set by direct placement on the preview and by keyboard-accessible controls (nudge, snap to edge or corner, numeric offset); elements stay inside the frame and the layout does not depend on dragging alone.
+- The user can add free text blocks with editable content, size, colour, alignment and weight, and remove them again.
+- Stat elements available: pace or speed (the user picks which, in the reader's units), distance, duration, and date. Duration offers elapsed time and moving time where the activity has both.
+- Date and time elements let the user choose a format (for example `2026-09-24`, `24 Sep 2026`, `24/09/2026`, long weekday form, with or without time), rendered in the activity's own time zone or the reader's, stated on the control.
+- An element whose value the activity lacks is offered disabled with the reason, never drawn as a blank or `NaN`.
+- Layout, text and format choices are part of the same serializable overlay configuration used by the video overlays where the model allows, so a layout round-trips through project JSON.
+- Export stays transparent PNG with configurable dimensions; text is drawn with the canvas, not baked from a remote font, and no activity data, text or image leaves the browser.
+- Unit tests cover placement clamping, each stat's value and unit formatting, each date format, missing-value handling, text escaping, and configuration round-trip; browser tests cover placing, nudging, adding text, changing a date format and downloading, with a pixel check that elements land where placed.
+
+#### AV-1011: Build a Custom Video Overlay on a Free Canvas, With or Without a Source Video
+
+Dependencies: AV-1003, AV-1004, AV-1005, AV-1006, AV-1007, AV-1010
+
+Acceptance criteria:
+- The overlay page offers a **custom canvas** mode for building a telemetry video overlay from an activity alone or from an activity and a source video; a video is optional, and without one the canvas is the whole output.
+- The user chooses the output resolution: presets (for example 1920x1080, 1080x1920, 1080x1080, 3840x2160) and a custom width and height within stated limits. The preview keeps the chosen aspect ratio, and the layout is stored in fractions of the frame so it survives a change of resolution.
+- Components are placed and moved freely on the canvas by direct manipulation, with keyboard-accessible equivalents (select, nudge, numeric position, size, layer order, duplicate, delete). Components stay inside the frame, and selection, move and resize are undoable.
+- Available data components, each bound to the activity timeline (TD-041) so it changes as the video plays: speed gauge, distance display, time display (elapsed and moving), pace display, and the ones AV-1010 already defines. Each has a label, unit and number format, and is disabled with a reason when the activity lacks the data.
+- Available **shapes**, as in a card behind the figures: rounded rectangle, rectangle, ellipse and line. Each has fill colour, fill transparency, border width, border colour, border transparency and, where it applies, corner radius. A shape can sit behind or in front of other components and can hold or group components so they move together.
+- Text blocks and the static elements of AV-1010 are available on the same canvas, and share one placement model, so a layout made for the static image opens here and the reverse.
+- The whole layout, including shapes, resolution and component bindings, is the serializable overlay configuration (project JSON), can be saved and reopened, and a layout from a built-in preset can be taken as the starting point.
+- The preview renders the chosen layout over the video with the same renderer the export uses, so what is seen is what is written.
+- Export goes through the existing overlay exporters at the chosen resolution: transparent PNG sequence and transparent VP9 WebM where supported (AV-1006), and burned-in video where supported (AV-1007). Without a video, the transparent exports render the timeline across the activity's duration at a chosen frame rate.
+- Everything stays in the browser: no activity data, video, layout or output leaves it.
+- Unit tests cover placement and resize clamping, resolution change keeping the layout proportional, shape styling and transparency, binding each data component to the timeline, a missing-data component, layout round-trip, and the shared model with AV-1010; golden renders cover each shape and each data component; browser tests cover choosing a resolution, placing and moving components, styling a shape, previewing with and without a video, and exporting, including a pixel check that components land where placed.
+
+#### AV-1012: Export the Overlay as a Transparent VP9 WebM Where the Browser Keeps Alpha
+
+Dependencies: AV-1001, AV-1006, AV-1011
+
+Acceptance criteria:
+- The overlay export panel offers a transparent VP9 WebM beside the PNG sequence, for the template overlays and the custom canvas alike, with or without a video.
+- It is offered only where a probe at export time shows `MediaRecorder` keeps the canvas's alpha (TD-039): a short transparent clip is recorded, played back over magenta and read. Elsewhere the choice is shown disabled with the reason, and the PNG sequence stays.
+- The overlay is drawn by the export's renderer on a page canvas, one frame every 1/fps seconds on the clock, so the recording takes as long as the overlay; the panel says so before it starts and asks for the tab to stay in front.
+- A recording that cannot stay in step — the tab hidden, or more than a second behind — stops with the reason and keeps nothing. A stop keeps nothing.
+- The finished file states its duration: the recorder leaves it out, and it is written into the segment's Info without reading the file into memory whole, moving the segment size, SeekHead and cue positions it shifts. A file that cannot be patched is still offered, with a note.
+- The size is bounded by a bitrate ceiling scaled with the picture, and a recording larger than a tab can hold is refused before it starts.
+- Everything stays in the browser.
+- Unit tests cover the duration patch on recorder-shaped files (unknown-size clusters, block groups, a known-size segment with SeekHead and Cues, an existing Duration), the real-time loop (pacing, the last frame's length, a hidden tab, falling behind, a short hitch, a stop, a frame that fails), the plan, the capability check and the panel; a browser test records the overlay of the committed clip, checks the file's length is finite and as planned, and plays it over magenta to check what is clear stayed clear.
+
+#### AV-1013: Export an Activity as an Image of Its Map, With the Details Below or Placed Over It
+
+Dependencies: AV-1009, AV-1010, AV-1011, AV-1209, AV-1211
+
+GitHub issue #14. The overlay page's still image (AV-1009, AV-1010) is drawn on a transparent background and never bakes in a basemap; the map video's still (AV-1209) has a real map but only as a frame of the video. This is the picture between them: the activity on a real map, with its details, as one image.
+
+Acceptance criteria:
+- **Where it lives:** a third thing to make on the overlay page with an activity and no video, beside the still image and the custom canvas: *A map image*. The viewer hands the open activity to it, as it does for the route overlay.
+- **Basemap:** OpenFreeMap's styles or route only, said before any map is drawn (TD-064, TD-068). Never the OpenStreetMap tile servers, and not MapTiler, whose terms forbid saving its map as an image (TD-079). The provider's credit is drawn in the image.
+- **The map is always seen from straight above.** It starts fitted to the route with a margin, north up, and can then be moved, zoomed and turned to any heading, never tilted; there is no 3D terrain. The route uses the map video's styles (colour, width, edge, colour by speed, elevation or heart rate) and is drawn whole, with start and finish marked.
+- **Two layouts:**
+  - *Map and panel:* the map on top and a panel of a chosen colour below it, holding the details the reader picks: the activity's name, the date, distance, moving time, elapsed time, elevation gain, average speed or pace, average heart rate, and the elevation profile. A detail the activity lacks is offered disabled with the reason. The panel's height follows from what is picked and the image's shape, so it is never a fixed box with empty space or crowded text.
+  - *Free canvas:* the map fills the image, and the custom canvas editor (TD-062) places what goes over it, as the map video hosts it (AV-1207): shapes, text, figures for the whole activity, the date and the elevation profile, with its layout file.
+- **Size and output:** landscape, portrait, square and social presets (1080 × 1350, 1200 × 630 among them) or a custom size within stated limits; a PNG, or a JPEG.
+- **Privacy and requests:** the privacy trim hides the start and end from the fit, the route and the profile. Rendering waits for every tile; a failed tile is tried again and then the export stops rather than save a picture with a hole. Requests go through the export's queue, four at a time and each tile once (TD-076). Nothing is uploaded, and a route-only image asks for nothing.
+- **Tests:** unit tests for the panel's layout (its height for each set of details and each image shape), the fit, and the framing at a heading; a browser test over fixture tiles that exports each layout and checks pixels (the basemap, the route's colour, the panel's colour and its text, the credit); privacy: only the chosen map host is asked, by GET, nothing of the activity is sent, and route only asks for nothing.
+
+#### AV-1014: One File Input on the Overlay Page, Opening in the Mode That Fits
+
+Dependencies: AV-1002, AV-1009, AV-1011, AV-1013, TD-059, TD-081
+
+GitHub issue #16. The overlay page has a slot for the video and another for the activity, each with its own drop zone, so the reader has to know which file goes where. This task replaces them with **one input** that takes either kind, or both at once, works out what each file is, and opens the page in the mode that fits.
+
+Acceptance criteria:
+- **One input:** a single labelled drop zone and picker, *Files*, taking MP4 and MOV videos and GPX, FIT, TCX and KML activities, one or several at a time. It says what it wants from what the page holds: a video or an activity, or both, when empty; the activity when a video without telemetry is held; a video when only an activity is (and *Add a video* was asked for). Its test id is `overlay-file-input`.
+- **What a file is:** decided from its first bytes where they say (an ISO base media box is a video; the FIT signature or a GPX, TCX or KML root is an activity), else from its extension. A file that is neither is refused with the reason, as the drop zone refuses one now. The video's telemetry and the activity's format are then read exactly as before (`useVideoTelemetryRead`, `parseActivityFile`).
+- **Several files at once:** one pick or drop may hold one video and one activity. Two or more of one kind are all refused with a reason naming them ("Choose one video at a time: a.mp4 and b.mp4 are both videos."); a file of the other kind in the same drop is still taken. A video dropped while another is being read is refused with the reason, until that read finishes or is cancelled.
+- **Opens in the mode that fits:**
+  - A video with telemetry: the template overlay over the video, with its own activity, and Sync first.
+  - A video without telemetry: the video held, its note beside it, and the input asking for its activity.
+  - An activity only: the still image, or the mode last chosen this session under *What to make*, as now.
+  - A video and an activity, together or one after the other: the template overlay (or the custom canvas, if chosen), with Sync first.
+- **Each file held keeps its own line:** under the input, the video's line and the activity's line, each with its name, the details it shows now, *Choose another video* / *Choose another activity* (a picker of that kind only, test ids `overlay-video-replace` and `overlay-activity-replace`) and *Remove*, so one can be changed without the other. A new video replaces the video and keeps an activity chosen by hand; a new activity replaces the activity and keeps the video; a video's telemetry never replaces a hand-picked activity (TD-040). With both held, the drop zone gives way to the two lines.
+- **Status:** a video being read shows its progress and Cancel; an activity being read says so; a failure is shown with its file's name and reason, and takes nothing else down; focus moves to what went wrong. Each is announced as the slots announce it now.
+- **Handoffs unchanged:** the viewer's *Create route overlay*, *Create a map image* and *Create custom track*, and the extraction page's *Create overlays*, open in the mode they ask for.
+- **Layout (TD-059):** the input never moves or is drawn anew while a file is read, so a file dropped mid-read is never lost. In the still image and map image, *Add a video* brings back the input, taking videos only; the activity is changed by Start over, as now.
+- **Tests:** unit tests for what a file is (by content, by extension, neither); component tests for each row of *Opens in the mode that fits*, several files in one drop (one of each, two of a kind, a refused one), replacing and removing each, a video dropped while one is read, the input's wording in each state, and focus on a failure; the browser tests moved from `overlay-video-input` and `overlay-activity-input` to the one input.
+
+#### AV-1015: Style a Figure's Label and Value Apart, With Spacing, Alignment, a Halo of Its Own and a Switch to Hide the Label
+
+Dependencies: AV-1011, AV-1207, TD-059, TD-062
+
+GitHub issue #17. A live figure on the custom canvas (a text or gauge component) is drawn as a label over a value. Both lines share one colour and one size scale, at fixed proportions, always left-aligned, with a fixed dark halo when the background is under 30 %. This task styles the two lines apart. The extras in gpx2video's reference comment on the issue are not part of this task: the unit as a third part, an icon, font weights, italic, vertical alignment, a shadow, and side-by-side layouts. Fonts are #26.
+
+Acceptance criteria:
+- **Settings per figure:** set in the canvas editor for a text or gauge component, and saved in its layout file:
+  - **Show the label:** a switch. Off, only the value is drawn, centred in the box's height. The label's text is kept, so switching it back on restores it.
+  - **Label size (%)** and **Value size (%)**, in place of the one *Text size (%)*.
+  - **Label colour** and **Value colour**, in place of the one *Text colour*.
+  - **Spacing** between the label and the value, as a share of the frame's width, so it scales with the picture.
+  - **Alignment:** left, centre or right, for both lines.
+  - **Halo colour** and **Halo (%)** for the halo drawn under the text on a clear background. 0 % means no halo.
+- **Older layouts draw exactly as before:**
+  - The value takes the existing text colour, and a missing label colour falls back to it.
+  - Missing sizes, spacing, alignment and halo take today's values: the label at 0.55 em and 75 % opacity, the value at 1.1 em bold, today's gap, left-aligned, and today's halo (black at 80 %) where the background is under 30 %.
+  - The label is shown.
+  - No new template version: the new fields are optional within version 2.
+- **One renderer:** the canvas preview and every export (PNG sequence, transparent WebM, burned-in video) draw the new settings, and so do the map video's figures, through the same renderer.
+- **The box grows to fit:** when a change in the editor makes the text need more room than the box has, the box grows to hold it.
+  - It grows right and down, and stops at the frame's edges: it never grows or moves past them.
+  - Text that still doesn't fit is cut at the box, which is inside the frame. Nothing past the frame's edge is drawn in the preview or any export.
+  - The box never shrinks by itself.
+- **Tests:**
+  - template round trips of the new fields, an older layout keeping its colour and defaults, and the fields within version 2;
+  - renderer tests: each line's size and colour, the spacing, the alignment, the label hidden, the halo's colour and transparency, no halo at 0 %, an older layout drawing the same pixels as before, and text past the frame's edge not drawn;
+  - editor tests for each control, the box growing to fit, and stopping at the frame's edge;
+  - a browser test that reads an exported frame's pixels for the two colours and the halo.
+
+#### AV-1016: Predefined Overlay Components for Cycling and Running, With Smoothing, and a Starting Layout per Sport
+
+Dependencies: AV-1011, AV-1015, TD-080
+
+GitHub issue #18. The canvas editor offers each figure and gauge on its own, with nothing designed for a sport. This task adds a **registry of predefined components** that can be dropped in by sport, **smoothing** for figures that jump second to second, and a starting **layout per sport**.
+
+It builds only what can be drawn today. These entries wait for their own drawing pieces and are not offered until those land:
+- dials, charts, the gradient glyph and colour, and the compass (#21);
+- zones (#20);
+- splits (#22);
+- average-so-far figures (#39).
+
+Acceptance criteria:
+- **Registry:**
+  - `src/overlay/predefined.ts` holds the entries as plain data. Each has an id, a name, a sport (`cycling`, `running` or `any`), the data it needs, and a builder that makes ordinary components with a default look, size and smoothing.
+  - Adding a sport later means adding entries, not changing the editor.
+- **Offered in the editor:** the *Add* list gets *Cycling*, *Running* and *Any sport* groups. An entry the activity can't supply is offered disabled with the reason, as figures are now.
+- **Once added, an ordinary component:** saved in the layout file, edited with the usual controls (including AV-1015's), and drawn by the one renderer in the preview, every export and the map video.
+- **Entries available now:**
+  - **Cycling:** speed (figure and bar gauge, ranged from the activity's top speed), power, power 3 s average, cadence (rpm), gradient (%, smoothed), climb so far, elevation profile.
+  - **Running:** pace (smoothed), heart rate, running cadence (spm), distance of the total.
+  - **Any sport:** elevation profile, progress bar, route inset.
+- **Climb so far:** a new live metric, the elevation gained up to this moment. It uses the same rule as the summary's elevation gain, so at the end it equals the summary's figure. It holds through a stop.
+- **Smoothing:**
+  - Any live figure or gauge can show the trailing average of its value over a window of 0 to 30 s. 0 is off, and a component saved without a window is off.
+  - Pace is smoothed through speed, then turned back into pace.
+  - The preview and every export compute it from the same timeline, so they agree, and it holds through a stop (TD-080).
+  - Predefined entries set a default window: power 3 s, pace 5 s, speed 2 s, gradient 5 s, cadence 3 s. The reader can change it or turn it off per component.
+- **Starting layouts:** *Cycling* and *Running* join *Start from* in the canvas editor. Each is built from the registry's entries and laid out for the frame's shape (landscape or portrait), using only entries the activity can supply.
+- **Layout files:** the new fields stay within template version 2, and older layouts open unchanged.
+- **Tests:**
+  - every registry entry builds valid components, and one the activity lacks is disabled with its reason;
+  - smoothing: the window, off, a stop, pace through speed, and the same values in the preview's and the export's renderer;
+  - climb so far: rising, falling and the end equalling the summary's figure;
+  - the starting layouts in both shapes, and with a missing stream;
+  - a browser test that adds a predefined entry and reads its smoothed value in an exported frame.
+
+#### AV-1017: A Documented Contract for Overlay Components, and Why Remotion Is Not Used
+
+Dependencies: AV-1011, AV-1015, AV-1016
+
+GitHub issue #19, first part. The issue asks for readers' own overlay components, using Remotion, and lists three blockers to settle first.
+
+Two of them rule Remotion out (TD-085):
+- its browser rendering sends a telemetry event on every render, with the IP address and the page's origin, and it "cannot be disabled";
+- its terms forbid services that let end users bring their own Remotion code.
+
+The issue's fallback stands: the app's own renderer, with a documented component contract.
+
+This task writes that contract and its documentation. **Loading and running a reader's own component is not part of it.** Running someone else's code needs a sandbox and a change to the page's CSP, which is a security decision left to the maintainer on the issue.
+
+Acceptance criteria:
+- **Remotion decision recorded:** TD-085 quotes the pages read on 2026-11-12 for telemetry, the licence and the terms, says why each rules Remotion out for this app, and names what would have to change to look again.
+- **Contract types:** in `src/overlay/contract.ts`, as TypeScript types and JSON-serialisable props, one section per kind of component:
+  - **Live figures:** the value in stored units (m/s, s/km, m, bpm, W, rpm, %, s), the unit system chosen, the formatted text and label, the style including AV-1015's figure settings, the smoothing window, the box in pixels, the frame size and the video time.
+  - **Gauges:** the above plus the range and the fraction within it.
+  - **Along the route:** the route's shape in the box's 0..1 space, the position, the progress, and the elevation profile.
+  - **Whole activity:** the summary figures, the date, and the activity's name where the file states one.
+  - **Zones:** reserved and documented as coming with #20.
+
+  Missing data is absent, never a placeholder. A draw function's signature is `(ctx, props) => void`, drawing on a 2D canvas context inside its box only.
+- **One adapter:** `contractProps(...)` builds each section's props from what the renderer already resolves. A test checks that every built-in component, in every state the renderer draws, maps to valid props of its section.
+- **Documentation:** in `docs/components/`, a README covering what a component is, the rules (no network, no storage, nothing outside the box, the same picture for the same props) and the status (loading readers' components is not built yet, and why). Then a page per section with a props table, units, how often props change, and a minimal example draw function. The examples are real files that a test typechecks and runs against a recording context. The canvas editor links to the README.
+- **Tests:** the adapter for every built-in; props that survive `structuredClone`; absent rather than placeholder data; the examples run.
+
+#### AV-1018: A Customisable Zones Component for Heart Rate and Power
+
+Dependencies: AV-1015, AV-1016, AV-1017, TD-080
+
+GitHub issue #20. A component showing which heart rate or power zone the activity is in at each moment. Its zones can be customised, and it is drawn by the one renderer everywhere. It also fills #18's zone entries and the reserved zones section of the contract (#19).
+
+Acceptance criteria:
+- **Sources:** heart rate (bpm) and power (W). The model allows other bounded figures later.
+- **Zones:**
+  - 2 to 10 zones, 5 by default for heart rate and 7 for power.
+  - Each zone has a name, a colour and a lower bound. The bounds are absolute values, or a % of a reference: the maximum heart rate for heart rate, the FTP for power.
+  - **Default heart rate zones:** 50–60, 60–70, 70–80, 80–90 and 90–100 % of the maximum.
+  - **Default power zones:** Coggan's seven zones of FTP. The bounds start at 0, 56, 76, 91, 106, 121 and 151 %.
+  - A value under the first zone's lower bound counts in zone 1, and one over the top counts in the last zone.
+- **Shapes:** a horizontal bar, a vertical bar, a segmented arc, and a single coloured figure. Each can also show:
+  - the zone's number and name;
+  - the value, in bpm or W;
+  - the time in each zone so far, counted as moving time is (TD-058), from the unsmoothed values.
+- **Smoothing:** AV-1016's smoothing window applies to the value the zone is read from. The default is 3 s for power and 0 s for heart rate.
+- **Through a stop:** the zone holds as the figure does (TD-080), so power at zero falls in zone 1. Missing data is not drawn.
+- **Personal figures:**
+  - The maximum heart rate and FTP are the reader's own. They are kept **in memory for the session only**, as the overlay settings are (TD-040), and never written to device storage: the theme stays the only thing this app stores.
+  - A layout file includes them only if the reader ticks *Include my maximum heart rate and FTP*; the box is unticked by default.
+  - A layout file that holds them offers to use them when it is opened.
+- **Needs your figures:**
+  - A zone set measured in % of a reference the reader hasn't entered isn't drawn. The editor says which figure it needs and offers the activity's highest value as a starting point, labelled as such.
+  - Absolute bounds need no reference.
+- **Editor:**
+  - the source, the reference and its value, the number of zones, and each zone's name, colour and bound;
+  - the shape, what to show, and smoothing;
+  - the usual position, size, colours, text sizes and halo (AV-1015).
+- **Everywhere:** the canvas preview, the PNG sequence, the transparent WebM, the burned-in video, the map video and the map image draw it through the one renderer. The personal figures go to the export workers with the request, and nowhere else.
+- **Registry and contract:**
+  - *Heart rate zones* (cycling and running) and *Power zones* (cycling) are added to AV-1016's registry.
+  - The contract's zones section and `docs/components/zones.md` are written, with an example.
+- **Layout files:** a new optional field within version 2. Older layouts open unchanged.
+- **Tests:**
+  - zone lookup at the bounds, for each source and custom bounds;
+  - defaults from the maximum heart rate and FTP, and the needs-your-figures state;
+  - smoothing;
+  - time in zone, counted as moving time is;
+  - layout round trips, with and without the personal figures;
+  - a renderer test per shape;
+  - the privacy guard: no storage;
+  - a browser test reading an exported frame's zone colours.
+
+#### AV-1019: Dial Gauge, Line Chart With a Cursor, Gradient Indicator and Compass
+
+Dependencies: AV-1015, AV-1016, AV-1017, AV-1018, AV-1211, TD-080
+
+GitHub issue #21. Four new component types, drawn by the one renderer, so the canvas preview, the PNG sequence, the transparent WebM, the burned-in video and the map video all show them alike. Each is placed, sized and saved like any other, with AV-1015's colours, text sizes and halo where it draws text.
+
+Acceptance criteria:
+- **Dial gauge** (`dial`): an arc of ticks with a needle or a marker, and the value and label in the middle.
+  - For speed, pace, cadence, power, heart rate or any figure with a range.
+  - **Settings:** the sweep (180° to 300°, default 240°); the range, which defaults to the activity's own range for that figure rounded to a sensible step, or can be set by hand; the major tick step and the minor ticks per major; needle or marker; the track, fill and needle colours.
+  - Values beyond the range pin at its ends.
+  - Smoothing (AV-1016) applies.
+- **Line chart with a cursor** (`chart`): a figure against time or distance, with a cursor at the moment shown.
+  - **Sources:** any live metric or camera stream with values.
+  - **Settings:** the x axis (time or distance); the window (the whole activity, or N seconds or metres either side of now, with the cursor in the middle); the line and fill colours; axis labels on or off (the y range's ends, and the x window).
+  - A gap in the data is a gap in the line.
+  - **The elevation profile becomes a case of the chart.** Both are projected by one series projection, extended from `projectProfile`. Existing `elevationProfile` components keep their type and draw the same pixels.
+- **Gradient indicator** (`gradient`): the current slope in %, with an up or down glyph and a colour by steepness.
+  - **Settings:** the colour bands (editable, with defaults for descents, flat, and four climbing bands) and the glyph on or off.
+  - **Grade source:** the file's recorded grade where it has one. Otherwise it is derived from elevation over the last 50 m of distance, so most GPX and FIT files have a gradient. The plain *Gradient* figure gains the derived grade too.
+- **Compass / heading** (`compass`): the direction of travel.
+  - **Rose style:** a rose that turns so the heading is up, with a fixed marker.
+  - **Needle style:** a fixed north-up rose with a needle pointing along the heading.
+  - **Settings:** the style, labelled cardinal points on or off, and the colours.
+  - **The heading:** a new live metric, `heading`, the bearing from the point about 20 m back along the route to the current position.
+    - It is smoothed with a circular mean (never a plain average across 0°/360°).
+    - It holds through a stop (TD-080), and is absent until the activity has moved 20 m.
+  - **Display:** written as a figure, in degrees with a cardinal letter.
+- **Missing data is not drawn**, as for other figures.
+- **Registry and contract:**
+  - **AV-1016's registry gains:** *Speedometer* (cycling, a dial); *Cadence dial* (cycling); *Speed against time* (any sport, a chart); *Heart rate against time* (any sport, a chart); *Gradient indicator* (cycling, replacing the plain gradient entry); *Compass* (any sport).
+  - **AV-1017's contract gains** sections or props for the four types, with docs pages and examples.
+- **Layout files:** new optional fields within version 2. Older layouts open unchanged, with the elevation profile's pixels unchanged.
+- **Tests:**
+  - **Renderer:** the needle's angle at the range's ends and beyond; the chart cursor's position for each axis and window; a gap in the chart; the gradient's colour bands at their bounds; the compass at the four cardinal headings and across 359°/1°.
+  - **Heading:** the bearing, the circular smoothing, holding through a stop, and absent before 20 m.
+  - **Derived grade:** up, down, flat, and none without elevation.
+  - **Editor:** each control.
+  - **Layout files:** round trips.
+  - **Browser:** an exported frame read for a dial and a chart.
+
+#### AV-1020: The Answers on Issues #17 to #21: a Shape Grows With Its Figure, Reasons Grouped, the Contract Only, Start Over Clears the Figures, and Dials and Chart Windows in the Reader's Units
+
+Dependencies: AV-1015, AV-1016, AV-1017, AV-1018, AV-1019, TD-088
+
+GitHub issues #17, #18, #19, #20 and #21: the answers given on 12 November 2026 to the questions each build left open. What the answers kept as built is not repeated here.
+
+Acceptance criteria:
+- **A shape grows with the figure it holds (#17).** When a live figure grows to fit its label and value (AV-1015) and it is held by a shape, the shape grows right and down with it so the figure stays inside, keeping the gap the figure had from the shape's right and bottom edges, and never past the frame's edges. The shape never moves and never shrinks, its other members are untouched, and the figure and the shape change in one step that one Undo takes back. A figure that is not held, and a plain resize by hand, behave as before.
+- **"Not in this activity" is grouped by reason (#18).** In the custom canvas (and so on the map video and the map image) and in the still image, each reason is written once, after the names of everything it rules out, in the order the Add list has them: "Heart rate, Heart rate zones, Heart rate against time: This activity has no heart rate." An entry with a reason of its own is a line of its own, as now.
+- **The contract only (#19).** Nothing loads a reader's code at runtime. The status section of `docs/components/README.md` says this is decided, not pending: components are added to the app's code by pull request. TD-085 says so too.
+- **Start over clears the maximum heart rate and FTP (#20).** The overlay page's Start over lets them go with the files, and its Undo puts them back with the files. The undo message says the figures were let go only when there were any. Nothing else clears them, and they are still never stored on the device.
+- **Dials in the reader's units (#21).**
+  - A dial's major ticks carry numbers, in the units the dial's figure is shown in (the component's own units, or the reader's): km/h or mph, min/km or min/mi as m:ss, bpm, W, rpm, spm.
+  - The range and the major step are typed in those units, and a range found from the activity, and an automatic step, are rounded in those units, so a speed dial reads 0, 10, 20 … km/h or 0, 5, 10 … mph, not steps of a whole m/s.
+  - What is stored stays in the stored units (m/s, s/km …), so a layout opens the same in either system and the contract is unchanged; switching units moves the numbers, not the needle.
+  - The numbers use the dial's text colour and size and its halo, sit inside the ticks, and are left out when the dial is too small for them to be read, rather than overlapping.
+- **A chart's window follows the unit system (#21).** On a distance axis the window is typed in feet when the chart's units are imperial and in metres when metric, stored in metres; a new window starts at 500 m or 1,500 ft. The window on a time axis stays in seconds.
+- Tests: the shape growing with a held figure (and not otherwise, and at the frame's edge), one Undo; the grouped list in both editors; Start over and its Undo with and without figures; tick values, labels and rounding in metric and imperial for speed and pace, a typed range and step round-tripping through the stored units, labels left out on a small dial, a golden render of a labelled dial; the chart window's field in feet and metres.
+
+#### AV-1021: A Splits Component, From the File's Laps or Every Kilometre or Mile
+
+Dependencies: AV-1015, AV-1016, AV-1017, AV-1018, AV-1020, TD-058, TD-080
+
+GitHub issue #22, split out of #18. A new component type, `splits`, drawn by the one renderer, so the canvas preview, the PNG sequence, the transparent WebM, the burned-in video and the map video all show it alike. It is placed, sized and saved like any other, with AV-1015's colours, text sizes and halo.
+
+Acceptance criteria:
+- **What it shows:**
+  - the current split's number and its time so far;
+  - the last finished split's time, with how it compares to the one before it: faster or slower, in a colour of each, compared by pace (time per distance) so splits of different lengths compare fairly; equal to the second is neither;
+  - optionally a list of the last N finished splits (0 to 10, default 0), newest first, each with its number, time and the faster/slower colour;
+  - optionally the pace or the average speed of the current and of each finished split, in the component's units; pace by default for running, speed otherwise.
+- **Where splits come from:**
+  - **The file's laps** (`activity.laps`, read from FIT lap messages and TCX `<Lap>`) where there are at least two with a start time, each lap starting at its start time;
+  - **otherwise every kilometre or mile** in the component's units, or a distance the reader sets (0.1 to 100 of those units);
+  - the reader chooses either when the file has laps; laps are the default then.
+  - Unavailable, with the reason, when the activity has no time, or (for distance splits) no distance.
+- **Rules:**
+  - Split time counts moving time (the default, as the stats do: TD-058) or elapsed time, the reader's choice.
+  - Through a stop (TD-080) the current split's clock follows that choice: elapsed keeps running, moving holds.
+  - A split boundary is where the activity's distance along (or a lap's start time) crosses it, interpolated between points; a split cut by a segment break, or by the map video's privacy trim, is still counted and numbered by the distance along the whole activity. The last split may be short and is compared by pace.
+  - The splits are found once per timeline, in O(n), and a frame costs a binary search, as the zones' time in zone is (TD-086, TD-088).
+- **Customisable:** what is shown (above), the number of past splits listed, the faster and slower colours, the source and distance, the time counted, plus the usual position, size, colours, text sizes and halo.
+- **Everywhere:** in the custom canvas's Add list, and as *Splits* in the Running and Cycling predefined groups (AV-1016); drawn on the map video; not offered on the map image (a still, like the dial and chart: AV-1020). Its props are a section of the component contract (`SplitsProps`, AV-1017) with a docs page and a runnable example.
+- **Tests:** distance splits at the boundaries in metric and imperial and at a set distance; laps from a TCX fixture and from a FIT fixture with lap messages; elapsed and moving split times through a stop; a segment break inside a split; the faster/slower comparison including a short last split and a tie; the editor; a golden render; the contract adapter; and a browser test that exports a frame and reads the split's region.
+
+#### AV-1022: A Privacy Trim for the Overlay's Route: Hide a Share of the Start and End, by Slider or Percentage
+
+Dependencies: AV-1004, AV-1009, AV-1010, AV-1011, AV-1013, TD-068, TD-079
+
+GitHub issue #24. The video overlay's route, the still image's route and the route image draw the whole route, both ends included, often at home. This hides a share of each end from everything drawn of *where* the activity went. It is the trim #23's moving map will use.
+
+Acceptance criteria:
+- **One trim for the overlay**, not one per component: *Hide from the start (%)* and *Hide from the end (%)*, each 0 (the default, nothing hidden) to 45 %, as shares of the route's distance.
+  - Set with a range slider with two handles along the route and two percentage inputs, kept in step both ways: moving a handle updates its input, and typing a value moves its handle. Each handle and input is labelled and works by keyboard.
+  - The distance each share hides is written beside it, in the reader's units ("8 % — 1.2 km").
+  - Offered where the route is drawn: the template overlay's controls, the custom canvas, the still image and the route image.
+- **What it hides:**
+  - the route inset's line and marker, in the overlay preview and every export (PNG sequence, transparent WebM, burned-in video);
+  - the still image's route and the route image's line and start and end markers;
+  - while the moment is in a hidden stretch, the inset shows the kept route with no marker.
+  - The figures (speed, distance, heart rate …) are not places and keep showing.
+- **The route is cut before anything is built from it**, by the map video's own cut (`trimRoute`, TD-068): the ends are interpolated exactly that far in, and the projection, the fit and the simplification see only the kept part, so in the whole-route view the inset fits only what is kept and the hidden ends cannot be guessed from an empty margin. A segment break inside a kept part stays a break.
+- **Too little left:** when less than 100 m of route would remain (`MIN_TRIMMED_ROUTE_METERS`), no route, marker or route image is drawn, and the control says why.
+- **Saved** in the layout file (and the template) as the two shares, never as places. A layout without one opens with none, within template version 2.
+- **The other trims:** the map video's and map image's trims stay in metres, as their projects save them, and now show the share they hide beside them. One cut serves all three.
+- Tests: the cut at chosen shares, at 0 %, at both ends at once, on a route with a segment break, and too little left; the fit using only the kept part; no marker in a hidden stretch; the editor's slider and inputs in step both ways and by keyboard; the layout round trip; the share beside the map video's and map image's trims; and a browser test whose exported frame has no line or marker in the hidden stretches.
+
+#### AV-1023: The Route Inset as a Real Map: Styles, a Chosen Zoom Following the Position, and Heading-Up or North-Up
+
+Dependencies: AV-1004, AV-1011, AV-1022, AV-1201, AV-1205, AV-1209, AV-1013, TD-064, TD-068, TD-076, TD-077, TD-079, TD-091
+
+GitHub issue #23. The route inset (`routeInset`) is only the line, fitted whole and north up. It gains a view that follows the position, heading-up or north-up, and optionally a basemap drawn by the map video's own MapLibre path. The privacy trim of AV-1022 applies to all of it.
+
+Acceptance criteria:
+- **View** (per inset, every inset, with or without a map):
+  - **Whole route** (today's fit of the kept route, north up), the default, so older layouts draw as before;
+  - **Follow:** a zoom the reader picks (10 to 18, default 15), the position held in the centre and the route moving under it.
+  - **Orientation when following:** north up, or heading up (the direction of travel up), from the timeline's smoothed heading (AV-1019), so it does not swing on GPS noise, and held through a stop (TD-080).
+  - The route and marker are drawn by the renderer in Web Mercator at the camera's centre, zoom and bearing, the same projection MapLibre uses, so a line drawn over a map lies on its roads.
+- **Shape and line:** square or round, a border (width and colour), the trail behind (all of it, or the last 1 to 60 minutes) and the route ahead (shown, dimmed or hidden), and the line colour and width.
+- **Map** (off by default):
+  - None (the line only, as today), or a basemap from the providers the map video already uses: OpenFreeMap's styles, and MapTiler's with the reader's key, the latter only for video exports (the transparent WebM and the video with the overlay drawn in), never the PNG sequence, whose frames are static images its terms forbid (TD-079).
+  - No other provider is offered. Those raised on the issue (OpenStreetMap's tile servers, OpenTopoMap, Thunderforest/OpenCycleMap, Stadia, Esri, Google, Bing and IGN) have their terms read and recorded in the decision with whether each could be offered and how; none is added here.
+  - Where the map is turned on, the page says that tile requests reveal the area to the provider, and how many tiles the export will ask for before it starts (the map video's count and limits, TD-076, TD-077).
+  - The map's credit is drawn in the inset whenever a provider's map is shown.
+  - At most two map insets in one overlay.
+  - Not offered inside the map video's and map image's canvas, which are maps already; the view and orientation are.
+- **Drawing:**
+  - **Export:** the inset's map is drawn on the page by the map video's offscreen map and request queue (`openExportMap`, TD-064), every tile waited for before a frame is written. For each frame the worker asks the page for each map inset's picture, gets it as an `ImageBitmap`, and draws it in the inset's box under the line, the marker and the rest of the overlay. One frame at a time in memory.
+  - This one path serves the PNG sequence and the video with the overlay drawn in; the transparent WebM, recorded in real time, first loads every tile its plan needs, and a frame that still cannot be drawn in time stops the recording with the reason, as now.
+  - **Preview:** a live MapLibre map in the inset's box, under the overlay, moved to the same camera each frame without waiting for tiles; the page says the export waits for every tile and the preview does not.
+- **Privacy trim (AV-1022):** only the kept route is drawn or framed; while the moment is in a hidden stretch the camera holds at the kept route's nearest end and no marker is drawn, so no tile is asked for a hidden stretch.
+- **Saved** in the layout as the inset's settings, within template version 2; older layouts open as a whole-route, line-only inset.
+- Tests: the camera (centre held while following, zoom, heading-up from the smoothed heading, held through a stop, across 359°/0°); the Mercator projection against MapLibre's at known points; the trail and the route ahead; the trim (camera held, no marker, no tile for a hidden stretch); providers per export kind (MapTiler never for the PNG sequence); the editor's controls; at most two map insets; the layout round trip; golden renders of a following, heading-up line-only inset; and browser tests over fixture tiles (never a live provider): an exported frame's pixels show the map, the route and a centred marker, every tile asked once, by GET, with nothing of the activity, and none for the trimmed ends.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model
@@ -1244,3 +1604,156 @@ Acceptance criteria:
 - Responsive tests cover desktop layout and mobile layout without the large-screen sidebar.
 - Performance checks cover editing and previewing drafts with large point counts, including append operations.
 - Privacy regression tests confirm route-builder import, edit, append, and export flows do not upload route points, file contents, draft metadata, or exported files.
+
+#### AV-1109: Merge Several Track Files Into One Timed Activity With Pauses
+
+Dependencies: AV-102, AV-103, AV-1101, AV-1106, AV-1107
+
+Acceptance criteria:
+- From Route Builder the user can combine two or more recorded track files (GPX first; FIT and TCX as the parsers allow) into **one** activity that can be exported as a single track, as a separate action from the untimed planned-track export (TD-054).
+- The files are ordered by their own recorded start time, oldest first, whatever order they were chosen or dropped in and whatever their file names; the order is shown, and a file with no timestamps is refused from the merge with the reason rather than placed by guess.
+- The merged activity is built as if it were one recording: one track, one segment run per source, original timestamps, elevation and any sensor fields the exporter supports kept, points strictly in time order.
+- The gap between the end of one file and the start of the next is treated as a **pause**: it counts in elapsed time but not in moving or timer time, adds no distance across the jump, and produces no interpolated points. A gap with a large spatial jump is warned about, not joined.
+- Overlapping files (the second starts before the first ends) are refused or trimmed by an explicit, stated rule, never silently interleaved.
+- Totals (distance, elapsed time, moving time, elevation gain and loss, average speed or pace) are computed over the merged activity and equal the sum of the parts, with the pauses excluded from moving time.
+- The merged activity can be viewed on the page, exported through the exporter registry (GPX first; FIT and TCX where they can represent the pause correctly) with a name that identifies it as merged, and re-imported by the viewer to the same points, times and totals.
+- Fixture: the two Garmin Connect cycling files recorded on 2026-09-24 near Imabari, `activity_24573607104.gpx` (5,817 points, 23:55:51Z to 02:11:48Z) and `activity_24573607127.gpx` (10,465 points, 03:26:17Z to 07:36:36Z), which are a morning ride and a continuation 74 minutes later from about the same place. Merging them yields one ride of 16,282 points with a 74-minute pause; the test must give the same result whichever file is chosen first. Committed fixtures are trimmed or synthesized copies if the originals' size or location data should not be committed.
+- Nothing is uploaded or stored; the merge happens in the browser.
+- Tests cover ordering independent of selection order, the pause accounting, overlap handling, a file without timestamps, totals equal to the sum of the parts, GPX export and re-import, and the no-upload privacy behaviour.
+
+### Epic E12: Animated Route Map Video
+
+A page of its own that turns an activity into a short animated map video, in the manner of Relive and MapDirector: the camera flies over the map, the route draws itself behind a moving marker, figures run alongside, and the result is downloaded as a video file. It reuses the overlay renderer and the burned-in encoder (E10) for everything drawn on top of the map, and MapLibre for the map itself. Everything is rendered in the browser; the only network traffic is the map tiles, and the page says so.
+
+#### AV-1201: Evaluate Map Video Rendering, Tile Sources and Their Terms
+
+Dependencies: AV-302, AV-1001, AV-1007
+
+Acceptance criteria:
+- A spike renders a 10-second, 30 fps, 1920x1080 flyover of a fixture ride and records the result as a decision (TD) covering: how a frame is captured (a MapLibre map driven frame by frame with `jumpTo`, waiting for every tile of that frame before the canvas is read, not recorded in real time), how it is encoded (the Mediabunny path of TD-045, H.264 MP4 first, VP9 WebM where H.264 encoding is missing), memory and time per frame, and the longest video and largest size the page will accept.
+- The rendered video must be deterministic: the same activity, settings and tiles give the same frames, whatever the speed of the machine or network. A frame is never written with a tile still loading.
+- The decision chooses the basemaps offered and states each one's terms: street map, satellite imagery and terrain elevation (`raster-dem`) for 3D. The OpenStreetMap tile servers' usage policy does not permit bulk or video rendering, so the default for video must be a source whose terms allow it, or a user-supplied tile URL/style with a key, or route-only with no basemap. A source that needs a key never ships a key in the bundle.
+- The decision states how many tile requests a typical render makes, and whether tiles are cached for the length of a render only (never persisted).
+- The decision lists what the browsers in the test matrix can do (WebGL2, WebCodecs `VideoEncoder`, H.264 and VP9 encoding, `OffscreenCanvas`), and what the page offers where they cannot.
+- Open questions in docs/planning/06 for the basemap, terrain and default length are answered or carried forward with a reason.
+
+#### AV-1202: Add the Map Video Page and Navigation
+
+Dependencies: AV-012, AV-1201
+
+Acceptance criteria:
+- A dedicated route, such as `/map-video`, and a `Tools` entry named `Map video` or an agreed equivalent. Map videos are not made inside the viewer, the overlay page or Route Builder.
+- The page opens on its file slot: an activity file chosen or dropped, read through the existing format detector and parser registry. A file without usable route points is refused with the reason.
+- The viewer, Route Builder (a merged activity, AV-1109) and the video telemetry page can hand the loaded activity over in memory with an action such as `Make a map video`; a reload or direct entry without handoff does not crash and shows the file slot.
+- The page says, before any tile is fetched, that the map is drawn from an online tile provider which learns the area shown, and offers route-only rendering with no basemap.
+- The page uses the app header, theme, Settings modal, route SEO metadata (no file names or activity values) and responsive layout conventions; the workspace layout follows the overlay page's (TD-059).
+- Tests cover the route, `Tools` navigation, the empty state, file read and refusal, handoff entry, reload fallback, and that no tile is requested before the reader has an activity on the page.
+
+#### AV-1203: Define the Map Video Model: Timing, Camera Path and Route Reveal
+
+Dependencies: AV-1003, AV-1201
+
+Acceptance criteria:
+- A map video is a serializable project: the activity reference, output size and fps, length, basemap, camera settings, route style, overlay layout and intro/outro choices, versioned like the overlay layout file (TD-061), saved and reopened as JSON. Activity data is never written into it.
+- Video time maps to activity progress by a stated rule the user chooses: by distance (an even pace along the route) or by recorded time with pauses shortened to a fixed short beat. The mapping is monotonic, starts at the first point and ends at the last, and is computed once, not per frame.
+- The camera path is pure and computed from the route: a follow camera behind the marker with a set zoom, pitch (0 to 60 degrees) and a bearing that follows the heading, smoothed over a window so it never spins on GPS noise or hairpins. A north-up option keeps bearing 0.
+- The route reveal for a frame is the route up to the marker's interpolated position, so the drawn line and the marker meet exactly; the rest of the route may be shown dimmed or hidden.
+- An intro flies from an overview of the whole route to the start, and an outro pulls back to the whole route; each has a length, and either can be turned off.
+- A privacy trim hides a chosen distance (for example 200 m) at the start and end of the route from the drawn line, the marker, the camera and the figures, so a video need not show where someone lives.
+- Unit tests cover the time mapping both ways (including a long pause and a recording with gaps), camera smoothing on a hairpin and a noisy straight, bearing wrap-around at 0/360, reveal and marker agreeing, intro/outro boundaries, the privacy trim, and the project round-trip.
+
+#### AV-1204: Build the Map Video Preview
+
+Dependencies: AV-1202, AV-1203
+
+Acceptance criteria:
+- A MapLibre preview at the output's aspect ratio plays the video's timeline with play, pause and a scrubber, using the same model and camera path as the export.
+- Changing a setting updates the preview without re-reading the file.
+- The preview may skip frames to keep up; the export never does. The page says the preview is a guide and the export is exact.
+- Route-only mode draws the route and marker on the page background with no tile requests.
+- The preview is keyboard-operable (play/pause, step, scrub) and usable on a phone width.
+- Tests cover play/pause/scrub, settings updates, route-only mode with no tile requests, and aspect changes.
+
+#### AV-1205: Style the Map, the Route and the Marker
+
+Dependencies: AV-1203, AV-1204
+
+Acceptance criteria:
+- Basemap choices as decided in AV-1201 (for example dark, light, satellite, route-only), with optional 3D terrain and an exaggeration control where a terrain source is available.
+- Route style: colour, width, a casing, the unrevealed part shown dimmed or hidden, and optional colouring by speed, elevation or heart rate when the stream exists (disabled with the reason when it does not).
+- Marker: a dot, an arrow pointing along the heading, or a sport icon, with size and colour; an optional fading trail ("comet") behind it.
+- Start and finish markers, optionally hidden with the privacy trim.
+- Output size presets matching the custom canvas (1920x1080, 1080x1920, 1080x1080, 3840x2160) and a custom size within the limits AV-1201 sets.
+- Map attribution required by the chosen source is always drawn in the frame and cannot be turned off.
+- Tests cover each style option, colour-by availability, the attribution, and the size limits.
+
+#### AV-1206: Add Camera Keyframes
+
+Dependencies: AV-1203, AV-1204
+
+Acceptance criteria:
+- Besides the automatic follow camera, the user can set keyframes on the timeline: at a moment, a camera position (centre, zoom, pitch, bearing) taken from the preview's current view, with the follow camera's values as the default between keyframes.
+- Between keyframes the camera eases with a stated curve; a keyframe can be moved, edited by its numbers, and deleted; changes are undoable.
+- A keyframe never points the camera away from the marker so far that it leaves the frame, unless the user chooses a fixed camera for that stretch.
+- Keyframes are saved in the project.
+- Tests cover interpolation, easing, ordering, editing and deletion, undo, and the round-trip.
+
+#### AV-1207: Put Figures and Graphics on the Map Video
+
+Dependencies: AV-1011, AV-1203, AV-1204
+
+Acceptance criteria:
+- The overlay components of E10 — live figures, gauges, the progress bar, the elevation profile with a moving cursor, text, shapes and still elements — can be placed over the map with the custom canvas editor and its layout file (TD-062), bound to the map video's timeline rather than a source video's.
+- During the outro a summary card can show the activity's totals (distance, time, elevation gain, average speed or pace) using the still image's figures (TD-061).
+- Figures during a shortened pause show the paused values, not interpolated ones.
+- The preview and the export draw the figures with the same renderer, composited over the map frame.
+- Tests cover binding to the map timeline, figures during a pause, the summary card, and a golden render of a composited frame with stubbed map pixels.
+
+#### AV-1208: Place the Reader's Photos Along the Route
+
+Dependencies: AV-1203, AV-1204
+
+Acceptance criteria:
+- The user can add local photos (JPEG, HEIC where the browser decodes it, PNG). Each is placed on the route by its EXIF time against the activity's clock (with a clock-offset control), or by its EXIF GPS position, or by hand at a point on the route.
+- When the marker reaches a photo, the video pauses its progress for a set time and shows the photo over the map with a short transition, then continues.
+- A photo's EXIF location and other metadata are never written into the exported video or the project file; the project refers to photos by name only and asks for them again on reopening.
+- A photo the browser cannot decode, or one with no time, position or hand placement, is listed with the reason and left out.
+- Tests cover placement by time, by position and by hand, the clock offset, the pause it adds to the timeline, an undecodable photo, and that no EXIF data reaches the output.
+
+#### AV-1209: Export the Map Video
+
+Dependencies: AV-1201, AV-1204, AV-1205, AV-1207
+
+Acceptance criteria:
+- Export renders every frame deterministically (AV-1201) at the chosen size and fps and encodes it in the browser to MP4 (H.264) where the browser can, or WebM (VP9), as the panel offers; a still poster frame (PNG) can be saved from any moment.
+- An optional local audio file (for example music) can be added; it is trimmed or faded out to the video's length. No music is bundled or fetched.
+- Progress shows frames done, time left and tile loading; the export can be stopped and keeps nothing when stopped. A tile that fails after retries stops the export with the reason rather than writing a blank frame.
+- The export works while the tab is in the background where the browser allows; where it cannot, the panel says so before starting.
+- The file name identifies the activity and that it is a map video; output uses `Blob`/object URL downloads and the generated-export storage rules of the 25 October 2026 review (OPFS with Web Locks where available).
+- Tests cover the plan (frames, length, size), MP4 and WebM where supported, the poster frame, the audio track, stopping, a failed tile, and the file name.
+
+#### AV-1210: Map Video Fixtures, E2E, Accessibility, Performance and Privacy Coverage
+
+Dependencies: AV-1202 to AV-1209
+
+Acceptance criteria:
+- Browser tests run against locally served fixture tiles (a small committed tile set or generated solid tiles), never a live provider.
+- An end-to-end test opens the page, loads a fixture ride, chooses a size and style, adds a figure, previews, exports a short MP4 (or WebM), and checks the file's length, size and pixels at known frames: the marker and route colour where the plan puts them, and the figure's text region.
+- A route-only test renders and exports with no tile requests at all.
+- Accessibility tests cover the page's controls, the timeline and keyframe editing by keyboard, and focus order; responsive tests cover desktop and phone widths.
+- Performance checks cover a long activity (250,000 points, the import limit) in the timing, camera and reveal computations, and the memory of a 60-second 1080p export.
+- Privacy tests confirm no activity data, photo, project or output is uploaded, that tile requests are the only network traffic and only for the basemap chosen, and that the privacy trim removes the trimmed points from every frame.
+
+#### AV-1211: An Elevation Profile With a Moving Cursor, for the Overlay and the Map Video
+
+Dependencies: AV-1011, AV-1207
+
+The M10 review found the elevation profile named in AV-1207's criteria was never built (TD-073).
+
+Acceptance criteria:
+- An elevation profile element can be placed with the custom canvas editor and saved in its layout file: the activity's elevation against distance, with a cursor at the current moment.
+- On the overlay page it follows the video's time; over the map video it follows the marker, and through a shortened stop the cursor holds still.
+- Over the map video it draws the trimmed stretch alone, so it cannot show what the privacy trim hides.
+- An activity without elevation leaves the element empty and says why in the editor.
+- A layout using it opens in an earlier version with that element left out and a warning, as any element it does not know is.
+- Tests cover the profile's shape and cursor, the trim, a layout round trip, and a golden render.

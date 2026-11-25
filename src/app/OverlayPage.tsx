@@ -1,454 +1,1048 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { download } from '../components/ExportPanel';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { OverlayControls } from '../components/OverlayControls';
+import { buildOverlayTimeline } from '../overlay/timeline';
 import { FileDropZone } from '../components/FileDropZone';
-import { OverlayBurnInExport } from '../components/OverlayBurnInExport';
-import { OverlayFrameExport, type VideoInfo } from '../components/OverlayFrameExport';
-import { OverlayTemplateEditor } from '../components/OverlayTemplateEditor';
-import { OverlayVideoPreview } from '../components/OverlayVideoPreview';
-import { toActivityError } from '../domain/errors';
-import { projectRoute } from '../domain/routeProjection';
-import {
-  DEFAULT_ROUTE_IMAGE,
-  ROUTE_IMAGE_PRESETS,
-  canvasToPng,
-  renderRouteToCanvas,
-  routeImageBaseName,
-  validateRouteImageOptions,
-  type RouteImageOptions,
-} from '../overlays/routeImage';
+import { ErrorPanel, WarningList } from '../components/ErrorPanel';
+import { BurnedInExportPanel } from '../components/BurnedInExportPanel';
+import { OverlayExportPanel } from '../components/OverlayExportPanel';
+import { OverlayPreview } from '../components/OverlayPreview';
+import { RouteOverlayPanel } from '../components/RouteOverlayPanel';
+import { CustomCanvas } from '../components/CustomCanvas';
+import { MapImagePanel } from '../components/MapImagePanel';
+import { VideoReadProgress } from '../components/VideoReadProgress';
+import type { Activity } from '../domain/activity';
+import { ActivityError, toActivityError } from '../domain/errors';
+import { formatDistance, formatDuration, formatFileSize, type UnitSystem } from '../domain/units';
 import { parseActivityFile } from '../parsers';
-import { createOverlayRenderer } from '../overlays/renderOverlay';
-import { BUILT_IN_TEMPLATES, availabilityOf, staticAvailability } from '../overlays/template';
-import { buildTimeline } from '../overlays/timeline';
-import type { UnitSystem } from '../domain/units';
+import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { useInteractionStore } from '../state/interactionStore';
-import { CUSTOM_TEMPLATE_ID, currentTemplate, useOverlayTemplateStore } from '../state/overlayTemplateStore';
-import { useOverlayStore } from '../state/overlayStore';
+import { useMapImageStore } from '../state/mapImageStore';
+import { usePersonalStore } from '../state/personalStore';
+import type { PersonalFigures } from '../overlay/template';
+import {
+  hasOverlaySource,
+  useOverlayStore,
+  type OverlayMedia,
+  type OverlaySnapshot,
+  type OverlayVideo,
+} from '../state/overlayStore';
+import type { VideoReadProgressState } from '../components/VideoReadProgress';
+import { classifyOverlayFile, sortOverlayFiles, type OverlayFileKind } from './overlayFiles';
+import { VIDEO_EXTENSIONS } from './readVideoTelemetry';
+import { useVideoTelemetryRead } from './useVideoTelemetryRead';
 
-/** The containers a camera or phone writes that a browser may play. */
-const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'm4v'];
+/** What became of the last file of a kind chosen. Each kind has its own. */
+type SlotState =
+  | { status: 'idle' }
+  | { status: 'reading'; fileName: string }
+  | { status: 'error'; error: ActivityError; fileName: string };
+
+const IDLE: SlotState = { status: 'idle' };
 
 /**
- * AV-1002 / AV-1009. Makes overlays from an activity.
+ * Focuses the files once React has drawn them: the error they are showing if
+ * any, so focus lands on what went wrong, else the drop zone, else the heading.
+ */
+function focusSlot(ref: RefObject<HTMLElement | null>) {
+  setTimeout(() => {
+    const slot = ref.current;
+    // With the files gone (the still image, once nothing is left to say), the way back to them.
+    const target =
+      slot?.querySelector<HTMLElement>('.panel--error button') ??
+      slot?.querySelector<HTMLElement>('.dropzone__target') ??
+      slot?.querySelector<HTMLElement>('h3') ??
+      document.querySelector<HTMLElement>('[data-add-video]') ??
+      document.querySelector<HTMLElement>('[data-start-over]');
+    target?.focus();
+  }, 0);
+}
+
+/**
+ * AV-1002. Where overlays are made: a page of its own, reached from Tools,
+ * that holds a local video, a normalized activity, or both.
  *
- * Today that is one thing: the route, alone, as a transparent PNG to lay over a
- * video in an editor. The page is the home for the telemetry-video overlays
- * that follow (AV-1003 onward), which is why it is its own route and not part
- * of the viewer.
+ * It renders nothing of the viewer — no map, no charts, no export controls —
+ * because there is nothing to view here, only something to draw over.
  *
- * Everything is drawn in this tab. The image is a canvas encoded to a `Blob`
- * and saved by the browser; no coordinates, pixels or files are sent anywhere.
+ * TD-059. With a video it is a workspace: the preview kept in view, and the
+ * files, the overlay controls and the exports beside it. Reading or failing to
+ * read a file is said in that file's slot, and nothing else is taken down for
+ * it: a file being replaced stays until its replacement has been read.
+ *
+ * Two ways in. The extraction page hands over what it read; or the files are
+ * chosen here, which is also what a reload needs, since the handoff is memory
+ * only (§5) and does not survive one.
  */
 export function OverlayPage() {
-  const activity = useOverlayStore((state) => state.activity);
-  const isSection = useOverlayStore((state) => state.isSection);
-  const setActivity = useOverlayStore((state) => state.setActivity);
-  const video = useOverlayStore((state) => state.video);
+  const source = useOverlayStore((state) => state.source);
   const setVideo = useOverlayStore((state) => state.setVideo);
+  const setActivity = useOverlayStore((state) => state.setActivity);
+  const clearActivity = useOverlayStore((state) => state.clearActivity);
+  const offerVideoActivity = useOverlayStore((state) => state.offerVideoActivity);
   const clear = useOverlayStore((state) => state.clear);
-  const defaultUnits = useInteractionStore((state) => state.unitSystem);
+  const restore = useOverlayStore((state) => state.restore);
+  const offsetSeconds = useOverlayStore((state) => state.offsetSeconds);
+  const setOffsetSeconds = useOverlayStore((state) => state.setOffsetSeconds);
+  const trim = useOverlayStore((state) => state.trim);
+  const setTrim = useOverlayStore((state) => state.setTrim);
+  const controls = useOverlayStore((state) => state.controls);
+  const setControls = useOverlayStore((state) => state.setControls);
+  const media = useOverlayStore((state) => state.media);
+  const setMedia = useOverlayStore((state) => state.setMedia);
+  const unitSystem = useInteractionStore((state) => state.unitSystem);
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [options, setOptions] = useState<RouteImageOptions>(DEFAULT_ROUTE_IMAGE);
-  const [exportError, setExportError] = useState<string | undefined>();
-  const [intakeError, setIntakeError] = useState<string | undefined>();
-  const [saved, setSaved] = useState<string | undefined>();
-  const [isReading, setIsReading] = useState(false);
-  // AV-1005. The template lives in a session store so edits survive moving
-  // between pages and switching templates, and nothing else.
-  const selectedId = useOverlayTemplateStore((state) => state.selectedId);
-  const savedTemplates = useOverlayTemplateStore((state) => state.saved);
-  const chosenUnits = useOverlayTemplateStore((state) => state.units);
-  const selectTemplate = useOverlayTemplateStore((state) => state.select);
-  const saveTemplate = useOverlayTemplateStore((state) => state.save);
-  const changeUnits = useOverlayTemplateStore((state) => state.setUnits);
-  const importTemplate = useOverlayTemplateStore((state) => state.importTemplate);
-  const resetTemplate = useOverlayTemplateStore((state) => state.reset);
-  const units: UnitSystem = chosenUnits ?? defaultUnits;
-  const template = useMemo(
-    () => currentTemplate({ selectedId, saved: savedTemplates }, units),
-    [selectedId, savedTemplates, units],
+  const [videoState, setVideoState] = useState<SlotState>(IDLE);
+  const [activityState, setActivityState] = useState<SlotState>(IDLE);
+  /**
+   * What Start over let go of, until the reader undoes it or chooses a file: the overlay's
+   * state, and the reader's own maximum heart rate and FTP (AV-1020, TD-089), which are
+   * not in the overlay store.
+   */
+  const [cleared, setCleared] = useState<{ overlay: OverlaySnapshot; personal: PersonalFigures } | undefined>();
+  /** Where the preview draws its sync panel: the side column, below the files. */
+  const [syncTarget, setSyncTarget] = useState<HTMLDivElement | null>(null);
+  /** Whether either export holds a finished file Start over would throw away. */
+  const [finished, setFinished] = useState({ png: false, video: false });
+  const [confirmingStartOver, setConfirmingStartOver] = useState(false);
+  /** With the still image showing, whether the reader asked for the video slot back. */
+  const [addingVideo, setAddingVideo] = useState(false);
+  /** AV-1011. Making a custom canvas rather than a built-in template (or the still image, without a video). */
+  const canvasMode = useOverlayStore((state) => state.canvasMode);
+  const setCanvasMode = useOverlayStore((state) => state.setCanvasMode);
+  const canvasDraft = useOverlayStore((state) => state.canvasDraft);
+  /** AV-1013. Making an image of the activity's map, which needs no video. */
+  const mapImageChosen = useMapImageStore((state) => state.chosen);
+  const setMapImageChosen = useMapImageStore((state) => state.setChosen);
+  const setCanvasDraft = useOverlayStore((state) => state.setCanvasDraft);
+  /** Records whether each export holds a finished file: the template's and the canvas's alike. */
+  const exportFinished = useCallback(
+    (kind: 'png' | 'video', done: boolean) =>
+      setFinished((current) => (current[kind] === done ? current : { ...current, [kind]: done })),
+    [],
   );
-  const [offsetSeconds, setOffsetSeconds] = useState(0);
-  const [videoInfo, setVideoInfo] = useState<VideoInfo | undefined>();
-  const [exporting, setExporting] = useState(false);
+  const pngFinished = useCallback((done: boolean) => exportFinished('png', done), [exportFinished]);
+  const videoFinished = useCallback((done: boolean) => exportFinished('video', done), [exportFinished]);
+  const { reading, read, cancel } = useVideoTelemetryRead();
+  const filesSection = useRef<HTMLElement>(null);
+  const [refusal, setRefusal] = useState<string | undefined>();
+  const keepIt = useRef<HTMLButtonElement>(null);
+  const exports = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
 
-  // AV-1004. The clock the video is lined up against, and what it can supply.
-  const timelineResult = useMemo(() => (activity ? buildTimeline(activity) : undefined), [activity]);
-  const overlayRenderer = useMemo(() => {
-    if (!activity || !timelineResult) return undefined;
-    return createOverlayRenderer({
-      activity,
-      template,
-      ...(timelineResult.ok
-        ? { timeline: timelineResult.timeline, availability: availabilityOf(timelineResult.timeline) }
-        : { availability: staticAvailability(activity.streams.hasLocation) }),
+  // TD-059. Where the stage sticks over the page (below 1100px), the page
+  // scrolls a focused control clear of it: its height is the scroll padding.
+  useEffect(() => {
+    const element = stage.current;
+    const scroller = element?.closest<HTMLElement>('.shell__scroll');
+    if (!element || !scroller || typeof ResizeObserver !== 'function') return;
+    const observer = new ResizeObserver(() => {
+      scroller.style.setProperty('--overlay-stage-height', `${element.offsetHeight}px`);
     });
-  }, [activity, timelineResult, template]);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      scroller.style.removeProperty('--overlay-stage-height');
+    };
+  }, [source.video]);
 
-  const sensorChoices = useMemo(
-    () =>
-      timelineResult?.ok
-        ? (activity?.sensorStreams ?? [])
-            .filter((stream) => timelineResult.timeline.availableSensors.has(stream.key))
-            .map((stream) => ({ key: stream.key, label: stream.label }))
-        : [],
-    [activity, timelineResult],
+  // The confirm takes the place of the button that opened it: focus goes to
+  // its safe answer rather than falling to the page.
+  useEffect(() => {
+    if (confirmingStartOver) keepIt.current?.focus();
+  }, [confirmingStartOver]);
+
+  /*
+   * A read that finishes after the reader has let its slot go — Start over,
+   * Remove, or a newer file — must write nothing: each read takes a
+   * generation, and letting go moves it on, as the viewer's store does.
+   */
+  const videoRead = useRef(0);
+  const activityRead = useRef(0);
+  /** AV-1014. Moves on when Start over lets go, so a pick still being sorted takes nothing after it. */
+  const picks = useRef(0);
+  /**
+   * TD-088 (AV-1014). A ticket for each pick, taken before its files are sorted, and the newest ticket
+   * that has chosen each kind of file. A pick whose sorting finishes late finds a newer pick has chosen
+   * its kind and takes nothing of it, so an older file never replaces a newer one. Remove moves a kind's
+   * newest ticket past every pick in flight, so a pick still being sorted takes nothing of that kind after it.
+   */
+  const tickets = useRef(0);
+  const newestOfKind = useRef<Record<OverlayFileKind, number>>({ video: 0, activity: 0 });
+  const supersedeKind = (kind: OverlayFileKind) => {
+    newestOfKind.current[kind] = ++tickets.current;
+  };
+  /** The name of the video being read, if one is: a second video is refused until it is done. */
+  const readingVideo = useRef<string | undefined>(undefined);
+  /** What the input refused by name before the pick reached `handleFiles`, taken up there. */
+  const refusedByName = useRef<string | undefined>(undefined);
+  // A pick still being sorted when the page is left must not start a read after it.
+  useEffect(
+    () => () => {
+      picks.current += 1;
+    },
+    [],
   );
+  const letGoOfVideoRead = () => {
+    videoRead.current += 1;
+    readingVideo.current = undefined;
+    cancel();
+  };
+  const letGoOfActivityRead = () => {
+    activityRead.current += 1;
+  };
+
+  const handleVideo = async (file: File) => {
+    const generation = ++videoRead.current;
+    readingVideo.current = file.name;
+    setCleared(undefined);
+    setVideoState(IDLE);
+    try {
+      const { activity, timing, activityError } = await read(file);
+      if (generation !== videoRead.current) return;
+      readingVideo.current = undefined;
+      // Whatever the reader returned is a video to draw over — it decides
+      // which outcomes still are — and what the video could not supply is
+      // noted beside it. The store decides whether its telemetry becomes the
+      // activity: not over one the reader chose by hand (TD-040).
+      setVideo({ file, timing, telemetryNote: activityError?.message });
+      // The still image gives way to the video workspace; a later still image starts without the slot.
+      setAddingVideo(false);
+      if (activity) offerVideoActivity(activity);
+    } catch (error) {
+      if (generation !== videoRead.current) return;
+      readingVideo.current = undefined;
+      const failure = toActivityError(error, 'gopro_extract_failed');
+      if (failure.code === 'extraction_cancelled') return;
+      // What the reader throws is a file nothing could be drawn over; the
+      // video already held, if any, is still the one in use.
+      setVideoState({ status: 'error', error: failure, fileName: file.name });
+      focusSlot(filesSection);
+    }
+  };
+
+  const handleActivity = async (file: File) => {
+    const generation = ++activityRead.current;
+    setCleared(undefined);
+    setActivityState({ status: 'reading', fileName: file.name });
+    try {
+      // The same intake the viewer uses: GPX, FIT, TCX and KML, read here.
+      // Set only once read, so the activity being replaced stays until then.
+      const { activity } = await parseActivityFile(file);
+      if (generation !== activityRead.current) return;
+      setActivity(activity, 'hand');
+      setActivityState(IDLE);
+    } catch (error) {
+      if (generation !== activityRead.current) return;
+      setActivityState({
+        status: 'error',
+        error: toActivityError(error, 'unsupported_format'),
+        fileName: file.name,
+      });
+      focusSlot(filesSection);
+    }
+  };
 
   /**
-   * What is wrong with the current settings or route, if anything. Worked out
-   * during render rather than discovered by drawing, so the message and the
-   * disabled Save button can never disagree with what is on screen.
+   * AV-1014. One pick or drop, of one file or several: each is told apart by
+   * what it is, and the video and the activity are read as they were by their
+   * own slots. `videoOnly` is the still image's "Add a video", which keeps its
+   * activity and takes no other.
    */
-  const problem = useMemo(() => {
-    if (!activity) return undefined;
-    try {
-      validateRouteImageOptions(options);
-      projectRoute(activity.points, options);
-      return undefined;
-    } catch (error) {
-      return toActivityError(error, 'file_read_failed').message;
+  const handleFiles = async (picked: File[], videoOnly: boolean) => {
+    const pick = picks.current;
+    const ticket = ++tickets.current;
+    // What the input refused by name is already shown; the sorting adds to it.
+    const earlier = refusedByName.current;
+    refusedByName.current = undefined;
+    const classified = await Promise.all(
+      picked.map(async (file) => ({ file, kind: await classifyOverlayFile(file) })),
+    );
+    if (pick !== picks.current) return;
+    // TD-088. What an older pick holds of a kind a newer pick has already taken is let go, as the reader chose another file after it.
+    const current = classified.filter((entry) => entry.kind === undefined || ticket >= newestOfKind.current[entry.kind]);
+    const sorted = sortOverlayFiles(current);
+    const reasons = [earlier, sorted.refusal].filter((reason) => reason !== undefined);
+    let { video, activity } = sorted;
+    if (activity && videoOnly) {
+      reasons.push(
+        `"${activity.name}" is an activity, and only a video is taken here. Start over to use another activity.`,
+      );
+      activity = undefined;
     }
-  }, [activity, options]);
-
-  // Redraw the preview whenever what it shows changes. The preview *is* the
-  // export canvas, so what is seen is what is saved. A drawing failure that
-  // validation did not foresee (no canvas support) is reported on export.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !activity || problem) return;
-    try {
-      renderRouteToCanvas(canvas, activity, options);
-    } catch {
-      /* reported by handleExport */
+    if (video && readingVideo.current !== undefined) {
+      reasons.push(
+        `"${readingVideo.current}" is still being read; wait for it or cancel it, then choose "${video.name}" again.`,
+      );
+      video = undefined;
     }
-  }, [activity, options, problem]);
-
-  const handleVideo = (file: File) => {
-    setOffsetSeconds(0);
-    setVideoInfo(undefined);
-    setVideo(file);
+    setRefusal(reasons.length > 0 ? reasons.join(' ') : undefined);
+    // A kind is claimed by the files this pick takes, not by ones it refuses: a refused file must not silence an older pick it did not replace.
+    if (video) newestOfKind.current.video = ticket;
+    if (activity) newestOfKind.current.activity = ticket;
+    if (video) void handleVideo(video);
+    if (activity) void handleActivity(activity);
   };
 
-  const handleFile = async (file: File) => {
-    setIsReading(true);
-    setIntakeError(undefined);
-    try {
-      const { activity: parsed } = await parseActivityFile(file);
-      // The viewer is happy to open an indoor workout; there is nothing here to
-      // draw from one, and saying so now beats an empty preview.
-      if (!parsed.streams.hasLocation) {
-        setIntakeError('That file has no GPS coordinates, so there is no route to draw.');
-        return;
-      }
-      setActivity(parsed);
-    } catch (error) {
-      const failure = toActivityError(error, 'unsupported_format');
-      setIntakeError(`${failure.message} ${failure.hint}`);
-    } finally {
-      setIsReading(false);
-    }
+  const focusStartOver = () =>
+    setTimeout(() => document.querySelector<HTMLElement>('[data-start-over]')?.focus(), 0);
+
+  const startOver = () => {
+    picks.current += 1;
+    letGoOfVideoRead();
+    letGoOfActivityRead();
+    setConfirmingStartOver(false);
+    setFinished({ png: false, video: false });
+    const personal = usePersonalStore.getState().personal;
+    setCleared({ overlay: clear(), personal });
+    usePersonalStore.getState().clear();
+    setVideoState(IDLE);
+    setActivityState(IDLE);
+    setAddingVideo(false);
+    setRefusal(undefined);
+    focusSlot(filesSection);
   };
 
-  const handleExport = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas || !activity || problem) return;
-    try {
-      renderRouteToCanvas(canvas, activity, options);
-      const blob = await canvasToPng(canvas);
-      const fileName = `${routeImageBaseName(activity)}.png`;
-      download(blob, fileName);
-      setSaved(fileName);
-      setExportError(undefined);
-    } catch (error) {
-      setSaved(undefined);
-      setExportError(toActivityError(error, 'file_read_failed').message);
-    }
-  };
+  // The controls sit in the side column, so the page builds the timeline they
+  // ask about: the same one the preview builds, from the same inputs.
+  const durationSeconds = source.video?.timing?.durationSeconds ?? media?.durationSeconds ?? 0;
+  const timeline = useMemo(
+    () =>
+      buildOverlayTimeline(source.activity, {
+        video: { durationSeconds, start: source.video?.timing?.start },
+        offsetSeconds,
+      }),
+    [source.activity, durationSeconds, source.video?.timing?.start, offsetSeconds],
+  );
 
-  const setNumber = (key: 'width' | 'height' | 'padding' | 'lineWidth') => (value: string) =>
-    setOptions((current) => ({ ...current, [key]: value === '' ? NaN : Number(value) }));
+  /** Start over, and its confirm; `beside` is another action on the same row. */
+  const startOverControls = (beside?: ReactNode) => (
+    <>
+      {hasOverlaySource(source) && !confirmingStartOver && (
+        <p className="overlay-files__actions">
+          {beside}
+          {/* Lets go of the files only: the overlay settings are the reader's (TD-043). */}
+          <button
+            type="button"
+            className="button"
+            data-start-over
+            onClick={() =>
+              source.activity && (finished.png || finished.video)
+                ? setConfirmingStartOver(true)
+                : startOver()
+            }
+          >
+            Start over
+          </button>
+        </p>
+      )}
+      {confirmingStartOver && (
+        // Undo puts the files back, but a finished export is made again, not kept.
+        <div className="panel overlay-undo" role="alert">
+          <p className="panel__message">
+            A finished export is still here to download. Starting over lets it go, and Undo will not
+            bring it back.
+          </p>
+          <span className="overlay-files__actions">
+            <button type="button" className="button" onClick={startOver}>
+              Start over anyway
+            </button>
+            <button
+              type="button"
+              className="button"
+              ref={keepIt}
+              onClick={() => {
+                setConfirmingStartOver(false);
+                focusStartOver();
+              }}
+            >
+              Keep it
+            </button>
+          </span>
+        </div>
+      )}
+    </>
+  );
 
-  const presetId =
-    ROUTE_IMAGE_PRESETS.find((p) => p.width === options.width && p.height === options.height)?.id ?? 'custom';
+  const figuresLetGo = [
+    cleared?.personal.maxHeartRate !== undefined && 'maximum heart rate',
+    cleared?.personal.ftp !== undefined && 'FTP',
+  ].filter(Boolean);
+  const letGo =
+    figuresLetGo.length > 0
+      ? `both files, and your ${figuresLetGo.join(' and ')}, were let go`
+      : 'both files were let go';
+  const undo = cleared && (
+    <div className="panel overlay-undo" role="status">
+      <p className="panel__message">
+        Started over: {letGo}. Your overlay settings are kept.
+      </p>
+      <button
+        type="button"
+        className="button"
+        onClick={() => {
+          restore(cleared.overlay);
+          // A figure typed since Start over is the reader's newer word, and is kept.
+          usePersonalStore.getState().replace({ ...cleared.personal, ...usePersonalStore.getState().personal });
+          setCleared(undefined);
+          focusSlot(filesSection);
+        }}
+      >
+        Undo
+      </button>
+    </div>
+  );
+
+  /*
+   * AV-1014. A video still being read, picked beside the activity rather than
+   * through the still image's Add a video: the page waits for it as the
+   * workspace, rather than opening the still image for the moment the
+   * activity is read first.
+   */
+  const videoComing = Boolean(reading) && !addingVideo;
+  const mapImage = mapImageChosen && !source.video && !videoComing && source.activity !== undefined;
+  const canvas = canvasMode && source.activity !== undefined && !mapImage;
+  /*
+   * The still image and the map image are made from the activity alone: once
+   * one is chosen, the file slots give way to it, and Start over, below it, is
+   * the way to another activity or to a video.
+   */
+  const routeImage =
+    !source.video && !videoComing && source.activity !== undefined && !canvas && !mapImage;
+  const stillImage = routeImage || mapImage;
+  /*
+   * AV-1014. The files give way to the still image, and "Add a video" brings
+   * back the input. They are drawn at one place in the tree either way, and
+   * stay while anything is being read or refused, so a drop is never lost to
+   * a section drawn anew.
+   */
+  const showFiles =
+    !stillImage ||
+    addingVideo ||
+    Boolean(reading) ||
+    videoState.status !== 'idle' ||
+    activityState.status !== 'idle' ||
+    refusal !== undefined;
 
   return (
-    <main className="page">
+    <main className={source.video || canvas || mapImage ? 'page page--overlays is-workspace' : 'page page--overlays'}>
       <div className="page__inner">
         <header className="page__header">
           <h2 className="page__title">Overlays</h2>
           <p className="page__intro">
-            Draw a route as a transparent image to lay over a video in your editor. It is made in
-            this tab from a file on your device — nothing is uploaded.
+            Draw what a video's telemetry says over the picture (speed, distance, the route, the
+            climbs) for your own video editor. Everything is drawn on this device; the video, its
+            telemetry and anything made from them are never uploaded.
           </p>
         </header>
 
-        {!activity && (
-          <section className="prose" aria-label="Choose a route">
-            <h3 className="prose__title">Choose a route</h3>
-            <p>
-              Open a GPX, FIT or TCX file here, or open one in the file viewer and choose{' '}
-              <em>Create route overlay</em>.
-            </p>
-            {intakeError && (
-              <p role="alert" className="route-tools__notice">
-                {intakeError}
-              </p>
-            )}
-            <FileDropZone onFile={(file) => void handleFile(file)} disabled={isReading} />
-          </section>
-        )}
-
-        {activity && (
-          <>
-            <section className="box route-tools" aria-label="Overlay settings">
-              <p className="route-tools__help">
-                {activity.metadata.name ?? activity.source.fileName ?? 'Route'}
-                {isSection ? ' — selected section only' : ''}
-              </p>
-
-              <div className="route-tools__row">
-                <label className="export__label">
-                  Size{' '}
-                  <select
-                    className="select"
-                    value={presetId}
-                    onChange={(event) => {
-                      const preset = ROUTE_IMAGE_PRESETS.find((p) => p.id === event.target.value);
-                      if (preset) {
-                        setOptions((o) => ({ ...o, width: preset.width, height: preset.height }));
-                      }
-                    }}
-                  >
-                    {ROUTE_IMAGE_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))}
-                    <option value="custom" disabled>
-                      Custom
-                    </option>
-                  </select>
-                </label>
-                <label className="export__label">
-                  Width{' '}
-                  <input
-                    className="input"
-                    type="number"
-                    value={Number.isNaN(options.width) ? '' : options.width}
-                    onChange={(event) => setNumber('width')(event.target.value)}
-                  />
-                </label>
-                <label className="export__label">
-                  Height{' '}
-                  <input
-                    className="input"
-                    type="number"
-                    value={Number.isNaN(options.height) ? '' : options.height}
-                    onChange={(event) => setNumber('height')(event.target.value)}
-                  />
-                </label>
-                <label className="export__label">
-                  Padding{' '}
-                  <input
-                    className="input"
-                    type="number"
-                    value={Number.isNaN(options.padding) ? '' : options.padding}
-                    onChange={(event) => setNumber('padding')(event.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="route-tools__row">
-                <label className="export__label">
-                  Route colour{' '}
-                  <input
-                    type="color"
-                    value={options.color}
-                    onChange={(event) => setOptions((o) => ({ ...o, color: event.target.value }))}
-                  />
-                </label>
-                <label className="export__label">
-                  Route width{' '}
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    value={Number.isNaN(options.lineWidth) ? '' : options.lineWidth}
-                    onChange={(event) => setNumber('lineWidth')(event.target.value)}
-                  />
-                </label>
-                <label className="export__label">
-                  <input
-                    type="checkbox"
-                    checked={options.showMarkers}
-                    onChange={(event) =>
-                      setOptions((o) => ({ ...o, showMarkers: event.target.checked }))
-                    }
-                  />{' '}
-                  Mark the start and end
-                </label>
-              </div>
-
-              {(problem ?? exportError) && (
-                <p role="alert" className="route-tools__notice">
-                  {problem ?? exportError}
-                </p>
-              )}
-            </section>
-
-            <section className="box overlay-preview" aria-label="Preview">
-              <canvas
-                ref={canvasRef}
-                className="overlay-preview__canvas"
-                data-testid="overlay-canvas"
-                aria-label="Route overlay preview"
-              />
-            </section>
-
-            <section className="box route-tools" aria-label="Video overlay">
-              <h3 className="prose__title">Preview on a video</h3>
-              {timelineResult && !timelineResult.ok && (
-                <p role="note">{timelineResult.reason}</p>
-              )}
-              {timelineResult?.ok && overlayRenderer && (
-                <>
-                  <div className="route-tools__row">
-                    <label className="export__label">
-                      Template{' '}
-                      <select
-                        className="select"
-                        value={selectedId}
-                        onChange={(event) => selectTemplate(event.target.value, units)}
-                      >
-                        {BUILT_IN_TEMPLATES.map((entry) => (
-                          <option key={entry.id} value={entry.id}>
-                            {entry.label}
-                          </option>
-                        ))}
-                        {savedTemplates[CUSTOM_TEMPLATE_ID] && (
-                          <option value={CUSTOM_TEMPLATE_ID}>
-                            {savedTemplates[CUSTOM_TEMPLATE_ID].name} (loaded)
-                          </option>
-                        )}
-                      </select>
-                    </label>
-                    <label className="export__label">
-                      Units{' '}
-                      <select
-                        className="select"
-                        value={units}
-                        onChange={(event) => changeUnits(event.target.value as UnitSystem, template)}
-                      >
-                        <option value="metric">Metric</option>
-                        <option value="imperial">Imperial</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  {overlayRenderer.resolved.hidden.length > 0 && (
-                    <ul className="export__warnings" aria-label="Hidden components">
-                      {overlayRenderer.resolved.hidden.map(({ component, reason }) => (
-                        <li key={component.id}>{reason}</li>
-                      ))}
-                    </ul>
-                  )}
-
-                  <OverlayTemplateEditor
-                    template={template}
-                    availability={
-                      timelineResult.ok ? availabilityOf(timelineResult.timeline) : staticAvailability(false)
-                    }
-                    hidden={overlayRenderer.resolved.hidden}
-                    sensors={sensorChoices}
-                    onChange={saveTemplate}
-                    onImport={importTemplate}
-                    onReset={resetTemplate}
-                  />
-
-                  {!video && (
-                    <>
-                      <p>Choose the video these figures belong to. It stays on this device.</p>
-                      <FileDropZone
-                        acceptedExtensions={VIDEO_EXTENSIONS}
-                        onFile={handleVideo}
-                      />
-                    </>
-                  )}
-                  {video && (
-                    <>
-                      <OverlayVideoPreview
-                        file={video}
-                        renderer={overlayRenderer}
-                        offsetSeconds={offsetSeconds}
-                        onOffsetChange={setOffsetSeconds}
-                        onMetadata={setVideoInfo}
-                        disabled={exporting}
-                      />
-                      <p>
-                        <button
-                          type="button"
-                          className="button"
-                          onClick={() => {
-                            setVideoInfo(undefined);
-                            setVideo(undefined);
-                          }}
-                        >
-                          Choose another video
-                        </button>
-                      </p>
-                    </>
-                  )}
-                </>
-              )}
-            </section>
-
-            {timelineResult?.ok && overlayRenderer && video && videoInfo && (
-              <OverlayBurnInExport
-                file={video}
-                renderer={overlayRenderer}
+        {/*
+          TD-059. One layout for every state, so the file slots never move in
+          the page: a file being dropped while a video finishes reading is not
+          lost to a slot drawn anew. With a video it is a workspace, the picture
+          kept in view beside the files, the controls and the exports.
+        */}
+        <div className={source.video && !canvas ? 'overlay-workspace' : 'overlay-column'}>
+          <div className="overlay-workspace__stage" ref={stage}>
+            {source.video && !canvas ? (
+              <OverlayPreview
+                video={source.video}
+                activity={source.activity}
                 offsetSeconds={offsetSeconds}
-                video={videoInfo}
-                onBusyChange={setExporting}
+                onOffsetChange={setOffsetSeconds}
+                trim={trim}
+                onTrimChange={setTrim}
+                units={unitSystem}
+                controls={controls}
+                onControlsChange={setControls}
+                onMediaInfo={setMedia}
+                controlsElsewhere
+                syncTarget={syncTarget}
               />
-            )}
-
-            {timelineResult?.ok && overlayRenderer && video && videoInfo && (
-              <OverlayFrameExport
-                renderer={overlayRenderer}
-                offsetSeconds={offsetSeconds}
-                video={videoInfo}
-              />
-            )}
-
-            <section className="box route-tools" aria-label="Save overlay">
-              <p className="export__hint">
-                Saved as a PNG with a transparent background: only the route is drawn, with no map
-                behind it.
-              </p>
-              <div className="route-tools__row">
+            ) : null}
+          </div>
+          <div className="overlay-workspace__side">
+            {/* The way past the files, sync and overlay settings, for a keyboard. */}
+            {source.video && source.activity && !canvas && (
+              <p className="overlay-skip">
                 <button
                   type="button"
-                  className="button button--primary"
-                  onClick={() => void handleExport()}
-                  disabled={Boolean(problem)}
+                  className="button"
+                  onClick={() => {
+                    const target = exports.current?.querySelector<HTMLElement>('h3');
+                    target?.focus();
+                    target?.scrollIntoView({ block: 'start' });
+                  }}
                 >
-                  Save as PNG
+                  Skip to export
                 </button>
-                <button type="button" className="button" onClick={clear}>
-                  Choose another route
-                </button>
-              </div>
-              {saved && (
-                <p role="status" className="export__saved">
-                  Saved <strong>{saved}</strong>.
+              </p>
+            )}
+            {/* Beside the drop zone Start over puts focus in, so it is seen. */}
+            {undo}
+            {/*
+              TD-059. With a video, sync is the first thing to do, so it comes
+              first, and the files it is done with shrink to a line each below.
+              The slots keep their place in the tree either way, so a file being
+              dropped is never lost to a slot drawn anew.
+            */}
+            <div className="overlay-sync-slot" ref={setSyncTarget} />
+            {/* AV-1011. With an activity, the reader chooses what to make. */}
+            {source.activity && (
+              <fieldset className="overlay-mode" aria-label="What to make">
+                <legend className="summary__label">What to make</legend>
+                <label className="overlay-controls__choice">
+                  <input
+                    type="radio"
+                    name="overlay-mode"
+                    checked={!canvas && !mapImage}
+                    onChange={() => {
+                      setCanvasMode(false);
+                      setMapImageChosen(false);
+                    }}
+                  />
+                  <span>{source.video ? 'An overlay from a template' : 'A still image'}</span>
+                </label>
+                {!source.video && (
+                  <label className="overlay-controls__choice">
+                    <input
+                      type="radio"
+                      name="overlay-mode"
+                      checked={mapImage}
+                      onChange={() => {
+                        setCanvasMode(false);
+                        setMapImageChosen(true);
+                      }}
+                    />
+                    <span>A map image, with the activity’s details</span>
+                  </label>
+                )}
+                <label className="overlay-controls__choice">
+                  <input
+                    type="radio"
+                    name="overlay-mode"
+                    checked={canvas}
+                    onChange={() => {
+                      setCanvasMode(true);
+                      setMapImageChosen(false);
+                    }}
+                  />
+                  <span>{source.video ? 'A custom canvas over the video' : 'A custom video overlay, with no video'}</span>
+                </label>
+              </fieldset>
+            )}
+            {showFiles && (
+              <FilesSection
+                sectionRef={filesSection}
+                video={source.video}
+                activity={source.activity}
+                focusedSection={source.focusedSection}
+                media={media}
+                units={unitSystem}
+                compact={Boolean(source.video)}
+                stillImage={stillImage}
+                reading={reading}
+                videoState={videoState}
+                activityState={activityState}
+                refusal={refusal}
+                onRefused={(reason) => {
+                  refusedByName.current = reason;
+                  setRefusal(reason);
+                }}
+                onFiles={(files, videoOnly) => void handleFiles(files, videoOnly)}
+                // TD-088. A file chosen by Choose another is the newest of its kind, as a pick's is.
+                onVideo={(file) => {
+                  supersedeKind('video');
+                  void handleVideo(file);
+                }}
+                onActivity={(file) => {
+                  supersedeKind('activity');
+                  void handleActivity(file);
+                }}
+                onCancelReading={cancel}
+                onDismissVideo={() => {
+                  setVideoState(IDLE);
+                  focusSlot(filesSection);
+                }}
+                onDismissActivity={() => {
+                  setActivityState(IDLE);
+                  focusSlot(filesSection);
+                }}
+                onDismissRefusal={() => {
+                  setRefusal(undefined);
+                  focusSlot(filesSection);
+                }}
+                onRemoveVideo={() => {
+                  picks.current += 1;
+                  supersedeKind('video');
+                  letGoOfVideoRead();
+                  setVideo(undefined);
+                  focusSlot(filesSection);
+                }}
+                onRemoveActivity={() => {
+                  supersedeKind('activity');
+                  letGoOfActivityRead();
+                  setActivityState(IDLE);
+                  clearActivity();
+                  focusSlot(filesSection);
+                }}
+              />
+            )}
+            {!stillImage && startOverControls()}
+            {canvas && source.activity && (
+              <CustomCanvas
+                activity={source.activity}
+                video={source.video}
+                media={media}
+                offsetSeconds={offsetSeconds}
+                trim={trim}
+                units={unitSystem}
+                onOpenSync={source.video ? () => setCanvasMode(false) : undefined}
+                onMediaInfo={setMedia}
+                onFinishedChange={exportFinished}
+                initialDraft={canvasDraft}
+                onDraftChange={setCanvasDraft}
+              />
+            )}
+            {/* Below the files, so the slots never move when a route image appears. */}
+            {mapImage && source.activity && <MapImagePanel activity={source.activity} units={unitSystem} />}
+            {routeImage && source.activity && (
+              <RouteOverlayPanel
+                activity={source.activity}
+                focusedSection={source.focusedSection}
+              />
+            )}
+            {stillImage && (
+              <div className="overlay-still__start-over">
+                <p className="overlay-controls__hint">
+                  Made from {source.activity?.source.fileName ?? source.activity?.metadata.name ?? 'this activity'}
+                  {source.focusedSection && ', the focused section only'}. Add a video to draw over it, keeping this
+                  activity; start over to use another.
                 </p>
-              )}
-            </section>
-          </>
-        )}
+                {startOverControls(
+                  addingVideo ? (
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => {
+                        // Lets go of a video being read or refused, too: the input goes with it.
+                        picks.current += 1;
+                        letGoOfVideoRead();
+                        setVideoState(IDLE);
+                        setRefusal(undefined);
+                        setAddingVideo(false);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button"
+                      data-add-video
+                      onClick={() => {
+                        setAddingVideo(true);
+                        focusSlot(filesSection);
+                      }}
+                    >
+                      Add a video
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
+            {source.video && source.activity && !timeline.unavailable && !canvas && (
+              <OverlayControls
+                controls={controls}
+                timeline={timeline}
+                onChange={setControls}
+                frameAspect={media && media.height > 0 ? media.width / media.height : undefined}
+                activity={source.activity}
+                units={unitSystem}
+              />
+            )}
+            {source.video && source.activity && !canvas && (
+              <div className="overlay-exports" ref={exports}>
+                <OverlayExportPanel
+                  video={source.video}
+                  activity={source.activity}
+                  controls={controls}
+                  offsetSeconds={offsetSeconds}
+                  trim={trim}
+                  units={unitSystem}
+                  media={media}
+                  onFinishedChange={pngFinished}
+                />
+                <BurnedInExportPanel
+                  video={source.video}
+                  activity={source.activity}
+                  controls={controls}
+                  offsetSeconds={offsetSeconds}
+                  trim={trim}
+                  units={unitSystem}
+                  media={media}
+                  onFinishedChange={videoFinished}
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </main>
+  );
+}
+
+/** A file input the "Choose another" button of a held file opens, keeping the current file until then. */
+function ReplaceInput({
+  accept,
+  onFile,
+  testId,
+  inputRef,
+}: {
+  accept: readonly string[];
+  onFile: (file: File) => void;
+  testId: string;
+  inputRef: RefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <input
+      ref={inputRef}
+      type="file"
+      hidden
+      accept={accept.map((extension) => `.${extension}`).join(',')}
+      data-testid={testId}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (file) onFile(file);
+      }}
+    />
+  );
+}
+
+const KIND_ACCEPTED = [...VIDEO_EXTENSIONS, ...SUPPORTED_FORMATS];
+
+/**
+ * AV-1014. The files, in one section: what is being read, what went wrong,
+ * the one input, and a line for each file held. The input stays through any
+ * read (TD-059), and gives way only when both a video and an activity are held.
+ */
+function FilesSection({
+  sectionRef,
+  video,
+  activity,
+  focusedSection,
+  media,
+  units,
+  compact,
+  stillImage,
+  reading,
+  videoState,
+  activityState,
+  refusal,
+  onFiles,
+  onRefused,
+  onVideo,
+  onActivity,
+  onCancelReading,
+  onDismissVideo,
+  onDismissActivity,
+  onDismissRefusal,
+  onRemoveVideo,
+  onRemoveActivity,
+}: {
+  sectionRef: RefObject<HTMLElement | null>;
+  video: OverlayVideo | undefined;
+  activity: Activity | undefined;
+  focusedSection?: boolean;
+  media: OverlayMedia | undefined;
+  units: UnitSystem;
+  /** In the workspace: one line each, the details folded away. */
+  compact: boolean;
+  /** With the still image showing: only a video is taken, and the activity is not listed. */
+  stillImage: boolean;
+  reading: VideoReadProgressState | undefined;
+  videoState: SlotState;
+  activityState: SlotState;
+  refusal: string | undefined;
+  onFiles: (files: File[], videoOnly: boolean) => void;
+  onRefused: (reason: string | undefined) => void;
+  onVideo: (file: File) => void;
+  onActivity: (file: File) => void;
+  onCancelReading: () => void;
+  onDismissVideo: () => void;
+  onDismissActivity: () => void;
+  onDismissRefusal: () => void;
+  onRemoveVideo: () => void;
+  onRemoveActivity: () => void;
+}) {
+  const bothHeld = Boolean(video) && Boolean(activity);
+  // Says what it wants from what is held: the other kind, or either when empty.
+  const wording = stillImage
+    ? { title: 'Drop a video to draw over', subtitle: 'MP4 or MOV. Or choose one.' }
+    : video || reading
+      ? activity
+        ? // Only while the video beside it is read: with both held the input is not drawn.
+          { title: 'Drop another activity to use instead', subtitle: 'GPX, FIT, TCX or KML. Or choose one.' }
+        : { title: 'Drop the activity for this video', subtitle: 'GPX, FIT, TCX or KML. Or choose one.' }
+      : activity
+        ? { title: 'Drop a video to draw over', subtitle: 'MP4 or MOV. Or choose one.' }
+        : {
+            title: 'Drop a video, an activity, or both',
+            subtitle: 'MP4 or MOV; GPX, FIT, TCX or KML. Or choose them.',
+          };
+
+  return (
+    <section className="prose overlay-slot overlay-files" aria-label="Files" ref={sectionRef}>
+      <h3 className="prose__title" tabIndex={-1}>
+        Files
+      </h3>
+      {reading && <VideoReadProgress progress={reading} onCancel={onCancelReading} />}
+      {activityState.status === 'reading' && (
+        <p role="status">Reading {activityState.fileName} in this tab…</p>
+      )}
+      {videoState.status === 'error' && (
+        <ErrorPanel error={videoState.error} fileName={videoState.fileName} onDismiss={onDismissVideo} />
+      )}
+      {activityState.status === 'error' && (
+        <ErrorPanel
+          error={activityState.error}
+          fileName={activityState.fileName}
+          onDismiss={onDismissActivity}
+        />
+      )}
+      {refusal && (
+        <div className="panel panel--error" role="alert">
+          <p className="panel__message">{refusal}</p>
+          <button type="button" className="button" onClick={onDismissRefusal}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {!bothHeld && (
+        <FileDropZone
+          multiple
+          acceptedExtensions={stillImage ? VIDEO_EXTENSIONS : KIND_ACCEPTED}
+          // TD-088: the page tells a file by its content first, so a GPX named ride.txt is taken; the extensions stay the picker's hint.
+          classify="none"
+          onFiles={(files) => onFiles(files, stillImage)}
+          onRefused={onRefused}
+          testId="overlay-file-input"
+          title={wording.title}
+          subtitle={wording.subtitle}
+        />
+      )}
+      {video && (
+        <VideoLine
+          video={video}
+          activity={activity}
+          media={media}
+          compact={compact}
+          reading={reading}
+          onFile={onVideo}
+          onRemove={onRemoveVideo}
+        />
+      )}
+      {activity && !stillImage && (
+        <ActivityLine
+          activity={activity}
+          focusedSection={focusedSection}
+          units={units}
+          compact={compact}
+          busy={activityState.status === 'reading'}
+          onFile={onActivity}
+          onRemove={onRemoveActivity}
+        />
+      )}
+    </section>
+  );
+}
+
+function VideoLine({
+  video,
+  activity,
+  media,
+  compact,
+  reading,
+  onFile,
+  onRemove,
+}: {
+  video: OverlayVideo;
+  activity: Activity | undefined;
+  media: OverlayMedia | undefined;
+  compact: boolean;
+  reading: VideoReadProgressState | undefined;
+  onFile: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const replace = useRef<HTMLInputElement>(null);
+  // The container's clock where it has one, else the length the browser read.
+  const duration = video.timing?.durationSeconds ?? media?.durationSeconds;
+  return (
+    <div role="group" aria-label="Video" className="overlay-files__file">
+      {compact ? (
+        <p className="overlay-slot__line">
+          <span className="overlay-slot__name">{video.file.name}</span>
+          <span>{formatFileSize(video.file.size)}</span>
+          {duration !== undefined && <span>{formatDuration(duration)}</span>}
+        </p>
+      ) : (
+        <dl className="summary__grid">
+          <div className="summary__stat">
+            <dt className="summary__label">File</dt>
+            <dd className="summary__value">{video.file.name}</dd>
+          </div>
+          <div className="summary__stat">
+            <dt className="summary__label">Size</dt>
+            <dd className="summary__value">{formatFileSize(video.file.size)}</dd>
+          </div>
+          {duration !== undefined && (
+            <div className="summary__stat">
+              <dt className="summary__label">Duration</dt>
+              <dd className="summary__value">{formatDuration(duration)}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {/* With an activity chosen, a video without telemetry is not a problem: said as a note. */}
+      {video.telemetryNote && (
+        <p className={activity ? 'overlay-slot__note' : undefined}>
+          {video.telemetryNote}
+          {activity && ' The activity file below is drawn over it instead.'}
+        </p>
+      )}
+      <p className="overlay-slot__actions">
+        <button
+          type="button"
+          className="button"
+          onClick={() => replace.current?.click()}
+          disabled={Boolean(reading)}
+        >
+          Choose another video
+        </button>
+        <button type="button" className="button" onClick={onRemove} disabled={Boolean(reading)}>
+          Remove
+        </button>
+      </p>
+      <ReplaceInput
+        accept={VIDEO_EXTENSIONS}
+        onFile={onFile}
+        testId="overlay-video-replace"
+        inputRef={replace}
+      />
+    </div>
+  );
+}
+
+function ActivityLine({
+  activity,
+  focusedSection,
+  units,
+  compact,
+  busy,
+  onFile,
+  onRemove,
+}: {
+  activity: Activity;
+  focusedSection?: boolean;
+  units: UnitSystem;
+  /** In the workspace: one line, the details folded away. */
+  compact: boolean;
+  busy: boolean;
+  onFile: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const replace = useRef<HTMLInputElement>(null);
+  const charted = activity.sensorStreams?.filter((stream) => stream.display === 'chart') ?? [];
+
+  return (
+    <div role="group" aria-label="Activity" className="overlay-files__file">
+      {compact && (
+        <p className="overlay-slot__line">
+          <span className="overlay-slot__name">
+            {activity.source.fileName ?? activity.source.format.toUpperCase()}
+          </span>
+          <span>{formatDistance(activity.derived?.distanceMeters, units)}</span>
+          <span>{formatDuration(activity.derived?.durationSeconds)}</span>
+          {focusedSection && <span>Focused section only</span>}
+        </p>
+      )}
+      {/* Folded away in the workspace: what was read, for whoever wants it. */}
+      <SlotDetails folded={compact}>
+        <dl className="summary__grid">
+          {/* In the workspace the name, distance and duration are on the line above. */}
+          {!compact && (
+            <div className="summary__stat">
+              <dt className="summary__label">From</dt>
+              <dd className="summary__value">
+                {activity.source.fileName ?? activity.source.format.toUpperCase()}
+              </dd>
+            </div>
+          )}
+          {focusedSection && !compact && (
+            <div className="summary__stat">
+              <dt className="summary__label">Scope</dt>
+              <dd className="summary__value">Focused section only</dd>
+            </div>
+          )}
+          <div className="summary__stat">
+            <dt className="summary__label">Points</dt>
+            <dd className="summary__value">{activity.points.length}</dd>
+          </div>
+          {!compact && (
+            <>
+              <div className="summary__stat">
+                <dt className="summary__label">Distance</dt>
+                <dd className="summary__value">
+                  {formatDistance(activity.derived?.distanceMeters, units)}
+                </dd>
+              </div>
+              <div className="summary__stat">
+                <dt className="summary__label">Duration</dt>
+                <dd className="summary__value">
+                  {formatDuration(activity.derived?.durationSeconds)}
+                </dd>
+              </div>
+            </>
+          )}
+          {charted.length > 0 && (
+            <div className="summary__stat">
+              <dt className="summary__label">Camera streams</dt>
+              <dd className="summary__value">{charted.map((stream) => stream.label).join(', ')}</dd>
+            </div>
+          )}
+        </dl>
+      </SlotDetails>
+      <WarningList warnings={activity.warnings} />
+      <p className="overlay-slot__actions">
+        <button
+          type="button"
+          className="button"
+          onClick={() => replace.current?.click()}
+          disabled={busy}
+        >
+          Choose another activity
+        </button>
+        <button type="button" className="button" onClick={onRemove} disabled={busy}>
+          Remove
+        </button>
+      </p>
+      <ReplaceInput
+        accept={SUPPORTED_FORMATS}
+        onFile={onFile}
+        testId="overlay-activity-replace"
+        inputRef={replace}
+      />
+    </div>
+  );
+}
+
+/** What an activity read, shown as it is, or folded under "Details" in the workspace. */
+function SlotDetails({ folded, children }: { folded: boolean; children: ReactNode }) {
+  if (!folded) return <>{children}</>;
+  return (
+    <details className="overlay-slot__details">
+      <summary>Details</summary>
+      {children}
+    </details>
   );
 }

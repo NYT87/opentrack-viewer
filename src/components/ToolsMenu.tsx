@@ -82,7 +82,13 @@ export function ToolsMenu({ items }: ToolsMenuProps) {
         aria-haspopup="menu"
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={(event) => {
+          const opening = !isOpen;
+          setIsOpen(opening);
+          // Opened by Enter or Space (a click with no pointer): into the menu,
+          // as the menu button pattern has it. A pointer leaves focus put.
+          if (opening && event.detail === 0) queueMicrotask(() => focusItem(0));
+        }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' && !isOpen) {
             event.preventDefault();
@@ -93,9 +99,20 @@ export function ToolsMenu({ items }: ToolsMenuProps) {
         }}
       >
         Tools
-        <span className="tools__caret" aria-hidden="true">
-          ▾
-        </span>
+        {/* A chevron drawn like the Settings icon, large enough to read as "opens a menu". */}
+        <svg
+          className="tools__caret"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
       </button>
 
       {isOpen && (

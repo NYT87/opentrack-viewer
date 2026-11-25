@@ -1,3 +1,4 @@
+import { assertFileSize, assertPointCount } from '../limits';
 import FitParser from 'fit-file-parser';
 
 import {
@@ -11,6 +12,7 @@ import {
   type ActivitySport,
   type ActivityWarning,
 } from '../../domain/activity';
+import { utcOffsetFromLocalTimestamp } from '../timeZone';
 import { ActivityError } from '../../domain/errors';
 import { withDerivedStats } from '../../domain/stats';
 
@@ -45,10 +47,12 @@ export async function parseFit(
   buffer: ArrayBuffer,
   options: ParseFitOptions = {},
 ): Promise<Activity> {
+  assertFileSize(buffer.byteLength);
   const warnings: ActivityWarning[] = [];
   const parsed = await decode(buffer);
 
   const records = parsed.records ?? [];
+  assertPointCount(records.length);
   if (records.length === 0) {
     throw new ActivityError(
       'no_route_points',
@@ -76,6 +80,7 @@ export async function parseFit(
       deviceName: readCreator(parsed),
       device: readDevice(parsed),
       sport,
+      utcOffsetMinutes: readUtcOffset(parsed),
     },
     points,
     streams: computeStreams(points),
@@ -91,6 +96,7 @@ export async function parseFit(
 
 /** Convenience wrapper matching the async parser contract used by intake. */
 export async function parseFitFile(file: File): Promise<Activity> {
+  assertFileSize(file.size);
   const buffer = await file.arrayBuffer();
   return parseFit(buffer, { fileName: file.name, fileSizeBytes: file.size });
 }
@@ -280,6 +286,13 @@ function buildSegmentIndex(
     }
     return segment;
   };
+}
+
+/** AV-1010. The offset the device states: its activity message's local time less its UTC time. */
+function readUtcOffset(parsed: ParsedFit): number | undefined {
+  const raw = (parsed as { activity?: unknown }).activity;
+  const activity = (Array.isArray(raw) ? raw[0] : raw) as { timestamp?: unknown; local_timestamp?: unknown } | undefined;
+  return utcOffsetFromLocalTimestamp(activity?.timestamp, activity?.local_timestamp);
 }
 
 function readLaps(laps: ParsedLap[]): ActivityLap[] {

@@ -1,0 +1,480 @@
+{
+ "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+ "features": {
+  "VideoEncoder": true,
+  "VideoDecoder": true,
+  "VideoFrame": true,
+  "AudioEncoder": true,
+  "AudioDecoder": true,
+  "OffscreenCanvas": true,
+  "offscreen2d": true,
+  "MediaRecorder": true,
+  "canvasCaptureStream": true,
+  "videoCaptureStream": true,
+  "requestVideoFrameCallback": true,
+  "webgpu": true,
+  "webgl2": true,
+  "crossOriginIsolated": false,
+  "SharedArrayBuffer": false,
+  "showSaveFilePicker": false,
+  "storageGetDirectory": true,
+  "MediaStreamTrackProcessor": true,
+  "MediaStreamTrackGenerator": true,
+  "hardwareConcurrency": 4,
+  "deviceMemory": 4,
+  "performanceMemory": true,
+  "WebAssembly": true,
+  "ImageDecoder": true,
+  "blobWebp": "image/webp",
+  "blobPng": "image/png",
+  "canPlay": {
+   "avc": "probably",
+   "avcHigh": "probably",
+   "hevc": "probably",
+   "hev1": "probably",
+   "vp9webm": "probably",
+   "vp8webm": "probably",
+   "av1": "probably",
+   "aac": "probably",
+   "opusWebm": "probably"
+  }
+ },
+ "encoders": {
+  "vp8-1080|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "vp8-1080|prefer-hardware": {
+   "supported": false,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "vp8-1080|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "vp9-1080|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "vp9-1080|prefer-hardware": {
+   "supported": false,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "vp9-1080|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "vp9-1080-alpha|no-preference": {
+   "supported": false,
+   "alpha": "keep",
+   "hw": "no-preference"
+  },
+  "vp9-1080-alpha|prefer-hardware": {
+   "supported": false,
+   "alpha": "keep",
+   "hw": "prefer-hardware"
+  },
+  "vp9-1080-alpha|prefer-software": {
+   "supported": false,
+   "alpha": "keep",
+   "hw": "prefer-software"
+  },
+  "vp8-1080-alpha|no-preference": {
+   "supported": false,
+   "alpha": "keep",
+   "hw": "no-preference"
+  },
+  "vp8-1080-alpha|prefer-hardware": {
+   "supported": false,
+   "alpha": "keep",
+   "hw": "prefer-hardware"
+  },
+  "vp8-1080-alpha|prefer-software": {
+   "supported": false,
+   "alpha": "keep",
+   "hw": "prefer-software"
+  },
+  "av1-1080|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "av1-1080|prefer-hardware": {
+   "supported": false,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "av1-1080|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "avc-1080|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "avc-1080|prefer-hardware": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "avc-1080|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "hevc-1080|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "hevc-1080|prefer-hardware": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "hevc-1080|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "vp9-2160|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "vp9-2160|prefer-hardware": {
+   "supported": false,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "vp9-2160|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "avc-2160|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "avc-2160|prefer-hardware": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "avc-2160|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "hevc-2160|no-preference": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "no-preference"
+  },
+  "hevc-2160|prefer-hardware": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-hardware"
+  },
+  "hevc-2160|prefer-software": {
+   "supported": true,
+   "alpha": "discard",
+   "hw": "prefer-software"
+  },
+  "opus": true,
+  "aac": true
+ },
+ "decoders": {
+  "avc-480|no-preference": true,
+  "avc-480|prefer-hardware": true,
+  "avc-480|prefer-software": true,
+  "avc-1080|no-preference": true,
+  "avc-1080|prefer-hardware": true,
+  "avc-1080|prefer-software": true,
+  "avc-2160|no-preference": true,
+  "avc-2160|prefer-hardware": true,
+  "avc-2160|prefer-software": true,
+  "hevc-2160|no-preference": true,
+  "hevc-2160|prefer-hardware": true,
+  "hevc-2160|prefer-software": false,
+  "hev1-2160|no-preference": true,
+  "hev1-2160|prefer-hardware": true,
+  "hev1-2160|prefer-software": false,
+  "vp9-2160|no-preference": true,
+  "vp9-2160|prefer-hardware": true,
+  "vp9-2160|prefer-software": true,
+  "av1-2160|no-preference": true,
+  "av1-2160|prefer-hardware": false,
+  "av1-2160|prefer-software": true,
+  "aac": true
+ },
+ "recorder": {
+  "video/webm": true,
+  "video/webm;codecs=vp8": true,
+  "video/webm;codecs=vp9": true,
+  "video/webm;codecs=av1": true,
+  "video/webm;codecs=h264": true,
+  "video/webm;codecs=vp9,opus": true,
+  "video/mp4": true,
+  "video/mp4;codecs=avc1": true,
+  "video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"": true,
+  "video/mp4;codecs=hvc1": false,
+  "video/mp4;codecs=vp9": true,
+  "video/mp4;codecs=av1": false,
+  "video/x-matroska;codecs=avc1": true
+ },
+ "alpha": {
+  "webcodecs vp09.00.40.08": {
+   "configSupported": false,
+   "alphaEchoed": "keep"
+  },
+  "webcodecs vp8": {
+   "configSupported": false,
+   "alphaEchoed": "keep"
+  },
+  "mediaRecorder": {
+   "mime": "video/webm;codecs=vp9",
+   "bytes": 6463,
+   "transparentPixel": [
+    254,
+    0,
+    254,
+    255
+   ],
+   "opaquePixel": [
+    254,
+    254,
+    255,
+    255
+   ],
+   "alphaPreserved": true
+  }
+ },
+ "perf": {
+  "drawOverlay 1920x1080": {
+   "frames": 300,
+   "msPerFrame": 0.45,
+   "offscreen": true
+  },
+  "drawOverlay 3840x2160": {
+   "frames": 60,
+   "msPerFrame": 3.67,
+   "offscreen": true
+  },
+  "encode vp9-1080|prefer-hardware": {
+   "supported": false
+  },
+  "encode vp9-1080|prefer-software": {
+   "supported": true,
+   "frames": 150,
+   "chunks": 150,
+   "fps": 62.1,
+   "msPerFrame": 16.1,
+   "drawMsPerFrame": 0.5,
+   "kbPerSecondOfVideo": 750,
+   "maxQueue": 9,
+   "heapDeltaMB": -1.5
+  },
+  "encode vp8-1080|prefer-hardware": {
+   "supported": false
+  },
+  "encode vp8-1080|prefer-software": {
+   "supported": true,
+   "frames": 150,
+   "chunks": 150,
+   "fps": 91.1,
+   "msPerFrame": 11,
+   "drawMsPerFrame": 0.3,
+   "kbPerSecondOfVideo": 979,
+   "maxQueue": 9,
+   "heapDeltaMB": -0.2
+  },
+  "encode avc-1080|prefer-hardware": {
+   "supported": true,
+   "frames": 150,
+   "chunks": 150,
+   "fps": 187.8,
+   "msPerFrame": 5.3,
+   "drawMsPerFrame": 0.3,
+   "kbPerSecondOfVideo": 646,
+   "maxQueue": 9,
+   "heapDeltaMB": 0.2
+  },
+  "encode avc-1080|prefer-software": {
+   "supported": true,
+   "frames": 150,
+   "chunks": 150,
+   "fps": 42.7,
+   "msPerFrame": 23.4,
+   "drawMsPerFrame": 0.3,
+   "kbPerSecondOfVideo": 968,
+   "maxQueue": 9,
+   "heapDeltaMB": 0.1
+  },
+  "encode av1-1080|prefer-hardware": {
+   "supported": false
+  },
+  "encode av1-1080|prefer-software": {
+   "supported": true,
+   "frames": 90,
+   "chunks": 90,
+   "fps": 50.1,
+   "msPerFrame": 20,
+   "drawMsPerFrame": 0.4,
+   "kbPerSecondOfVideo": 424,
+   "maxQueue": 9,
+   "heapDeltaMB": 0.1
+  },
+  "encode hevc-1080|prefer-hardware": {
+   "supported": true,
+   "frames": 150,
+   "chunks": 150,
+   "fps": 174.2,
+   "msPerFrame": 5.7,
+   "drawMsPerFrame": 0.3,
+   "kbPerSecondOfVideo": 583,
+   "maxQueue": 9,
+   "heapDeltaMB": -0.2
+  },
+  "encode hevc-1080|prefer-software": {
+   "supported": true,
+   "frames": 58,
+   "chunks": 58,
+   "fps": 1.8,
+   "msPerFrame": 541,
+   "drawMsPerFrame": 0.3,
+   "kbPerSecondOfVideo": 937,
+   "maxQueue": 9,
+   "heapDeltaMB": -0.8
+  },
+  "encode vp9-2160|prefer-hardware": {
+   "supported": false
+  },
+  "encode vp9-2160|prefer-software": {
+   "supported": true,
+   "frames": 45,
+   "chunks": 45,
+   "fps": 22.3,
+   "msPerFrame": 44.9,
+   "drawMsPerFrame": 1.5,
+   "kbPerSecondOfVideo": 1802,
+   "maxQueue": 9,
+   "heapDeltaMB": 0.7
+  },
+  "encode avc-2160|prefer-hardware": {
+   "supported": true,
+   "frames": 45,
+   "chunks": 45,
+   "fps": 50.4,
+   "msPerFrame": 19.8,
+   "drawMsPerFrame": 0.9,
+   "kbPerSecondOfVideo": 1087,
+   "maxQueue": 9,
+   "heapDeltaMB": -0.3
+  },
+  "encode avc-2160|prefer-software": {
+   "supported": true,
+   "frames": 45,
+   "chunks": 45,
+   "fps": 9.3,
+   "msPerFrame": 107.9,
+   "drawMsPerFrame": 0.8,
+   "kbPerSecondOfVideo": 2935,
+   "maxQueue": 9,
+   "heapDeltaMB": 0.1
+  },
+  "encode hevc-2160|prefer-hardware": {
+   "supported": true,
+   "frames": 45,
+   "chunks": 45,
+   "fps": 47,
+   "msPerFrame": 21.3,
+   "drawMsPerFrame": 0.9,
+   "kbPerSecondOfVideo": 1496,
+   "maxQueue": 9,
+   "heapDeltaMB": -0.1
+  },
+  "encode hevc-2160|prefer-software": {
+   "supported": true,
+   "frames": 27,
+   "chunks": 27,
+   "fps": 0.5,
+   "msPerFrame": 1980.7,
+   "drawMsPerFrame": 0.6,
+   "kbPerSecondOfVideo": 2961,
+   "maxQueue": 9,
+   "heapDeltaMB": 0.2
+  },
+  "sequence image/png": {
+   "supported": true,
+   "msPerFrame": 17.9,
+   "kbPerFrame": 125
+  },
+  "sequence image/webp": {
+   "supported": true,
+   "msPerFrame": 78,
+   "kbPerFrame": 384
+  },
+  "recorder 1080|video/webm;codecs=vp9": {
+   "framesDrawn": 296,
+   "drawFps": 59.1,
+   "bytes": 2763531,
+   "kbPerSecondOfVideo": 539,
+   "reportedDuration": "Infinity"
+  }
+ },
+ "decode": {
+  "fileBytes": 4402730,
+  "webcodecs": {
+   "available": true,
+   "codec": "avc1.4d402a",
+   "supported": true,
+   "samples": 379,
+   "frames": 379,
+   "fps": 1167,
+   "size": "848x480"
+  },
+  "burnedIn vp9": {
+   "supported": true,
+   "frames": 379,
+   "chunks": 379,
+   "fps": 100.5,
+   "realtimeFactor": 3.4,
+   "kbPerSecondOfVideo": 438
+  },
+  "burnedIn avc": {
+   "supported": true,
+   "frames": 379,
+   "chunks": 379,
+   "fps": 320.7,
+   "realtimeFactor": 10.7,
+   "kbPerSecondOfVideo": 495
+  },
+  "videoElement": {
+   "playable": true,
+   "duration": 12.679,
+   "wallMs": 14676,
+   "rvfcFrames": 379,
+   "totalFrames": 379,
+   "dropped": 0,
+   "presented": 379,
+   "audioTracks": 1,
+   "videoTracks": 1,
+   "size": "848x480"
+  }
+ },
+ "errors": [],
+ "totalMs": 138243,
+ "engine": "brave",
+ "browserVersion": "155.0.8059.40",
+ "wallMs": 139917
+}

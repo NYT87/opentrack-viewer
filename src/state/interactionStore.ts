@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ActivityPointRange, ChartXAxisMode } from '../domain/activity';
-import { localeUnitSystem, readStoredTheme, storeTheme } from '../domain/preferences';
+import { localeUnitSystem, readStoredTheme, storeTheme, readStoredBasemap, storeBasemap } from '../domain/preferences';
 import type { ThemeMode } from '../domain/theme';
 import type { PerformanceMetric } from '../domain/performance';
 import type { UnitSystem } from '../domain/units';
@@ -25,8 +25,7 @@ interface InteractionState {
   /** Defaulted from the browser's locale (§17); a session preference. */
   unitSystem: UnitSystem;
   /**
-   * AV-009. Defaults to following the OS, and is the one preference kept
-   * between visits rather than for the session.
+   * AV-009. Defaults to following the OS; remembered alongside the basemap choice.
    */
   themeMode: ThemeMode;
   /**
@@ -63,7 +62,7 @@ interface InteractionState {
 }
 
 export const useInteractionStore = create<InteractionState>((set) => ({
-  basemapEnabled: true,
+  basemapEnabled: readStoredBasemap(),
   // The browser's own locale decides the starting unit system; the Settings
   // control overrides it, and that override lasts the session.
   unitSystem: localeUnitSystem(),
@@ -84,6 +83,7 @@ export const useInteractionStore = create<InteractionState>((set) => ({
 
   setBasemapEnabled(enabled) {
     set({ basemapEnabled: enabled });
+    storeBasemap(enabled);
   },
 
   setUnitSystem(units) {
@@ -96,7 +96,7 @@ export const useInteractionStore = create<InteractionState>((set) => ({
 
   setThemeMode(mode) {
     set({ themeMode: mode });
-    // The one preference written to disk. Everything else is session state.
+    // Theme and basemap are preferences; activity interactions stay in memory.
     storeTheme(mode);
   },
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeDistance,
   computeElevation,
+  elevationClimb,
   computeStats,
   computeTimeBounds,
   haversineMeters,
@@ -16,6 +17,18 @@ const point = (partial: Partial<ActivityPoint>, index = 0): ActivityPoint => ({
 
 const points = (list: Partial<ActivityPoint>[]): ActivityPoint[] =>
   list.map((item, index) => point(item, index));
+
+it('does not count an odometer increase across a segment gap as moving time', () => {
+  const samples = points([0, 10, 110, 120].map((seconds, index) => ({
+    time: new Date(seconds * 1000), distanceMeters: index * 100, segmentIndex: index < 2 ? 0 : 1,
+  })));
+  const { stats } = computeStats(samples);
+  expect(stats.durationSeconds).toBe(120);
+  expect(stats.movingDurationSeconds).toBe(20);
+  // The source odometer remains authoritative for total distance.
+  expect(stats.distanceMeters).toBe(300);
+  expect(stats.averageMovingSpeedMetersPerSecond).toBe(15);
+});
 
 describe('haversineMeters', () => {
   it('matches a known one-degree-of-latitude distance', () => {
@@ -168,6 +181,45 @@ describe('computeTimeBounds (AV-402)', () => {
 });
 
 describe('computeElevation (AV-403)', () => {
+  describe('across a recording gap (AV-1101)', () => {
+    const run = (elevations: number[], segment: number) =>
+      elevations.map((elevationMeters) => ({ elevationMeters, segmentIndex: segment }));
+
+    it('does not count the jump up between two segments as climb', () => {
+      const result = computeElevation(points([...run([100, 100, 100], 0), ...run([1000, 1000, 1000], 1)]));
+      expect(result.gainMeters).toBe(0);
+      expect(result.lossMeters).toBe(0);
+      expect(result.minMeters).toBe(100);
+      expect(result.maxMeters).toBe(1000);
+    });
+
+    it('does not count the jump down between two segments as descent', () => {
+      const result = computeElevation(points([...run([1000, 1000], 0), ...run([100, 100], 1)]));
+      expect(result.gainMeters).toBe(0);
+      expect(result.lossMeters).toBe(0);
+      expect(result.minMeters).toBe(100);
+      expect(result.maxMeters).toBe(1000);
+    });
+
+    it('still counts the climbing done inside each segment, from where that segment began', () => {
+      const result = computeElevation(points([...run([100, 110, 120], 0), ...run([1000, 1010, 995], 1)]));
+      expect(result.gainMeters).toBe(30);
+      expect(result.lossMeters).toBe(15);
+    });
+
+    it('starts a new anchor even when a gap falls in the middle of a not-yet-committed climb', () => {
+      // 2 m up (under the threshold) before the gap must not combine with 2 m after it.
+      const result = computeElevation(points([...run([100, 102], 0), ...run([500, 502], 1)]), 3);
+      expect(result.gainMeters).toBe(0);
+    });
+
+    it('counts a continuous segment exactly as before', () => {
+      const flat = computeElevation(points(run([100, 110, 130, 120], 0)));
+      const unsegmented = computeElevation(points([100, 110, 130, 120].map((elevationMeters) => ({ elevationMeters }))));
+      expect(flat).toEqual(unsegmented);
+    });
+  });
+
   it('sums a sustained climb', () => {
     const result = computeElevation(
       points([{ elevationMeters: 100 }, { elevationMeters: 150 }, { elevationMeters: 200 }]),
@@ -213,6 +265,27 @@ describe('computeElevation (AV-403)', () => {
 
   it('returns an empty result when no point has elevation', () => {
     expect(computeElevation(points([{ lat: 1, lon: 1 }]))).toEqual({});
+  });
+});
+
+describe('elevationClimb (AV-1016)', () => {
+  it('commits the gain as the summary does, so the last point reads the summary figure', () => {
+    const list = points(
+      [100, 101, 104, 103, 110, 108, 99, 99.5, 112].map((elevationMeters, i) => ({ elevationMeters, segmentIndex: i < 5 ? 0 : 1 })),
+    );
+    const { gainMeters, lossMeters, gainSoFar } = elevationClimb(list);
+    expect(gainMeters).toBe(computeElevation(list).gainMeters);
+    expect(lossMeters).toBe(computeElevation(list).lossMeters);
+    expect(gainSoFar[list.length - 1]).toBe(gainMeters);
+    // Never decreasing: a descent adds nothing and takes nothing away.
+    for (let i = 1; i < gainSoFar.length; i += 1) expect(gainSoFar[i]!).toBeGreaterThanOrEqual(gainSoFar[i - 1]!);
+  });
+
+  it('has none before the first reading and holds through points without one', () => {
+    const { gainSoFar } = elevationClimb(
+      points([{ lat: 1 }, { elevationMeters: 10 }, { elevationMeters: 20 }, { lat: 2 }, { elevationMeters: 40 }]),
+    );
+    expect(gainSoFar).toEqual([undefined, 0, 10, 10, 30]);
   });
 });
 

@@ -1,0 +1,11 @@
+clearRect(0, 0, 1280, 720)
+save()
+fillText("Day 1", 64, 36) fill="#ffffff" font="700 56.32px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+fillText("DISTANCE", 64, 216) fill="#ffffff" font="600 12.67px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.8
+fillText("594 m", 64, 231.21) fill="#ffffff" font="700 28.16px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+fillText("2024-01-01 10:00", 1280, 686.21) fill="#ffffff" font="400 28.16px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()

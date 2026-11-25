@@ -1,3 +1,4 @@
+import { assertXmlInput, assertXmlStructure, assertPointCount, assertFileSize } from '../limits';
 import {
   computeStreams,
   isPlausibleSpeed,
@@ -8,6 +9,7 @@ import {
   type ActivitySport,
   type ActivityWarning,
 } from '../../domain/activity';
+import { utcOffsetFromIsoTime } from '../timeZone';
 import { ActivityError } from '../../domain/errors';
 import { withDerivedStats } from '../../domain/stats';
 import type { RawGpxDocument, RawGpxPoint } from './gpxTypes';
@@ -39,6 +41,7 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
     throw new ActivityError('no_route_points', 'No <trkpt> or <rtept> elements were found.');
   }
 
+  assertPointCount(raw.points.length);
   const sport = mapSport(raw.type);
   const points = normalizePoints(raw.points, warnings, sport);
   const streams = computeStreams(points);
@@ -68,6 +71,7 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
       deviceName: raw.creator,
       device: raw.device,
       sport,
+      utcOffsetMinutes: raw.points.find((point) => point.utcOffsetMinutes !== undefined)?.utcOffsetMinutes,
     },
     points,
     streams,
@@ -82,6 +86,7 @@ export function parseGpx(xml: string, options: ParseGpxOptions = {}): Activity {
 
 /** Convenience wrapper matching the async parser contract used by intake. */
 export async function parseGpxFile(file: File): Promise<Activity> {
+  assertFileSize(file.size);
   const text = await file.text();
   return parseGpx(text, { fileName: file.name, fileSizeBytes: file.size });
 }
@@ -94,8 +99,10 @@ function parseDocument(xml: string, injected?: DOMParser): Document {
   if (typeof xml !== 'string' || xml.trim() === '') {
     throw new ActivityError('invalid_gpx_xml', 'The file is empty.');
   }
+  assertXmlInput(xml, 'invalid_gpx_xml');
   const parser = injected ?? new DOMParser();
   const document = parser.parseFromString(xml, 'application/xml');
+  assertXmlStructure(document);
 
   // DOMParser reports XML errors as a <parsererror> element rather than throwing.
   if (document.getElementsByTagName('parsererror').length > 0) {
@@ -149,6 +156,7 @@ function readGpxDocument(document: Document, warnings: ActivityWarning[]): RawGp
       const segmentIndex = segmentCount;
       segmentCount += 1;
       for (const trkpt of childrenNamed(segment, 'trkpt')) {
+        assertPointCount(points.length + 1);
         points.push(readPoint(trkpt, segmentIndex));
       }
     }
@@ -174,6 +182,7 @@ function readGpxDocument(document: Document, warnings: ActivityWarning[]): RawGp
       const segmentIndex = segmentCount;
       segmentCount += 1;
       for (const rtept of rtepts) {
+        assertPointCount(points.length + 1);
         points.push(readPoint(rtept, segmentIndex));
       }
     }
@@ -276,13 +285,16 @@ function readDeviceInfo(root: Element): ActivityDeviceInfo | undefined {
 }
 
 function readPoint(element: Element, segmentIndex: number): RawGpxPoint {
+  const timeText = textOf(element, 'time');
   const point: RawGpxPoint = {
     lat: parseNumber(element.getAttribute('lat')),
     lon: parseNumber(element.getAttribute('lon')),
     elevationMeters: parseNumber(textOf(element, 'ele')),
-    time: parseDate(textOf(element, 'time')),
+    time: parseDate(timeText),
     segmentIndex,
   };
+  const offset = utcOffsetFromIsoTime(timeText);
+  if (offset !== undefined) point.utcOffsetMinutes = offset;
 
   const extensions = firstNamed(element, 'extensions');
   if (extensions) readExtensions(extensions, point);
@@ -322,6 +334,11 @@ function readExtensions(extensions: Element, point: RawGpxPoint): void {
           break;
         case 'speed':
           point.speedMetersPerSecond = parseNumber(value);
+          break;
+        // Cluetrust GPXDATA's distance from the start, in metres: an odometer
+        // a GPX file can carry where GPX itself has none (AV-1109).
+        case 'distance':
+          point.distanceMeters = parseNumber(value);
           break;
         default:
           break;
@@ -405,6 +422,9 @@ function normalizePoints(
       else if (!STROKE_CADENCE_SPORTS.has(sport)) point.runningCadenceSpm = item.cadence;
     }
     if (Number.isFinite(item.powerWatts)) point.powerWatts = item.powerWatts;
+    if (Number.isFinite(item.distanceMeters) && (item.distanceMeters as number) >= 0) {
+      point.distanceMeters = item.distanceMeters;
+    }
     if (Number.isFinite(item.temperatureCelsius)) {
       point.temperatureCelsius = item.temperatureCelsius;
     }

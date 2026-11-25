@@ -1,22 +1,23 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileDropZone } from '../components/FileDropZone';
 import { WarningList } from '../components/ErrorPanel';
+import { VideoReadProgress } from '../components/VideoReadProgress';
 import { formatDistance, formatDuration, type UnitSystem } from '../domain/units';
 import { ActivityError, toActivityError } from '../domain/errors';
 import type { Activity } from '../domain/activity';
+import { MapVideoLink } from '../components/MapVideoLink';
 import { useActivityStore } from '../state/activityStore';
 import { useInteractionStore } from '../state/interactionStore';
-import { useOverlayStore } from '../state/overlayStore';
+import { useOverlayStore, type OverlayVideoTiming } from '../state/overlayStore';
+import { VIDEO_EXTENSIONS } from './readVideoTelemetry';
 import { ROUTES } from './routes';
-
-/** The container formats a GoPro writes. */
-const VIDEO_EXTENSIONS = ['mp4', 'mov'];
+import { useVideoTelemetryRead } from './useVideoTelemetryRead';
 
 type PageState =
   | { status: 'idle' }
-  | { status: 'extracting'; fileName: string; fraction: number }
-  | { status: 'ready'; activity: Activity; file: File }
+  /** The file and its clock are kept for the overlay page (AV-1002). */
+  | { status: 'ready'; activity: Activity; video: File; timing: OverlayVideoTiming }
   | { status: 'error'; error: ActivityError };
 
 /**
@@ -35,59 +36,51 @@ type PageState =
 export function VideoTelemetryPage() {
   const navigate = useNavigate();
   const setActivity = useActivityStore((state) => state.setActivity);
-  const setOverlayActivity = useOverlayStore((state) => state.setActivity);
+  const setOverlayVideo = useOverlayStore((state) => state.setVideo);
+  const offerOverlayActivity = useOverlayStore((state) => state.offerVideoActivity);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
 
   const [state, setState] = useState<PageState>({ status: 'idle' });
-  const abortRef = useRef<AbortController | undefined>(undefined);
+  const { reading, read, cancel } = useVideoTelemetryRead();
 
   const handleFile = async (file: File) => {
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setState({ status: 'extracting', fileName: file.name, fraction: 0 });
-
+    setState({ status: 'idle' });
     try {
-      // Loaded on demand: a reader who never opens a video should not download
-      // an MP4 demuxer to look at a GPX file.
-      const [{ extractGpmf }, { parseGopro }] = await Promise.all([
-        import('../parsers/gopro/extractGpmf'),
-        import('../parsers/gopro/parseGopro'),
-      ]);
-
-      const payload = await extractGpmf(file, {
-        signal: controller.signal,
-        onProgress: (fraction) =>
-          setState((current) =>
-            current.status === 'extracting' ? { ...current, fraction } : current,
-          ),
-      });
-
-      const activity = await parseGopro(payload, {
-        fileName: file.name,
-        fileSizeBytes: file.size,
-      });
-      setState({ status: 'ready', activity, file });
+      const { activity, timing, activityError } = await read(file);
+      if (!activity || !timing) {
+        // This page exists to turn the track into an activity; a video that
+        // yields none is, here, a failure to explain. The overlay page differs.
+        setState({
+          status: 'error',
+          error: activityError ?? new ActivityError('gopro_extract_failed', 'No activity was read.'),
+        });
+        return;
+      }
+      setState({ status: 'ready', activity, video: file, timing });
     } catch (error) {
-      setState({ status: 'error', error: toActivityError(error, 'gopro_extract_failed') });
-    } finally {
-      abortRef.current = undefined;
+      const failure = toActivityError(error, 'gopro_extract_failed');
+      // A stop is what the reader asked for, not something to explain.
+      setState(failure.code === 'extraction_cancelled' ? { status: 'idle' } : { status: 'error', error: failure });
     }
   };
-
-  /** AV-1002. The same activity, plus the video it came from, to the overlay page. */
-  const openInOverlays = () => {
-    if (state.status !== 'ready') return;
-    setOverlayActivity(state.activity, { video: state.file });
-    navigate(ROUTES.overlays);
-  };
-
-  const cancel = () => abortRef.current?.abort();
 
   const openInViewer = () => {
     if (state.status !== 'ready') return;
     // The handoff: the activity is put where the viewer already looks for one.
     setActivity(state.activity);
     navigate(ROUTES.viewer);
+  };
+
+  const createOverlays = () => {
+    if (state.status !== 'ready') return;
+    // AV-1002. The same idea, for the overlay page: the video and the
+    // container's clock, handed over in memory and nowhere else. The activity
+    // (with the camera's other streams and its warnings inside it) is offered
+    // too; the store declines it if the reader chose one there by hand, which
+    // is theirs to keep (TD-040).
+    setOverlayVideo({ file: state.video, timing: state.timing });
+    offerOverlayActivity(state.activity);
+    navigate(ROUTES.overlays);
   };
 
   return (
@@ -102,58 +95,43 @@ export function VideoTelemetryPage() {
           </p>
         </header>
 
-        {state.status === 'idle' && (
-          <FileDropZone
-            acceptedExtensions={VIDEO_EXTENSIONS}
-            onFile={(file) => void handleFile(file)}
-          />
-        )}
+        {reading ? (
+          <VideoReadProgress progress={reading} onCancel={cancel} />
+        ) : (
+          <>
+            {state.status === 'idle' && (
+              <FileDropZone
+                acceptedExtensions={VIDEO_EXTENSIONS}
+                onFile={(file) => void handleFile(file)}
+              />
+            )}
 
-        {state.status === 'extracting' && (
-          <section className="prose" aria-label="Reading the video">
-            <h3 className="prose__title">Reading {state.fileName}</h3>
-            <p>
-              Only the telemetry track is kept; the video itself streams past without being held
-              in memory, however large it is.
-            </p>
-            <progress
-              className="video__progress"
-              value={state.fraction}
-              max={1}
-              aria-label="Extraction progress"
-            />
-            <p>
-              <button type="button" className="button" onClick={cancel}>
-                Stop reading
-              </button>
-            </p>
-          </section>
-        )}
+            {state.status === 'error' && (
+              <section className="prose" aria-label="Extraction failed">
+                <h3 className="prose__title">That video could not be read</h3>
+                <p role="alert">{state.error.message}</p>
+                <p>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setState({ status: 'idle' })}
+                  >
+                    Try another video
+                  </button>
+                </p>
+              </section>
+            )}
 
-        {state.status === 'error' && (
-          <section className="prose" aria-label="Extraction failed">
-            <h3 className="prose__title">That video could not be read</h3>
-            <p role="alert">{state.error.message}</p>
-            <p>
-              <button
-                type="button"
-                className="button"
-                onClick={() => setState({ status: 'idle' })}
-              >
-                Try another video
-              </button>
-            </p>
-          </section>
-        )}
-
-        {state.status === 'ready' && (
-          <ExtractionSummary
-            activity={state.activity}
-            units={unitSystem}
-            onOpen={openInViewer}
-            onOverlay={openInOverlays}
-            onReset={() => setState({ status: 'idle' })}
-          />
+            {state.status === 'ready' && (
+              <ExtractionSummary
+                activity={state.activity}
+                units={unitSystem}
+                onOpen={openInViewer}
+                onOverlays={createOverlays}
+                onReset={() => setState({ status: 'idle' })}
+              />
+            )}
+          </>
         )}
       </div>
     </main>
@@ -164,13 +142,13 @@ function ExtractionSummary({
   activity,
   units,
   onOpen,
-  onOverlay,
+  onOverlays,
   onReset,
 }: {
   activity: Activity;
   units: UnitSystem;
   onOpen: () => void;
-  onOverlay: () => void;
+  onOverlays: () => void;
   onReset: () => void;
 }) {
   const derived = activity.derived;
@@ -205,9 +183,10 @@ function ExtractionSummary({
         <button type="button" className="button button--primary" onClick={onOpen}>
           Open in viewer
         </button>
-        <button type="button" className="button" onClick={onOverlay}>
-          Make an overlay
+        <button type="button" className="button" onClick={onOverlays}>
+          Create overlays
         </button>
+        <MapVideoLink activity={activity} origin="videoTelemetry" />
         <button type="button" className="button" onClick={onReset}>
           Read another video
         </button>

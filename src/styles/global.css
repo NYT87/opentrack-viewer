@@ -19,6 +19,20 @@
   --scrim: rgba(22, 32, 43, 0.45);
   --shadow: rgba(22, 32, 43, 0.18);
   --radius: 10px;
+  /*
+   * The type ladder from DESIGN.md, as tokens. Label is the uppercase caption
+   * only; every sentence of supporting copy is Reading or larger.
+   */
+  --text-label: 11px;
+  --text-reading: 12px;
+  --text-control: 13px;
+  --text-body: 14px;
+  --text-title: 15px;
+  --text-figure: 16px;
+  --text-headline: 18px;
+  --text-display: 24px;
+  /* Native checkboxes, radios and sliders in the one lit colour, not the browser's blue. */
+  accent-color: var(--accent);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -39,6 +53,29 @@
 }
 
 * { box-sizing: border-box; }
+
+/* Read by assistive technology, not drawn: live regions and chart help. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A reader who asked the system for less motion gets none from the page. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 body {
   margin: 0;
@@ -65,6 +102,9 @@ body {
 }
 
 .shell__scroll {
+  /* The containing block for screen-reader-only text, which would otherwise
+     be placed against the document and stretch it past the viewport. */
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -85,7 +125,17 @@ body {
 
 .shell__title { margin: 0; font-size: 16px; letter-spacing: 0.01em; }
 
-.shell__brand { color: var(--text); text-decoration: none; }
+.shell__brand { color: var(--text); text-decoration: none; white-space: nowrap; }
+.shell__close { white-space: nowrap; }
+@media (max-width: 420px) {
+  .shell__header { padding: 10px 16px; gap: 10px; }
+  .shell__lead { gap: 10px; }
+  .shell__actions { gap: 8px; }
+  .shell__brand-rest { display: none; }
+  .shell__close { padding: 6px 8px; font-size: var(--text-control); }
+  .tools__button { padding: 6px 8px; }
+  .shell__header { gap: 12px; }
+}
 .shell__brand:hover { color: var(--accent); }
 .shell__brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 
@@ -131,7 +181,12 @@ body {
 .tools__button:hover,
 .tools__button.is-open { color: var(--text); border-color: var(--accent); }
 .tools__button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.tools__caret { font-size: 10px; }
+.tools__caret { width: 16px; height: 16px; flex: none; transition: transform 150ms ease; }
+/* Open, it points up: the menu it opened is below. */
+.tools__button.is-open .tools__caret { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) {
+  .tools__caret { transition: none; }
+}
 
 .tools__menu {
   position: absolute;
@@ -254,16 +309,27 @@ body {
   .footer__bottom { padding: 16px 20px 20px; }
 }
 
-.link { color: var(--accent); text-decoration: none; }
-.link:hover { text-decoration: underline; }
+/* A link in running text is underlined, so it is a link without its colour:
+   thin and offset, in a lighter accent, until the pointer reaches it. */
+.link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+  text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.link:hover { text-decoration-color: var(--accent); }
 .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Routed pages that are not the viewer's split layout. */
-.page { flex: 1; padding: 24px 20px; }
+/* min-width: 0 so a page is never wider than the screen: as a flex item it would
+   otherwise grow to its widest unbreakable line (a nowrap hint, a transport row)
+   and scroll sideways, eating the right gutter. */
+.page { flex: 1; min-width: 0; padding: 24px 20px; }
 .page__inner { max-width: 620px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 .page__header { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
 .page__title { margin: 0 0 4px; font-size: 18px; }
-.page__intro { margin: 0; color: var(--text-muted); }
+.page__intro { margin: 0; max-width: 68ch; color: var(--text-muted); }
 
 .setting { display: flex; flex-direction: column; gap: 6px; }
 .setting--group { border: none; margin: 0; padding: 0; }
@@ -290,6 +356,9 @@ body {
 }
 .button:hover { border-color: var(--accent); }
 .button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Disabled reads as disabled, the primary button included: faded, no hover. */
+.button:disabled { opacity: 0.45; cursor: not-allowed; }
+.button:disabled:hover { border-color: var(--border); }
 
 .select {
   align-self: flex-start;
@@ -302,6 +371,33 @@ body {
   font-size: 12px;
 }
 .select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A text or number field, from the same recipe as the select. */
+.input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-control);
+  font-variant-numeric: tabular-nums;
+}
+.input:hover { border-color: var(--accent); }
+.input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Ink Muted, not the browser's grey: 4.5:1 and more on the Canvas fill. */
+.input::placeholder { color: var(--text-muted); opacity: 1; }
+.input[aria-invalid='true'] { border-color: var(--error); }
+.select { max-width: 100%; }
+
+/* Native controls show the system's ring when reached by keyboard. */
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible,
+input[type='range']:focus-visible,
+input[type='color']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* File drop zone */
 .dropzone { display: flex; flex-direction: column; gap: 6px; }
@@ -324,14 +420,14 @@ body {
 .dropzone__title { font-weight: 600; }
 .dropzone__subtitle { color: var(--text-muted); font-size: 12px; }
 .dropzone__input { display: none; }
-.dropzone__hint { margin: 0; color: var(--text-muted); font-size: 11px; }
+.dropzone__hint { margin: 0; color: var(--text-muted); font-size: var(--text-reading); }
 .dropzone__rejection { margin: 0; color: var(--error); font-size: 12px; }
 
 /* Empty state and panels */
 .empty-state { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
 .empty-state__title { margin: 0 0 6px; font-size: 14px; }
 .empty-state__body { margin: 0 0 8px; color: var(--text-muted); }
-.empty-state__note { margin: 0; color: var(--text-muted); font-size: 12px; }
+.empty-state__note { margin: 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 
 .status { margin: 0; color: var(--text-muted); }
 
@@ -347,10 +443,12 @@ body {
   border-radius: 4px;
   background: var(--bg-sunken);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
 }
 
 .warnings { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; }
+/* In the overview, the parser notes are a group of their own, not a last stat row. */
+.box > .warnings { margin-top: 16px; }
 .warnings__summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
 .warnings__list { margin: 8px 0 0; padding-left: 18px; font-size: 12px; }
 .warnings__item.is-warning { color: var(--warn); }
@@ -360,24 +458,36 @@ body {
 /* Summary */
 .summary { display: flex; flex-direction: column; gap: 10px; }
 .summary__header { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-.summary__title { margin: 0; font-size: 15px; }
-.summary__source { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; }
+/* The activity's name is the viewer's page title, so it takes the Headline step. */
+.summary__title { margin: 0; font-size: var(--text-headline); line-height: 1.3; overflow-wrap: anywhere; }
+.summary__title:focus { outline: none; }
+/* The ring hugs the words: a full-width box read as a text field, an
+   underline as a link. */
+.summary__title { width: fit-content; max-width: 100%; }
+.summary__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.summary__source { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-reading); overflow-wrap: anywhere; }
+.summary__note { margin: 14px 0 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 .summary__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  /* Wide enough for a date with seconds ("2 Mar 2024, 18:00:50") on one line. */
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px 16px;
   margin: 0;
 }
 .summary__stat { display: flex; flex-direction: column; gap: 2px; }
 .summary__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .summary__value { margin: 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+/* TD-057. The primary fields: a reader's first three questions, answered larger. */
+.summary__grid--lead { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px 24px; }
+.summary__grid--lead .summary__value { font-size: var(--text-display); line-height: 1.2; }
+.summary__grid--lead + .summary__grid { padding-top: 12px; border-top: 1px solid var(--border); }
 .summary__missing { color: var(--text-muted); }
-.summary__missing small { display: block; font-size: 11px; }
+.summary__missing small { display: block; font-size: var(--text-label); }
 
 /* Viewer (AV-004, AV-005, AV-011) */
 .viewer { flex: 1; min-width: 0; }
@@ -418,6 +528,10 @@ body {
 .section-nav__link:hover { color: var(--text); border-left-color: var(--accent); }
 .section-nav__link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
+/* A section the sidebar jumped to shows the ring only when reached by keyboard. */
+.box:focus, .map-section:focus { outline: none; }
+.box:focus-visible, .map-section:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .box {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -430,11 +544,14 @@ body {
 
 /* The map draws its own surface, so it fills its box edge to edge. */
 .box--map { padding: 0; overflow: hidden; }
+/* On the dark page the night frame needs an edge of its own. */
+:root[data-theme='dark'] .box--map { border-color: #2c3d52; }
 
 /* AV-406: laps to the left of the map on large screens. */
 .map-section { display: grid; gap: 20px; min-width: 0; }
 .map-section.has-laps { grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); }
-.map-section__laps { display: flex; flex-direction: column; min-height: 0; }
+/* Laps keep their own height beside the map instead of stretching to it. */
+.map-section__laps { display: flex; flex-direction: column; min-height: 0; align-self: start; }
 .map-section__map { min-width: 0; }
 
 .laps { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
@@ -451,7 +568,7 @@ body {
   top: 0;
   background: var(--bg-raised);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-bottom: 1px solid var(--border);
@@ -468,12 +585,175 @@ body {
 }
 
 @media (max-width: 1100px) {
-  /* AV-011: the sidebar is a large-screen affordance only. */
-  .section-nav { display: none; }
+  /* TD-056: below the sidebar's width the same links run as one row that
+     scrolls sideways, so Export is a tap away rather than a long scroll. */
   .viewer__content { grid-template-columns: minmax(0, 1fr); }
+  .section-nav { position: static; }
+  .section-nav__list { flex-direction: row; gap: 0; overflow-x: auto; scrollbar-width: none; }
+  .section-nav__link {
+    width: auto;
+    white-space: nowrap;
+    border-left: 0;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-nav__link:hover { border-bottom-color: var(--accent); }
+}
+
+/* A dropped file's progress, refusal or failure, above the activity it left alone. */
+.viewer__notice { display: flex; flex-direction: column; gap: 8px; }
+.viewer__notice.panel { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.viewer__notice .panel__message { margin: 0; }
+.viewer__notice-kept { margin: 0; color: var(--text-muted); font-size: var(--text-reading); }
+
+/* TD-056: a file dragged over an open activity can replace it. */
+.viewer { position: relative; }
+.viewer.is-dropping .viewer__content { opacity: 0.35; }
+.viewer__drop {
+  position: absolute;
+  inset: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120px;
+  border: 1.5px dashed var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* A phone: two figures a row, so the overview is not a list of eleven. */
+@media (max-width: 480px) {
+  .summary__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .viewer__content { padding: 16px; }
 }
 
 /* Homepage */
+
+/* The front door is wider than a reading page: the four tools run two abreast,
+   while every paragraph keeps its own measure inside the column. */
+.page--home { padding-top: 40px; }
+.page--home .page__inner { max-width: 820px; gap: 28px; }
+.page--home .page__header { padding-bottom: 20px; }
+.page__title--home {
+  margin-bottom: 8px;
+  font-size: 24px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.page--home .page__intro {
+  max-width: 60ch;
+  font-size: 15px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+.page__actions { margin: 16px 0 0; }
+/* The promise, in one line under the button, where the file is handed over. */
+/* The home header carries the proof strip beside the lead at desktop widths. */
+.page__header--home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 24px 40px;
+  align-items: start;
+}
+.page__lead { min-width: 0; }
+
+/* Proof strip: what the browser tests hold at zero, set in the stat idiom —
+   caption over figure, hairline-ruled, nothing tinted. */
+.proof { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.proof__title {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.proof__list { display: flex; flex-direction: column; margin: 0; }
+.proof__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0 10px;
+  border-top: 1px solid var(--border);
+}
+.proof__caption {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.proof__figure { margin: 0; color: var(--text); font-size: 16px; font-variant-numeric: tabular-nums; }
+.proof__unit { color: var(--text-muted); font-size: 13px; }
+.proof__link { align-self: flex-start; font-size: 13px; }
+
+/* A link that acts rather than navigates: a button dressed as running text. */
+.link--button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Below the tools, the explanation and the format list sit two abreast. */
+.home-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px 32px;
+  align-items: start;
+}
+.page--home .prose p { max-width: 60ch; text-wrap: pretty; }
+
+/* The tools: a name that is a link and a line saying what it is for. Hairline
+   rules separate them, as the format list does, rather than boxes. */
+.tool-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 32px;
+}
+.tool {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.tool:hover,
+.tool:focus-within { border-top-color: var(--accent); }
+.tool__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+/* The whole row is the target: the link's box is stretched over its row. */
+.tool__name::after { content: ''; position: absolute; inset: 0; }
+.tool:hover .tool__name { color: var(--accent); }
+.tool__name:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.tool__arrow { width: 14px; height: 14px; color: var(--accent); flex-shrink: 0; }
+.tool__detail { color: var(--text-muted); line-height: 1.6; max-width: 48ch; text-wrap: pretty; }
+
+@media (max-width: 860px) {
+  .page--home { padding-top: 28px; }
+  .page__header--home { grid-template-columns: minmax(0, 1fr); }
+  .home-pair { grid-template-columns: minmax(0, 1fr); }
+  .tool-list { grid-template-columns: minmax(0, 1fr); }
+}
+
 .prose { display: flex; flex-direction: column; gap: 10px; }
 .prose__title { margin: 0; font-size: 15px; }
 .prose p { margin: 0; color: var(--text-muted); line-height: 1.6; max-width: 66ch; }
@@ -487,6 +767,7 @@ body {
   text-decoration: none;
 }
 .button--primary:hover { filter: brightness(1.08); }
+.button--primary:disabled:hover { border-color: var(--accent); filter: none; }
 
 .format-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 
@@ -497,17 +778,14 @@ body {
   align-items: baseline;
 }
 .format__name { font-weight: 700; }
-.format__status {
+/* Every format is read; the caption says whether it is also written. */
+.format__access {
   justify-self: start;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
   color: var(--text-muted);
-  font-size: 11px;
-  text-transform: uppercase;
+  font-size: var(--text-label);
   letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
-.format__status.is-supported { border-color: var(--accent); color: var(--accent); }
 .format__detail { grid-column: 2; color: var(--text-muted); }
 
 .notice {
@@ -564,11 +842,13 @@ body {
 .modal__close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Device information (AV-405) */
-.device { display: flex; flex-direction: column; gap: 8px; }
+/* Device and other telemetry are groups of their own under the stat grid. */
+.device { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+.sensor-streams { margin-top: 20px; }
 .device__title {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -580,20 +860,28 @@ body {
   margin: 0;
 }
 .device__row { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.device__label { color: var(--text-muted); font-size: 11px; }
+.device__label {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .device__value { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .device__list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* Other telemetry the file carries but the charts do not show (AV-905) */
 .sensor-streams { display: flex; flex-direction: column; gap: 6px; }
 .sensor-streams__title {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.sensor-streams__intro { margin: 0; color: var(--text-muted); font-size: 11px; }
+.sensor-streams__intro { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 .sensor-streams__list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -604,7 +892,7 @@ body {
 }
 .sensor-streams__item { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sensor-streams__label { overflow-wrap: anywhere; }
-.sensor-streams__detail { color: var(--text-muted); font-size: 11px; }
+.sensor-streams__detail { color: var(--text-muted); font-size: var(--text-reading); }
 
 /* Chart panel */
 .chart-panel { border-top: 1px solid var(--border); background: var(--bg-raised); }
@@ -617,28 +905,63 @@ body {
   padding: 8px 16px 0;
 }
 
-.chart-panel__notice { margin: 0; color: var(--text-muted); font-size: 11px; }
+.chart-panel__notice { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 
-/* Focused-range bar (AV-511, AV-512) */
-.focus-bar {
+/*
+ * TD-056. The readout: what every chart says at the cursor, in the stat grid's
+ * caption-over-figure idiom. It sticks to the top of the scroll region while
+ * the charts pass under it, and keeps one row's height whether it holds the
+ * hint or the figures, so nothing below it jumps as the pointer comes and goes.
+ */
+.chart-readout {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+/* What the figures describe. One height at rest and with a section, so
+   selecting moves nothing below it. */
+.chart-readout__scope {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px 16px;
-  flex-wrap: wrap;
-  margin: 8px 16px 0;
-  padding: 8px 12px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  font-size: 12px;
+  min-height: 48px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
 }
-.focus-bar__text { color: var(--text); }
+.chart-readout__whole { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+.chart-readout__whole-title { color: var(--text); font-weight: 600; }
+.chart-readout__values { display: flex; align-items: center; min-height: 58px; padding: 8px 16px; }
+.chart-readout__hint { margin: 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+/* A row that scrolls sideways fades at its edge, so hidden values are seen to be there. */
+.chart-readout__list,
+.summary__grid--inline {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px 24px;
+  margin: 0;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.chart-readout__cell { display: flex; flex-direction: column; gap: 2px; flex: none; }
+.chart-readout__label {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.chart-readout__value { margin: 0; font-size: var(--text-figure); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .axis-switch { display: flex; align-items: center; gap: 6px; }
 .axis-switch__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -657,16 +980,18 @@ body {
 .axis-switch__option.is-active { background: var(--bg); color: var(--text); border-color: var(--accent); }
 .axis-switch__option:disabled { opacity: 0.45; cursor: not-allowed; }
 .axis-switch__option:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Why an option is greyed, said beside it rather than in a tooltip. */
+.axis-switch__reason { color: var(--text-muted); font-size: var(--text-reading); }
 
 /* Chart */
 .chart { padding: 6px 16px 14px; }
 .chart--empty { color: var(--text-muted); padding: 8px 16px 12px; }
 .chart--empty .chart__title { margin-bottom: 2px; }
-.chart__note { margin: 0 0 4px; color: var(--text-muted); font-size: 11px; }
-.chart__empty { margin: 0; font-size: 12px; }
-.chart__header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.chart__note { margin: 0 0 4px; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+.chart__empty { margin: 0; font-size: var(--text-reading); text-wrap: pretty; }
+.chart__header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
 .chart__title { margin: 0; font-size: 13px; }
-.chart__meta { margin: 0; color: var(--text-muted); font-size: 11px; }
+.chart__meta { margin: 0; color: var(--text-muted); font-size: var(--text-reading); }
 .chart__plot { width: 100%; overflow: hidden; }
 /* The viewBox is 1:1 with pixels, so text is never stretched by the SVG. */
 .chart__svg {
@@ -676,12 +1001,18 @@ body {
   touch-action: pan-y;
   user-select: none;
 }
+/* Inset, because the plot clips anything drawn outside it. */
+.chart__svg:focus { outline: none; }
+.chart__svg:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
 .chart__grid { stroke: var(--border); stroke-width: 1; }
 .chart__axis-label { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .chart__axis-label.is-endpoint { fill: var(--text-muted); opacity: 0.85; }
 .chart__tick { stroke: var(--border); stroke-width: 1; }
 .chart__area { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
 .chart__line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+/* TD-060. Where the recording was stopped: shaded and named, not drawn across. */
+.chart__pause rect { fill: color-mix(in srgb, var(--text-muted) 10%, transparent); }
+.chart__pause text { fill: var(--text-muted); font-size: 11px; }
 .chart__selection {
   fill: color-mix(in srgb, var(--accent) 18%, transparent);
   stroke: var(--accent);
@@ -694,11 +1025,15 @@ body {
 
 /* AV-554: export controls, shown only once an activity is loaded. */
 .export__title { margin: 0; font-size: 15px; }
+/* Export, route overlay and custom track are three jobs in one box: each
+   after the first starts below a hairline, with room above its title. */
+.export + .export { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
 .export__body {
   margin: 6px 0 14px;
   max-width: 60ch;
-  font-size: 13px;
+  font-size: var(--text-control);
   color: var(--text-muted);
+  text-wrap: pretty;
 }
 .export__controls {
   display: flex;
@@ -749,23 +1084,16 @@ body {
 }
 .export__warnings li { margin-top: 4px; }
 
-/* AV-605: what the selected section adds up to, beside the focus controls. */
-.selection-summary {
-  margin: 12px 0 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-sunken);
-}
-.selection-summary__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.selection-summary__title { margin: 0; font-size: 13px; }
-.selection-summary__scope { margin: 0; font-size: 12px; color: var(--text-muted); }
+/* AV-605, TD-056: the selected section, as the readout's scope row. Its title
+   and the reassurance, then its figures scrolling sideways, then the way out. */
+.selection-summary { display: flex; align-items: center; gap: 8px 20px; width: 100%; min-width: 0; }
+.selection-summary__header { display: flex; flex-direction: column; flex: none; }
+.selection-summary__title { margin: 0; font-size: var(--text-control); }
+.selection-summary__scope,
+.selection-summary__note { margin: 0; color: var(--text-muted); font-size: var(--text-reading); white-space: nowrap; }
+.selection-summary__reset { flex: none; }
+.summary__grid--inline .summary__stat { flex: none; }
+.summary__grid--inline .summary__value { font-size: var(--text-body); white-space: nowrap; }
 
 /* AV-555: says whether the chosen target is a rewrite or a conversion. */
 .export__hint {
@@ -773,19 +1101,22 @@ body {
   max-width: 70ch;
   font-size: 12px;
   color: var(--text-muted);
+  text-wrap: pretty;
 }
 
 /* §17: a lap row is a toggle that recolours its stretch of the route. */
+/* A hairline at rest, so the lap a reader can press looks pressable. */
 .laps__select {
+  min-width: 28px;
   padding: 2px 6px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: none;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
-.laps__select:hover { border-color: var(--border); }
+.laps__select:hover { border-color: var(--accent); }
 .laps__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .laps__select[aria-pressed='true'] {
   border-color: var(--accent);
@@ -793,8 +1124,748 @@ body {
   font-weight: 600;
 }
 .laps__row.is-selected td { font-weight: 600; }
-.laps__number { padding: 2px 6px; color: var(--text-muted); cursor: help; }
+.laps__number { display: inline-block; min-width: 28px; padding: 2px 6px; color: var(--text-muted); text-align: center; }
+.laps__note { margin: 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
 
 /* AV-907: the video telemetry page's progress and actions. */
 .video__progress { width: min(100%, 420px); height: 10px; }
 .video__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+
+/* Overlay preview (AV-1004). The layer is positioned in frame fractions, so it
+   scales with the video; font sizes use container units for the same reason. */
+.overlay-preview__frame {
+  position: relative;
+  /* The video's own shape, limited by width and by height: never stretched,
+     and the overlay layer (inset: 0) always covers exactly the picture. */
+  --frame-aspect: 1.7778; /* until the video states its own, inline */
+  aspect-ratio: var(--frame-aspect);
+  width: min(100%, calc(70vh * var(--frame-aspect)));
+  margin-inline: auto;
+  container-type: inline-size;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.overlay-preview__video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.overlay-layer { position: absolute; inset: 0; pointer-events: none; }
+.overlay-item {
+  --overlay-accent: currentColor; /* the template's accent token overrides it inline */
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.3em 0.6em;
+  border-radius: 0.4em;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+.overlay-item--progress, .overlay-item--routeInset, .overlay-item--elevationProfile { padding: 0; }
+/* A figure never wraps: a font too wide for its tile clips at the side, where it
+   is seen for what it is, rather than folding onto a second line that spills
+   out of the tile's height. */
+.overlay-item__label { font-size: 0.55em; text-transform: uppercase; opacity: 0.75; white-space: nowrap; }
+.overlay-item__value { font-weight: 700; line-height: 1.1; white-space: nowrap; }
+.overlay-item__track { height: 0.25em; margin-top: 0.2em; background: rgb(255 255 255 / 0.25); }
+.overlay-item__bar { height: 100%; min-height: 100%; background: var(--overlay-accent, currentColor); }
+.overlay-item--progress { background: rgb(255 255 255 / 0.25) !important; }
+.overlay-item__route { width: 100%; height: 100%; }
+.overlay-item__profile { width: 100%; height: 100%; display: block; }
+.overlay-preview__controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
+.overlay-preview__scrub { flex: 1 1 200px; min-width: 0; }
+.overlay-preview__time { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.overlay-preview__offset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 0; border: 1px solid var(--border); border-radius: var(--radius); }
+.overlay-preview__offset input[type='number'] { width: 6em; }
+.overlay-preview__hint { flex-basis: 100%; margin: 0; color: var(--text-muted); font-size: 12px; }
+.overlay-preview__warnings { color: var(--warn); font-size: 13px; }
+
+/* Overlay controls (AV-1005): groups wrap, so they stack on a phone. */
+.overlay-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 16px; }
+.overlay-controls > .prose__title, .overlay-controls > p { grid-column: 1 / -1; }
+.overlay-controls__group { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.overlay-controls__choice { display: flex; align-items: flex-start; gap: 8px; min-height: 28px; }
+.overlay-controls__choice > input { flex-shrink: 0; }
+.overlay-controls__field { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
+.overlay-controls__field input[type='range'] { flex: 1 1 120px; min-width: 0; }
+.overlay-controls__hint { color: var(--text-muted); font-size: 12px; }
+
+/* Overlay export (AV-1006) */
+.overlay-export__settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; }
+.overlay-export__progress { width: min(100%, 320px); vertical-align: middle; }
+
+/* AV-1009: the route image's preview sits on a checkerboard so transparency shows. */
+.route-image__stage { align-items: center; }
+.route-image__canvas {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  border-radius: var(--radius);
+  background-color: var(--bg-raised);
+  background-image:
+    linear-gradient(45deg, var(--bg-sunken) 25%, transparent 25%, transparent 75%, var(--bg-sunken) 75%),
+    linear-gradient(45deg, var(--bg-sunken) 25%, transparent 25%, transparent 75%, var(--bg-sunken) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+/* AV-1102. Imported file names are the reader's own and may hold no space to
+   break at; they wrap rather than widen a phone screen. */
+.route-draft__sources { overflow-wrap: anywhere; }
+
+/* AV-1104. Route Builder's editing controls: a small form beside the map.
+   Fields sit side by side where there is room and stack on a phone. */
+.editor { display: flex; flex-direction: column; gap: 12px; }
+.editor__fields { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; }
+.editor__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.editor__field input { width: 10ch; max-width: 100%; }
+.editor__modes { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.editor__mode { display: inline-flex; align-items: center; gap: 6px; }
+.editor__status { margin: 0; font-size: 13px; color: var(--text-muted); }
+.editor__selected { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* AV-1106. The append notice names the file too: it wraps anywhere, and as a
+   flex child it may shrink below its text's width, or a long name with no
+   space in it would widen a phone screen. */
+.route-draft__appended { min-width: 0; flex: 1 1 16rem; overflow-wrap: anywhere; }
+
+/* Phone overrides for the chart readout, last so they win over its base rules. */
+@media (max-width: 480px) {
+  /* On a phone the readout's resting scope is one line: the hint goes. */
+  /* On a phone the readout's hint keeps its first sentence. */
+  .chart-readout__hint-more { display: none; }
+  /* The three lead figures stay one row, a step smaller. */
+  .summary__grid--lead { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+  .summary__grid--lead .summary__value { font-size: var(--text-headline); }
+  /* The section on a phone: title, size and the way out on one line, its
+     figures scrolling on the next. The reassurance is still announced. */
+  .selection-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'head reset' 'figures figures';
+    gap: 4px 12px;
+  }
+  .selection-summary__header { grid-area: head; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+  .selection-summary__note { display: none; }
+  .selection-summary__reset { grid-area: reset; padding: 4px 10px; font-size: var(--text-control); }
+  .selection-summary .summary__grid--inline { grid-area: figures; }
+  .chart-readout__values { min-height: 52px; padding: 6px 16px; }
+}
+
+/*
+ * TD-059. The overlay workspace. At 1100px and wider the picture, its
+ * transport and the sync line stay in view in one column while the files, the
+ * overlay controls and the exports scroll beside them; narrower, the picture
+ * alone sticks to the top while everything else scrolls under it.
+ */
+.page--overlays.is-workspace .page__inner { max-width: 1180px; }
+.overlay-workspace, .overlay-column { display: grid; gap: 24px; }
+.overlay-column .overlay-workspace__stage:empty { display: none; }
+.overlay-workspace__side { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+@media (min-width: 1100px) {
+  .overlay-workspace { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+  /* The stage is only the picture, its transport and a line: it fits the screen
+     without scrolling inside itself, so nothing in it can scroll the picture away. */
+  .overlay-workspace__stage { position: sticky; top: 16px; }
+  /* The picture leaves room for what sits under it, so the whole stage, bar
+     included, fits the screen while it sticks. */
+  .overlay-workspace__stage .overlay-preview__frame {
+    width: min(100%, calc(max(200px, 100vh - 300px) * var(--frame-aspect)));
+  }
+}
+@media (max-width: 1099px) {
+  /* Focus moved by Tab lands clear of the sticky stage, never under it (WCAG 2.4.11). */
+  /* The stage's height, measured by the page and set inline over this default. */
+  .shell__scroll:has(.overlay-workspace) {
+    --overlay-stage-height: 0px;
+    scroll-padding-top: calc(var(--overlay-stage-height) + 12px);
+  }
+  /* A flex column, not a grid: a sticky grid item is held to its own row, so
+     the picture would let go as soon as the controls began. */
+  .overlay-workspace { display: flex; flex-direction: column; }
+  .overlay-workspace__stage {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding-bottom: 8px;
+    background: var(--bg);
+  }
+  .overlay-workspace__stage .overlay-preview .prose__title { display: none; }
+  /* Sticking on a phone, the picture keeps to under half the screen: a portrait
+     clip at full width would cover every control below it. */
+  .overlay-workspace__stage .overlay-preview__frame { width: min(100%, calc(38vh * var(--frame-aspect))); }
+  /* Kept short while it sticks: the sync line says the same in the column below. */
+  .overlay-workspace__stage .overlay-preview__summary { display: none; }
+}
+.overlay-preview__frame:focus { outline: none; }
+.overlay-preview__frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The keys the stage answers to: always one quiet line, so nothing moves when it is used. */
+.overlay-preview__keys { margin: 6px 0 0; overflow: hidden; color: var(--text-muted); font-size: var(--text-label); white-space: nowrap; text-overflow: ellipsis; }
+@media (hover: none) { .overlay-preview__keys { display: none; } }
+/* On a narrow screen the line wraps rather than losing its last keys to an ellipsis. */
+@media (max-width: 520px) { .overlay-preview__keys { white-space: normal; } }
+.overlay-preview__off {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.prose .overlay-preview__off p { margin: 0; color: var(--text); font-size: var(--text-reading); }
+.overlay-preview__summary { margin: 8px 0 0; color: var(--text-muted); font-size: var(--text-reading); }
+
+/* The transport keeps one line: the time never wraps under the scrubber. */
+.overlay-preview__controls { flex-wrap: nowrap; }
+.overlay-preview__time { white-space: nowrap; }
+
+/* The offset: steps around one field, wrapping as a group, never one by one. */
+.overlay-preview__offset { flex-direction: column; align-items: stretch; padding: 10px 12px; }
+.overlay-preview__offset .overlay-preview__hint { max-width: none; }
+.overlay-preview__steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.overlay-preview__field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-control); }
+.overlay-preview__field .input { width: 9ch; }
+.overlay-preview__nudges { display: inline-flex; flex-wrap: nowrap; gap: 6px; }
+.overlay-preview__against { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--text-muted); font-size: var(--text-reading); }
+.overlay-preview__lineup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--text-control); }
+
+/* How the video sits in the activity: a line, and a bar of the same facts. */
+.overlay-sync { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.overlay-sync__line { margin: 0; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+.overlay-sync__warning {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--text);
+  font-size: var(--text-reading);
+}
+.overlay-sync__track { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+/* The bar and its trace are one control: dragged, clicked, or stepped by key. */
+.overlay-sync__scale { position: relative; display: flex; flex-direction: column; gap: 4px; cursor: grab; touch-action: pan-y; border-radius: 6px; }
+.overlay-sync__scale:active { cursor: grabbing; }
+.overlay-sync__scale:focus { outline: none; }
+.overlay-sync__scale:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.overlay-sync__how { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.prose .overlay-sync__legend { max-width: none; flex-wrap: wrap; }
+.overlay-sync__bar {
+  position: relative;
+  height: 14px;
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.overlay-sync__activity,
+.overlay-sync__video,
+.overlay-sync__playhead { position: absolute; top: 0; bottom: 0; }
+.overlay-sync__activity { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.overlay-sync__video { top: 3px; bottom: 3px; border-radius: 3px; background: var(--accent); }
+.overlay-sync__playhead { width: 2px; margin-left: -1px; background: var(--text); pointer-events: none; }
+/* TD-081. The video's lane: the whole clip, the part exported over it, and a handle at each end of that part. */
+.overlay-sync__bar--video { height: 18px; overflow: visible; }
+.overlay-sync__clip {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 30%, transparent) 0 4px, transparent 4px 8px);
+}
+/* The handles lie over the video's lane, the bar's last row, beside the bar's slider rather than in it. */
+.overlay-sync__lanes { position: relative; }
+.overlay-sync__handles { position: absolute; left: 0; right: 0; bottom: 0; height: 18px; pointer-events: none; }
+.overlay-sync__handle { pointer-events: auto; }
+.overlay-sync__handle {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 10px;
+  margin-left: -5px;
+  border-radius: 3px;
+  background: var(--text);
+  border: 2px solid var(--bg);
+  cursor: ew-resize;
+  touch-action: none;
+}
+/* A finger's width to press, wider than the handle drawn. */
+.overlay-sync__handle::before { content: ''; position: absolute; inset: -8px -10px; }
+.overlay-sync__handle:focus { outline: none; }
+.overlay-sync__handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.overlay-sync__key--clip { margin-left: 8px; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 45%, transparent) 0 3px, transparent 3px 6px); }
+.overlay-trim { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.prose .overlay-trim__line { margin: 0; max-width: none; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+.overlay-trim__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.overlay-sync__legend { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--text-label); text-transform: uppercase; letter-spacing: 0.04em; }
+.overlay-sync__key { display: inline-block; width: 12px; height: 8px; border-radius: 2px; }
+.overlay-sync__key--activity { background: color-mix(in srgb, var(--accent) 22%, transparent); margin-left: 8px; }
+.overlay-sync__key--activity:first-child { margin-left: 0; }
+.overlay-sync__key--video { background: var(--accent); margin-left: 8px; }
+
+/* The files: what is held, and the ways to change it, in one row. */
+.overlay-slot__actions, .overlay-files__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+/* Under the still image: clear of the slot that Add a video brings back. */
+.overlay-still__start-over .overlay-files__actions { margin-top: 12px; }
+.overlay-files__file { margin-top: 12px; }
+.overlay-slot .prose__title:focus { outline: none; }
+.overlay-slot .prose__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.overlay-undo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.overlay-undo .panel__message { margin: 0; }
+.overlay-export__import { margin: 8px 0 0; max-width: 60ch; color: var(--text-muted); font-size: var(--text-reading); text-wrap: pretty; }
+
+/* In the workspace's narrower column the control groups stack, each full width. */
+.overlay-workspace .overlay-controls { grid-template-columns: minmax(0, 1fr); }
+
+/* TD-059. The trace of the activity's speed or elevation, over the sync bar. */
+.overlay-sync__trace { display: block; width: 100%; height: 22px; overflow: visible; }
+.overlay-sync__trace polyline {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+.overlay-sync__key--trace { background: var(--text-muted); height: 2px; margin-left: 8px; }
+.overlay-sync__warning { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.prose .overlay-sync__warning p { margin: 0; max-width: 60ch; color: var(--text); }
+.overlay-sync-panel .overlay-preview__offset { margin-top: 12px; }
+.overlay-preview__hint.is-invalid { color: var(--error); }
+.overlay-sync-slot:empty { display: none; }
+
+/* A slider's value beside it, so it can be set to a number. */
+.overlay-controls__value { min-width: 4ch; text-align: right; color: var(--text-muted); font-size: var(--text-reading); font-variant-numeric: tabular-nums; }
+
+/* Settings fit the side column rather than overflowing it. */
+.overlay-workspace__side .overlay-export__settings { grid-template-columns: minmax(0, 1fr); }
+
+/* The burned-in render is a desktop browser's: on a phone it is not offered. */
+@media (max-width: 700px) {
+  .overlay-export--burned { display: none; }
+}
+/* The activity's span reads on the dark well too. */
+:root[data-theme='dark'] .overlay-sync__activity,
+:root[data-theme='dark'] .overlay-sync__key--activity { background: color-mix(in srgb, var(--accent) 38%, transparent); }
+
+/* TD-059. A skip past the files and settings to the exports, and the notes around them. */
+.overlay-skip { margin: 0; }
+/* TD-059. A held file in the workspace is one line: its name, then what matters. */
+.prose .overlay-slot__line { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0; color: var(--text-muted); font-size: var(--text-reading); max-width: none; }
+.overlay-slot__name { min-width: 0; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.overlay-slot__details > summary { cursor: pointer; color: var(--text-muted); font-size: var(--text-reading); }
+.overlay-slot__details[open] > summary { margin-bottom: 8px; }
+.overlay-exports { display: flex; flex-direction: column; gap: 24px; }
+.overlay-export .prose__title:focus { outline: none; }
+.overlay-export .prose__title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.overlay-slot__note { color: var(--text-muted); font-size: var(--text-reading); }
+.overlay-controls__note { margin: 6px 0 0; color: var(--text); font-size: var(--text-reading); max-width: 60ch; text-wrap: pretty; }
+.overlay-controls__reset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.panel__code-line { margin: 0 0 8px; color: var(--text-muted); font-size: var(--text-label); }
+
+/*
+ * Touch and small screens. Desktop keeps the Instrument Panel's density; a
+ * coarse pointer gets 44px targets (Apple HIG, Material), 16px fields so iOS
+ * does not zoom the page on focus, and a phone gets 12px captions.
+ */
+/* At every size, standalone small targets keep WCAG 2.2's 24px. */
+/* The padding comes out of the list's gap, so the footer is no taller than before. */
+.footer__link { display: inline-block; vertical-align: top; padding-block: 4px; }
+.footer__list { gap: 2px; margin-block: -4px; }
+input[type='range'] { min-height: 24px; }
+/* Padding, not display: flex, so the disclosure triangle stays. */
+summary { padding-block: 3px; }
+
+@media (max-width: 520px) {
+  :root { --text-label: 12px; }
+}
+
+/* A title given focus on a route change shows the ring to a keyboard only. */
+main h2[tabindex='-1']:focus { outline: none; }
+main h2[tabindex='-1']:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+
+/* Pressed: the control answers the press itself, where a touch screen has no hover. */
+.button:active:not(:disabled),
+.tools__button:active,
+.icon-button:active,
+.section-nav__link:active,
+.axis-switch__option:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.button--primary:active:not(:disabled) { background: var(--accent); filter: brightness(0.92); }
+
+/* A label and its select wrap rather than push a long option past the screen. */
+.overlay-controls__field { flex-wrap: wrap; }
+
+/*
+ * A phone held sideways is too short for a sticky stage: the picture and its
+ * bar would cover the whole screen. There the stage scrolls with the page.
+ */
+@media (max-width: 1099px) and (max-height: 500px) {
+  .overlay-workspace__stage { position: static; }
+  .shell__scroll:has(.overlay-workspace) { scroll-padding-top: 12px; }
+}
+
+@media (pointer: coarse) {
+  .button,
+  .select,
+  .input,
+  .tools__button,
+  .section-nav__link,
+  .axis-switch__option,
+  .link--button { min-height: 44px; }
+  .icon-button { width: 44px; height: 44px; }
+  /* Fields at 16px: below it, iOS Safari zooms the page in on focus and does not zoom back. */
+  .select,
+  .input,
+  input[type='text'],
+  input[type='number'] { font-size: 16px; }
+  input[type='range'] { min-height: 44px; }
+  input[type='checkbox'],
+  input[type='radio'] { width: 22px; height: 22px; }
+  .choice,
+  .export__choice,
+  .editor__mode,
+  .overlay-controls__choice { min-height: 44px; align-items: center; }
+  .footer__link { padding-block: 12px; }
+  .footer__list { gap: 0; margin-block: -12px; }
+  /* Doubled class: MapLibre's own stylesheet sets these at the same specificity, later. */
+  .maplibregl-ctrl.maplibregl-ctrl-group button { width: 44px; height: 44px; }
+  /* Standalone links grow to a target; a link inside a sentence stays as text. */
+  .shell__brand,
+  .tool__name,
+  .proof__link { display: inline-flex; align-items: center; min-height: 44px; }
+  summary { padding-block: 13px; }
+  input[type='color'] { min-width: 44px; min-height: 44px; }
+  .overlay-sync__scale { padding-block: 4px; }
+  .overlay-sync__handles { bottom: 4px; }
+  .maplibregl-ctrl-attrib a { display: inline-block; padding: 8px 2px; }
+}
+
+/*
+ * AV-1109. Route Builder's merge: the files in the order they were recorded,
+ * each a row with what it covers and a way to take it out, then the merged
+ * activity with its pauses said in words and its route on a map.
+ */
+.merge__order,
+.merge__refused,
+/* Device file names run long with nothing to break at: they wrap anywhere rather than widen the page. */
+.merge { overflow-wrap: anywhere; }
+.merge__pauses,
+.merge__notes { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.merge__order { counter-reset: merge; }
+.merge__file {
+  counter-increment: merge;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.merge__file::before {
+  content: counter(merge);
+  grid-row: span 2;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.merge__file .button { grid-row: span 2; grid-column: 3; }
+.merge__file.is-overlapping { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.merge__name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.merge__facts { grid-column: 2; min-width: 0; color: var(--text-muted); font-size: var(--text-reading); }
+.merge__refused li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; color: var(--text-muted); }
+.merge__problem {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.prose .merge__problem { color: var(--text); max-width: 66ch; }
+.merge__hint { margin-top: 12px; }
+.merge__result { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.merge__title { margin: 0; font-size: var(--text-title); overflow-wrap: anywhere; }
+.merge__pauses { margin: 0; font-size: var(--text-reading); color: var(--text-muted); }
+/* The GPX loses the pauses once it leaves this app: said where it is chosen. */
+.merge__gpx-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  font-size: var(--text-body);
+}
+.merge__gpx-warning p { margin: 0; flex: 1 1 280px; }
+.merge__gpx-warning strong { color: var(--warn); }
+.merge__notes { margin: 0; font-size: var(--text-reading); }
+.merge__notes .is-warning { padding: 6px 10px; border-left: 3px solid var(--warn); }
+.merge__notes .is-info { color: var(--text-muted); }
+.merge__export { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 520px) {
+  .merge__file { grid-template-columns: auto minmax(0, 1fr); }
+  .merge__file .button { grid-row: auto; grid-column: 2; justify-self: start; }
+}
+
+/*
+ * AV-1010. The still image's editor: the elements as a row of toggles, the
+ * selected one's settings, a 3 × 3 pad of snaps whose dot sits where the
+ * element will, and the preview, which takes a press, a drag and the arrows.
+ */
+/* One row per element: its name selects it, Remove takes it off. */
+.still-image__elements {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.still-image__element {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 6px;
+  border-left: 3px solid transparent;
+}
+.still-image__element + .still-image__element { border-top: 1px solid var(--border); }
+.still-image__element.is-selected {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.still-image__element-name {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-control);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.still-image__element-name:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.still-image__unavailable,
+.still-image__hidden { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.still-image__hidden { color: var(--text-muted); font-size: var(--text-reading); }
+.still-image__editor { border-color: var(--accent); }
+.still-image__position { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; }
+.still-image__position .input { width: 8ch; }
+.still-image__nudges { display: flex; gap: 6px; }
+.still-image__nudges .button { min-width: 40px; font-variant-numeric: tabular-nums; }
+.still-image__snaps { display: grid; grid-template-columns: repeat(3, 36px); gap: 4px; }
+.still-image__snaps .button { position: relative; width: 36px; height: 36px; padding: 0; }
+.still-image__snap { position: absolute; width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
+.still-image__snap--top-left { top: 6px; left: 6px; }
+.still-image__snap--top { top: 6px; left: calc(50% - 4px); }
+.still-image__snap--top-right { top: 6px; right: 6px; }
+.still-image__snap--left { top: calc(50% - 4px); left: 6px; }
+.still-image__snap--center { top: calc(50% - 4px); left: calc(50% - 4px); }
+.still-image__snap--right { top: calc(50% - 4px); right: 6px; }
+.still-image__snap--bottom-left { bottom: 6px; left: 6px; }
+.still-image__snap--bottom { bottom: 6px; left: calc(50% - 4px); }
+.still-image__snap--bottom-right { bottom: 6px; right: 6px; }
+.still-image__text { align-items: flex-start; flex-wrap: wrap; }
+.still-image__text textarea { flex: 1 1 220px; min-width: 0; resize: vertical; font: inherit; font-size: var(--text-control); }
+.still-image__zones { margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 4px; }
+.still-image__zones legend { padding: 0; margin-bottom: 4px; }
+.still-image__preview { display: block; width: 100%; border-radius: var(--radius); }
+.still-image__preview:focus { outline: none; }
+.still-image__preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.still-image__preview .route-image__canvas { cursor: crosshair; touch-action: none; }
+.still-image__layout { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (pointer: coarse) {
+  .still-image__snaps { grid-template-columns: repeat(3, 44px); }
+  .still-image__snaps .button { width: 44px; height: 44px; }
+}
+/* The preview, the list of what is not drawn and the layout file span the panel; the preview comes first. */
+.still-image > .route-image__stage,
+.still-image > .still-image__hidden,
+.still-image > .still-image__layout,
+.still-image > .video__actions,
+.still-image > [role='status'],
+.still-image > [role='alert'] { grid-column: 1 / -1; }
+/*
+ * A dark well under the still image whatever the theme: it is made to sit over
+ * video, and white type, its default, vanishes on the light checkerboard the
+ * route image uses.
+ */
+.still-image .route-image__canvas {
+  max-width: none;
+  background-color: #30353b;
+  background-image:
+    linear-gradient(45deg, #262a2f 25%, transparent 25%, transparent 75%, #262a2f 75%),
+    linear-gradient(45deg, #262a2f 25%, transparent 25%, transparent 75%, #262a2f 75%);
+}
+
+/*
+ * AV-1011. The custom canvas: the preview in the canvas's own shape (the
+ * video letterboxed inside it, the overlay drawn over it by the exporters'
+ * renderer), the transport under it, then resolution, elements and the
+ * selected element's settings side by side, then the layout file and exports.
+ */
+.overlay-mode { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.overlay-mode legend { padding: 0 4px; }
+/* AV-1204. The map video preview: the video's shape, held by width and height
+   like the overlay preview, the map filling it. Route only paints the frame in
+   the page's own surface colour, read by the map when it is made. */
+.page--map-video.is-workspace .page__inner { max-width: 1180px; }
+.map-video-preview__frame {
+  --map-video-background: #11161c;
+  position: relative;
+  width: min(100%, calc(70vh * var(--frame-aspect, 1.7778)));
+  max-height: 70vh;
+  margin-inline: auto;
+  aspect-ratio: var(--frame-aspect, 1.7778);
+  background: var(--map-video-background);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.map-video-preview__frame:focus { outline: none; }
+.map-video-preview__frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Sized by its frame, not positioned in it: MapLibre's own stylesheet makes the
+   container `position: relative`, which would collapse an inset box to nothing. */
+.map-video-preview__map { width: 100%; height: 100%; }
+/* AV-1207. The figures, over the map and under the credit; the hand goes through to the map. */
+.map-video-preview__figures { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.map-video-preview__transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.map-video-preview__scrub { flex: 1 1 200px; min-width: 0; display: flex; }
+.map-video-preview__scrub input { width: 100%; }
+.map-video-preview__time { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.prose .map-video-preview__note { font-size: 13px; }
+/* AV-1205. The map's credit, in the frame as the export draws it: never folded,
+   never hidden. Sized to the frame, so it is the same share of every video. */
+.map-video-preview__frame { container-type: inline-size; }
+
+/* AV-1013. The map image: its map on top, the panel below it, the canvas's elements and the credit over both. */
+.map-image-preview { margin: 0; }
+.map-image__workspace { display: grid; gap: 16px; }
+.map-image__stage, .map-image__controls { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (min-width: 1100px) {
+  .map-image__workspace { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+  .map-image__stage { position: sticky; top: 16px; }
+  /* Room left under the picture for its view and save controls, so the stage fits the screen while it sticks. */
+  .map-image__stage .map-image-preview__frame { width: min(100%, calc(max(200px, 100vh - 420px) * var(--frame-aspect))); }
+}
+.map-image-preview__frame {
+  --map-video-background: #11161c;
+  position: relative;
+  width: min(100%, calc(70vh * var(--frame-aspect, 0.8)));
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--map-video-background);
+}
+/* At the image's own size, scaled to the frame from its top left (set inline). */
+.map-image-preview__map { flex: none; }
+.map-image-preview__panel { position: absolute; bottom: 0; left: 0; width: 100%; }
+.map-image-preview__over { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.prose .map-video-preview__attribution {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  max-width: 100%;
+  padding: 0.3em 0.6em;
+  font-size: max(9px, 1.15cqw);
+  line-height: 1.3;
+  color: #1a1a1a;
+  background: rgb(255 255 255 / 0.72);
+  border-top-left-radius: 4px;
+  pointer-events: none;
+}
+.prose .map-video-preview__legend { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+.map-video-preview__ramp { flex: 1 1 auto; max-width: 240px; height: 8px; border-radius: 4px; }
+.map-video-basemap__detail { display: grid; gap: 8px; margin-left: 28px; }
+.map-video-basemap__terrain { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.map-video-settings__field input[type='color'] { width: 3em; height: 2em; padding: 0; }
+.map-video-settings__field input[type='password'] { width: 14em; max-width: 100%; }
+/* AV-1206. Keyframes, one card each in time order. */
+.map-video-keyframes-slot:empty { display: none; }
+/* AV-1208. Photos, one row each: a thumbnail, how it is placed, and where it went or why not. */
+.map-video-photos__list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.map-video-photo { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.map-video-photo__thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; background: var(--border); }
+.map-video-photo__body { display: grid; gap: 6px; min-width: 0; }
+.prose .map-video-photo__name { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.map-video-photo__hand { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.prose .map-video-photo__status { margin: 0; font-size: 13px; }
+.map-video-keyframes__list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.map-video-keyframe { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+.map-video-keyframe__head, .map-video-keyframe__fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.map-video-keyframe__field { display: inline-flex; align-items: center; gap: 6px; }
+.map-video-keyframe__field input { width: 6em; }
+.map-video-settings__group { display: grid; gap: 8px; margin: 0; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.map-video-settings__group legend { padding: 0 4px; }
+.map-video-settings__field { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.map-video-settings__input { display: inline-flex; align-items: center; gap: 6px; }
+.map-video-settings__input input { width: 6.5em; }
+.map-video-settings__row { display: grid; gap: 6px; }
+.prose .map-video-settings__hint { font-size: 13px; }
+.map-video-project__notes { margin: 6px 0 0; padding-left: 1.2em; color: var(--text-muted); }
+@media (max-width: 1099px) {
+  .overlay-workspace__stage .map-video-preview__frame { width: min(100%, calc(38vh * var(--frame-aspect, 1.7778))); }
+  .overlay-workspace__stage .map-video-preview .prose__title { display: none; }
+}
+
+/* AV-1202. The map video page's basemap choice: one option a line, each explained. */
+.map-video-basemap { display: grid; gap: 8px; margin: 0; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); }
+.map-video-basemap legend { padding: 0 4px; }
+.custom-canvas { display: flex; flex-direction: column; gap: 12px; }
+.custom-canvas__stage { display: flex; flex-direction: column; gap: 8px; }
+.custom-canvas__frame {
+  /* The canvas's shape, set inline from its resolution; 16:9 until then. */
+  --canvas-aspect: 1.7778;
+  position: relative;
+  width: min(100%, calc(70vh * var(--canvas-aspect)));
+  max-width: 100%;
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background-color: #30353b;
+  background-image:
+    linear-gradient(45deg, #262a2f 25%, transparent 25%, transparent 75%, #262a2f 75%),
+    linear-gradient(45deg, #262a2f 25%, transparent 25%, transparent 75%, #262a2f 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.custom-canvas__frame:focus { outline: none; }
+.custom-canvas__frame:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.custom-canvas__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.custom-canvas__canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.custom-canvas__panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 16px; align-items: start; }
+.custom-canvas__exports { display: flex; flex-direction: column; gap: 24px; }
+
+/* AV-1022 (TD-091). The privacy trim: two native range handles over one track, the kept part between them. */
+.privacy-trim__slider { position: relative; height: 28px; margin: 4px 0 8px; }
+.privacy-trim__track { position: absolute; left: 0; right: 0; top: 50%; height: 6px; margin-top: -3px; border-radius: 3px; background: var(--bg-sunken); border: 1px solid var(--border); box-sizing: border-box; }
+.privacy-trim__kept { position: absolute; top: -1px; bottom: -1px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 60%, transparent); }
+/* Each handle's input covers only the share it can move over (0 to 45 %, and 55 to 100 %), so its own range is its limit and the two never cross. */
+.privacy-trim__handle { position: absolute; top: 0; height: 28px; margin: 0; width: 45%; background: transparent; }
+.privacy-trim__handle--start { left: 0; }
+.privacy-trim__handle--end { right: 0; }
+.privacy-trim__number { width: 8ch; }
+.privacy-trim__beside { min-width: 12ch; }
+input[type='range'].privacy-trim__handle { appearance: none; -webkit-appearance: none; min-height: 0; cursor: pointer; }
+.privacy-trim__handle::-webkit-slider-runnable-track { background: transparent; height: 28px; }
+.privacy-trim__handle::-moz-range-track { background: transparent; height: 28px; }
+.privacy-trim__handle::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 22px; margin-top: 3px; border-radius: 4px; background: var(--text); border: 2px solid var(--bg); box-sizing: border-box; cursor: ew-resize; }
+.privacy-trim__handle::-moz-range-thumb { width: 14px; height: 22px; border-radius: 4px; background: var(--text); border: 2px solid var(--bg); box-sizing: border-box; cursor: ew-resize; }
+@media (pointer: coarse) {
+  .privacy-trim__slider { height: 44px; }
+  .privacy-trim__handle { height: 44px; }
+  .privacy-trim__handle::-webkit-slider-runnable-track { height: 44px; }
+  .privacy-trim__handle::-moz-range-track { height: 44px; }
+  .privacy-trim__handle::-webkit-slider-thumb { width: 22px; height: 36px; margin-top: 4px; }
+  .privacy-trim__handle::-moz-range-thumb { width: 22px; height: 36px; }
+}
+.map-video-settings__share { color: var(--text-muted); font-size: var(--text-reading); white-space: nowrap; }
+
+/* AV-1023 (TD-092). The preview's live maps under the canvas: each in its inset's box, laid out in reference pixels and scaled to it. */
+.inset-map-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.inset-map { position: absolute; overflow: hidden; background: #11161c; }
+.inset-map__map { position: absolute; left: 0; top: 0; transform-origin: 0 0; }

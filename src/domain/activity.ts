@@ -1,7 +1,7 @@
 /**
  * Format-independent activity domain model (AV-101, TD-002).
  *
- * Every parser — GPX, FIT and TCX — must produce this shape. UI, stats, map
+ * Every parser — GPX, FIT, TCX and KML — must produce this shape. UI, stats, map
  * and chart layers depend on this module only — never on parser output types.
  */
 
@@ -16,8 +16,6 @@ export type ActivitySourceFormat =
   | 'gopro'
   /** An MP4/MOV with no telemetry this app can use — a video, and only that. */
   | 'video'
-  /** AV-1101. A planned track made in Route Builder, not a recording. */
-  | 'planned'
   | 'unknown';
 
 export type ActivitySport =
@@ -80,6 +78,12 @@ export function hasDisplayableDevice(
 
 export interface ActivityMetadata {
   name?: string;
+  /**
+   * AV-1010. Minutes east of UTC that the file states it was recorded in (a
+   * FIT local time, an ISO time with an offset). Absent when the file does not
+   * say, which is common: GPX and TCX times are usually written in UTC.
+   */
+  utcOffsetMinutes?: number;
   description?: string;
   sport?: ActivitySport;
   startTime?: Date;
@@ -220,6 +224,13 @@ export interface ActivityDerivedStats {
   averageSpeedMetersPerSecond?: number;
   /** The same average expressed as pace, which is how runners read it. */
   averagePaceSecondsPerKm?: number;
+  /**
+   * TD-058. Distance over *moving* time: what a watch or a training log shows
+   * as the average, and what the overview leads with. Absent when no moving
+   * time could be worked out.
+   */
+  averageMovingSpeedMetersPerSecond?: number;
+  averageMovingPaceSecondsPerKm?: number;
   elevationGainMeters?: number;
   elevationLossMeters?: number;
   minElevationMeters?: number;

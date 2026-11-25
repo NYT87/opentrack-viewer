@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import type { Plugin } from 'vite';
 import { resolveBasePath, resolveSiteUrl } from './base-path.ts';
+import { createHash } from 'node:crypto';
 
 /**
  * Deployed under a repository sub-path on GitHub Pages, so every emitted asset
@@ -11,6 +12,46 @@ import { resolveBasePath, resolveSiteUrl } from './base-path.ts';
  */
 const base = resolveBasePath();
 const siteUrl = resolveSiteUrl();
+
+/** A meta policy works on static Pages hosting. Hash the final inline bootstrap. */
+function contentSecurityPolicy(): Plugin {
+  return {
+    name: 'opentrack-content-security-policy',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        const hashes = Array.from(html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi))
+          .filter((match) => !/\bsrc\s*=/i.test(match[1] ?? ''))
+          .map((match) => `'sha256-${createHash('sha256').update(match[2] ?? '').digest('base64')}'`);
+        const policy = [
+          "default-src 'none'",
+          // binary-parser compiles trusted schemas for GoPro telemetry at runtime.
+          // Inline scripts still require a hash; arbitrary remote scripts stay blocked.
+          `script-src 'self' 'unsafe-eval' ${hashes.join(' ')}`,
+          // React and MapLibre position elements using inline style attributes.
+          "style-src 'self' 'unsafe-inline'",
+          // The viewer's map tiles; the map video's OpenFreeMap style, tiles, glyphs
+          // and sprites, all from that one host; MapTiler's, with the reader's key;
+          // and AWS Terrain Tiles from their own bucket, not all of S3 (TD-064).
+          "img-src 'self' blob: data: https://tile.openstreetmap.org https://tiles.openfreemap.org https://api.maptiler.com https://elevation-tiles-prod.s3.amazonaws.com",
+          "connect-src 'self' blob: https://tile.openstreetmap.org https://tiles.openfreemap.org https://api.maptiler.com https://elevation-tiles-prod.s3.amazonaws.com",
+          "media-src 'self' blob:",
+          "worker-src 'self' blob:",
+          "font-src 'self'",
+          "manifest-src 'self'",
+          "base-uri 'none'",
+          "form-action 'none'",
+          "object-src 'none'",
+          "frame-src 'none'",
+        ].join('; ');
+        // Must precede resources and scripts to govern the whole document.
+        return html.replace(/(<meta charset="UTF-8"\s*\/?>)/i,
+          `$1\n    <meta http-equiv="Content-Security-Policy" content="${policy}" />`);
+      },
+    },
+  };
+}
 
 /**
  * AV-013. Emits `robots.txt` and `sitemap.xml` from the same site URL the app
@@ -65,6 +106,7 @@ export default defineConfig({
   plugins: [
     react(),
     seoFiles(),
+    contentSecurityPolicy(),
     /**
      * AV-802. Precaches the app shell so a return visit works offline.
      *
@@ -88,6 +130,9 @@ export default defineConfig({
         // lazily loaded map chunk and its worker — so route-only mode keeps
         // working offline (AV-803).
         globPatterns: ['**/*.{js,css,html,webmanifest,png,svg,mjs}'],
+        // The link-preview image is for crawlers and chat apps, never drawn by
+        // the app: precaching it would make every visitor download it.
+        globIgnores: ['social/**'],
         // The map chunk is around a megabyte; the default 2 MiB cap would
         // silently drop it from the precache.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

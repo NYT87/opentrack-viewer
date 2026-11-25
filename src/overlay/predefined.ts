@@ -1,0 +1,234 @@
+import type { UnitSystem } from '../domain/units';
+import { newCanvasComponent, newSplitsComponent, newZonesComponent, canvasTemplate, type CanvasElementKey } from './customCanvas';
+import { METRIC_MISSING, NO_ROUTE, ELEVATION_MISSING, SPLITS_MISSING } from './missingData';
+import { splitsUnavailableReason } from './splits';
+import { OVERLAY_PRESETS, type OverlayPresetId } from './presets';
+import { SMOOTHING_LIMITS, canSmooth, type OverlayTimeline } from './timeline';
+import { normalizeRect, type OverlayComponent, type OverlayTemplate } from './template';
+
+/**
+ * AV-1016 (TD-084). The registry of predefined components: ready-made figures,
+ * gauges and profiles for a sport, each a name, a sport, the data it needs and
+ * a builder that makes ordinary components with a default look, size and
+ * smoothing. Once added a component is like any other (saved in the layout,
+ * edited with the usual controls, drawn by the one renderer), so the registry
+ * is plain data: a sport is added by adding entries here, and the editor, which
+ * only reads `PREDEFINED_ENTRIES`, does not change.
+ *
+ * Zones came with AV-1018 (TD-086), the dial, the chart, the gradient
+ * indicator and the compass with AV-1019 (TD-087), and splits with AV-1021
+ * (TD-090). Average-so-far figures wait for their own piece (#39) and have no
+ * entry until it lands.
+ */
+
+export type PredefinedSport = 'cycling' | 'running' | 'any';
+
+export interface PredefinedEntry {
+  /** Stable, `sport.name`: what the add list and a test refer to. */
+  id: string;
+  name: string;
+  sport: PredefinedSport;
+  /** Data source ids the activity must have: `metric:power`, `route`, or `splits` (laps with start times, or a distance). Empty needs nothing. */
+  needs: string[];
+  /** Why the entry is offered disabled, in the Add list's own wording. */
+  missing: string;
+  /** Ordinary components, the first of which is the one selected after adding. */
+  build: (
+    template: OverlayTemplate,
+    size: { width: number; height: number },
+    timeline: OverlayTimeline,
+    /** AV-1020. The reader's units, which a dial's range is rounded in. */
+    units?: UnitSystem,
+  ) => OverlayComponent[];
+}
+
+/** Whether this activity can supply an entry's data. */
+export function predefinedAvailability(entry: PredefinedEntry, timeline: OverlayTimeline): boolean {
+  if (timeline.unavailable) return false;
+  return entry.needs.every((need) =>
+    need === 'route' ? timeline.hasRoute : need === 'splits' ? splitsUnavailableReason(false, timeline.splitSources) === undefined : timeline.available.has(need),
+  );
+}
+
+export function predefinedEntry(id: string): PredefinedEntry | undefined {
+  return PREDEFINED_ENTRIES.find((entry) => entry.id === id);
+}
+
+type Build = PredefinedEntry['build'];
+
+/** An ordinary figure or gauge, with smoothing and display settings put on it. */
+function figure(
+  key: CanvasElementKey,
+  extra: { smoothing?: number; label?: string; decimals?: 0 | 1 | 2; ofTotal?: boolean } = {},
+): Build {
+  return (template, size, timeline, units) => {
+    const component = newCanvasComponent(template, key, size, timeline, units);
+    const seconds = Math.min(SMOOTHING_LIMITS.max, extra.smoothing ?? 0);
+    if (seconds > 0 && canSmooth(component.source)) component.smoothing = { windowSeconds: seconds };
+    const display: NonNullable<OverlayComponent['display']> = {};
+    if (extra.label) display.label = extra.label;
+    if (extra.decimals !== undefined) display.decimals = extra.decimals;
+    if (extra.ofTotal) display.ofTotal = true;
+    if (Object.keys(display).length > 0) component.display = display;
+    if (extra.ofTotal) {
+      // "12.40 / 42.20 km" is about twice as wide as a plain figure.
+      component.rect = normalizeRect({ ...component.rect, width: Math.min(0.5, component.rect.width * 1.7) });
+    }
+    return [component];
+  };
+}
+
+/** AV-1018. A zones component with its source's default zones; power is smoothed over 3 s. */
+const zones =
+  (source: 'heartRate' | 'power'): Build =>
+  (template, size) => [newZonesComponent(template, source, size)];
+
+/** AV-1021. Splits, with the rate a sport reads: a runner's pace, a rider's speed. */
+const splits =
+  (rate: 'pace' | 'speed'): Build =>
+  (template, size) => [newSplitsComponent(template, size, rate)];
+
+const plain =
+  (key: CanvasElementKey): Build =>
+  (template, size, timeline, units) => [newCanvasComponent(template, key, size, timeline, units)];
+
+export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
+  // Cycling
+  { id: 'cycling.speed', name: 'Speed', sport: 'cycling', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: figure('metric:speed', { smoothing: 2 }) },
+  { id: 'cycling.speed-gauge', name: 'Speed gauge', sport: 'cycling', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: figure('gauge:speed', { smoothing: 2 }) },
+  { id: 'cycling.power', name: 'Power', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: plain('metric:power') },
+  { id: 'cycling.power-3s', name: 'Power, 3 s average', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: figure('metric:power', { smoothing: 3, label: 'Power 3s' }) },
+  { id: 'cycling.cadence', name: 'Cadence', sport: 'cycling', needs: ['metric:cyclingCadence'], missing: METRIC_MISSING.cyclingCadence, build: figure('metric:cyclingCadence', { smoothing: 3, label: 'Cadence' }) },
+  // AV-1019. The gradient indicator replaces the plain gradient figure, under the same id: a layout stores components, not entries. It has the derived grade, so most files have one.
+  { id: 'cycling.gradient', name: 'Gradient indicator', sport: 'cycling', needs: ['metric:grade'], missing: METRIC_MISSING.grade, build: plain('gradient') },
+  { id: 'cycling.speedometer', name: 'Speedometer', sport: 'cycling', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: figure('dial:speed', { smoothing: 2 }) },
+  { id: 'cycling.cadence-dial', name: 'Cadence dial', sport: 'cycling', needs: ['metric:cyclingCadence'], missing: METRIC_MISSING.cyclingCadence, build: figure('dial:cyclingCadence', { smoothing: 3, label: 'Cadence' }) },
+  { id: 'cycling.power-zones', name: 'Power zones', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: zones('power') },
+  { id: 'cycling.heart-rate-zones', name: 'Heart rate zones', sport: 'cycling', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
+  { id: 'cycling.climb', name: 'Climb so far', sport: 'cycling', needs: ['metric:climb'], missing: METRIC_MISSING.climb, build: plain('metric:climb') },
+  { id: 'cycling.elevation-profile', name: 'Elevation profile', sport: 'cycling', needs: ['metric:elevation'], missing: ELEVATION_MISSING, build: plain('elevationProfile') },
+  { id: 'cycling.splits', name: 'Splits', sport: 'cycling', needs: ['splits'], missing: SPLITS_MISSING, build: splits('speed') },
+  // Running
+  { id: 'running.pace', name: 'Pace', sport: 'running', needs: ['metric:pace'], missing: METRIC_MISSING.pace, build: figure('metric:pace', { smoothing: 5 }) },
+  { id: 'running.heart-rate', name: 'Heart rate', sport: 'running', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: plain('metric:heartRate') },
+  { id: 'running.heart-rate-zones', name: 'Heart rate zones', sport: 'running', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
+  { id: 'running.cadence', name: 'Running cadence', sport: 'running', needs: ['metric:runningCadence'], missing: METRIC_MISSING.runningCadence, build: figure('metric:runningCadence', { smoothing: 3 }) },
+  { id: 'running.splits', name: 'Splits', sport: 'running', needs: ['splits'], missing: SPLITS_MISSING, build: splits('pace') },
+  { id: 'running.distance-total', name: 'Distance of the total', sport: 'running', needs: ['metric:distance'], missing: METRIC_MISSING.distance, build: figure('metric:distance', { ofTotal: true }) },
+  // Any sport
+  { id: 'any.speed-chart', name: 'Speed against time', sport: 'any', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: plain('chart:speed') },
+  { id: 'any.heart-rate-chart', name: 'Heart rate against time', sport: 'any', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: plain('chart:heartRate') },
+  { id: 'any.compass', name: 'Compass', sport: 'any', needs: ['metric:heading'], missing: METRIC_MISSING.heading, build: plain('compass') },
+  { id: 'any.elevation-profile', name: 'Elevation profile', sport: 'any', needs: ['metric:elevation'], missing: ELEVATION_MISSING, build: plain('elevationProfile') },
+  { id: 'any.progress', name: 'Progress bar', sport: 'any', needs: [], missing: '', build: plain('progress') },
+  { id: 'any.route', name: 'Route inset', sport: 'any', needs: ['route'], missing: NO_ROUTE, build: plain('route') },
+];
+
+// ---------------------------------------------------------------------------
+// Starting layouts
+
+/** What the canvas's Start from can lay out: a built-in template, or a sport. */
+export type StartLayoutId = OverlayPresetId | 'cycling' | 'running';
+
+export const START_LAYOUTS: readonly { id: StartLayoutId; name: string }[] = [
+  ...OVERLAY_PRESETS.map(({ id, name }) => ({ id, name })),
+  { id: 'cycling', name: 'Cycling' },
+  { id: 'running', name: 'Running' },
+];
+
+/** Which entries make a sport's layout, in reading order; the first of a pair that the activity can supply is taken. */
+const SPORT_LAYOUTS: Record<'cycling' | 'running', { figures: string[][]; profile: string }> = {
+  cycling: {
+    figures: [['cycling.speed'], ['cycling.power-3s'], ['cycling.cadence'], ['cycling.gradient', 'cycling.climb']],
+    profile: 'cycling.elevation-profile',
+  },
+  running: {
+    figures: [['running.pace'], ['running.heart-rate'], ['running.cadence'], ['running.distance-total']],
+    profile: 'any.elevation-profile',
+  },
+};
+
+/** The space around the layout, and between its figures, as shares of the frame's width. */
+const MARGIN = 0.04;
+const GAP = 0.01;
+
+/**
+ * AV-1016 (TD-084). A sport's starting layout, built from the registry's
+ * entries and laid out for the frame's shape. Landscape (or square): the
+ * figures in rows along the bottom-left, as many to a row as fit beside the
+ * elevation profile, which takes the bottom-right. Portrait: the profile
+ * across the bottom and the figures in rows above it, a lower third. Entries
+ * the activity cannot supply are left out and the rest close up. Everything is
+ * inside the frame and nothing overlaps.
+ */
+export function componentsFromSportLayout(
+  sport: 'cycling' | 'running',
+  timeline: OverlayTimeline,
+  size: { width: number; height: number },
+  units: UnitSystem = 'metric',
+): OverlayComponent[] {
+  const layout = SPORT_LAYOUTS[sport];
+  const aspect = size.width / size.height;
+  const landscape = aspect >= 1;
+  const supplied = (id: string) => {
+    const entry = predefinedEntry(id);
+    return entry && predefinedAvailability(entry, timeline) ? entry : undefined;
+  };
+  // Built one by one against what is already built, so each gets its own id.
+  const built: OverlayComponent[] = [];
+  const make = (entry: PredefinedEntry) => {
+    const [component] = entry.build(canvasTemplate(built), size, timeline, units);
+    if (component) built.push(component);
+    return component;
+  };
+  const figures: OverlayComponent[] = [];
+  for (const choices of layout.figures) {
+    const entry = choices.map(supplied).find(Boolean);
+    const component = entry && make(entry);
+    if (component) figures.push(component);
+  }
+  const profileEntry = supplied(layout.profile);
+  const profile = profileEntry && make(profileEntry);
+
+  // The profile's box: beside the figures in landscape, across the foot in portrait.
+  if (profile) {
+    const width = landscape ? profile.rect.width : 1 - 2 * MARGIN;
+    const height = (width * aspect) / 4;
+    profile.rect = normalizeRect({ x: 1 - MARGIN - width, y: 1 - Math.min(MARGIN * aspect, 0.1) - height, width, height });
+  }
+
+  // Rows of figures: as few as fit the room, filled evenly.
+  const room = landscape ? 1 - 2 * MARGIN - (profile ? profile.rect.width + MARGIN : 0) : 1 - 2 * MARGIN;
+  const widthOf = (items: OverlayComponent[]) =>
+    items.reduce((total, item) => total + item.rect.width, 0) + GAP * Math.max(0, items.length - 1);
+  const rowsAt = (perRow: number) => {
+    const rows: OverlayComponent[][] = [];
+    for (let i = 0; i < figures.length; i += perRow) rows.push(figures.slice(i, i + perRow));
+    return rows;
+  };
+  let rows: OverlayComponent[][] = [];
+  for (let perRow = figures.length; perRow >= 1; perRow -= 1) {
+    rows = rowsAt(perRow);
+    if (rows.every((row) => widthOf(row) <= room + 1e-9)) {
+      // The fewest rows that fit; then the most even split into that many.
+      const even = rowsAt(Math.ceil(figures.length / rows.length));
+      if (even.every((row) => widthOf(row) <= room + 1e-9)) rows = even;
+      break;
+    }
+  }
+  const rowHeight = figures.reduce((tallest, item) => Math.max(tallest, item.rect.height), 0);
+  // The margin and gap are the same in pixels on every side, but never more than a tenth of the frame's height, so a very wide frame still has a bottom.
+  const marginY = Math.min(MARGIN * aspect, 0.1);
+  const gapY = Math.min(GAP * aspect, 0.02);
+  const blockHeight = rows.length * rowHeight + Math.max(0, rows.length - 1) * gapY;
+  const floor = profile && !landscape ? profile.rect.y - gapY : 1 - marginY;
+  const top = floor - blockHeight;
+  rows.forEach((row, r) => {
+    let x = MARGIN;
+    for (const item of row) {
+      item.rect = normalizeRect({ ...item.rect, x, y: top + r * (rowHeight + gapY), height: rowHeight });
+      x += item.rect.width + GAP;
+    }
+  });
+  return built;
+}

@@ -61,19 +61,17 @@ describe('ChartPanel chart selection (AV-505, AV-506, AV-507)', () => {
     expect(cadence).not.toHaveTextContent(/rpm/i);
   });
 
-  it('explains why a run chart is unavailable instead of hiding it', () => {
+  it('draws no run chart for a ride, and says nothing in its place (AV-516)', () => {
     const ride = makeActivity(withBothAxes.points);
     ride.metadata.sport = 'cycling';
     render(<ChartPanel activity={ride} onXAxisChange={vi.fn()} />);
 
     // A file that said it was a ride is not asked again: pace and running
-    // cadence do not apply to it, and it is told why rather than shown nothing.
-    expect(screen.getByRole('region', { name: 'Pace chart' })).toHaveTextContent(
-      /shown for running activities/i,
-    );
-    expect(screen.getByRole('region', { name: 'Cadence chart' })).toHaveTextContent(
-      /shown for running activities/i,
-    );
+    // cadence do not apply to it, so they take no title, message or space.
+    expect(screen.queryByRole('region', { name: 'Pace chart' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Cadence chart' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/shown for running activities/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('elevation-chart-svg')).toBeInTheDocument();
   });
 
   it('charts speed by default for a file that never said what it was (AV-908)', () => {
@@ -152,8 +150,21 @@ describe('ChartPanel range selection (AV-508)', () => {
     // Fewer plotted points: the chart is drawing the section, not the whole.
     expect(pointsIn(chart())).toBeLessThan(before);
     // The axis keeps absolute values, so the section does not restart at zero.
-    const endpoints = [...chart().querySelectorAll('.is-endpoint')].map((n) => n.textContent);
+    // It is written once, under the last chart (TD-056).
+    const last = screen.getAllByRole('slider').at(-1)!;
+    const endpoints = [...last.querySelectorAll('.is-endpoint')].map((n) => n.textContent);
+    expect(endpoints.length).toBeGreaterThan(0);
     expect(endpoints.some((label) => label !== '0 m')).toBe(true);
+  });
+
+  it('writes the shared x axis once, under the last chart, and ticks every chart (TD-056)', () => {
+    render(<ChartPanel activity={runWithCadence} onXAxisChange={vi.fn()} />);
+    const charts = screen.getAllByRole('slider');
+    expect(charts.length).toBeGreaterThan(1);
+    for (const chart of charts.slice(0, -1)) {
+      expect(chart.querySelectorAll('.chart__axis-label--x')).toHaveLength(0);
+    }
+    expect(charts.at(-1)!.querySelectorAll('.chart__axis-label--x').length).toBeGreaterThan(0);
   });
 
   it('recalculates chart availability for the focused section (AV-511)', () => {
@@ -172,9 +183,9 @@ describe('ChartPanel range selection (AV-508)', () => {
     // Focus the cadence-free tail.
     drag(screen.getAllByTestId('elevation-chart-svg')[0]!, 500, 780);
 
-    expect(screen.getByRole('region', { name: 'Cadence chart' })).toHaveTextContent(
-      /no cadence data/i,
-    );
+    // The section has no cadence, so the chart is no longer drawn (AV-516).
+    expect(screen.queryByRole('region', { name: 'Cadence chart' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('elevation-chart-svg')).toBeInTheDocument();
   });
 
   it('says the file is unchanged, and Reset View restores the full activity (AV-511, AV-512)', () => {
@@ -265,14 +276,16 @@ describe('ChartPanel x-axis switch (AV-504)', () => {
   it('explains a fallback when the preferred mode is unavailable', () => {
     render(<ChartPanel activity={timeOnly} xAxisPreference="distance" onXAxisChange={vi.fn()} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent(/no distance or GPS/i);
+    expect(document.querySelector('.chart-panel__notice')).toHaveTextContent(/no distance or GPS/i);
+    expect(document.querySelector('.chart-panel__notice')).toHaveAttribute('role', 'status');
     expect(axisButton('Time')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('shows no fallback notice when the preference is honoured', () => {
     render(<ChartPanel activity={withBothAxes} xAxisPreference="time" onXAxisChange={vi.fn()} />);
 
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    // The panel's section announcer is always mounted, and empty; no notice beside it.
+    expect(screen.getAllByRole('status').filter((status) => status.textContent)).toHaveLength(0);
   });
 
   it('rebuilds the series from the normalized activity, never the source file', () => {
@@ -472,5 +485,176 @@ describe('choosing speed or pace (AV-908)', () => {
     await userEvent.click(metricButton('Pace'));
 
     expect(screen.getByRole('region', { name: 'Pace chart' })).toHaveTextContent(/Pace \(\/mi\)/);
+  });
+});
+
+describe('only capable charts are drawn (AV-516)', () => {
+  const drawn = () => screen.queryAllByRole('slider').map((chart) => chart.getAttribute('aria-label'));
+  const placeholders = /is shown for|has no .* data|nothing to chart|needs both|Switch to (pace|speed) to chart/i;
+
+  const at = (t: number) => new Date(`2024-01-01T10:00:${String(t).padStart(2, '0')}Z`);
+
+  it('a run: elevation, pace and cadence, and nothing about speed or pedal cadence', () => {
+    render(<ChartPanel activity={runWithCadence} onXAxisChange={vi.fn()} />);
+    expect(drawn()).toEqual(['Elevation chart', 'Pace chart', 'Cadence chart']);
+    expect(screen.queryByText(placeholders)).not.toBeInTheDocument();
+  });
+
+  it('a ride: elevation, speed and pedal cadence, and nothing about pace or running cadence', () => {
+    const ride = makeActivity([
+      { lat: 0, lon: 0.0001, elevationMeters: 100, cyclingCadenceRpm: 85, time: at(0) },
+      { lat: 0.0009, lon: 0.0001, elevationMeters: 102, cyclingCadenceRpm: 88, time: at(10) },
+      { lat: 0.0018, lon: 0.0001, elevationMeters: 104, cyclingCadenceRpm: 90, time: at(20) },
+    ]);
+    ride.metadata.sport = 'cycling';
+    render(<ChartPanel activity={ride} onXAxisChange={vi.fn()} />);
+    expect(drawn()).toEqual(['Elevation chart', 'Speed chart', 'Pedal cadence chart']);
+    expect(screen.queryByText(placeholders)).not.toBeInTheDocument();
+  });
+
+  it('elevation only: one chart, and no message for the rest', () => {
+    const hike = makeActivity([
+      { lat: 0, lon: 0.0001, elevationMeters: 100 },
+      { lat: 0.001, lon: 0.0001, elevationMeters: 140 },
+      { lat: 0.002, lon: 0.0001, elevationMeters: 120 },
+    ]);
+    hike.metadata.sport = 'hiking';
+    render(<ChartPanel activity={hike} onXAxisChange={vi.fn()} />);
+    expect(drawn()).toEqual(['Elevation chart']);
+    expect(screen.queryByText(placeholders)).not.toBeInTheDocument();
+  });
+
+  it('no optional sensors: no heart rate, power or temperature messages', () => {
+    render(<ChartPanel activity={runWithCadence} onXAxisChange={vi.fn()} />);
+    for (const name of ['Heart rate chart', 'Power chart', 'Temperature chart']) {
+      expect(screen.queryByRole('region', { name })).not.toBeInTheDocument();
+    }
+  });
+
+  it('nothing chartable: the panel has nothing to offer, and says so to the page', async () => {
+    const { hasAnyChart } = await import('../domain/charts');
+    const bare = makeActivity([{ lat: 0, lon: 0.0001 }, { lat: 0.001, lon: 0.0001 }]);
+    bare.metadata.sport = 'hiking';
+    expect(hasAnyChart(bare)).toBe(false);
+    expect(hasAnyChart(runWithCadence)).toBe(true);
+  });
+});
+
+describe('the charts read as one instrument (TD-056)', () => {
+  // Pace needs a little distance and time before it has a value, so its series
+  // starts later than elevation's: the case that used to misalign the cursors.
+  const run = makeActivity(
+    Array.from({ length: 12 }, (_, i) => ({
+      lat: i * 0.0003,
+      lon: 0.0001,
+      elevationMeters: 100 + i,
+      time: new Date(Date.UTC(2024, 0, 1, 10, 0, i * 10)),
+    })),
+  );
+  run.metadata.sport = 'running';
+
+  it('draws every chart over the same x extent', () => {
+    render(<ChartPanel activity={run} onXAxisChange={vi.fn()} />);
+    const sliders = screen.getAllByRole('slider');
+    expect(sliders.length).toBeGreaterThan(1);
+    const extents = sliders.map((chart) => [chart.getAttribute('aria-valuemin'), chart.getAttribute('aria-valuemax')]);
+    expect(new Set(extents.map((extent) => extent.join()))).toHaveProperty('size', 1);
+  });
+
+  it('shows a hint until there is a cursor, then every chart value at it', () => {
+    const { rerender } = render(<ChartPanel activity={run} onXAxisChange={vi.fn()} />);
+    const readout = () => screen.getByRole('region', { name: 'Values at the cursor' });
+    expect(readout()).toHaveTextContent(/Point at a chart or the route/);
+
+    rerender(<ChartPanel activity={run} onXAxisChange={vi.fn()} activePointIndex={6} />);
+    const cells = within(readout()).getAllByRole('term').map((term) => term.textContent);
+    expect(cells).toEqual(['At', 'Elevation', 'Pace']);
+    expect(readout()).toHaveTextContent('106 m');
+  });
+
+  it('shows the missing marker for a chart with no reading at the cursor', () => {
+    render(<ChartPanel activity={run} onXAxisChange={vi.fn()} activePointIndex={0} />);
+    const readout = screen.getByRole('region', { name: 'Values at the cursor' });
+    // Point 0 has an elevation but no pace yet: a dash, not a neighbour's value.
+    expect(within(readout).getAllByRole('definition').map((value) => value.textContent)).toEqual(['0 m', '100 m', '—']);
+  });
+
+  it('lets go of a kept section with Escape on a chart', () => {
+    render(<ChartPanel activity={run} onXAxisChange={vi.fn()} />);
+    act(() => useInteractionStore.getState().setSelectedRange({ startIndex: 2, endIndex: 8 }));
+    expect(screen.getByRole('button', { name: 'Reset View' })).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getAllByRole('slider')[0]!, { key: 'Escape' });
+    expect(useInteractionStore.getState().selectedRange).toBeUndefined();
+  });
+});
+
+describe('one line, one place for the section (TD-056)', () => {
+  // Heart rate labels ("150") are wider than elevation's ("9.5"), which used to
+  // start each plot at its own pixel and break the shared cursor line.
+  const ride = makeActivity(
+    Array.from({ length: 10 }, (_, i) => ({
+      lat: i * 0.0004,
+      lon: 0.0001,
+      elevationMeters: 9 + i * 0.05,
+      heartRateBpm: 100 + i * 7,
+      time: new Date(Date.UTC(2024, 0, 1, 10, 0, i * 10)),
+    })),
+  );
+  ride.metadata.sport = 'cycling';
+
+  it('starts every plot at the same pixel', () => {
+    render(<ChartPanel activity={ride} onXAxisChange={vi.fn()} />);
+    const starts = screen
+      .getAllByRole('slider')
+      .map((chart) => chart.querySelector('.chart__grid')!.getAttribute('x1'));
+    expect(starts.length).toBeGreaterThan(1);
+    expect(new Set(starts).size).toBe(1);
+  });
+
+  it('says the whole activity is shown, then the section, in the same sticky row', () => {
+    const { container } = render(<ChartPanel activity={ride} onXAxisChange={vi.fn()} />);
+    const scope = () => container.querySelector('.chart-readout__scope')!;
+    expect(scope()).toHaveTextContent('Whole activity · 10 points');
+
+    act(() => useInteractionStore.getState().setSelectedRange({ startIndex: 2, endIndex: 6 }));
+    expect(within(scope() as HTMLElement).getByRole('region', { name: 'Selected section summary' })).toHaveTextContent(
+      /5 of 10 points.*Your file is unchanged/,
+    );
+    expect(within(scope() as HTMLElement).getByRole('button', { name: 'Reset View' })).toBeInTheDocument();
+    // Nothing is inserted between the panel's controls and the readout.
+    expect(container.querySelector('.focus-bar')).toBeNull();
+    expect(screen.getAllByRole('status').some((status) => /Showing a selected section: 5 of 10 points/.test(status.textContent ?? ''))).toBe(true);
+  });
+});
+
+describe('letting a section go (TD-056)', () => {
+  it('returns focus to the chart the section was kept from, and says so', () => {
+    render(<ChartPanel activity={runWithCadence} onXAxisChange={vi.fn()} />);
+    const chart = screen.getAllByRole('slider')[1]!;
+    // A section kept from the second chart (the cursor itself is the page's
+    // state, so the section is made by a drag on the focused chart).
+    chart.focus();
+    fireEvent.pointerDown(chart, { clientX: 100, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(chart, { clientX: 500, pointerId: 1 });
+    fireEvent.pointerUp(chart, { clientX: 500, pointerId: 1 });
+    const reset = screen.getByRole('button', { name: 'Reset View' });
+    reset.focus();
+
+    fireEvent.click(reset);
+
+    expect(screen.queryByRole('button', { name: 'Reset View' })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getAllByRole('slider')[1]);
+    expect(screen.getAllByRole('status').some((status) => status.textContent === 'Showing the whole activity.')).toBe(true);
+  });
+
+  it('says why an x-axis cannot be chosen, on the page', () => {
+    const timeOnlyRun = makeActivity([
+      { elevationMeters: 10, time: new Date('2024-01-01T10:00:00Z') },
+      { elevationMeters: 20, time: new Date('2024-01-01T10:01:00Z') },
+    ]);
+    const { container } = render(<ChartPanel activity={timeOnlyRun} onXAxisChange={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Distance' })).toBeDisabled();
+    expect(container.querySelector('.axis-switch__reason')?.textContent).toBeTruthy();
   });
 });

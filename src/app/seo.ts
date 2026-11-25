@@ -19,10 +19,15 @@ export const SITE_URL: string =
   'https://nyt87.github.io/opentrack-viewer/';
 
 /**
- * A square app icon, because there is no purpose-made preview image yet. A
- * 1200×630 image would render better in link previews; §17 still asks which.
+ * The link-preview image: 1200×630, the size Open Graph and X draw large,
+ * made by `scripts/preview-image/make-preview-image.mjs`. Its route and
+ * elevation are made-up curves, so a shared link shows no one's ride.
  */
-export const PREVIEW_IMAGE = `${SITE_URL}icons/icon-512.png`;
+export const PREVIEW_IMAGE = `${SITE_URL}social/preview-1200x630.png`;
+export const PREVIEW_IMAGE_WIDTH = 1200;
+export const PREVIEW_IMAGE_HEIGHT = 630;
+export const PREVIEW_IMAGE_ALT =
+  'OpenTrack Viewer: your activity files, read in your browser. A route and its elevation profile, with GPX, FIT, TCX and KML.';
 
 export interface RouteMetadata {
   /** The full `<title>`, not a fragment: it is what a browser tab shows. */
@@ -31,9 +36,9 @@ export interface RouteMetadata {
 }
 
 export const DEFAULT_METADATA: RouteMetadata = {
-  title: `${SITE_NAME} — open GPX, FIT and TCX activity files in your browser`,
+  title: `${SITE_NAME} — open GPX, FIT, TCX and KML activity files in your browser`,
   description:
-    'View GPX, FIT and TCX activity files locally in your browser. Routes, elevation, pace, ' +
+    'View GPX, FIT, TCX and KML activity files locally in your browser. Routes, elevation, pace, ' +
     'speed, heart rate and laps, with no upload, no account and no backend.',
 };
 
@@ -43,7 +48,7 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
     title: `Open an activity file — ${SITE_NAME}`,
     // Describes the tool, never the file someone happens to have open.
     description:
-      'Open a GPX, FIT or TCX file to see its route, distance, duration, elevation and sensor ' +
+      'Open a GPX, FIT, TCX or KML file to see its route, distance, duration, elevation and sensor ' +
       'charts. Parsing happens in this browser tab; your file is never uploaded.',
   },
   [ROUTES.videoTelemetry]: {
@@ -53,19 +58,26 @@ const ROUTE_METADATA: Record<string, RouteMetadata> = {
       'Read the GPS track a GoPro recorded alongside the picture, and view it as an activity. ' +
       'The video is read in this browser tab and never uploaded.',
   },
-  [ROUTES.routeBuilder]: {
-    title: `Plan a custom route — ${SITE_NAME}`,
-    // Describes what the page does, never a route someone happens to be editing.
-    description:
-      'Start a route, or edit a copy of one you have opened, and export it as a file for your ' +
-      'GPS watch or bike computer. Everything happens in this browser tab; nothing is uploaded.',
-  },
   [ROUTES.overlays]: {
-    title: `Make a route overlay — ${SITE_NAME}`,
-    // Describes what the page does, never a route someone happens to open.
+    title: `Make telemetry overlays — ${SITE_NAME}`,
+    // Describes local generation, never a video or activity someone has open.
     description:
-      'Draw a route as a transparent image to lay over a video in your editor. It is made in ' +
-      'this browser tab from a file on your device; nothing is uploaded.',
+      'Draw the telemetry inside a GoPro video, or an activity file, over the picture for your ' +
+      'own video editor. Everything is drawn in this browser tab; nothing is uploaded.',
+  },
+  [ROUTES.routeBuilder]: {
+    title: `Plan a route — ${SITE_NAME}`,
+    // Describes the tool, never a track someone has imported or drawn.
+    description:
+      'Start a planned track, or begin from a GPX, FIT, TCX or KML route, and export it as a new ' +
+      'file. Everything is built in this browser tab; nothing is uploaded.',
+  },
+  [ROUTES.mapVideo]: {
+    title: `Make a map video — ${SITE_NAME}`,
+    // Describes the tool, never an activity someone has open.
+    description:
+      'Turn a GPX, FIT, TCX or KML activity into a short video of the route drawing itself over a ' +
+      'map. The video is made in this browser tab; the activity is never uploaded.',
   },
   [ROUTES.terms]: {
     title: `Terms and Conditions — ${SITE_NAME}`,

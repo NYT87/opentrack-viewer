@@ -24,19 +24,26 @@ export function TermsPage() {
           <p>
             Activity files you open are read, parsed and analysed entirely in your browser. They
             are not uploaded to a server, and this app has no backend, no account system and no
-            database. Nothing about your activity is stored between sessions: closing the tab
-            discards it.
+            database. Opened activities are held in memory and closing the tab discards that
+            in-memory activity. Generated video and overlay exports may be written to temporary
+            browser storage. They are deleted when discarded or when you leave their export panel;
+            after a closed tab or crash, abandoned exports are reclaimed on your next visit where
+            the browser supports safe cleanup. Settings also offers deletion of abandoned exports.
+            Downloads still offered in another open tab are preserved. Copies you download are
+            yours to manage separately.
           </p>
         </section>
 
         <section className="prose">
           <h3 className="prose__title">Maps are the exception</h3>
           <p>
-            When the basemap is enabled, the map requests tiles from a third-party tile provider.
-            Those requests reveal the approximate area you are looking at, and are subject to that
-            provider&rsquo;s own terms and privacy practices. They never include your activity
-            file, your route coordinates or any other data from it. You can turn the basemap off
-            in Settings, which stops all external requests.
+            When the basemap is enabled, the map requests tiles from a third-party tile provider:
+            OpenStreetMap for the maps in the viewer and the other tools, and OpenFreeMap for the
+            map video. Those requests reveal the approximate area you are looking at, and are
+            subject to that provider&rsquo;s own terms and privacy practices. They never include
+            your activity file, your route coordinates or any other data from it. You can turn the
+            basemap off in Settings, which stops these requests. The map video page starts on route
+            only when it is off, and asks before using an online map there.
           </p>
         </section>
 
@@ -71,7 +78,8 @@ export function TermsPage() {
         <section className="prose">
           <h3 className="prose__title">Supported formats</h3>
           <p>
-            This build reads GPX, FIT and TCX, and can write all three back out. A file that
+            This build reads GPX, FIT, TCX and KML, and can write the first three back out; a
+            KML file is read for viewing and conversion, not written. A file that
             cannot be read will be reported rather than partially interpreted, and an export names
             what the chosen format could not carry. Whichever format you open, the app can only
             show what a file actually contains: fields a device did not record cannot be

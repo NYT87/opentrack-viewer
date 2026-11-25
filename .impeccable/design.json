@@ -1,0 +1,396 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-21T03:11:50.475Z",
+  "title": "Design System: OpenTrack Viewer",
+  "extensions": {
+    "colorMeta": {
+      "trail-blue": {
+        "role": "primary",
+        "displayName": "Trail Blue",
+        "canonical": "#1668c4",
+        "tonalRamp": [
+          "oklch(20% 0.09 255)",
+          "oklch(30% 0.13 255)",
+          "oklch(40% 0.16 255)",
+          "oklch(50% 0.17 255)",
+          "oklch(60% 0.16 255)",
+          "oklch(70% 0.13 255)",
+          "oklch(82% 0.08 255)",
+          "oklch(94% 0.03 255)"
+        ]
+      },
+      "trail-blue-dark": {
+        "role": "primary",
+        "displayName": "Trail Blue (dark theme)",
+        "canonical": "#4aa3ff",
+        "tonalRamp": [
+          "oklch(20% 0.09 255)",
+          "oklch(30% 0.13 255)",
+          "oklch(40% 0.16 255)",
+          "oklch(50% 0.17 255)",
+          "oklch(60% 0.16 255)",
+          "oklch(70% 0.13 255)",
+          "oklch(82% 0.08 255)",
+          "oklch(94% 0.03 255)"
+        ]
+      },
+      "amber-warning": {
+        "role": "secondary",
+        "displayName": "Amber Warning",
+        "canonical": "#8a5300",
+        "tonalRamp": [
+          "oklch(20% 0.05 70)",
+          "oklch(30% 0.08 70)",
+          "oklch(40% 0.10 70)",
+          "oklch(47% 0.11 70)",
+          "oklch(60% 0.13 70)",
+          "oklch(72% 0.15 70)",
+          "oklch(84% 0.12 70)",
+          "oklch(95% 0.04 70)"
+        ]
+      },
+      "signal-red": {
+        "role": "secondary",
+        "displayName": "Signal Red",
+        "canonical": "#b3261e",
+        "tonalRamp": [
+          "oklch(20% 0.08 28)",
+          "oklch(30% 0.12 28)",
+          "oklch(40% 0.16 28)",
+          "oklch(50% 0.19 28)",
+          "oklch(60% 0.19 28)",
+          "oklch(70% 0.15 28)",
+          "oklch(84% 0.08 28)",
+          "oklch(95% 0.02 28)"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "canonical": "#f6f8fa",
+        "tonalRamp": [
+          "oklch(15% 0.012 245)",
+          "oklch(25% 0.012 245)",
+          "oklch(37% 0.012 245)",
+          "oklch(50% 0.012 245)",
+          "oklch(64% 0.012 245)",
+          "oklch(78% 0.010 245)",
+          "oklch(90% 0.008 245)",
+          "oklch(97% 0.004 245)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "#ffffff"
+      },
+      "well": {
+        "role": "neutral",
+        "displayName": "Well",
+        "canonical": "#eef1f5"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#d3dae2"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#16202b",
+        "tonalRamp": [
+          "oklch(15% 0.015 245)",
+          "oklch(25% 0.015 245)",
+          "oklch(37% 0.015 245)",
+          "oklch(50% 0.015 245)",
+          "oklch(64% 0.015 245)",
+          "oklch(78% 0.012 245)",
+          "oklch(90% 0.008 245)",
+          "oklch(96% 0.004 245)"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Ink Muted",
+        "canonical": "#5a6b7d"
+      },
+      "canvas-dark": {
+        "role": "neutral",
+        "displayName": "Canvas (dark theme)",
+        "canonical": "#0b0f14"
+      },
+      "panel-dark": {
+        "role": "neutral",
+        "displayName": "Panel (dark theme)",
+        "canonical": "#131a22"
+      },
+      "well-dark": {
+        "role": "neutral",
+        "displayName": "Well (dark theme)",
+        "canonical": "#1d2733"
+      },
+      "hairline-dark": {
+        "role": "neutral",
+        "displayName": "Hairline (dark theme)",
+        "canonical": "#223040"
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "Ink (dark theme)",
+        "canonical": "#e6edf3"
+      },
+      "ink-muted-dark": {
+        "role": "neutral",
+        "displayName": "Ink Muted (dark theme)",
+        "canonical": "#8b9bb0"
+      },
+      "map-night": {
+        "role": "tertiary",
+        "displayName": "Map Night",
+        "canonical": "#11161c"
+      },
+      "route-casing": {
+        "role": "tertiary",
+        "displayName": "Route Casing",
+        "canonical": "#0b0f14"
+      },
+      "lap-amber": {
+        "role": "tertiary",
+        "displayName": "Lap Amber",
+        "canonical": "#ffd166"
+      },
+      "selection-violet": {
+        "role": "tertiary",
+        "displayName": "Selection Violet",
+        "canonical": "#c77dff"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The Home title only; one step above Headline so the front door reads as the product."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page title on Home, Tools pages and Terms."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Box and section titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Base size; prose runs muted at 1.6 and 66ch."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Header buttons, menu items, section links, choices."
+      },
+      "reading": {
+        "displayName": "Reading",
+        "purpose": "Supporting copy, chips, hints, tables, notices."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase caption above every figure and table column."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "The tabular number under a caption in the stat grid."
+      }
+    },
+    "shadows": [
+      {
+        "name": "menu-float",
+        "value": "0 12px 30px var(--shadow)",
+        "purpose": "The Tools dropdown while open."
+      },
+      {
+        "name": "dialog-float",
+        "value": "0 24px 60px var(--shadow)",
+        "purpose": "The Settings dialog over the scrim."
+      }
+    ],
+    "motion": [
+      {
+        "name": "none",
+        "value": "none",
+        "purpose": "No transitions or animations are defined; state changes are immediate. The map and the chart cursor are the only things that move."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sidebar-and-laps",
+        "value": "1100px"
+      },
+      {
+        "name": "footer-and-map",
+        "value": "860px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "The default bordered control; hover turns the border Trail Blue.",
+      "html": "<button class=\"ds-btn\">Close activity</button>",
+      "css": ".ds-btn { padding: 6px 12px; border: 1px solid var(--border, #d3dae2); border-radius: var(--radius, 10px); background: transparent; color: var(--text, #16202b); font: inherit; font-size: 14px; cursor: pointer; } .ds-btn:hover { border-color: var(--accent, #1668c4); } .ds-btn:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 2px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one solid accent fill; at most one per page.",
+      "html": "<a class=\"ds-btn-primary\" href=\"#\">Open an activity</a>",
+      "css": ".ds-btn-primary { display: inline-block; padding: 6px 12px; border: 1px solid var(--accent, #1668c4); border-radius: var(--radius, 10px); background: var(--accent, #1668c4); color: var(--on-accent, #ffffff); font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; } .ds-btn-primary:hover { filter: brightness(1.08); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 2px; }"
+    },
+    {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "icon-button",
+      "description": "34px square control; the Settings gear in the header.",
+      "html": "<button class=\"ds-icon-btn\" aria-label=\"Settings\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg></button>",
+      "css": ".ds-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--border, #d3dae2); border-radius: var(--radius, 10px); background: transparent; color: var(--text-muted, #5a6b7d); cursor: pointer; } .ds-icon-btn svg { width: 18px; height: 18px; } .ds-icon-btn:hover { color: var(--text, #16202b); border-color: var(--accent, #1668c4); } .ds-icon-btn:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 2px; }"
+    },
+    {
+      "name": "Tools Menu",
+      "kind": "nav",
+      "refersTo": "menu",
+      "description": "The header dropdown: trigger plus a floating Panel menu, the one place a shadow appears besides the dialog.",
+      "html": "<div class=\"ds-tools\"><button class=\"ds-tools__button is-open\" aria-haspopup=\"menu\" aria-expanded=\"true\">Tools <span class=\"ds-tools__caret\" aria-hidden=\"true\">&#9662;</span></button><div class=\"ds-tools__menu\" role=\"menu\"><a class=\"ds-tools__item is-current\" role=\"menuitem\" aria-current=\"page\" href=\"#\">File viewer</a><a class=\"ds-tools__item\" role=\"menuitem\" href=\"#\">Video telemetry</a><a class=\"ds-tools__item\" role=\"menuitem\" href=\"#\">Overlays</a><a class=\"ds-tools__item\" role=\"menuitem\" href=\"#\">Route Builder</a></div></div>",
+      "css": ".ds-tools { position: relative; display: inline-block; padding-bottom: 180px; } .ds-tools__button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border, #d3dae2); border-radius: var(--radius, 10px); background: transparent; color: var(--text-muted, #5a6b7d); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; } .ds-tools__button:hover, .ds-tools__button.is-open { color: var(--text, #16202b); border-color: var(--accent, #1668c4); } .ds-tools__button:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 2px; } .ds-tools__caret { font-size: 10px; } .ds-tools__menu { position: absolute; top: calc(34px + 6px); left: 0; min-width: 180px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--border, #d3dae2); border-radius: var(--radius, 10px); background: var(--bg-raised, #ffffff); box-shadow: 0 12px 30px var(--shadow, rgba(22,32,43,0.18)); } .ds-tools__item { padding: 8px 10px; border-radius: 6px; color: var(--text-muted, #5a6b7d); font-size: 13px; text-decoration: none; white-space: nowrap; } .ds-tools__item:hover { background: var(--bg, #f6f8fa); color: var(--text, #16202b); } .ds-tools__item.is-current { color: var(--text, #16202b); font-weight: 600; } .ds-tools__item:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: -2px; }"
+    },
+    {
+      "name": "Stat Box",
+      "kind": "card",
+      "refersTo": "box",
+      "description": "A viewer box carrying the caption-over-figure stat grid under a hairline-divided header.",
+      "html": "<section class=\"ds-box\"><header class=\"ds-box__header\"><h3 class=\"ds-box__title\">Morning Ride</h3><p class=\"ds-box__source\">FIT · morning-ride.fit</p></header><dl class=\"ds-stats\"><div class=\"ds-stat\"><dt class=\"ds-stat__label\">Distance</dt><dd class=\"ds-stat__value\">42.18 km</dd></div><div class=\"ds-stat\"><dt class=\"ds-stat__label\">Duration</dt><dd class=\"ds-stat__value\">1:31:04</dd></div><div class=\"ds-stat\"><dt class=\"ds-stat__label\">Avg speed</dt><dd class=\"ds-stat__value\">27.8 km/h</dd></div><div class=\"ds-stat\"><dt class=\"ds-stat__label\">Elevation gain</dt><dd class=\"ds-stat__value\">412 m</dd></div></dl></section>",
+      "css": ".ds-box { border: 1px solid var(--border, #d3dae2); border-radius: var(--radius, 10px); background: var(--bg-raised, #ffffff); padding: 16px; color: var(--text, #16202b); font-size: 14px; } .ds-box__header { border-bottom: 1px solid var(--border, #d3dae2); padding-bottom: 8px; margin-bottom: 10px; } .ds-box__title { margin: 0; font-size: 15px; } .ds-box__source { margin: 2px 0 0; color: var(--text-muted, #5a6b7d); font-size: 11px; } .ds-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 16px; margin: 0; } .ds-stat { display: flex; flex-direction: column; gap: 2px; } .ds-stat__label { color: var(--text-muted, #5a6b7d); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; } .ds-stat__value { margin: 0; font-size: 16px; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Select",
+      "kind": "input",
+      "refersTo": "select",
+      "description": "The settings select: hairline field on Canvas at 12px.",
+      "html": "<select class=\"ds-select\"><option>Metric (km, m)</option><option>Imperial (mi, ft)</option></select>",
+      "css": ".ds-select { padding: 6px 10px; border: 1px solid var(--border, #d3dae2); border-radius: var(--radius, 10px); background: var(--bg, #f6f8fa); color: var(--text, #16202b); font: inherit; font-size: 12px; } .ds-select:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 1px; }"
+    },
+    {
+      "name": "Dropzone",
+      "kind": "custom",
+      "refersTo": "dropzone",
+      "description": "The file intake: dashed hairline on Panel; dragging turns it Trail Blue over Well.",
+      "html": "<div class=\"ds-dropzone\" tabindex=\"0\" role=\"button\"><span class=\"ds-dropzone__title\">Drop an activity file here</span><span class=\"ds-dropzone__subtitle\">or click to choose a .gpx, .fit, .tcx or .kml file</span></div>",
+      "css": ".ds-dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 28px 16px; border: 1.5px dashed var(--border, #d3dae2); border-radius: var(--radius, 10px); background: var(--bg-raised, #ffffff); color: var(--text, #16202b); font-size: 14px; cursor: pointer; text-align: center; } .ds-dropzone:hover, .ds-dropzone.is-dragging { border-color: var(--accent, #1668c4); background: var(--bg-sunken, #eef1f5); } .ds-dropzone:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 2px; } .ds-dropzone__title { font-weight: 600; } .ds-dropzone__subtitle { color: var(--text-muted, #5a6b7d); font-size: 12px; }"
+    },
+    {
+      "name": "Section Sidebar",
+      "kind": "nav",
+      "refersTo": "section-link",
+      "description": "The sticky large-screen section list: a 2px hairline left rule that turns Trail Blue on hover.",
+      "html": "<nav class=\"ds-sections\" aria-label=\"Sections\"><a class=\"ds-sections__link\" href=\"#\">Overview</a><a class=\"ds-sections__link\" href=\"#\">Map</a><a class=\"ds-sections__link\" href=\"#\">Laps</a><a class=\"ds-sections__link\" href=\"#\">Charts</a><a class=\"ds-sections__link\" href=\"#\">Export</a></nav>",
+      "css": ".ds-sections { display: flex; flex-direction: column; gap: 2px; width: 160px; } .ds-sections__link { display: block; padding: 6px 10px; border-left: 2px solid var(--border, #d3dae2); color: var(--text-muted, #5a6b7d); font-size: 13px; text-decoration: none; } .ds-sections__link:hover { color: var(--text, #16202b); border-left-color: var(--accent, #1668c4); } .ds-sections__link:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: -2px; }"
+    },
+    {
+      "name": "Notice",
+      "kind": "custom",
+      "refersTo": "box",
+      "description": "An amber-bordered notice with a 12% amber tint; the only tinted container besides the focus bar.",
+      "html": "<p class=\"ds-notice\">With the basemap on, the map requests tiles from the tile provider, which reveals the approximate area you are viewing.</p>",
+      "css": ".ds-notice { margin: 0; padding: 10px 14px; border: 1px solid var(--warn, #8a5300); border-radius: var(--radius, 10px); color: var(--text, #16202b); background: color-mix(in srgb, var(--warn, #8a5300) 12%, transparent); font-size: 14px; max-width: 60ch; }"
+    },
+    {
+      "name": "Text Link",
+      "kind": "custom",
+      "refersTo": "button",
+      "description": "A link in running text: accent colour plus a thin offset underline, so it is a link without its colour.",
+      "html": "<p class=\"ds-prose\">Nothing leaves this tab. A <a class=\"ds-link\" href=\"#\">browser test</a> fails if it does.</p>",
+      "css": ".ds-prose { margin: 0; color: var(--text-muted, #5a6b7d); font-size: 13px; } .ds-link { color: var(--accent, #1668c4); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.15em; text-decoration-color: color-mix(in srgb, var(--accent, #1668c4) 60%, transparent); } .ds-link:hover { text-decoration-color: var(--accent, #1668c4); } .ds-link:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 2px; }"
+    },
+    {
+      "name": "Tool Row",
+      "kind": "nav",
+      "refersTo": "section-link",
+      "description": "A hairline-topped row whose name is a stretched link with a drawn arrow; hover turns the hairline and name Trail Blue.",
+      "html": "<ul class=\"ds-tools\"><li class=\"ds-tool\"><a class=\"ds-tool__name\" href=\"#\">Overlays<svg class=\"ds-tool__arrow\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M13 6l6 6-6 6\"/></svg></a><span class=\"ds-tool__detail\">Bring a GoPro video, an activity file, or both. Draw speed, distance, the route and the climbs over the picture.</span></li></ul>",
+      "css": ".ds-tools { list-style: none; margin: 0; padding: 0; max-width: 394px; } .ds-tool { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 12px 0 16px; border-top: 1px solid var(--border, #d3dae2); color: var(--text, #16202b); font-size: 14px; } .ds-tool:hover, .ds-tool:focus-within { border-top-color: var(--accent, #1668c4); } .ds-tool__name { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; color: var(--text, #16202b); font-weight: 700; text-decoration: none; } .ds-tool__name::after { content: \"\"; position: absolute; inset: 0; } .ds-tool:hover .ds-tool__name { color: var(--accent, #1668c4); } .ds-tool__name:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 3px; border-radius: 4px; } .ds-tool__arrow { width: 14px; height: 14px; color: var(--accent, #1668c4); } .ds-tool__detail { color: var(--text-muted, #5a6b7d); line-height: 1.6; max-width: 48ch; }"
+    },
+    {
+      "name": "Proof Strip",
+      "kind": "custom",
+      "refersTo": "box",
+      "description": "What the browser tests hold at zero, as caption-over-figure readings.",
+      "html": "<section class=\"ds-proof\"><h3 class=\"ds-proof__title\">Held at zero by the browser tests</h3><dl class=\"ds-proof__list\"><div class=\"ds-proof__row\"><dt class=\"ds-proof__caption\">Uploads while a file is open</dt><dd class=\"ds-proof__figure\">0 <span class=\"ds-proof__unit\">allowed</span></dd></div><div class=\"ds-proof__row\"><dt class=\"ds-proof__caption\">Coordinates or file name in a request</dt><dd class=\"ds-proof__figure\">0 <span class=\"ds-proof__unit\">allowed</span></dd></div><div class=\"ds-proof__row\"><dt class=\"ds-proof__caption\">Outside requests before a file opens</dt><dd class=\"ds-proof__figure\">0 <span class=\"ds-proof__unit\">allowed</span></dd></div></dl><a class=\"ds-proof__link\" href=\"#\">How this is tested, on GitHub</a></section>",
+      "css": ".ds-proof { display: flex; flex-direction: column; gap: 10px; width: 280px; } .ds-proof__title { margin: 0; color: var(--text-muted, #5a6b7d); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; } .ds-proof__list { margin: 0; } .ds-proof__row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0 10px; border-top: 1px solid var(--border, #d3dae2); } .ds-proof__caption { color: var(--text-muted, #5a6b7d); font-size: 11px; line-height: 1.4; letter-spacing: 0.04em; text-transform: uppercase; } .ds-proof__figure { margin: 0; color: var(--text, #16202b); font-size: 16px; font-variant-numeric: tabular-nums; } .ds-proof__unit { color: var(--text-muted, #5a6b7d); font-size: 13px; } .ds-proof__link { align-self: flex-start; color: var(--accent, #1668c4); font-size: 13px; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.15em; text-decoration-color: color-mix(in srgb, var(--accent, #1668c4) 60%, transparent); } .ds-proof__link:hover { text-decoration-color: var(--accent, #1668c4); } .ds-proof__link:focus-visible { outline: 2px solid var(--accent, #1668c4); outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Instrument Panel",
+    "overview": "OpenTrack Viewer looks like the readout on a bike computer: a calm neutral chassis, numbers set first, and exactly one lit colour. The system is utilitarian, plain and honest. Every element is there because a task needs it, surfaces stay out of the way of the file's numbers and route, and nothing is decorated. The chrome is a fixed header band, one scrolling region, and a footer that only appears when the reader reaches the bottom.\n\nDensity is moderate and even. Body text runs at 14px, controls at 13px, supporting text at 12px, and every label is an 11px uppercase caption with slight tracking. Numbers are tabular so columns align in the stat grid and lap table. Structure comes from hairline borders and three background tones, never from shadow or colour fill. The one chromatic colour, Trail Blue, is reserved for action, selection and the route itself; amber and red appear only to warn and to report an error.\n\nThe system ships in light and dark from the same token names. Light is the base and the fallback; dark is resolved before first paint from a stored preference or the OS. The map is the exception to the theme: its frame is always night-dark and its route palette is fixed, so a route looks the same in both themes and the raster basemap is dimmed and desaturated to sit behind it. The confirmed anti-reference is marketing imagery: no hero photos, illustrations or device frames. Copy and one button carry the home page.",
+    "keyCharacteristics": [
+      "One accent, used for action, selection and the route line; everything else is neutral.",
+      "Hairline borders and three background steps carry all structure; surfaces are flat.",
+      "System font stack, no web fonts; hierarchy comes from size, weight and uppercase captions.",
+      "Tabular numerals wherever a figure is shown.",
+      "A single 10px radius on nearly every control and container; no pills.",
+      "The map keeps its own fixed dark palette in both themes.",
+      "Nothing renders before the data earns it: no placeholders, no empty boxes."
+    ],
+    "rules": [
+      {
+        "name": "The One Lit Colour Rule",
+        "body": "Trail Blue means act, selected or route. If an element is none of those three, it is neutral. Amber and red are status reports, not accents.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fixed Map Rule",
+        "body": "The map's frame and route palette do not change with the theme. Night background, Trail Blue route, amber lap, violet selection, in light and dark alike.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tint Rule",
+        "body": "Accent fills behind text are mixes, not solids: 10% Trail Blue for the focused-range bar, 12% amber for a notice, 16% to 18% Trail Blue for chart areas and selections. Solid accent fill is for the primary button alone.",
+        "section": "colors"
+      },
+      {
+        "name": "The Caption-Over-Figure Rule",
+        "body": "A statistic is an 11px uppercase muted label with a 16px tabular figure beneath it, 2px apart. Nothing else is added: no icon, no tint, no unit badge.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Web Font Rule",
+        "body": "The type is the system stack. No font is fetched; a page cannot wait on, or leak a request for, a typeface.",
+        "section": "typography"
+      },
+      {
+        "name": "The Floating-Only Rule",
+        "body": "Boxes, cards and controls at rest cast no shadow. A shadow means \"this is above the page and will go away\".",
+        "section": "elevation"
+      },
+      {
+        "name": "The Border-Not-Fill Rule",
+        "body": "State is shown on the border. Hover, open and active turn the border Trail Blue; the background changes only for toggles, which drop to Canvas or Well.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do build every new control from the same recipe: 1px hairline border, 10px radius, transparent fill, border to Trail Blue on hover, 2px Trail Blue focus-visible outline.",
+      "Do show every statistic as an 11px uppercase muted caption over a 16px tabular figure.",
+      "Do use the three neutral tones for structure (Well, Canvas, Panel) and reserve shadow for the menu and the dialog.",
+      "Do keep Trail Blue to action, selection and route, and tint it (10% to 18%) when it sits behind text or data.",
+      "Do keep the map's night frame and route palette identical in both themes.",
+      "Do omit a section, chart or card when the data cannot support it, rather than rendering a placeholder.",
+      "Do cap prose at 66ch and help text at 60ch, in Ink Muted at line-height 1.6."
+    ],
+    "donts": [
+      "Don't add hero photographs, illustrations or device mock-ups to the home page or any tool page. Copy and one primary button carry it.",
+      "Don't fetch a web font; the type is the system stack.",
+      "Don't introduce a second radius for a new control; 10px is the system, 6px for menu items.",
+      "Don't put a shadow under a box or card at rest.",
+      "Don't use Amber or Signal Red for anything but a warning or an error."
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document>
+    <name>Synthetic KML track</name>
+    <Schema id="schema">
+      <gx:SimpleArrayField name="heartrate" type="int"><displayName>Heart Rate</displayName></gx:SimpleArrayField>
+      <gx:SimpleArrayField name="cadence" type="int"><displayName>Cadence</displayName></gx:SimpleArrayField>
+      <gx:SimpleArrayField name="power" type="int"><displayName>Power</displayName></gx:SimpleArrayField>
+    </Schema>
+    <Placemark>
+      <name>Morning track</name>
+      <gx:Track>
+        <altitudeMode>absolute</altitudeMode>
+        <when>2024-03-02T08:00:00Z</when>
+        <when>2024-03-02T08:00:30Z</when>
+        <when>2024-03-02T08:01:00Z</when>
+        <when>2024-03-02T08:01:30Z</when>
+        <when>2024-03-02T08:02:00Z</when>
+        <gx:coord>0.0000 51.5000 100.0</gx:coord>
+        <gx:coord>0.0000 51.5010 102.0</gx:coord>
+        <gx:coord>0.0000 51.5020 104.0</gx:coord>
+        <gx:coord>0.0000 51.5030 106.0</gx:coord>
+        <gx:coord>0.0000 51.5040 108.0</gx:coord>
+        <ExtendedData>
+          <SchemaData schemaUrl="#schema">
+            <gx:SimpleArrayData name="heartrate">
+              <gx:value>120</gx:value>
+              <gx:value>130</gx:value>
+              <gx:value>140</gx:value>
+              <gx:value>150</gx:value>
+              <gx:value>160</gx:value>
+            </gx:SimpleArrayData>
+            <gx:SimpleArrayData name="cadence">
+              <gx:value>80</gx:value>
+              <gx:value>82</gx:value>
+              <gx:value>84</gx:value>
+              <gx:value>86</gx:value>
+              <gx:value>88</gx:value>
+            </gx:SimpleArrayData>
+            <gx:SimpleArrayData name="power">
+              <gx:value>200</gx:value>
+              <gx:value>210</gx:value>
+              <gx:value>220</gx:value>
+              <gx:value>230</gx:value>
+              <gx:value>240</gx:value>
+            </gx:SimpleArrayData>
+          </SchemaData>
+        </ExtendedData>
+      </gx:Track>
+    </Placemark>
+  </Document>
+</kml>

@@ -5,9 +5,9 @@ import userEvent from '@testing-library/user-event';
 vi.mock('maplibre-gl', async () => {
   const { FakeMap, setWorkerUrl } = await import('../test/helpers/maplibreMock');
   return {
-    default: { Map: FakeMap, NavigationControl: class {}, setWorkerUrl },
+    default: { Map: FakeMap, NavigationControl: class {}, ScaleControl: class { setUnit() {} }, setWorkerUrl },
     Map: FakeMap,
-    NavigationControl: class {},
+    NavigationControl: class {}, ScaleControl: class { setUnit() {} },
     setWorkerUrl,
   };
 });
@@ -44,7 +44,7 @@ const toolsItem = (name: string) =>
   within(screen.getByRole('menu', { name: 'Tools' })).getByRole('menuitem', { name });
 
 const openSettings = async () => {
-  await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+  await userEvent.click(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' }));
   return screen.findByRole('dialog');
 };
 
@@ -63,19 +63,6 @@ describe('routing (AV-006)', () => {
     expect(screen.queryByTestId('file-input')).not.toBeInTheDocument();
   });
 
-  it('describes video telemetry, with its privacy boundary, and links to its page (AV-014)', async () => {
-    render(<App />);
-
-    const section = within(screen.getByRole('region', { name: 'Video telemetry' }));
-    expect(section.getByText(/never uploaded/i)).toBeInTheDocument();
-    expect(section.getByText(/not opened in the file viewer/i)).toBeInTheDocument();
-
-    await userEvent.click(section.getByRole('link', { name: /video telemetry page/i }));
-    expect(await screen.findByRole('heading', { name: 'Video telemetry' })).toBeInTheDocument();
-    // The primary action is still the activity viewer.
-    window.location.hash = '#/';
-  });
-
   it('describes the privacy model and the supported formats', () => {
     render(<App />);
 
@@ -83,8 +70,12 @@ describe('routing (AV-006)', () => {
     expect(screen.getByText('GPX')).toBeInTheDocument();
     expect(screen.getByText('FIT')).toBeInTheDocument();
     expect(screen.getByText('TCX')).toBeInTheDocument();
-    // Every format the plan named is now readable, so none is listed as planned.
-    expect(screen.getAllByText('Supported')).toHaveLength(4);
+    expect(screen.getByText('KML')).toBeInTheDocument();
+    // Every format is read; the caption says which are also written.
+    expect(screen.getAllByText('Read · Write')).toHaveLength(3);
+    expect(screen.getAllByText('Read only')).toHaveLength(1);
+    // KML is read, not written, and the homepage must not claim otherwise (AV-762).
+    expect(screen.getByText(/conversion to GPX, FIT or TCX\. Not written\./)).toBeInTheDocument();
     expect(screen.queryByText('Planned')).not.toBeInTheDocument();
   });
 
@@ -117,6 +108,18 @@ describe('routing (AV-006)', () => {
     await openTools();
 
     expect(toolsItem('File viewer')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('starts each new page at its top', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    render(<App />);
+    // Not on the first load, where the browser's own start is right.
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    await goToViewer();
+
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    scrollTo.mockRestore();
   });
 
   it('falls back to the homepage for an unknown route', async () => {
@@ -165,7 +168,7 @@ describe('header (AV-010)', () => {
     render(<App />);
     await goToViewer();
 
-    const settings = screen.getByRole('button', { name: 'Settings' });
+    const settings = within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' });
     expect(settings).toHaveAttribute('title', 'Settings');
     // Icon only: no visible label text to read out twice.
     expect(settings.textContent).toBe('');
@@ -176,7 +179,7 @@ describe('header (AV-010)', () => {
     render(<App />);
     await goToViewer();
 
-    screen.getByRole('button', { name: 'Settings' }).focus();
+    within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' }).focus();
     await userEvent.keyboard('{Enter}');
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
@@ -209,6 +212,8 @@ describe('Tools menu (AV-012)', () => {
     expect(toolsButton()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('menu', { name: 'Tools' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'File viewer' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Route Builder' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Map video' })).toBeInTheDocument();
 
     await userEvent.click(toolsButton());
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
@@ -255,6 +260,32 @@ describe('Tools menu (AV-012)', () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'File viewer' })),
     );
+  });
+
+  it('opens with Enter into the menu, as the menu button pattern has it', async () => {
+    render(<App />);
+    toolsButton().focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'File viewer' })),
+    );
+  });
+
+  it('opens on a pointer press without moving focus into the menu', async () => {
+    render(<App />);
+    await userEvent.click(toolsButton());
+    expect(screen.getByRole('menu', { name: 'Tools' })).toBeInTheDocument();
+    expect(toolsButton()).toHaveFocus();
+  });
+
+  it('moves focus to the new page\'s title after navigating from the menu', async () => {
+    render(<App />);
+    toolsButton().focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Route Builder' })).toBeInTheDocument());
+    screen.getByRole('menuitem', { name: 'Route Builder' }).focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Route Builder' })).toHaveFocus());
   });
 
   it('leaves loaded state alone when opened and closed', async () => {
@@ -317,7 +348,7 @@ describe('Terms and Conditions (AV-008)', () => {
     expect(page).toHaveTextContent(/without warranty/i);
     expect(page).toHaveTextContent(/not medical advice|medical advice/i);
     expect(page).toHaveTextContent(/responsible for the files/i);
-    expect(page).toHaveTextContent(/reads GPX, FIT and TCX/i);
+    expect(page).toHaveTextContent(/reads GPX, FIT, TCX and KML/i);
   });
 
   it('marks itself as needing legal review', async () => {
@@ -356,7 +387,7 @@ describe('settings modal (AV-007)', () => {
     // not have to open a file to find the switch.
     render(<App />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await userEvent.click(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' }));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('radio', { name: 'Dark' })).toBeInTheDocument();
@@ -368,7 +399,7 @@ describe('settings modal (AV-007)', () => {
     // activity, so the control would act on nothing.
     render(<App />);
 
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Close activity' })).not.toBeInTheDocument();
   });
 
@@ -376,7 +407,7 @@ describe('settings modal (AV-007)', () => {
     render(<App />);
     await goToViewer();
 
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' })).toBeInTheDocument();
   });
 
   it('opens as a dialog without changing the route', async () => {
@@ -404,7 +435,7 @@ describe('settings modal (AV-007)', () => {
   it('moves focus into the dialog and returns it to the opener on close', async () => {
     render(<App />);
     await goToViewer();
-    const opener = screen.getByRole('button', { name: 'Settings' });
+    const opener = within(document.querySelector<HTMLElement>('.shell__header')!).getByRole('button', { name: 'Settings' });
 
     const dialog = await openSettings();
     expect(dialog).toContainElement(document.activeElement as HTMLElement);
@@ -469,8 +500,8 @@ describe('settings modal (AV-007)', () => {
     expect(screen.getByLabelText('Units')).toBeInTheDocument();
     expect(screen.getByLabelText('Basemap tiles')).toBeInTheDocument();
     // The theme is now remembered; the copy must say which is which.
-    expect(screen.getByText(/theme is remembered on this device/i)).toBeInTheDocument();
-    expect(screen.getByText(/no activity data is ever stored/i)).toBeInTheDocument();
+    expect(screen.getByText(/theme and basemap choice are remembered on this device/i)).toBeInTheDocument();
+    expect(screen.getByText(/generated exports may use temporary local storage/i)).toBeInTheDocument();
   });
 
   it('writes preferences to the shared store', async () => {

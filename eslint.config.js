@@ -18,6 +18,18 @@ export default tseslint.config(
     },
   },
   {
+    // The overlay fixture generator runs in Node but hands a function to a
+    // headless browser, which is where `OffscreenCanvas` and the rest exist.
+    files: ['src/test/fixtures/make-overlay-fixtures.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
+    // The plain-JS files that run in a browser: the AV-1001 and AV-1201 probe
+    // pages (TD-039, TD-064). They are served to Playwright, never bundled.
+    files: ['scripts/overlay-export-probe/probe.js', 'scripts/map-video-probe/probe.js'],
+    languageOptions: { globals: { ...globals.browser, MP4Box: 'readonly' } },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,

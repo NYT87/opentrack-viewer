@@ -23,7 +23,7 @@ const fromRaw = (fixture: string, fileName: string) =>
     {
       // `readBinaryFixture` hands back an ArrayBuffer; the payload is bytes.
       rawData: new Uint8Array(readBinaryFixture(fixture)),
-      timing: { videoDurationSeconds: 0, frameDurationMs: 0, samples: [] },
+      timing: { videoDurationSeconds: 0, frameIntervalSeconds: 0, samples: [] },
     },
     { fileName, idFactory: () => 'fixed-id' },
   );
@@ -290,24 +290,23 @@ describe('speed for a video, recorded or derived (AV-908)', () => {
   }, 60_000);
 });
 
-describe('large telemetry (AV-906)', () => {
-  it('interprets a long recording within a generous time budget', async () => {
-    // The fixture is ~75 KB of payload; a multi-gigabyte video yields a
-    // telemetry track of this order (a few MB), so this bounds the part that
-    // grows with video length without committing a large file.
-    const raw = new Uint8Array(readBinaryFixture('hero7.raw'));
-    const copies = 20;
-    const rawData = new Uint8Array(raw.length * copies);
-    for (let i = 0; i < copies; i += 1) rawData.set(raw, i * raw.length);
+describe('a video with a fix, end to end (AV-906)', () => {
+  it('reads the generated HERO7 clip into a mappable activity', async () => {
+    // The container is synthetic; the payload — and its satellite fix — is
+    // not. This is the path the browser test walks, without the browser.
+    const file = new File([readBinaryFixture('hero7-synthetic.mp4')], 'GH010007.MP4', {
+      type: 'video/mp4',
+    });
+    const activity = await parseGopro(await extractGpmf(file), {
+      fileName: file.name,
+      fileSizeBytes: file.size,
+    });
 
-    const started = performance.now();
-    const activity = await parseGopro(
-      { rawData, timing: { videoDurationSeconds: 0, frameDurationMs: 0, samples: [] } },
-      { fileName: 'GH010099.mp4', idFactory: () => 'fixed-id' },
-    );
-    const elapsed = performance.now() - started;
-
+    expect(activity.source.format).toBe('gopro');
     expect(activity.points.length).toBeGreaterThan(100);
-    expect(elapsed).toBeLessThan(30_000);
-  }, 60_000);
+    expect(activity.streams.hasLocation).toBe(true);
+    expect(activity.streams.hasTime).toBe(true);
+    expect(activity.derived?.distanceMeters).toBeGreaterThan(0);
+    expect(activity.metadata.device?.name).toMatch(/hero7/i);
+  });
 });
