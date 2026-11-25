@@ -17,6 +17,7 @@ import { App } from './App';
 import { useActivityStore } from '../state/activityStore';
 import { useInteractionStore } from '../state/interactionStore';
 import { useOverlayStore } from '../state/overlayStore';
+import { readZip } from '../test/helpers/zip';
 import { useOverlayTemplateStore } from '../state/overlayTemplateStore';
 import { fixtureFile, readFixture } from '../test/helpers/fixtures';
 import { parseGpx } from '../parsers/gpx/parseGpx';
@@ -625,4 +626,143 @@ describe('customizing the template (AV-1005)', () => {
   function component_exists(id: string) {
     return Boolean(useOverlayTemplateStore.getState().saved['compact-hud']?.components.some((c) => c.id === id));
   }
+});
+
+describe('saving the overlay as frames (AV-1006)', () => {
+  beforeEach(() => {
+    const context = new Proxy(
+      {},
+      {
+        get: (_target, name) => (name === 'measureText' ? () => ({ width: 0 }) : () => undefined),
+        set: () => true,
+      },
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      (() => context) as unknown as HTMLCanvasElement['getContext'],
+    );
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+  });
+
+  const open = async () => {
+    const activity = await parseGpx(readFixture('overlay-sync.gpx'), { fileName: 'overlay-sync.gpx' });
+    useOverlayStore.getState().setActivity(activity, { video: new File(['x'], 'private-name.webm', { type: 'video/webm' }) });
+    window.location.hash = '#/overlays';
+    render(<App />);
+    const video = (await screen.findByTestId('overlay-video')) as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { value: 4, configurable: true });
+    Object.defineProperty(video, 'videoWidth', { value: 640, configurable: true });
+    Object.defineProperty(video, 'videoHeight', { value: 360, configurable: true });
+    fireEvent.loadedMetadata(video);
+    return screen.findByRole('region', { name: 'Export overlay frames' });
+  };
+  const panel = (el: HTMLElement) => within(el);
+
+  it('defaults to the video\'s own size and length, and says how many frames that is', async () => {
+    const region = panel(await open());
+    expect(region.getByLabelText('Frame width')).toHaveValue(640);
+    expect(region.getByLabelText('Frame height')).toHaveValue(360);
+    expect(region.getByLabelText('Export from')).toHaveValue(0);
+    expect(region.getByLabelText('Export to')).toHaveValue(4);
+    expect(region.getByText(/120 frames, in one zip file/)).toBeInTheDocument();
+  });
+
+  it('is not offered until there is a video', async () => {
+    const activity = await parseGpx(readFixture('overlay-sync.gpx'), { fileName: 'overlay-sync.gpx' });
+    useOverlayStore.getState().setActivity(activity);
+    window.location.hash = '#/overlays';
+    render(<App />);
+    await screen.findByRole('region', { name: 'Video overlay' });
+    expect(screen.queryByRole('region', { name: 'Export overlay frames' })).not.toBeInTheDocument();
+  });
+
+  it('follows the frame rate and the range', async () => {
+    const region = panel(await open());
+    fireEvent.change(region.getByLabelText(/Frame rate/), { target: { value: '10' } });
+    expect(region.getByText(/40 frames/)).toBeInTheDocument();
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '2' } });
+    expect(region.getByText(/20 frames/)).toBeInTheDocument();
+  });
+
+  it('says which setting is wrong and will not start', async () => {
+    const region = panel(await open());
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '0' } });
+    expect(region.getByRole('alert')).toHaveTextContent(/after its start/);
+    expect(region.getByRole('button', { name: 'Save PNG frames (zip)' })).toBeDisabled();
+
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '4' } });
+    fireEvent.change(region.getByLabelText('Frame width'), { target: { value: '99999' } });
+    expect(region.getByRole('alert')).toHaveTextContent(/at most 4096/);
+    fireEvent.change(region.getByLabelText('Frame width'), { target: { value: '' } });
+    expect(region.getByRole('button', { name: 'Save PNG frames (zip)' })).toBeDisabled();
+  });
+
+  it('warns that a long export arrives as several zip files', async () => {
+    const region = panel(await open());
+    fireEvent.change(region.getByLabelText(/Frame rate/), { target: { value: '120' } });
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '100' } });
+    expect(region.getByText(/in at least 8 zip files/)).toBeInTheDocument();
+  });
+
+  it('saves a zip of numbered transparent frames at the chosen size', async () => {
+    const region = panel(await open());
+    fireEvent.change(region.getByLabelText(/Frame rate/), { target: { value: '10' } });
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '1' } });
+    await userEvent.click(region.getByRole('button', { name: 'Save PNG frames (zip)' }));
+
+    expect(await region.findByText(/Saved 10 frames/)).toBeInTheDocument();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.fileName).toBe('overlay-frames-part-01.zip');
+    const files = await readZip(saved[0]!.blob);
+    expect(files.filter((f) => f.name.endsWith('.png'))).toHaveLength(10);
+    expect(files[0]!.name).toBe('overlay_000001.png');
+    const readme = new TextDecoder().decode(files.find((f) => f.name === 'README.txt')!.data);
+    expect(readme).toContain('10 fps');
+    expect(readme).toContain('640 x 360');
+    // Named for what it is, never for the video it was made beside.
+    expect(saved[0]!.fileName).not.toMatch(/private-name/);
+    expect(readme).not.toMatch(/private-name/);
+  });
+
+  it('can be stopped, and says what was kept', async () => {
+    const region = panel(await open());
+    fireEvent.change(region.getByLabelText(/Frame rate/), { target: { value: '100' } });
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '40' } });
+    await userEvent.click(region.getByRole('button', { name: 'Save PNG frames (zip)' }));
+    await region.findByRole('progressbar', { name: 'Export progress' });
+    await userEvent.click(region.getByRole('button', { name: 'Stop' }));
+
+    expect(await region.findByText(/Stopped\./)).toBeInTheDocument();
+    expect(region.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(region.getByRole('button', { name: 'Save PNG frames (zip)' })).toBeEnabled();
+  });
+
+  it('says so when the browser cannot draw the images', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      (() => null) as unknown as HTMLCanvasElement['getContext'],
+    );
+    const region = panel(await open());
+    await userEvent.click(region.getByRole('button', { name: 'Save PNG frames (zip)' }));
+    expect(await region.findByRole('alert')).toHaveTextContent(/cannot draw images/);
+    expect(saved).toHaveLength(0);
+  });
+
+  it('uses the telemetry offset set above', async () => {
+    const region = panel(await open());
+    fireEvent.change(screen.getByLabelText('Offset (seconds)'), { target: { value: '3' } });
+    fireEvent.change(region.getByLabelText(/Frame rate/), { target: { value: '4' } });
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '1' } });
+    await userEvent.click(region.getByRole('button', { name: 'Save PNG frames (zip)' }));
+    await region.findByText(/Saved 4 frames/);
+    expect(saved).toHaveLength(1);
+  });
+
+  it('makes no network request', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const region = panel(await open());
+    fireEvent.change(region.getByLabelText(/Frame rate/), { target: { value: '5' } });
+    fireEvent.change(region.getByLabelText('Export to'), { target: { value: '1' } });
+    await userEvent.click(region.getByRole('button', { name: 'Save PNG frames (zip)' }));
+    await region.findByText(/Saved 5 frames/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

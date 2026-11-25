@@ -384,6 +384,8 @@ Owner decisions (answers to the open questions below):
 - **First templates: compact HUD, route/map inset and gauge dashboard.** The metric strip is not in the first set.
 - **Overlay settings can be imported and exported as a project JSON file**, so templates are reusable across videos. The app still stores nothing itself: the file is the user's.
 
+Built (AV-1006): the PNG frame sequence. Frames are drawn one at a time by the same renderer the preview uses and packed into stored (uncompressed) zip files by a small in-repo writer. A zip is closed and saved when it reaches 1,500 frames or 200 MB, then forgotten, so memory is bounded by one archive however long the clip. A long clip therefore arrives as several zip files (`part-01`, `part-02`, ...) whose frame numbering continues across parts; the browser may ask permission for several downloads. Limits: 1–120 fps, frames up to 4096 px a side, 54,000 frames per export (about 30 minutes at 30 fps). Not built: streaming straight to disk through the File System Access API (Chromium only), which would avoid the multi-part download.
+
 Spike questions still to answer: alpha support in `VideoEncoder` per browser; memory for a 5-minute 1080p30 overlay (≈9,000 frames); whether `ffmpeg.wasm` is acceptable at its bundle size; mobile limits.
 
 ## 17. Open Questions

@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 import { countPixelsNear, decodePng } from './helpers/png';
@@ -2053,6 +2055,117 @@ test('keeps the template controls usable on a phone (AV-1005)', async ({ page })
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+/** Unzips with the system tool, returning the folder; also proves the archive is valid. */
+function unzipTo(path: string): string {
+  execFileSync('unzip', ['-tq', path]);
+  const dir = mkdtempSync(join(tmpdir(), 'overlay-frames-'));
+  execFileSync('unzip', ['-oq', path, '-d', dir]);
+  return dir;
+}
+
+test('saves the overlay as real transparent PNG frames in a valid zip (AV-1006)', async ({ page }, testInfo) => {
+  const requests = recordRequests(page);
+  await openOverlayPreview(page);
+  const panel = page.getByRole('region', { name: 'Export overlay frames' });
+
+  // Defaults come from the video itself.
+  await expect(panel.getByLabel('Frame width')).toHaveValue('160');
+  await expect(panel.getByLabel('Frame height')).toHaveValue('90');
+  await expect(panel.getByLabel('Export to')).toHaveValue('4');
+
+  // Telemetry shifted so it runs out at video second 2: the second half is empty.
+  await page.getByLabel('Offset (seconds)').fill('8');
+  await panel.getByLabel(/Frame rate/).fill('10');
+  await expect(panel.getByText(/40 frames, in one zip file/)).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('overlay-frames-part-01.zip');
+  await expect(panel.getByText(/Saved 40 frames/)).toBeVisible();
+
+  const path = testInfo.outputPath('frames.zip');
+  await file.saveAs(path);
+  const dir = unzipTo(path);
+  const names = execFileSync('unzip', ['-Z1', path]).toString().trim().split('\n');
+  expect(names.filter((n) => n.endsWith('.png'))).toHaveLength(40);
+  expect(names).toContain('README.txt');
+  const readme = readFileSync(join(dir, 'README.txt'), 'utf-8');
+  expect(readme).toContain('10 fps');
+  expect(readme).toContain('160 x 90');
+  expect(readme).not.toMatch(/sync-test|overlay-sync/);
+
+  const frame = (n: number) => decodePng(readFileSync(join(dir, `overlay_${String(n).padStart(6, '0')}.png`)));
+  const stats = (image: ReturnType<typeof decodePng>) => {
+    let drawn = 0;
+    for (let i = 3; i < image.pixels.length; i += 4) if (image.pixels[i]! > 0) drawn += 1;
+    return { drawn, corner: image.pixels[3]! };
+  };
+
+  const first = frame(1);
+  expect([first.width, first.height]).toEqual([160, 90]);
+  // A real RGBA PNG with a transparent background and something drawn on it.
+  expect(stats(first).corner).toBe(0);
+  expect(stats(first).drawn).toBeGreaterThan(100);
+  // Past the end of the telemetry nothing is drawn: fully transparent.
+  expect(stats(frame(40)).drawn).toBe(0);
+  // The figures differ from frame to frame.
+  expect(Buffer.compare(frame(1).pixels, frame(15).pixels)).not.toBe(0);
+
+  expect(
+    requests.map((r) => r.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
+  ).toEqual([]);
+});
+
+test('splits a long export across zip files without gaps in the numbering (AV-1006)', async ({ page }, testInfo) => {
+  await openOverlayPreview(page);
+  const panel = page.getByRole('region', { name: 'Export overlay frames' });
+  await panel.getByLabel(/Frame rate/).fill('100');
+  await panel.getByLabel('Export to').fill('20');
+  await expect(panel.getByText(/2,000 frames, in at least 2 zip files/)).toBeVisible();
+
+  const downloads: { name: string; path: string }[] = [];
+  page.on('download', async (download) => {
+    const path = testInfo.outputPath(download.suggestedFilename());
+    await download.saveAs(path);
+    downloads.push({ name: download.suggestedFilename(), path });
+  });
+  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
+  await expect(panel.getByText(/Saved 2,000 frames/)).toBeVisible({ timeout: 60_000 });
+  await expect.poll(() => downloads.length).toBe(2);
+
+  downloads.sort((a, b) => a.name.localeCompare(b.name));
+  expect(downloads.map((d) => d.name)).toEqual(['overlay-frames-part-01.zip', 'overlay-frames-part-02.zip']);
+  const frames: number[] = [];
+  for (const { path } of downloads) {
+    execFileSync('unzip', ['-tq', path]);
+    for (const name of execFileSync('unzip', ['-Z1', path]).toString().trim().split('\n')) {
+      const match = /^overlay_(\d{6})\.png$/.exec(name);
+      if (match) frames.push(Number(match[1]));
+    }
+  }
+  frames.sort((a, b) => a - b);
+  expect(frames).toHaveLength(2000);
+  expect(frames[0]).toBe(1);
+  expect(frames.at(-1)).toBe(2000);
+  expect(new Set(frames).size).toBe(2000);
+});
+
+test('stops an export when asked, and says what was kept (AV-1006)', async ({ page }) => {
+  await openOverlayPreview(page);
+  const panel = page.getByRole('region', { name: 'Export overlay frames' });
+  // Large frames, so the export is slow enough to interrupt.
+  await panel.getByLabel('Frame width').fill('3840');
+  await panel.getByLabel('Frame height').fill('2160');
+  await panel.getByLabel(/Frame rate/).fill('60');
+
+  await panel.getByRole('button', { name: 'Save PNG frames (zip)' }).click();
+  await expect(panel.getByRole('progressbar', { name: 'Export progress' })).toBeVisible();
+  await panel.getByRole('button', { name: 'Stop' }).click();
+  await expect(panel.getByText(/^Stopped\./)).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Save PNG frames (zip)' })).toBeEnabled();
 });
 
 test('fixture files are never read by the server', async () => {

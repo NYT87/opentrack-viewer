@@ -15,6 +15,10 @@ export type ActivityErrorCode =
   | 'extraction_cancelled'
   | 'large_file_slow_parse'
   | 'invalid_selected_range'
+  | 'overlay_export_unsupported'
+  | 'overlay_export_too_large'
+  | 'overlay_export_cancelled'
+  | 'overlay_export_failed'
   | 'file_read_failed';
 
 const HINTS: Record<ActivityErrorCode, string> = {
@@ -30,6 +34,11 @@ const HINTS: Record<ActivityErrorCode, string> = {
   extraction_cancelled: 'Reading the video was stopped.',
   large_file_slow_parse: 'This file is large and may take a moment to parse.',
   invalid_selected_range: 'Select a longer section of the activity.',
+  overlay_export_unsupported:
+    'This browser cannot draw the overlay images. Try a recent Chrome, Edge, Firefox or Safari.',
+  overlay_export_too_large: 'Choose a shorter range, a lower frame rate or a smaller size.',
+  overlay_export_cancelled: 'The export was stopped. Any zip files already saved are complete.',
+  overlay_export_failed: 'The overlay frames could not be written. Try a smaller size or a shorter range.',
   file_read_failed: 'The file could not be read from your device. Try selecting it again.',
 };
 

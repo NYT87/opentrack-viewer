@@ -8,6 +8,8 @@ export interface OverlayVideoPreviewProps {
   /** Seconds the telemetry is shifted against the video. */
   offsetSeconds: number;
   onOffsetChange: (seconds: number) => void;
+  /** Reported once the browser knows the video's length and size. */
+  onMetadata?: (info: { duration?: number; width: number; height: number }) => void;
 }
 
 /** Offsets beyond this are nearly always a typo, not a camera clock error. */
@@ -30,6 +32,7 @@ export function OverlayVideoPreview({
   renderer,
   offsetSeconds,
   onOffsetChange,
+  onMetadata,
 }: OverlayVideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -136,6 +139,14 @@ export function OverlayVideoPreview({
           onLoadedMetadata={(event) => {
             setDuration(event.currentTarget.duration);
             setError(undefined);
+            const { duration: length, videoWidth, videoHeight } = event.currentTarget;
+            onMetadata?.({
+              ...(Number.isFinite(length) ? { duration: length } : {}),
+              // The size the overlay is drawn at: the picture's own, or the
+              // preview's fallback when the browser reports none.
+              width: videoWidth || 1280,
+              height: videoHeight || 720,
+            });
             syncFromVideo();
           }}
           onSeeked={syncFromVideo}

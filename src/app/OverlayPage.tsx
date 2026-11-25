@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { download } from '../components/ExportPanel';
 import { FileDropZone } from '../components/FileDropZone';
+import { OverlayFrameExport, type VideoInfo } from '../components/OverlayFrameExport';
 import { OverlayTemplateEditor } from '../components/OverlayTemplateEditor';
 import { OverlayVideoPreview } from '../components/OverlayVideoPreview';
 import { toActivityError } from '../domain/errors';
@@ -68,6 +69,7 @@ export function OverlayPage() {
     [selectedId, savedTemplates, units],
   );
   const [offsetSeconds, setOffsetSeconds] = useState(0);
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | undefined>();
 
   // AV-1004. The clock the video is lined up against, and what it can supply.
   const timelineResult = useMemo(() => (activity ? buildTimeline(activity) : undefined), [activity]);
@@ -123,6 +125,7 @@ export function OverlayPage() {
 
   const handleVideo = (file: File) => {
     setOffsetSeconds(0);
+    setVideoInfo(undefined);
     setVideo(file);
   };
 
@@ -378,9 +381,17 @@ export function OverlayPage() {
                         renderer={overlayRenderer}
                         offsetSeconds={offsetSeconds}
                         onOffsetChange={setOffsetSeconds}
+                        onMetadata={setVideoInfo}
                       />
                       <p>
-                        <button type="button" className="button" onClick={() => setVideo(undefined)}>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => {
+                            setVideoInfo(undefined);
+                            setVideo(undefined);
+                          }}
+                        >
                           Choose another video
                         </button>
                       </p>
@@ -389,6 +400,14 @@ export function OverlayPage() {
                 </>
               )}
             </section>
+
+            {timelineResult?.ok && overlayRenderer && video && videoInfo && (
+              <OverlayFrameExport
+                renderer={overlayRenderer}
+                offsetSeconds={offsetSeconds}
+                video={videoInfo}
+              />
+            )}
 
             <section className="box route-tools" aria-label="Save overlay">
               <p className="export__hint">
