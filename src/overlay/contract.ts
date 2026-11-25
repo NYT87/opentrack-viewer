@@ -18,6 +18,8 @@ import {
   DEFAULT_CHART,
   DEFAULT_OVERLAY_STYLE,
   STILL_IMAGE_COMPONENT_TYPES,
+  componentSampleValue,
+  elevationTotalOf,
   resolveOverlayComponent,
   type OverlayComponent,
   type OverlayFigureSetting,
@@ -194,6 +196,23 @@ export const STORED_UNITS: Readonly<Record<OverlayMetricKey, string>> = {
   climb: 'm',
   /** AV-1019. Degrees clockwise from north, 0 up to just under 360. */
   heading: '°',
+  // AV-1025 (TD-094).
+  maxSpeed: 'm/s',
+  maxHeartRate: 'bpm',
+  maxPower: 'W',
+  averageSpeed: 'm/s',
+  averageMovingSpeed: 'm/s',
+  /** 0 means no movement so far. */
+  averagePace: 's/km',
+  averageMovingPace: 's/km',
+  /** Positive is climbing. */
+  verticalSpeed: 'm/s',
+  elevationLowest: 'm',
+  elevationHighest: 'm',
+  /** Whole seconds are not promised: the seconds since the stopwatch's start. */
+  stopwatch: 's',
+  /** Seconds since 1970-01-01T00:00:00Z at the moment; `text` is already in the zone the reader chose. */
+  clock: 's',
 };
 
 /**
@@ -226,6 +245,8 @@ export interface FigureProps extends ContractMoment {
   smoothingWindowSeconds?: number;
   /** Metres. Present only for a distance written "of the total": the whole activity's, `text` already says both. */
   totalDistanceMeters?: number;
+  /** AV-1025. Metres. Present only for the lowest or highest elevation written "of the total": the whole activity's lowest or highest, `text` already says both. */
+  totalElevationMeters?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -694,7 +715,7 @@ export function contractProps(
   // A figure or a gauge: the value is read as `resolveOverlayComponent` reads it.
   const source = component.source as OverlayDataSource;
   const id = dataSourceId(source);
-  const raw = sample.values[id] as number;
+  const raw = componentSampleValue(component, sample) as number;
   const windowSeconds = component.smoothing?.windowSeconds;
   const smoothed = windowSeconds
     ? smoothedValueAt(timeline, source, sample.videoTimeSeconds, windowSeconds)
@@ -719,6 +740,8 @@ export function contractProps(
   if (source.kind === 'metric' && source.metric === 'distance' && component.display?.ofTotal && total !== undefined) {
     props.totalDistanceMeters = total;
   }
+  const elevationTotal = component.display?.ofTotal ? elevationTotalOf(source, timeline) : undefined;
+  if (elevationTotal !== undefined) props.totalElevationMeters = elevationTotal;
   if (component.type === 'gauge' && component.range && ready.fraction !== undefined) {
     return { ...props, section: 'gauge', range: { min: component.range.min, max: component.range.max }, fraction: ready.fraction };
   }
@@ -981,7 +1004,7 @@ export function contractPropsFor(
   if (section === undefined) return undefined;
   if (section === 'wholeActivity') return wholeActivityProps(component, context);
   if (!sample) return undefined;
-  const ready = resolveOverlayComponent(template, component, sample, timeline, context.units, context.personal);
+  const ready = resolveOverlayComponent(template, component, sample, timeline, context.units, context.personal, context.readerTimeZone);
   if (ready.status !== 'ready') return undefined;
   // Splits the renderer draws nothing for (no splits to count) have no props either.
   if (component.type === 'splits' && !splitsViewOf(ready, sample, timeline, context.activity)) return undefined;

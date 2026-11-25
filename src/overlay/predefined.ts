@@ -16,9 +16,9 @@ import { normalizeRect, type OverlayComponent, type OverlayTemplate } from './te
  * only reads `PREDEFINED_ENTRIES`, does not change.
  *
  * Zones came with AV-1018 (TD-086), the dial, the chart, the gradient
- * indicator and the compass with AV-1019 (TD-087), and splits with AV-1021
- * (TD-090). Average-so-far figures wait for their own piece (#39) and have no
- * entry until it lands.
+ * indicator and the compass with AV-1019 (TD-087), splits with AV-1021
+ * (TD-090), and the figures so far (maxima, averages, vertical speed, the
+ * lowest and highest elevation, a stopwatch and a clock) with AV-1025 (TD-094).
  */
 
 export type PredefinedSport = 'cycling' | 'running' | 'any';
@@ -106,6 +106,10 @@ export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
   { id: 'cycling.power-zones', name: 'Power zones', sport: 'cycling', needs: ['metric:power'], missing: METRIC_MISSING.power, build: zones('power') },
   { id: 'cycling.heart-rate-zones', name: 'Heart rate zones', sport: 'cycling', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
   { id: 'cycling.climb', name: 'Climb so far', sport: 'cycling', needs: ['metric:climb'], missing: METRIC_MISSING.climb, build: plain('metric:climb') },
+  // AV-1025 (TD-094). The figures so far, by sport.
+  { id: 'cycling.max-speed', name: 'Max speed so far', sport: 'cycling', needs: ['metric:maxSpeed'], missing: METRIC_MISSING.maxSpeed, build: plain('metric:maxSpeed') },
+  { id: 'cycling.average-speed', name: 'Average speed so far', sport: 'cycling', needs: ['metric:averageSpeed'], missing: METRIC_MISSING.averageSpeed, build: plain('metric:averageSpeed') },
+  { id: 'cycling.vertical-speed', name: 'Vertical speed', sport: 'cycling', needs: ['metric:verticalSpeed'], missing: METRIC_MISSING.verticalSpeed, build: figure('metric:verticalSpeed', { smoothing: 5 }) },
   { id: 'cycling.elevation-profile', name: 'Elevation profile', sport: 'cycling', needs: ['metric:elevation'], missing: ELEVATION_MISSING, build: plain('elevationProfile') },
   { id: 'cycling.splits', name: 'Splits', sport: 'cycling', needs: ['splits'], missing: SPLITS_MISSING, build: splits('speed') },
   // Running
@@ -114,10 +118,16 @@ export const PREDEFINED_ENTRIES: readonly PredefinedEntry[] = [
   { id: 'running.heart-rate-zones', name: 'Heart rate zones', sport: 'running', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: zones('heartRate') },
   { id: 'running.cadence', name: 'Running cadence', sport: 'running', needs: ['metric:runningCadence'], missing: METRIC_MISSING.runningCadence, build: figure('metric:runningCadence', { smoothing: 3 }) },
   { id: 'running.splits', name: 'Splits', sport: 'running', needs: ['splits'], missing: SPLITS_MISSING, build: splits('pace') },
+  { id: 'running.average-pace', name: 'Average pace so far', sport: 'running', needs: ['metric:averagePace'], missing: METRIC_MISSING.averagePace, build: plain('metric:averagePace') },
   { id: 'running.distance-total', name: 'Distance of the total', sport: 'running', needs: ['metric:distance'], missing: METRIC_MISSING.distance, build: figure('metric:distance', { ofTotal: true }) },
   // Any sport
   { id: 'any.speed-chart', name: 'Speed against time', sport: 'any', needs: ['metric:speed'], missing: METRIC_MISSING.speed, build: plain('chart:speed') },
   { id: 'any.heart-rate-chart', name: 'Heart rate against time', sport: 'any', needs: ['metric:heartRate'], missing: METRIC_MISSING.heartRate, build: plain('chart:heartRate') },
+  { id: 'any.max-heart-rate', name: 'Max heart rate so far', sport: 'any', needs: ['metric:maxHeartRate'], missing: METRIC_MISSING.maxHeartRate, build: plain('metric:maxHeartRate') },
+  { id: 'any.lowest-elevation', name: 'Lowest elevation so far', sport: 'any', needs: ['metric:elevationLowest'], missing: METRIC_MISSING.elevationLowest, build: plain('metric:elevationLowest') },
+  { id: 'any.highest-elevation', name: 'Highest elevation so far', sport: 'any', needs: ['metric:elevationHighest'], missing: METRIC_MISSING.elevationHighest, build: plain('metric:elevationHighest') },
+  { id: 'any.stopwatch', name: 'Stopwatch', sport: 'any', needs: ['metric:stopwatch'], missing: METRIC_MISSING.stopwatch, build: plain('metric:stopwatch') },
+  { id: 'any.clock', name: 'Clock', sport: 'any', needs: ['metric:clock'], missing: METRIC_MISSING.clock, build: plain('metric:clock') },
   { id: 'any.compass', name: 'Compass', sport: 'any', needs: ['metric:heading'], missing: METRIC_MISSING.heading, build: plain('compass') },
   { id: 'any.elevation-profile', name: 'Elevation profile', sport: 'any', needs: ['metric:elevation'], missing: ELEVATION_MISSING, build: plain('elevationProfile') },
   { id: 'any.progress', name: 'Progress bar', sport: 'any', needs: [], missing: '', build: plain('progress') },

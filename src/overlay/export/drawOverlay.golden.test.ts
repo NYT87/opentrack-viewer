@@ -220,6 +220,33 @@ describe('custom canvas render goldens (AV-1011)', () => {
     await expect(drawn('imperial')).toMatchFileSnapshot(snapshot('custom-dial-imperial-t5'));
   });
 
+  it('draws a stopwatch and a clock, in the same render as the other figures, as they change with the ride (AV-1025)', async () => {
+    const components = [
+      figure('stopwatch', 'stopwatch', at(0.02, 0.02, 0.2, 0.12)),
+      figure('stopwatch-own', 'stopwatch', at(0.24, 0.02, 0.2, 0.12), { stopwatch: { startSeconds: 3 }, display: { label: 'Since 0:03' } }),
+      figure('clock', 'clock', at(0.46, 0.02, 0.2, 0.12)),
+      figure('clock-12h', 'clock', at(0.68, 0.02, 0.3, 0.12), { clock: { zone: 'offset', offsetMinutes: 330, hour12: true, seconds: true, date: true } }),
+      figure('max-speed', 'maxSpeed', at(0.02, 0.2, 0.2, 0.12)),
+      figure('avg-speed', 'averageSpeed', at(0.24, 0.2, 0.2, 0.12)),
+      figure('vertical', 'verticalSpeed', at(0.46, 0.2, 0.2, 0.12)),
+      figure('highest', 'elevationHighest', at(0.68, 0.2, 0.25, 0.12), { display: { ofTotal: true } }),
+    ];
+    const early = custom(components, 2);
+    const list = custom(components, 5);
+    // The ride starts at 10:00:00 UTC; the clock is read in UTC here, and again 5:30 east of it.
+    expect(list).toContain('fillText("0:05"');
+    expect(list).toContain('fillText("0:02"');
+    expect(list).toContain('fillText("10:00:05"');
+    expect(list).toContain('fillText("1 Jan 2024, 3:30:05 PM"');
+    expect(early).toContain('fillText("0:02"');
+    expect(early).toContain('fillText("0:00"');
+    expect(early).toContain('fillText("10:00:02"');
+    expect(list).toContain('fillText("SINCE 0:03"');
+    // The elevation climbs a metre a second: 105 m so far, of 160.
+    expect(list).toMatch(/fillText\("105 \/ \d+ m"/);
+    await expect(list).toMatchFileSnapshot(snapshot('custom-stopwatch-clock-t5'));
+  });
+
   it('draws the splits of the ride, with the last finished one in its colour, in metric and imperial (AV-1021)', async () => {
     // The reader's minute-long ride, whole: it speeds up, so every split is faster than the one before, and at 45 s three of the 100 m splits have ended.
     const whole = buildOverlayTimeline(ride, { video: { durationSeconds: 60 } });

@@ -317,7 +317,7 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
           continue;
         }
         if (!sample) continue;
-        const ready = resolveOverlayComponent(template, component, sample, timeline, units, input.personal);
+        const ready = resolveOverlayComponent(template, component, sample, timeline, units, input.personal, input.readerTimeZone);
         if (ready.status !== 'ready') continue;
 
         const box = boxOf(component);

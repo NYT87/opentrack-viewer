@@ -145,6 +145,18 @@ export function formatSpeed(
     : `${((value * 3600) / 1000).toFixed(1)} km/h`;
 }
 
+/**
+ * AV-1025. The rate of ascent in metres per second, as the metres (or feet) a minute, signed: "+18 m/min",
+ * "-6 m/min", "0 m/min". A rate that rounds to nothing reads 0 with no sign. `decimals` defaults to none.
+ */
+export function formatVerticalSpeed(metersPerSecond: number | undefined, units: UnitSystem = 'metric', decimals: 0 | 1 | 2 = 0): string {
+  if (!Number.isFinite(metersPerSecond)) return MISSING;
+  const perMinute = toDisplayElevation((metersPerSecond as number) * 60, units);
+  const rounded = Number(perMinute.toFixed(decimals));
+  const sign = rounded > 0 ? '+' : rounded < 0 ? '-' : '';
+  return `${sign}${Math.abs(rounded).toFixed(decimals)} ${elevationUnitLabel(units)}/min`;
+}
+
 export function formatFileSize(bytes: number | undefined): string {
   if (!Number.isFinite(bytes)) return MISSING;
   const value = bytes as number;

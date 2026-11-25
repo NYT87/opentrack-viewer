@@ -1,6 +1,7 @@
 import type { Activity } from '../domain/activity';
 import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
+import { formatStillDate, formatUtcOffset, type DateZone } from './dateFormat';
 import { keptRoute, minimumKeptText } from './privacyTrim';
 import {
   DEFAULT_ROUTE_IMAGE_OPTIONS,
@@ -148,71 +149,7 @@ export function summaryValue(stat: SummaryStatKey, activity: Activity, units: Un
   }
 }
 
-const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MONTHS_LONG = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-/** Where a date is read: an offset the file states, or a named time zone. */
-export type DateZone = { kind: 'offset'; minutes: number } | { kind: 'zone'; timeZone: string };
-
-interface CivilTime {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-}
-
-/** The calendar date and clock time of an instant in a zone. */
-function civil(date: Date, zone: DateZone): CivilTime {
-  if (zone.kind === 'offset') {
-    const shifted = new Date(date.getTime() + zone.minutes * 60_000);
-    return {
-      year: shifted.getUTCFullYear(),
-      month: shifted.getUTCMonth() + 1,
-      day: shifted.getUTCDate(),
-      hour: shifted.getUTCHours(),
-      minute: shifted.getUTCMinutes(),
-    };
-  }
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: zone.timeZone,
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const read = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
-  return { year: read('year'), month: read('month'), day: read('day'), hour: read('hour') % 24, minute: read('minute') };
-}
-
-const pad = (n: number) => String(n).padStart(2, '0');
-
-/**
- * A date as one of the four formats, written the same in every browser: the
- * month and weekday names are this module's, not the locale's, so `24 Sep 2026`
- * does not become `24 Sept 2026` where a locale prefers it. A time is 24-hour.
- */
-export function formatStillDate(date: Date, format: DateFormatId, withTime: boolean, zone: DateZone): string {
-  const { year, month, day, hour, minute } = civil(date, zone);
-  const time = `${pad(hour)}:${pad(minute)}`;
-  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]!;
-  switch (format) {
-    case 'iso':
-      return `${year}-${pad(month)}-${pad(day)}${withTime ? ` ${time}` : ''}`;
-    case 'medium':
-      return `${day} ${MONTHS_SHORT[month - 1]} ${year}${withTime ? `, ${time}` : ''}`;
-    case 'numeric':
-      return `${pad(day)}/${pad(month)}/${year}${withTime ? ` ${time}` : ''}`;
-    case 'long':
-      return `${weekday} ${day} ${MONTHS_LONG[month - 1]} ${year}${withTime ? `, ${time}` : ''}`;
-  }
-}
+export { formatStillDate, formatUtcOffset, type DateZone };
 
 export const DATE_FORMAT_LABELS: Record<DateFormatId, string> = {
   iso: '2026-09-24',
@@ -220,14 +157,6 @@ export const DATE_FORMAT_LABELS: Record<DateFormatId, string> = {
   numeric: '24/09/2026',
   long: 'Thursday 24 September 2026',
 };
-
-/** `UTC+09:00`, `UTC−03:30`, `UTC`. */
-export function formatUtcOffset(minutes: number): string {
-  if (minutes === 0) return 'UTC';
-  const sign = minutes < 0 ? '−' : '+';
-  const total = Math.abs(minutes);
-  return `UTC${sign}${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
-}
 
 export function readerTimeZoneOf(context: Pick<StillImageContext, 'readerTimeZone'>): string {
   return context.readerTimeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';

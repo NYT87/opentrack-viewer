@@ -490,3 +490,232 @@ describe('smoothing (AV-1016)', () => {
     expect(canSmooth({ kind: 'sensor', key: 'ACCL' })).toBe(true);
   });
 });
+
+describe('figures so far (AV-1025)', () => {
+  const key = (name: string) => `metric:${name}`;
+  const valueAt = (timeline: ReturnType<typeof buildOverlayTimeline>, name: string, t: number) => timeline.sampleAt(t)?.values[key(name)];
+
+  it('holds the highest speed, heart rate and power up to the moment, the moment’s own value included', () => {
+    const activity = makeActivity([
+      { time: at(0), distanceMeters: 0, speedMetersPerSecond: 2, heartRateBpm: 100, powerWatts: 90 },
+      { time: at(4), distanceMeters: 40, speedMetersPerSecond: 6, heartRateBpm: 140, powerWatts: 250 },
+      { time: at(8), distanceMeters: 100, speedMetersPerSecond: 4, heartRateBpm: 120, powerWatts: 200 },
+    ]);
+    const timeline = buildOverlayTimeline(activity, { video: { durationSeconds: 8 } });
+    // At 2 s the speed is 4 (between 2 and 6): the moment's value is above the 2 behind it.
+    expect(valueAt(timeline, 'maxSpeed', 0)).toBe(2);
+    expect(valueAt(timeline, 'maxSpeed', 2)).toBeCloseTo(4);
+    expect(valueAt(timeline, 'maxHeartRate', 2)).toBeCloseTo(120);
+    expect(valueAt(timeline, 'maxPower', 2)).toBeCloseTo(170);
+    // At and after the peak it holds, while the speed itself falls back.
+    expect(valueAt(timeline, 'maxSpeed', 4)).toBe(6);
+    expect(valueAt(timeline, 'speed', 6)).toBeCloseTo(5);
+    expect(valueAt(timeline, 'maxSpeed', 6)).toBe(6);
+    expect(valueAt(timeline, 'maxHeartRate', 8)).toBe(140);
+    expect(valueAt(timeline, 'maxPower', 8)).toBe(250);
+  });
+
+  it('averages the distance so far over the time so far, and over the moving time, and says a pace for each', () => {
+    const activity = makeActivity([
+      { time: at(0), distanceMeters: 0 },
+      { time: at(4), distanceMeters: 40 },
+      { time: at(8), distanceMeters: 100 },
+    ]);
+    const timeline = buildOverlayTimeline(activity, { video: { durationSeconds: 8 } });
+    // Nothing yet at the very start: absent, not zero.
+    expect(valueAt(timeline, 'averageSpeed', 0)).toBeUndefined();
+    expect(valueAt(timeline, 'averageMovingSpeed', 0)).toBeUndefined();
+    expect(valueAt(timeline, 'averagePace', 0)).toBeUndefined();
+    // 20 m in 2 s; 100 m in 8 s.
+    expect(valueAt(timeline, 'averageSpeed', 2)).toBeCloseTo(10);
+    expect(valueAt(timeline, 'averageSpeed', 8)).toBeCloseTo(12.5);
+    expect(valueAt(timeline, 'averageMovingSpeed', 8)).toBeCloseTo(12.5);
+    // 1000 / 12.5 m/s: 80 s a kilometre.
+    expect(valueAt(timeline, 'averagePace', 8)).toBeCloseTo(80);
+    expect(valueAt(timeline, 'averageMovingPace', 8)).toBeCloseTo(80);
+  });
+
+  /** 0 to 10 s moving at 5 m/s, a stop of 40 s with no point, 50 to 55 s moving, then a new segment (a recording gap) at 60 s. */
+  const withStop = () =>
+    makeActivity([
+      { time: at(0), distanceMeters: 0, elevationMeters: 100, speedMetersPerSecond: 5 },
+      { time: at(5), distanceMeters: 25, elevationMeters: 110, speedMetersPerSecond: 5 },
+      { time: at(10), distanceMeters: 50, elevationMeters: 120, speedMetersPerSecond: 5 },
+      { time: at(50), distanceMeters: 50, elevationMeters: 120, speedMetersPerSecond: 0 },
+      { time: at(55), distanceMeters: 75, elevationMeters: 90, speedMetersPerSecond: 5 },
+      { time: at(60), distanceMeters: 75, elevationMeters: 90, speedMetersPerSecond: 1, segmentIndex: 1 },
+      { time: at(65), distanceMeters: 100, elevationMeters: 95, speedMetersPerSecond: 5, segmentIndex: 1 },
+    ]);
+
+  it('holds the totals through a stop, counts only the moving time in the moving average, and reads no ascent', () => {
+    const timeline = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 } });
+    expect(valueAt(timeline, 'maxSpeed', 10)).toBe(5);
+    // 30 s in, in the middle of the stop: the figures of a total hold; the figures of motion read zero.
+    expect(valueAt(timeline, 'speed', 30)).toBe(0);
+    expect(valueAt(timeline, 'maxSpeed', 30)).toBe(5);
+    expect(valueAt(timeline, 'elevationHighest', 30)).toBe(120);
+    expect(valueAt(timeline, 'elevationLowest', 30)).toBe(100);
+    expect(valueAt(timeline, 'verticalSpeed', 30)).toBe(0);
+    // 50 m in 30 s elapsed (the stop's seconds are time that passed), 50 m in the 10 s spent moving.
+    expect(valueAt(timeline, 'averageSpeed', 30)).toBeCloseTo(50 / 30);
+    expect(valueAt(timeline, 'averageMovingSpeed', 30)).toBeCloseTo(5);
+    expect(valueAt(timeline, 'averageMovingPace', 30)).toBeCloseTo(200);
+    expect(valueAt(timeline, 'averagePace', 30)).toBeCloseTo(600);
+    // The stop ends and the moving average carries on from where it was: 75 m over 15 moving seconds.
+    expect(valueAt(timeline, 'averageMovingSpeed', 55)).toBeCloseTo(5);
+    expect(valueAt(timeline, 'averageSpeed', 55)).toBeCloseTo(75 / 55);
+  });
+
+  it('holds across a break in the recording, the way a stop does', () => {
+    const timeline = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 } });
+    // 57.5 s is between the last point of one segment and the first of the next: standing still, everything held.
+    expect(valueAt(timeline, 'verticalSpeed', 57.5)).toBe(0);
+    expect(valueAt(timeline, 'maxSpeed', 57.5)).toBe(5);
+    expect(valueAt(timeline, 'elevationLowest', 57.5)).toBe(90);
+    expect(valueAt(timeline, 'elevationHighest', 57.5)).toBe(120);
+    // Inside the second segment the figures run on from there.
+    expect(valueAt(timeline, 'elevationLowest', 65)).toBe(90);
+    expect(valueAt(timeline, 'averageMovingSpeed', 65)).toBeCloseTo(100 / 20);
+  });
+
+  it('finds the lowest and the highest elevation so far, the moment’s own included', () => {
+    const timeline = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 } });
+    expect(valueAt(timeline, 'elevationLowest', 0)).toBe(100);
+    expect(valueAt(timeline, 'elevationHighest', 0)).toBe(100);
+    expect(valueAt(timeline, 'elevationHighest', 2.5)).toBeCloseTo(105);
+    expect(valueAt(timeline, 'elevationLowest', 2.5)).toBe(100);
+    // Falling to 90 by 55 s: 105 at 52.5 s is not a new low, 90 is.
+    expect(valueAt(timeline, 'elevationLowest', 52.5)).toBe(100);
+    expect(valueAt(timeline, 'elevationLowest', 55)).toBe(90);
+    expect(valueAt(timeline, 'elevationHighest', 55)).toBe(120);
+  });
+
+  it('reads the rate of ascent over the last 10 s, the first seconds over the span there is, zero through a stop', () => {
+    const timeline = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 } });
+    // Climbing 2 m/s from the start: the first 5 s have only 5 s to look back over.
+    expect(valueAt(timeline, 'verticalSpeed', 0)).toBe(0);
+    expect(valueAt(timeline, 'verticalSpeed', 5)).toBeCloseTo(2);
+    expect(valueAt(timeline, 'verticalSpeed', 10)).toBeCloseTo(2);
+    // 55 s: 90 m now, the stop ended at 50 s at 120 m, so the look back starts there, not 10 s back inside the stop: 6 m/s down.
+    expect(valueAt(timeline, 'verticalSpeed', 55)).toBeCloseTo(-6);
+    expect(timeline.available.has(key('verticalSpeed'))).toBe(true);
+  });
+
+  it('smooths the rate of ascent with the lookback, and a figure’s own window on top of it, but never a total', () => {
+    const climbThenFlat = makeActivity(
+      Array.from({ length: 31 }, (_, i) => ({ time: at(i), distanceMeters: i * 5, elevationMeters: 100 + 2 * Math.min(i, 10) })),
+    );
+    const timeline = buildOverlayTimeline(climbThenFlat, { video: { durationSeconds: 30 } });
+    // The climb ends at 10 s, but the rate takes the next 10 s to reach zero: not a step.
+    expect(valueAt(timeline, 'verticalSpeed', 10)).toBeCloseTo(2);
+    expect(valueAt(timeline, 'verticalSpeed', 12)).toBeCloseTo(1.6);
+    expect(valueAt(timeline, 'verticalSpeed', 15)).toBeCloseTo(1);
+    expect(valueAt(timeline, 'verticalSpeed', 20)).toBeCloseTo(0);
+    // A window on top is the mean of those, so it lags further.
+    const smoothed = smoothedValueAt(timeline, { kind: 'metric', metric: 'verticalSpeed' }, 12, 4)!;
+    expect(smoothed).toBeGreaterThan(1.6);
+    expect(smoothed).toBeLessThan(2);
+    expect(canSmooth({ kind: 'metric', metric: 'verticalSpeed' })).toBe(true);
+    for (const metric of ['maxSpeed', 'maxHeartRate', 'maxPower', 'averageSpeed', 'averageMovingSpeed', 'averagePace', 'averageMovingPace', 'elevationLowest', 'elevationHighest', 'stopwatch', 'clock'] as const) {
+      expect(canSmooth({ kind: 'metric', metric }), metric).toBe(false);
+    }
+  });
+
+  it('has no total where a dropout leaves nothing known', () => {
+    // 60 s with no point, but 600 m further on: the activity moved, so this is lost data, not a stop.
+    const activity = makeActivity([
+      { time: at(0), distanceMeters: 0, elevationMeters: 10, speedMetersPerSecond: 10 },
+      { time: at(60), distanceMeters: 600, elevationMeters: 20, speedMetersPerSecond: 10 },
+    ]);
+    const timeline = buildOverlayTimeline(activity, { video: { durationSeconds: 60 } });
+    for (const name of ['maxSpeed', 'averageSpeed', 'averageMovingSpeed', 'averagePace', 'verticalSpeed', 'elevationLowest', 'elevationHighest']) {
+      expect(valueAt(timeline, name, 30), name).toBeUndefined();
+    }
+    // The clock and the stopwatch are not read from the points: they run on.
+    expect(valueAt(timeline, 'stopwatch', 30)).toBe(30);
+  });
+
+  it('finds one source’s value alone for a smoothing window, the same as the whole sample has it', () => {
+    const timeline = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 } });
+    // Through the stop, across the break, in a gap that bridges, on a point and off it.
+    for (const t of [0, 2.5, 10, 30, 52.5, 57.5, 65]) {
+      const whole = timeline.sampleAt(t)!;
+      for (const metric of ['speed', 'pace', 'distance', 'elevation', 'verticalSpeed', 'maxSpeed', 'averageMovingSpeed', 'elevationLowest', 'stopwatch', 'clock']) {
+        const id = key(metric);
+        const narrow = timeline.sampleAt(t, id)!;
+        expect(narrow.values[id], `${metric} at ${t}`).toEqual(whole.values[id]);
+        expect(narrow.activityElapsedSeconds).toBe(whole.activityElapsedSeconds);
+        expect(narrow.position).toEqual(whole.position);
+      }
+    }
+    // The narrow sample holds that source and the elapsed time, not the whole list.
+    expect(Object.keys(timeline.sampleAt(2.5, key('speed'))!.values).filter((id) => ['metric:distance', 'metric:maxSpeed', 'metric:clock'].includes(id))).toEqual([]);
+    expect(timeline.sampleAt(30, key('speed'))!.values[key('speed')]).toBe(0);
+  });
+
+  it('does not charge the height across a stop or a break to the seconds after it, and carries on where an elevation is missing', () => {
+    const level = (extra: (i: number) => object) => makeActivity(Array.from({ length: 41 }, (_, i) => ({ time: at(i < 20 ? i : i + 580), distanceMeters: i * 5, ...extra(i) })));
+    // Level at 100 m, ten minutes standing, level at 108 m: the 8 m is drift, not climbing.
+    const drift = buildOverlayTimeline(level((i) => ({ elevationMeters: i < 20 ? 100 : 108 })), { video: { durationSeconds: 700 } });
+    for (const t of [600, 605, 610, 615, 619]) expect(valueAt(drift, 'verticalSpeed', t), `at ${t}`).toBeCloseTo(0);
+    const broken = buildOverlayTimeline(level((i) => ({ elevationMeters: i < 20 ? 100 : 108, segmentIndex: i < 20 ? 0 : 1 })), { video: { durationSeconds: 700 } });
+    expect(valueAt(broken, 'verticalSpeed', 605)).toBeCloseTo(0);
+    // The first points have no elevation: the rate is there from the first reading on, over the span there is.
+    const late = buildOverlayTimeline(makeActivity(Array.from({ length: 30 }, (_, i) => ({ time: at(i), distanceMeters: i, ...(i >= 2 ? { elevationMeters: 100 + 2 * i } : {}) }))), { video: { durationSeconds: 29 } });
+    expect(valueAt(late, 'verticalSpeed', 3)).toBeCloseTo(2);
+    expect(valueAt(late, 'verticalSpeed', 8)).toBeCloseTo(2);
+    // One point with no elevation: the rate is absent only where the elevation is, not ten seconds after.
+    const hole = buildOverlayTimeline(makeActivity(Array.from({ length: 40 }, (_, i) => ({ time: at(i), distanceMeters: i, ...(i !== 15 ? { elevationMeters: 100 + 2 * i } : {}) }))), { video: { durationSeconds: 39 } });
+    expect(valueAt(hole, 'verticalSpeed', 20)).toBeCloseTo(2);
+    expect(valueAt(hole, 'verticalSpeed', 25)).toBeCloseTo(2);
+  });
+
+  it('writes no average pace for an activity that never moves, even from a layout file', () => {
+    const still = buildOverlayTimeline(makeActivity([0, 1, 2].map((i) => ({ time: at(i * 5), lat: 1, lon: 1 }))));
+    expect(still.sampleAt(5)!.values[key('averageSpeed')]).toBe(0);
+    expect(still.sampleAt(5)!.values[key('averagePace')]).toBeUndefined();
+    expect(still.sampleAt(5)!.values[key('averageMovingPace')]).toBeUndefined();
+  });
+
+  it('is offered only for what the activity has', () => {
+    const bare = buildOverlayTimeline(makeActivity([{ time: at(0), lat: 1, lon: 1 }, { time: at(10), lat: 1.0001, lon: 1 }]));
+    for (const name of ['maxHeartRate', 'maxPower', 'verticalSpeed', 'elevationLowest', 'elevationHighest']) expect(bare.available.has(key(name)), name).toBe(false);
+    for (const name of ['maxSpeed', 'averageSpeed', 'averageMovingSpeed', 'averagePace', 'averageMovingPace', 'stopwatch', 'clock']) expect(bare.available.has(key(name)), name).toBe(true);
+    // Standing still the whole time: no pace to be had, though there is an average speed of zero.
+    const still = buildOverlayTimeline(makeActivity([{ time: at(0), lat: 1, lon: 1 }, { time: at(10), lat: 1, lon: 1 }]));
+    expect(still.available.has(key('averageSpeed'))).toBe(true);
+    expect(still.available.has(key('averagePace'))).toBe(false);
+    const untimed = buildOverlayTimeline(makeActivity([{ lat: 1, lon: 1 }, { lat: 2, lon: 2 }]));
+    expect(untimed.unavailable).toBe('no_timestamps');
+    expect(untimed.available.size).toBe(0);
+  });
+
+  it('counts the stopwatch from the start of the cut, else of the activity, and reads 0 before then', () => {
+    const activity = withStop();
+    const whole = buildOverlayTimeline(activity, { video: { durationSeconds: 65 } });
+    expect(valueAt(whole, 'stopwatch', 0)).toBe(0);
+    expect(valueAt(whole, 'stopwatch', 42)).toBe(42);
+    // Cut to start 20 s into the video: it reads 0 up to there, 0:00 from there on, and counts.
+    const cut = buildOverlayTimeline(activity, { video: { durationSeconds: 65 }, cutStartSeconds: 20 });
+    expect(valueAt(cut, 'stopwatch', 10)).toBe(0);
+    expect(valueAt(cut, 'stopwatch', 20)).toBe(0);
+    expect(valueAt(cut, 'stopwatch', 42)).toBe(22);
+    // The cut is in the video's seconds: a video that began 5 s before the activity puts it 5 s further on.
+    const early = buildOverlayTimeline(activity, { video: { durationSeconds: 65, start: new Date(T0.getTime() - 5000) }, cutStartSeconds: 20 });
+    expect(valueAt(early, 'stopwatch', 30)).toBe(10);
+    // Moved by the offset, like everything else on the activity's clock.
+    const late = buildOverlayTimeline(activity, { video: { durationSeconds: 65 }, offsetSeconds: 10, cutStartSeconds: 20 });
+    expect(valueAt(late, 'stopwatch', 20)).toBe(0);
+    expect(valueAt(late, 'stopwatch', 30)).toBe(10);
+  });
+
+  it('carries the wall-clock time of the moment, in seconds since 1970, from the activity’s start', () => {
+    const timeline = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 } });
+    expect(valueAt(timeline, 'clock', 0)).toBe(T0.getTime() / 1000);
+    expect(valueAt(timeline, 'clock', 30.5)).toBeCloseTo(T0.getTime() / 1000 + 30.5);
+    // The video lagging the activity by 10 s: video time 0 is 10 s before the activity's start, so nothing; 10 s is its start.
+    const late = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 }, offsetSeconds: 10 });
+    expect(valueAt(late, 'clock', 5)).toBeUndefined();
+    expect(valueAt(late, 'clock', 10)).toBe(T0.getTime() / 1000);
+  });
+});

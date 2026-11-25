@@ -15,12 +15,20 @@ import { dataSourceId, type OverlayDataSource, type OverlayMetricKey, type Overl
  * and the range found from an activity are rounded in those units.
  */
 
+/** AV-1025. A maximum or an average of speed is a speed, and an average pace a pace: a dial reads each as its family. */
+function dialFamily(metric: OverlayMetricKey | undefined): OverlayMetricKey | undefined {
+  if (metric === 'maxSpeed' || metric === 'averageSpeed' || metric === 'averageMovingSpeed') return 'speed';
+  if (metric === 'averagePace' || metric === 'averageMovingPace') return 'pace';
+  return metric;
+}
+
 /**
  * A stored value of a dial's metric, in the units it is shown in: speed in km/h or
  * mph, pace in seconds per kilometre or per mile; everything else, and a camera
  * stream, is as stored. Linear, so it converts a step and a span as it does a value.
  */
 export function toDialUnits(metric: OverlayMetricKey | undefined, value: number, units: UnitSystem): number {
+  metric = dialFamily(metric);
   if (metric === 'speed') return units === 'imperial' ? (value * 3600) / METERS_PER_MILE : (value * 3600) / 1000;
   if (metric === 'pace') return units === 'imperial' ? (value * METERS_PER_MILE) / 1000 : value;
   return value;
@@ -28,6 +36,7 @@ export function toDialUnits(metric: OverlayMetricKey | undefined, value: number,
 
 /** The stored value of one typed in the units the dial is shown in; the inverse of `toDialUnits`. */
 export function fromDialUnits(metric: OverlayMetricKey | undefined, value: number, units: UnitSystem): number {
+  metric = dialFamily(metric);
   if (metric === 'speed') return units === 'imperial' ? (value * METERS_PER_MILE) / 3600 : (value * 1000) / 3600;
   if (metric === 'pace') return units === 'imperial' ? (value * 1000) / METERS_PER_MILE : value;
   return value;
@@ -35,6 +44,7 @@ export function fromDialUnits(metric: OverlayMetricKey | undefined, value: numbe
 
 /** What a typed or stored number is in once converted, for a speed or a pace; `undefined` for the rest, whose unit is the stored one. */
 export function dialUnitLabel(metric: OverlayMetricKey | undefined, units: UnitSystem): string | undefined {
+  metric = dialFamily(metric);
   if (metric === 'speed') return units === 'imperial' ? 'mph' : 'km/h';
   if (metric === 'pace') return units === 'imperial' ? 'min/mi' : 'min/km';
   return undefined;
@@ -116,7 +126,7 @@ export function paceStep(span: number): number {
 
 /** The automatic step for a span in a metric's dial units. */
 function autoStep(metric: OverlayMetricKey | undefined, span: number): number {
-  return metric === 'pace' ? paceStep(span) : niceStep(span);
+  return dialFamily(metric) === 'pace' ? paceStep(span) : niceStep(span);
 }
 
 /** Metrics that cannot go below zero: their default range starts there at the lowest. */
@@ -132,6 +142,15 @@ const NON_NEGATIVE = new Set<string>([
   'metric:moving',
   'metric:climb',
   'metric:heading',
+  // AV-1025. Totals, rates of a total and times so far do not go below zero; a vertical speed and an elevation may.
+  'metric:maxSpeed',
+  'metric:maxHeartRate',
+  'metric:maxPower',
+  'metric:averageSpeed',
+  'metric:averageMovingSpeed',
+  'metric:averagePace',
+  'metric:averageMovingPace',
+  'metric:stopwatch',
 ]);
 
 /**
@@ -238,7 +257,7 @@ export function dialTicks(range: { min: number; max: number }, setting: Pick<Ove
  * fewest decimals the step needs (none for a step of a whole number).
  */
 export function dialTickLabel(metric: OverlayMetricKey | undefined, value: number, step: number): string {
-  if (metric === 'pace') {
+  if (dialFamily(metric) === 'pace') {
     const total = Math.max(0, Math.round(value));
     return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
   }

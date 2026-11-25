@@ -29,6 +29,7 @@ import {
   type CanvasElementKey,
   ELEVATION_MISSING,
   EMPTY_CANVAS_DRAFT,
+  FIGURE_NAMES,
   type CanvasDraft,
   type CanvasState,
   type LayerMove,
@@ -104,7 +105,7 @@ import {
 } from '../overlay/zones';
 import { ElementRows } from './ElementRows';
 import { ColorField } from './ColorField';
-import { ChartEditor, CompassEditor, DialEditor, GradientEditor, SplitsEditor } from './MomentEditors';
+import { ChartEditor, ClockEditor, CompassEditor, DialEditor, GradientEditor, SplitsEditor, StopwatchEditor } from './MomentEditors';
 import { RouteInsetEditor } from './RouteInsetEditor';
 import { routeInsetOf } from '../overlay/routeInset';
 import { insetStyleUrl } from '../overlay/insetMapStyle';
@@ -265,8 +266,10 @@ export function CustomCanvas({
       buildOverlayTimeline(activity, {
         video: { durationSeconds, start: video?.timing?.start },
         offsetSeconds: video ? offsetSeconds : 0,
+        // AV-1025. A stopwatch counts from the cut's start here as it does in the exports.
+        cutStartSeconds: video ? trim?.startSeconds : undefined,
       }),
-    [activity, durationSeconds, video, offsetSeconds],
+    [activity, durationSeconds, video, offsetSeconds, trim?.startSeconds],
   );
   const timeline = host?.timeline ?? ownTimeline;
   const reportComponents = host?.onComponentsChange;
@@ -653,7 +656,7 @@ export function describeCanvasComponent(component: OverlayComponent): string {
     const name = component.display?.label?.trim();
     if (name) return name;
     if (source?.kind === 'metric') {
-      const base = { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade', climb: 'Climb so far', heading: 'Heading' }[source.metric];
+      const base = FIGURE_NAMES[source.metric];
       return component.type === 'gauge' ? `${base} gauge` : base;
     }
     return source?.kind === 'sensor' ? source.key : 'Figure';
@@ -668,7 +671,7 @@ export function describeCanvasComponent(component: OverlayComponent): string {
     const name = component.display?.label?.trim();
     if (name) return name;
     const source = component.source;
-    const base = source?.kind === 'metric' ? { speed: 'Speed', pace: 'Pace', distance: 'Distance', elapsed: 'Elapsed time', moving: 'Moving time', elevation: 'Elevation', heartRate: 'Heart rate', power: 'Power', cyclingCadence: 'Cycling cadence', runningCadence: 'Running cadence', temperature: 'Temperature', grade: 'Grade', climb: 'Climb so far', heading: 'Heading' }[source.metric] : source?.kind === 'sensor' ? source.key : 'Figure';
+    const base = source?.kind === 'metric' ? FIGURE_NAMES[source.metric] : source?.kind === 'sensor' ? source.key : 'Figure';
     return `${base} ${component.type}`;
   }
   if (component.type === 'splits') return component.display?.label?.trim() || 'Splits';
@@ -1185,7 +1188,7 @@ function ComponentEditor({
         return (laid.labelAdvance - laid.labelSize) / frame.width;
       })()
     : 0;
-  const numeric = component.source?.kind === 'metric' && !['pace', 'elapsed', 'moving', 'heading'].includes(component.source.metric);
+  const numeric = component.source?.kind === 'metric' && !['pace', 'elapsed', 'moving', 'heading', 'averagePace', 'averageMovingPace', 'stopwatch', 'clock'].includes(component.source.metric);
 
   const smoothingField = canSmooth(component.source) && (
     <PercentField
@@ -1366,6 +1369,29 @@ function ComponentEditor({
               </select>
             </div>
           )}
+          {component.source?.kind === 'metric' && (component.source.metric === 'elevationLowest' || component.source.metric === 'elevationHighest') && (
+            <div className="overlay-controls__field">
+              <label htmlFor={`${id}-of-total`}>Show</label>
+              <select
+                id={`${id}-of-total`}
+                className="select"
+                value={component.display?.ofTotal ? 'total' : 'so-far'}
+                onChange={(event) =>
+                  updateFigure((current) => {
+                    const display = { ...current.display };
+                    if (event.target.value === 'total') display.ofTotal = true;
+                    else delete display.ofTotal;
+                    return { ...current, display };
+                  })
+                }
+              >
+                <option value="so-far">{component.source.metric === 'elevationLowest' ? 'The lowest so far' : 'The highest so far'}</option>
+                <option value="total">{component.source.metric === 'elevationLowest' ? 'The lowest so far, of the whole activity’s' : 'The highest so far, of the whole activity’s'}</option>
+              </select>
+            </div>
+          )}
+          {isData && component.source?.kind === 'metric' && component.source.metric === 'stopwatch' && <StopwatchEditor id={id} component={component} onChange={(patch) => update(patch)} />}
+          {isData && component.source?.kind === 'metric' && component.source.metric === 'clock' && <ClockEditor id={id} component={component} onChange={(patch) => updateFigure(patch)} />}
           {isData && smoothingField}
           {numeric && component.type !== 'compass' && (
             <div className="overlay-controls__field">

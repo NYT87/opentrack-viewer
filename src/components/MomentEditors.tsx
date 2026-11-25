@@ -13,6 +13,8 @@ import {
   setGradientBand,
 } from '../overlay/gradient';
 import { STORED_UNITS } from '../overlay/contract';
+import { CLOCK_OFFSET_LIMITS, DEFAULT_CLOCK, STOPWATCH_START_MAX_SECONDS, formatStopwatch, parseClockSetting, type ClockZoneChoice } from '../overlay/liveFigures';
+import { formatUtcOffset } from '../overlay/dateFormat';
 import {
   CHART_WINDOW_MAX,
   DEFAULT_CHART,
@@ -536,6 +538,156 @@ export function SplitsEditor({
       <ColorField id={`${id}-splits-faster`} label="Faster colour" value={setting.fasterColor} onChange={(fasterColor) => withSplits({ fasterColor })} />
       <ColorField id={`${id}-splits-slower`} label="Slower colour" value={setting.slowerColor} onChange={(slowerColor) => withSplits({ slowerColor })} />
       <p className="overlay-controls__hint">A split is faster or slower when its pace differs from the one before it by half a second per kilometre or mile or more.</p>
+    </>
+  );
+}
+
+/** Seconds from "m:ss" or "h:mm:ss", or a plain number of seconds; `undefined` while it reads as none. */
+export function parseTimeOfActivity(text: string): number | undefined {
+  const clock = /^\s*(?:(\d+):)?(\d+):(\d{1,2})\s*$/.exec(text);
+  if (clock) {
+    const [, hours, minutes, seconds] = clock;
+    if (Number(seconds) >= 60 || (hours !== undefined && Number(minutes) >= 60)) return undefined;
+    return Number(hours ?? 0) * 3600 + Number(minutes) * 60 + Number(seconds);
+  }
+  return /^\s*\d+\s*$/.test(text) ? Number(text) : undefined;
+}
+
+/** Minutes east of UTC from "+5:30", "-3", "9" or "-03:30"; `undefined` while it reads as none or is not a real offset. */
+export function parseUtcOffset(text: string): number | undefined {
+  const match = /^\s*([-+\u2212])?\s*(\d{1,2})(?::(\d{2}))?\s*$/.exec(text);
+  if (!match) return undefined;
+  const minutes = Number(match[3] ?? 0);
+  if (minutes >= 60) return undefined;
+  const total = (match[1] === '-' || match[1] === '\u2212' ? -1 : 1) * (Number(match[2]) * 60 + minutes);
+  return total >= CLOCK_OFFSET_LIMITS.min && total <= CLOCK_OFFSET_LIMITS.max ? total : undefined;
+}
+
+/** A text field that passes on what reads as a value as it is typed, and shows where it really went when it is left (TD-074). */
+function ParsedField({
+  id,
+  label,
+  hint,
+  placeholder,
+  shown,
+  parse,
+  onValue,
+  onBlank,
+}: {
+  id: string;
+  label: string;
+  hint?: string;
+  placeholder: string;
+  shown: string;
+  parse: (text: string) => number | undefined;
+  onValue: (value: number) => void;
+  /** Called when the field is emptied: the default. */
+  onBlank?: () => void;
+}) {
+  const [draft, setDraft] = useState<string | undefined>();
+  const invalid = draft !== undefined && draft.trim() !== '' && parse(draft) === undefined;
+  return (
+    <div className="overlay-controls__field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        aria-invalid={invalid || undefined}
+        className="input"
+        type="text"
+        autoComplete="off"
+        placeholder={placeholder}
+        value={draft ?? shown}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          if (event.target.value.trim() === '') {
+            onBlank?.();
+            return;
+          }
+          const parsed = parse(event.target.value);
+          if (parsed !== undefined) onValue(parsed);
+        }}
+        onBlur={() => setDraft(undefined)}
+      />
+      {hint && (
+        <p id={`${id}-hint`} className="overlay-controls__hint">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * AV-1025 (TD-094). A stopwatch: where it starts, in the activity's own time (m:ss, or h:mm:ss). Empty
+ * is the default, the start of the cut, or of the activity where nothing is cut.
+ */
+export function StopwatchEditor({ id, component, onChange }: { id: string; component: OverlayComponent; onChange: Patch }) {
+  const start = component.stopwatch?.startSeconds;
+  return (
+    <ParsedField
+      id={`${id}-stopwatch-start`}
+      label="Starts at (into the activity)"
+      hint="m:ss or h:mm:ss. Empty starts it at the start of the cut, or of the activity where nothing is cut. It reads 0:00 before then."
+      placeholder="Start of the cut"
+      shown={start === undefined ? '' : formatStopwatch(start)}
+      parse={(text) => {
+        const seconds = parseTimeOfActivity(text);
+        return seconds !== undefined && seconds <= STOPWATCH_START_MAX_SECONDS ? seconds : undefined;
+      }}
+      onValue={(startSeconds) => onChange((current) => ({ ...current, stopwatch: { startSeconds } }))}
+      onBlank={() =>
+        onChange((current) => {
+          const next = { ...current };
+          delete next.stopwatch;
+          return next;
+        })
+      }
+    />
+  );
+}
+
+/**
+ * AV-1025 (TD-094). A clock: the zone (the reader's own, UTC, or an offset typed in: a file carries UTC only, and
+ * no service is asked), 24 or 12 hours, seconds, and the date.
+ */
+export function ClockEditor({ id, component, onChange }: { id: string; component: OverlayComponent; onChange: Patch }) {
+  const setting = component.clock ?? DEFAULT_CLOCK;
+  const withClock = (patch: Partial<typeof setting>) =>
+    onChange((current) => ({ ...current, clock: parseClockSetting({ ...(current.clock ?? DEFAULT_CLOCK), ...patch }) }));
+  return (
+    <>
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-clock-zone`}>Time zone</label>
+        <select id={`${id}-clock-zone`} className="select" value={setting.zone} onChange={(event) => withClock({ zone: event.target.value as ClockZoneChoice })}>
+          <option value="reader">Your time zone</option>
+          <option value="utc">UTC</option>
+          <option value="offset">An offset from UTC</option>
+        </select>
+      </div>
+      {setting.zone === 'offset' && (
+        <ParsedField
+          id={`${id}-clock-offset`}
+          label="Offset from UTC (hours:minutes)"
+          hint="For example +5:30 or -3. From -12:00 to +14:00."
+          placeholder="+1:00"
+          shown={setting.offsetMinutes ? formatUtcOffset(setting.offsetMinutes).replace('UTC', '').replace('\u2212', '-') : '0:00'}
+          parse={parseUtcOffset}
+          onValue={(offsetMinutes) => withClock({ offsetMinutes })}
+        />
+      )}
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.hour12} onChange={(event) => withClock({ hour12: event.target.checked })} />
+        <span>12-hour clock</span>
+      </label>
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.seconds} onChange={(event) => withClock({ seconds: event.target.checked })} />
+        <span>Show the seconds</span>
+      </label>
+      <label className="overlay-controls__choice">
+        <input type="checkbox" checked={setting.date} onChange={(event) => withClock({ date: event.target.checked })} />
+        <span>Show the date</span>
+      </label>
     </>
   );
 }

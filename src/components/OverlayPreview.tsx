@@ -136,8 +136,10 @@ export function OverlayPreview({
       buildOverlayTimeline(activity, {
         video: { durationSeconds, start: video.timing?.start },
         offsetSeconds,
+        // AV-1025. A stopwatch counts from the cut's start, in the preview as in the export.
+        cutStartSeconds: trim?.startSeconds,
       }),
-    [activity, durationSeconds, video.timing?.start, offsetSeconds],
+    [activity, durationSeconds, video.timing?.start, offsetSeconds, trim?.startSeconds],
   );
   const sample = timeline.sampleAt(time);
   // The template follows the controls and what the activity has. With no

@@ -1,7 +1,7 @@
 # Gauges
 
 Section `gauge` (`GaugeProps`): everything a [figure](figures.md) has (`source` with its `kind`, `metric` and `key`, `value`, `unit`,
-`unitSystem`, `label`, `text`, `figure`, `smoothingWindowSeconds`, `totalDistanceMeters`), with
+`unitSystem`, `label`, `text`, `figure`, `smoothingWindowSeconds`, `totalDistanceMeters`, `totalElevationMeters`), with
 `section` set to `'gauge'`, and the range. The shared props are in the [README](README.md): `box` (`x`, `y`, `width`, `height`), `frame`,
 `fontPx`, `style` (`textColor`, `accentColor`, `backgroundOpacity`, `fontScale`), `videoTimeSeconds` and `activityElapsedSeconds`.
 

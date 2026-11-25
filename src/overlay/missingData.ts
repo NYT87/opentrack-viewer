@@ -27,6 +27,19 @@ export const METRIC_MISSING: Record<OverlayMetricKey, string> = {
   grade: 'This activity has no gradient: it needs a recorded grade, or elevation and 50 m of distance.',
   climb: ELEVATION_MISSING,
   heading: 'This activity has no heading: it needs positions, and 20 m of movement.',
+  // AV-1025 (TD-094).
+  maxSpeed: 'This activity has no speed: it needs positions or a recorded speed, and times.',
+  maxHeartRate: 'This activity has no heart rate.',
+  maxPower: 'This activity has no power.',
+  averageSpeed: 'This activity has no average speed: it needs a distance and times.',
+  averageMovingSpeed: 'This activity has no average moving speed: it needs a distance and times, and some movement.',
+  averagePace: 'This activity has no average pace: it needs a distance and times, and some movement.',
+  averageMovingPace: 'This activity has no average moving pace: it needs a distance and times, and some movement.',
+  verticalSpeed: ELEVATION_MISSING,
+  elevationLowest: ELEVATION_MISSING,
+  elevationHighest: ELEVATION_MISSING,
+  stopwatch: 'This activity has no timestamps.',
+  clock: 'This activity has no timestamps, so it has no time of day.',
 };
 
 /** AV-1021. Why an activity cannot be split, for a predefined entry that needs splits: the file's laps with start times, or a distance. */

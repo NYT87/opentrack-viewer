@@ -391,3 +391,34 @@ describe('a map in a route inset, in the transparent video (AV-1023, TD-092)', (
     expect(session.close).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('a stopwatch in the transparent video (AV-1025)', () => {
+  it('counts from the start of the cut the request carries, and from the activity’s start without one', async () => {
+    const rider = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: new Date(i * 1000), distanceMeters: i * 5 })));
+    const stopwatch = {
+      id: 'stopwatch',
+      type: 'text' as const,
+      visible: true,
+      rect: { x: 0, y: 0, width: 0.5, height: 0.5 },
+      unitMode: 'auto' as const,
+      style: {},
+      source: { kind: 'metric' as const, metric: 'stopwatch' as const },
+    };
+    const base = { width: 32, height: 18, fps: 1, frameCount: 4, videoDurationSeconds: 10, offsetSeconds: 0, units: 'metric' as const, template: canvasTemplate([stopwatch]), activity: rider };
+    const texts = async (trimStartSeconds?: number) => {
+      const written: string[] = [];
+      const ctx = new Proxy({} as Record<string, unknown>, {
+        get: (target, key: string) => (key in target ? target[key] : (...args: unknown[]) => void (key === 'fillText' && written.push(String(args[0])))),
+        set: (target, key: string, value) => ((target[key] = value), true),
+      }) as unknown as OverlayContext2D;
+      const fake = fakes();
+      const job = startWebmExport({ ...base, ...(trimStartSeconds !== undefined ? { trimStartSeconds } : {}) }, () => undefined, { ...fake.deps, setUp: (...args) => ({ ...fake.deps.setUp(...args), ctx }) });
+      await job.done;
+      return written.filter((text) => /^\d+:\d\d$/.test(text));
+    };
+    expect(await texts()).toEqual(['0:00', '0:01', '0:02', '0:03']);
+    expect(await texts(5)).toEqual(['0:00', '0:01', '0:02', '0:03']);
+    // The frames are drawn from second 5: without the cut the stopwatch would read 0:05 there.
+    expect(await texts(5)).not.toContain('0:05');
+  });
+});
