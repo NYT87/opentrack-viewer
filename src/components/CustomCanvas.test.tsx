@@ -151,7 +151,7 @@ describe('the custom canvas (AV-1011)', () => {
     const lines = within(within(region()).getByRole('list', { name: 'Not in this activity' })).getAllByRole('listitem');
     // AV-1020: each reason once, after every name it rules out, in the Add list's order.
     const heart = lines.find((line) => /This activity has no heart rate\.$/.test(line.textContent ?? ''))!;
-    expect(heart.textContent).toMatch(/^Heart rate, Heart rate gauge, Heart rate zones,.*Heart rate against time: This activity has no heart rate\.$/);
+    expect(heart.textContent).toMatch(/^Heart rate, Max heart rate so far, Heart rate gauge, Heart rate zones,.*Heart rate against time, Max heart rate so far \(Any sport\): This activity has no heart rate\.$/);
     expect(lines.filter((line) => /no heart rate/.test(line.textContent ?? ''))).toHaveLength(1);
   });
 
@@ -371,6 +371,73 @@ describe('the custom canvas (AV-1011)', () => {
     expect((await layoutJson()).template.components[0]).not.toMatchObject({ display: { ofTotal: true } });
     await add('Speed');
     expect(screen.queryByLabelText('Show')).not.toBeInTheDocument();
+  });
+
+  it('shows the lowest or the highest elevation so far, or so far of the whole activity’s, and a stopwatch and a clock have their own settings (AV-1025)', async () => {
+    setup(ride((i) => ({ elevationMeters: 100 + (i % 20) })));
+    await add('Highest elevation so far');
+    expect(field('Show')).toHaveValue('so-far');
+    await userEvent.selectOptions(field('Show'), 'total');
+    expect((await layoutJson()).template.components[0]).toMatchObject({ source: { metric: 'elevationHighest' }, display: { ofTotal: true } });
+    await userEvent.selectOptions(field('Show'), 'so-far');
+    expect((await layoutJson()).template.components[0]).not.toMatchObject({ display: { ofTotal: true } });
+    // The decimals are offered for it, as for a plain elevation; none of the others' settings are.
+    expect(screen.queryByLabelText('Starts at (into the activity)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Time zone')).not.toBeInTheDocument();
+  });
+
+  it('sets a stopwatch’s start as m:ss or h:mm:ss, empty for the default, and says what a value it cannot read is (AV-1025)', async () => {
+    setup();
+    await add('Stopwatch');
+    const start = () => field('Starts at (into the activity)');
+    expect(start()).toHaveValue('');
+    expect(start()).toHaveAttribute('placeholder', 'Start of the cut');
+    await userEvent.type(start(), '1:05');
+    expect((await layoutJson()).template.components[0]).toMatchObject({ source: { metric: 'stopwatch' }, stopwatch: { startSeconds: 65 } });
+    await userEvent.clear(start());
+    await userEvent.type(start(), '1:02:03');
+    expect((await layoutJson()).template.components[0]).toMatchObject({ stopwatch: { startSeconds: 3723 } });
+    // Typing what is not a time is marked and keeps the last value that read (1:07, on the way to 1:75); leaving the field shows where it really is.
+    await userEvent.clear(start());
+    await userEvent.type(start(), '1:75');
+    expect(start()).toHaveAttribute('aria-invalid', 'true');
+    expect((await layoutJson()).template.components[0]).toMatchObject({ stopwatch: { startSeconds: 67 } });
+    await userEvent.tab();
+    expect(start()).toHaveValue('1:07');
+    await userEvent.clear(start());
+    await userEvent.type(start(), '2:00');
+    await userEvent.tab();
+    expect(start()).toHaveValue('2:00');
+    await userEvent.clear(start());
+    expect((await layoutJson()).template.components[0]).not.toHaveProperty('stopwatch');
+  });
+
+  it('sets a clock’s time zone, offset, hours, seconds and date, and each is a field a keyboard reaches (AV-1025)', async () => {
+    setup();
+    await add('Clock');
+    expect(field('Time zone')).toHaveValue('reader');
+    expect(screen.queryByLabelText('Offset from UTC (hours:minutes)')).not.toBeInTheDocument();
+    expect(field('12-hour clock')).not.toBeChecked();
+    expect(field('Show the seconds')).toBeChecked();
+    expect(field('Show the date')).not.toBeChecked();
+    expect((await layoutJson()).template.components[0]).not.toHaveProperty('clock');
+
+    await userEvent.selectOptions(field('Time zone'), 'offset');
+    expect(field('Offset from UTC (hours:minutes)')).toHaveValue('0:00');
+    await userEvent.clear(field('Offset from UTC (hours:minutes)'));
+    await userEvent.type(field('Offset from UTC (hours:minutes)'), '+5:30');
+    await userEvent.click(field('12-hour clock'));
+    await userEvent.click(field('Show the seconds'));
+    await userEvent.click(field('Show the date'));
+    expect((await layoutJson()).template.components[0]).toMatchObject({ source: { metric: 'clock' }, clock: { zone: 'offset', offsetMinutes: 330, hour12: true, seconds: false, date: true } });
+    // Another zone takes the offset with it.
+    await userEvent.selectOptions(field('Time zone'), 'utc');
+    expect(screen.queryByLabelText('Offset from UTC (hours:minutes)')).not.toBeInTheDocument();
+    expect((await layoutJson()).template.components[0]).toMatchObject({ clock: { zone: 'utc' } });
+    expect((await layoutJson()).template.components[0]!.clock).not.toHaveProperty('offsetMinutes');
+    // A clock's text is never smoothed, and has no decimals.
+    expect(screen.queryByLabelText('Smoothing (s)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Decimal places')).not.toBeInTheDocument();
   });
 
   describe('a figure’s label and value, styled apart (AV-1015, TD-083)', () => {

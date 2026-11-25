@@ -7,6 +7,12 @@ import { OverlayPreview } from './OverlayPreview';
 import { DEFAULT_OVERLAY_CONTROLS } from '../overlay/presets';
 import { makeActivity } from '../test/helpers/activity';
 import type { OverlayVideo } from '../state/overlayStore';
+import { buildOverlayTimeline } from '../overlay/timeline';
+
+vi.mock('../overlay/timeline', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../overlay/timeline')>();
+  return { ...actual, buildOverlayTimeline: vi.fn(actual.buildOverlayTimeline) };
+});
 
 const T0 = new Date('2024-01-01T10:00:00Z');
 const at = (s: number) => new Date(T0.getTime() + s * 1000);
@@ -672,5 +678,27 @@ describe('the sync panel (TD-059)', () => {
     render(<Harness />);
     expect(screen.getByRole('slider', { name: 'Size' })).toHaveAttribute('aria-valuetext', expect.stringMatching(/%$/));
     expect(screen.getByRole('combobox', { name: 'Position' })).toBeInTheDocument();
+  });
+
+  it('does not rebuild the timeline when the cut moves, only the stopwatch’s zero follows it (AV-1025)', () => {
+    const source = activity();
+    const props = {
+      video,
+      activity: source,
+      offsetSeconds: 0,
+      onOffsetChange: () => {},
+      onTrimChange: () => {},
+      units: 'metric' as const,
+      controls: DEFAULT_OVERLAY_CONTROLS,
+      onControlsChange: () => {},
+    };
+    const { rerender } = render(<OverlayPreview {...props} trim={{ startSeconds: 1 }} />);
+    const builds = vi.mocked(buildOverlayTimeline).mock.calls.length;
+    rerender(<OverlayPreview {...props} trim={{ startSeconds: 2 }} />);
+    rerender(<OverlayPreview {...props} trim={{ startSeconds: 3, endSeconds: 9 }} />);
+    expect(vi.mocked(buildOverlayTimeline).mock.calls.length).toBe(builds);
+    // A different offset is a different timeline.
+    rerender(<OverlayPreview {...props} offsetSeconds={1} trim={{ startSeconds: 3 }} />);
+    expect(vi.mocked(buildOverlayTimeline).mock.calls.length).toBe(builds + 1);
   });
 });

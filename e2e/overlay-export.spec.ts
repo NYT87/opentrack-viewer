@@ -45,6 +45,12 @@ test('exports a transparent PNG sequence of the overlay, drawn and stored on thi
   const panel = await openWithFiles(page, testInfo.outputDir);
 
   await panel.getByLabel('Frame rate').selectOption('10');
+  // AV-1026. The HERO8 clip's own timecode track, said before the export starts.
+  await expect(panel.getByTestId('timecode-note')).toContainText(
+    "Timecode at the first frame: 15:40:28:28 (from the video's timecode track).",
+  );
+  // Source numbering is offered only at the source's own rate, which 10 fps is not.
+  await expect(panel.getByRole('checkbox', { name: 'Number the frames by the source’s frames' })).toBeDisabled();
   const plan = (await panel.getByTestId('export-plan').textContent()) ?? '';
   const planned = /(\d+) frames, (\d+) × (\d+)/.exec(plan)!;
   const [frameCount, width, height] = [Number(planned[1]), Number(planned[2]), Number(planned[3])];
@@ -79,6 +85,15 @@ test('exports a transparent PNG sequence of the overlay, drawn and stored on thi
   expect(metadata).toMatchObject({ format: 'png-sequence', transparent: true, width, height, frameRate: 10, frameCount });
   expect(Math.abs(metadata.durationSeconds - metadata.videoDurationSeconds)).toBeLessThan(1 / 10);
   expect(JSON.stringify(metadata)).not.toMatch(/hero8|\.mp4|\.gpx/);
+  // AV-1026. The clip's timecode, as its own track states it: counter 1,692,868 at 29.97, non-drop.
+  expect(metadata.timecode).toEqual({
+    start: '15:40:28:28',
+    startFrame: 1_692_868,
+    frameRate: { numerator: 30000, denominator: 1001 },
+    dropFrame: false,
+    source: 'timecode-track',
+  });
+  expect(metadata.firstFrame).toBe('frame_000001.png');
 
   // Every frame is a PNG of the planned size.
   for (const frame of [frames[0]!, frames[frameCount >> 1]!, frames.at(-1)!]) {

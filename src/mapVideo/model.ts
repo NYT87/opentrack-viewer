@@ -76,6 +76,7 @@ export function buildMapVideoModel(activity: Activity, settings: MapVideoSetting
     introSeconds: settings.intro.enabled ? settings.intro.seconds : 0,
     outroSeconds: settings.outro.enabled ? settings.outro.seconds : 0,
     holds,
+    stoppedSpeedMps: activity.cleanup?.pause.speedThresholdMps,
   });
   if (!built.ok) return built;
   const { timeline } = built;

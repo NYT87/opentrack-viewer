@@ -249,6 +249,27 @@ describe('growing a figure’s box to fit its text (AV-1015, TD-083)', () => {
     expect(rectOf(smaller)).toEqual(rectOf(bigger));
   });
 
+  it('lays a stopwatch out at the widest it reads, whatever start it has, and a clock wider with its date and its 12-hour mark (AV-1025)', () => {
+    const source = (metric: 'stopwatch' | 'clock') => ({ source: { kind: 'metric' as const, metric } });
+    const plain = rectOf(grow([box('a', small, source('stopwatch'))]));
+    // A start of its own would read 0:00 at the widest value's moment: the layout is the same as without one.
+    expect(rectOf(grow([box('a', small, { ...source('stopwatch'), stopwatch: { startSeconds: 600 } })]))).toEqual(plain);
+    // An hour or more of stopwatch is wider than a plain "m:ss".
+    expect(plain.width * frame.width).toBeGreaterThan(2 * 0.6 * em + '0:00'.length * 1.1 * em * 0.55);
+    const time = rectOf(grow([box('a', small, source('clock'))]));
+    const withDate = rectOf(grow([box('a', small, { ...source('clock'), clock: { zone: 'utc', hour12: true, seconds: true, date: true } })]));
+    expect(withDate.width).toBeGreaterThan(time.width);
+    expect(time.width * frame.width).toBeGreaterThanOrEqual(2 * 0.6 * em + '20:48:28'.length * 1.1 * em * 0.55 - 1e-6);
+  });
+
+  it('lays a 12-hour clock out for its widest hour, and a clock with the date for a two-digit day, in any zone', () => {
+    const clock = (setting: object) => box('a', small, { source: { kind: 'metric' as const, metric: 'clock' as const }, clock: { zone: 'utc', hour12: true, seconds: true, date: false, ...setting } as OverlayComponent['clock'] });
+    const width = (setting: object) => rectOf(grow([clock(setting)])).width * frame.width;
+    // "10:48:28 PM" has one digit more than "8:48:28 PM".
+    expect(width({})).toBeGreaterThanOrEqual(2 * 0.6 * em + '10:48:28 PM'.length * 1.1 * em * 0.55 - 1e-6);
+    expect(width({ zone: 'offset', offsetMinutes: 600, date: true })).toBeGreaterThanOrEqual(2 * 0.6 * em + '28 Sep 2026, 10:48:28 PM'.length * 1.1 * em * 0.55 - 1e-6);
+  });
+
   it('counts the label only while it is shown, and a gauge’s track', () => {
     const wide = box('a', { x: 0, y: 0, width: 0.01, height: 0.01 }, { display: { label: 'An exceedingly long label for a speed' } });
     const shown = rectOf(grow([wide]));

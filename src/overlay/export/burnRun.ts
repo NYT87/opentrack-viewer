@@ -102,6 +102,8 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
   const timeline = buildOverlayTimeline(request.activity, {
     video: { durationSeconds: request.videoDurationSeconds, start: request.videoStart },
     offsetSeconds: request.offsetSeconds,
+    // AV-1025. A stopwatch counts from the cut's start.
+    cutStartSeconds: request.trim?.start,
   });
   const renderer = createOverlayRenderer({
     template: request.template,

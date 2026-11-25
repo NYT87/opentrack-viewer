@@ -723,3 +723,110 @@ describe('a map in a route inset (AV-1023, TD-092)', () => {
     expect(start.mock.calls[0]).toHaveLength(2);
   });
 });
+
+const sourceTimecode = {
+  startFrame: 1800,
+  rate: { numerator: 30000, denominator: 1001 },
+  timebase: 30,
+  dropFrame: true,
+  source: 'timecode-track',
+} as const;
+
+const withTimecode = (timecode: OverlayVideo['timecode'] = sourceTimecode): OverlayVideo => ({
+  ...video,
+  timing: { durationSeconds: 10, frameIntervalSeconds: 1001 / 30000 },
+  timecode,
+});
+
+describe('the source’s timecode (AV-1026, TD-095)', () => {
+  it('says where the picture starts, and where that came from', () => {
+    setup({ video: withTimecode() });
+    expect(screen.getByTestId('timecode-note')).toHaveTextContent(
+      "Timecode at the first frame: 00:01:00;02 (from the video's timecode track).",
+    );
+    expect(screen.getByTestId('timecode-note')).toHaveTextContent('Drop-frame');
+  });
+
+  it('says it is from the creation time when it is', () => {
+    setup({ video: withTimecode({ ...sourceTimecode, dropFrame: false, source: 'creation-time' }) });
+    expect(screen.getByTestId('timecode-note')).toHaveTextContent('(from the file\'s creation time)');
+  });
+
+  it('says the source has none, and offers no source numbering', () => {
+    setup({ video });
+    expect(screen.getByTestId('timecode-note')).toHaveTextContent('The source has no timecode.');
+    const box = screen.getByRole('checkbox', { name: 'Number the frames by the source’s frames' });
+    expect(box).toBeDisabled();
+    expect(box).toHaveAccessibleDescription(/source has no timecode/);
+  });
+
+  it('adds the cut’s start to it, in whole source frames', () => {
+    // 2 s is 59.94 frames: 60, so 1800 + 60 = 1860, which is 00:01:02;02 (the minute's first two labels are skipped).
+    setup({ video: withTimecode(), trim: { startSeconds: 2, endSeconds: 6.5 } });
+    expect(screen.getByTestId('timecode-note')).toHaveTextContent('Timecode at the first frame: 00:01:02;02');
+  });
+
+  it('sends the timecode of the first frame with the request, and no numbering unless asked', async () => {
+    const { start } = setup({ video: withTimecode(), trim: { startSeconds: 2, endSeconds: 6.5 } });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    const request = start.mock.calls[0]![0] as { startTimecode: { startFrame: number }; numberFramesBySource?: boolean };
+    expect(request.startTimecode.startFrame).toBe(1860);
+    expect(request).not.toHaveProperty('numberFramesBySource');
+  });
+
+  it('numbers the frames by the source’s when asked, at the source’s frame rate', async () => {
+    const { start } = setup({ video: withTimecode() });
+    const box = screen.getByRole('checkbox', { name: 'Number the frames by the source’s frames' });
+    expect(box).not.toBeChecked();
+    expect(box).toBeEnabled();
+    await userEvent.click(box);
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]![0]).toMatchObject({ numberFramesBySource: true });
+  });
+
+  it('refuses source numbering at another frame rate, with the reason, and sends none', async () => {
+    const { start } = setup({ video: withTimecode() });
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Number the frames by the source’s frames' }));
+    await userEvent.selectOptions(within(panel()).getByLabelText('Frame rate'), '30');
+    const box = screen.getByRole('checkbox', { name: 'Number the frames by the source’s frames' });
+    expect(box).toBeDisabled();
+    expect(box).toHaveAccessibleDescription('Only at the source’s own frame rate, 29.97 fps.');
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]![0]).not.toHaveProperty('numberFramesBySource');
+  });
+
+  it('does not switch itself back on after the rate went away and came back', async () => {
+    setup({ video: withTimecode() });
+    const name = 'Number the frames by the source’s frames';
+    await userEvent.click(screen.getByRole('checkbox', { name }));
+    await userEvent.selectOptions(within(panel()).getByLabelText('Frame rate'), '30');
+    await userEvent.selectOptions(within(panel()).getByLabelText('Frame rate'), String(30000 / 1001));
+    expect(screen.getByRole('checkbox', { name })).not.toBeChecked();
+  });
+
+  it('marks a finished export stale when the numbering changes', async () => {
+    const { jobs } = setup({ video: withTimecode() });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await act(async () => {
+      jobs[0]!.resolve({ file: new File(['z'], 'a.zip'), bytes: 1, frameCount: 300, dispose: async () => undefined } as never);
+    });
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Number the frames by the source’s frames' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(/made with earlier settings/);
+  });
+
+  it('says a WebM does not hold it, and offers no numbering there', async () => {
+    const recordings = { then: (ok: (v: unknown) => void) => ok({ supported: true }) } as unknown as Promise<never>;
+    setup({ video: withTimecode(), probeWebm: (() => recordings) as never });
+    await userEvent.click(within(panel()).getByRole('radio', { name: /Transparent video \(WebM\)/ }));
+    expect(screen.getByTestId('timecode-note')).toHaveTextContent(
+      "A WebM has no timecode track, so this file does not hold it; the PNG sequence's metadata file does.",
+    );
+    expect(screen.queryByRole('checkbox', { name: /Number the frames/ })).toBeNull();
+  });
+
+  it('writes nothing about a clip with no video: no note, no option', () => {
+    setup({ video: undefined, size: { width: 1280, height: 720 }, media: undefined });
+    expect(screen.queryByTestId('timecode-note')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /Number the frames/ })).toBeNull();
+  });
+});

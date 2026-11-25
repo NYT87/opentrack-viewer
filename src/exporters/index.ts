@@ -196,7 +196,9 @@ export async function exportActivity(
     blob: new Blob([typeof body === 'string' ? body : new Uint8Array(body)], { type }),
     fileName: `${options.baseName ?? deriveBaseName(activity, source.isRange)}.${definition.extension}`,
     mimeType: definition.mimeType,
-    warnings,
+    // AV-1024 (TD-093). An export says whether it holds cleaned data: the clean-up's own notes ride
+    // along. An activity that was not cleaned has none, so nothing changes for it.
+    warnings: [...warnings, ...source.activity.warnings.filter((warning) => warning.code.startsWith('cleanup_'))],
   };
 }
 

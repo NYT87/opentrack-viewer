@@ -133,6 +133,7 @@ test('previews the route only with no request at all, and plays by keyboard', as
   await page.getByRole('radio', { name: /^Route only/ }).check();
   // From here: the page's own online map asked for its style before Route only was chosen, and under load that was seen as a leak.
   const requests = recordRequests(page);
+  const askedBefore = asked.length;
 
   const preview = page.getByRole('region', { name: 'Preview' });
   await expect(preview.locator('.map-video-preview__map canvas')).toBeVisible();
@@ -165,7 +166,8 @@ test('previews the route only with no request at all, and plays by keyboard', as
   await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
 
   expect(offOrigin(requests)).toEqual([]);
-  expect(asked).toEqual([]);
+  // The page's own online map asked for its style before Route only was chosen; from then on, nothing.
+  expect(asked.slice(askedBefore)).toEqual([]);
 });
 
 test('asks OpenFreeMap for the online map, and nothing else outside the page', async ({ page }) => {

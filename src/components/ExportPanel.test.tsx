@@ -5,6 +5,7 @@ import { ExportPanel } from './ExportPanel';
 import { parseGpx } from '../parsers/gpx/parseGpx';
 import { readFixture } from '../test/helpers/fixtures';
 import { makeActivity } from '../test/helpers/activity';
+import { DEFAULT_CLEANUP_SETTINGS, cleanActivity } from '../domain/cleanup';
 import { parseFit } from '../parsers/fit/parseFit';
 import { readBinaryFixture } from '../test/helpers/fixtures';
 
@@ -262,5 +263,17 @@ describe('ExportPanel with a KML source (AV-762)', async () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]?.fileName).toBe('Morning-track.tcx');
     expect(await saved[0]?.blob.text()).toContain('<TrainingCenterDatabase');
+  });
+
+  it('says a cleaned export holds cleaned data, and says nothing of the kind for a raw one (AV-1024)', async () => {
+    const cleaned = cleanActivity(activity, { ...DEFAULT_CLEANUP_SETTINGS, enabled: true }).activity;
+    const { unmount } = render(<ExportPanel activity={cleaned} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
+    expect(screen.getByTestId('export-cleanup-notes')).toHaveTextContent(/Cleaned: 0 points dropped, smoothing none/);
+    unmount();
+
+    render(<ExportPanel activity={activity} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Rewrite as GPX' }));
+    expect(screen.queryByTestId('export-cleanup-notes')).not.toBeInTheDocument();
   });
 });

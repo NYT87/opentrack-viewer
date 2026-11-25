@@ -406,6 +406,39 @@ describe('the contract adapter (AV-1017)', () => {
     expect(get('decimals').label).toBe('My speed');
   });
 
+  it('gives the figures so far in the stored units, the elevations of the whole activity on request, a stopwatch and a clock (AV-1025)', () => {
+    const sample = timeline.sampleAt(30)!;
+    const get = (item: OverlayComponent, extra: Partial<ContractContext> = {}) => contractPropsFor(template, item, sample, timeline, context(activity, extra)) as FigureProps;
+    // The ride climbs 1 m a second (and wobbles by up to 3): 132 m at 30 s, 162 m at its highest, 100 m at the start.
+    const highest = get(metric('hi', 'elevationHighest'));
+    expect(highest).toMatchObject({ value: 132, unit: 'm', label: 'Highest elevation', text: '132 m' });
+    expect('totalElevationMeters' in highest).toBe(false);
+    const ofTotal = get(metric('hi-total', 'elevationHighest', { display: { ofTotal: true } }));
+    expect(ofTotal).toMatchObject({ value: 132, text: '132 / 162 m', totalElevationMeters: 162 });
+    expect(get(metric('lo-total', 'elevationLowest', { display: { ofTotal: true } }))).toMatchObject({ text: '100 / 100 m', totalElevationMeters: 100 });
+    expect(get(metric('hi-total', 'elevationHighest', { display: { ofTotal: true }, unitMode: 'imperial' })).text).toBe('433 / 531 ft');
+    // Only the elevations have a whole-activity figure: a distance's is its own.
+    expect('totalElevationMeters' in get(metric('d', 'distance', { display: { ofTotal: true } }))).toBe(false);
+    expect('totalElevationMeters' in get(metric('s', 'maxSpeed', { display: { ofTotal: true } }))).toBe(false);
+
+    expect(get(metric('max', 'maxSpeed'))).toMatchObject({ unit: 'm/s', text: formatSpeed(get(metric('max', 'maxSpeed')).value, 'metric') });
+    expect(get(metric('vs', 'verticalSpeed'))).toMatchObject({ unit: 'm/s', text: expect.stringMatching(/^[+-]\d+ m\/min$/) });
+    expect(get(metric('vs', 'verticalSpeed', { unitMode: 'imperial' })).text).toMatch(/ft\/min$/);
+
+    // A stopwatch from the activity's start reads the elapsed time; from a start of its own, the time since.
+    expect(get(metric('sw', 'stopwatch'))).toMatchObject({ value: 30, unit: 's', text: '0:30' });
+    expect(get(metric('sw', 'stopwatch', { stopwatch: { startSeconds: 12 } }))).toMatchObject({ value: 18, text: '0:18' });
+    expect(get(metric('sw', 'stopwatch', { stopwatch: { startSeconds: 45 } }))).toMatchObject({ value: 0, text: '0:00' });
+
+    // The clock is the activity's start (08:00:00 UTC) and 30 s, in the zone the reader chose.
+    const clock = (setting?: OverlayComponent['clock'], extra: Partial<ContractContext> = {}) => get(metric('c', 'clock', setting ? { clock: setting } : {}), extra);
+    expect(clock()).toMatchObject({ value: (T0 + 30_000) / 1000, unit: 's', text: '08:00:30' });
+    expect(clock(undefined, { readerTimeZone: 'America/New_York' }).text).toBe('04:00:30');
+    expect(clock({ zone: 'utc', hour12: true, seconds: false, date: false }, { readerTimeZone: 'America/New_York' }).text).toBe('8:00 AM');
+    expect(clock({ zone: 'offset', offsetMinutes: 330, hour12: false, seconds: true, date: true }).text).toBe('24 Sep 2026, 13:30:30');
+    expect(clock({ zone: 'offset', offsetMinutes: -210, hour12: true, seconds: true, date: false }).text).toBe('4:30:30 AM');
+  });
+
   it('gives a gauge its range and the same fraction the renderer resolved, clamped', () => {
     const sample = timeline.sampleAt(20)!;
     for (const item of [template.components.find((c) => c.id === 'gauge-speed')!, template.components.find((c) => c.id === 'sensor-gauge')!]) {

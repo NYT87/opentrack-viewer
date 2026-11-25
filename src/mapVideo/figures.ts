@@ -58,7 +58,7 @@ export function mapVideoOverlayTimeline(activity: Activity, model: MapVideoModel
   const climbBefore = trimmed >= 0 ? (elevationClimb(activity.points).gainSoFar[trimmed] ?? 0) : 0;
   const length = timeline.lengthSeconds;
 
-  const sampleAt = (videoSeconds: number): OverlaySample | undefined => {
+  const sampleAt = (videoSeconds: number, only?: string): OverlaySample | undefined => {
     if (base.unavailable || firstMs === undefined) return undefined;
     // The timeline and the marker's place only: a figure's smoothing samples this up to 121 times a frame (AV-1016), and the camera and the revealed line are not needed for a value.
     const sampled = timeline.at(Math.min(length, Math.max(0, videoSeconds)));
@@ -69,7 +69,7 @@ export function mapVideoOverlayTimeline(activity: Activity, model: MapVideoModel
       : undefined;
     const atMs = pause?.startTime ?? frame.position.time;
     if (atMs === undefined) return undefined;
-    const sample = base.sampleAt((atMs - firstMs) / 1000);
+    const sample = base.sampleAt((atMs - firstMs) / 1000, only);
     if (!sample) return undefined;
     const values = { ...sample.values };
     if (pause) {

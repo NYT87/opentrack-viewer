@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Activity } from '../domain/activity';
+import { CleanupNote } from './CleanupPanel';
 import { formatDuration, type UnitSystem } from '../domain/units';
 import type { ExportOutput } from '../overlay/export/client';
 import { isOverlayExportError } from '../overlay/export/errors';
@@ -241,6 +242,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
   return (
     <section className="prose map-video-export" aria-label="Make the video">
       <h3 className="prose__title">Make the video</h3>
+      <CleanupNote activity={activity} exporting />
       <p>
         Every frame is drawn with all of its map and encoded in this tab; nothing is uploaded. Keep this tab in front
         while it runs: a hidden tab stops the map from drawing, and the video waits until the tab is back.

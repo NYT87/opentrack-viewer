@@ -119,6 +119,74 @@ describe('figures on the map video\'s clock (AV-1207)', () => {
   });
 });
 
+describe('the figures so far over the map video (AV-1025)', () => {
+  const model = modelOf(ride, { intro: { enabled: true, seconds: 2 }, outro: { enabled: true, seconds: 2 } });
+  const timeline = mapVideoOverlayTimeline(ride, model);
+  const startMs = ride.points[0]!.time!.getTime();
+  const key = (name: string) => `metric:${name}`;
+
+  it('read where the marker is, as a source video’s do: a maximum, an average, the clock and the stopwatch', () => {
+    for (const t of [3, 4.5, 6]) {
+      const sample = timeline.sampleAt(t)!;
+      const elapsed = (model.at(t).position.time! - startMs) / 1000;
+      // Heart rate and speed climb the whole ride, so the maximum so far is the moment's own value.
+      expect(sample.values[key('maxHeartRate')]).toBeCloseTo(100 + elapsed, 3);
+      expect(sample.values[key('maxSpeed')]).toBeCloseTo(4 + 0.2 * elapsed, 3);
+      expect(sample.values[key('stopwatch')]).toBeCloseTo(elapsed, 6);
+      expect(sample.values[key('clock')]).toBeCloseTo(startMs / 1000 + elapsed, 6);
+      expect(sample.values[key('averageSpeed')]).toBeCloseTo(sample.values['metric:distance']! / elapsed, 6);
+      expect(sample.values[key('elevationHighest')]).toBeCloseTo(100 + elapsed, 3);
+    }
+    // The intro shows the start: nothing has been ridden, so there is no average yet, and the clock is the start's.
+    expect(timeline.sampleAt(0.5)!.values[key('averageSpeed')]).toBeUndefined();
+    expect(timeline.sampleAt(0.5)!.values[key('clock')]).toBeCloseTo(startMs / 1000, 6);
+  });
+
+  it('hold through a shortened stop: the clock and the stopwatch at the stop’s start, the rate of ascent at zero', () => {
+    const points: TestPoint[] = straightNorth(1000, 10, 5);
+    const t = points[points.length - 1]!.second!;
+    for (let s = 5; s <= 600; s += 5) points.push({ north: 1000, east: 0, second: t + s });
+    for (const point of straightNorth(1000, 10, 5).slice(1)) points.push({ north: 1000 + point.north, east: 0, second: t + 600 + point.second! });
+    const stopped = activityThrough(points);
+    stopped.points.forEach((point, i) => {
+      point.elevationMeters = 100 + Math.min(i, 20);
+    });
+    const paused = modelOf(stopped, { lengthSeconds: 30, timing: { mode: 'time', pauseBeatSeconds: 2 } });
+    const [pause] = paused.timeline.pauses;
+    const clock = mapVideoOverlayTimeline(stopped, paused);
+    const first = stopped.points[0]!.time!.getTime();
+    const into = paused.timeline.introSeconds + pause!.startSeconds;
+    for (const d of [0.1, 0.9, 1.9]) {
+      const sample = clock.sampleAt(into + d)!;
+      expect(sample.values[key('stopwatch')]).toBeCloseTo(t, 6);
+      expect(sample.values[key('clock')]).toBeCloseTo(first / 1000 + t, 6);
+      expect(sample.values[key('verticalSpeed')]).toBe(0);
+      expect(sample.values[key('maxSpeed')]).toBeCloseTo(5, 3);
+      expect(sample.values[key('averageMovingSpeed')]).toBeCloseTo(5, 2);
+    }
+    expect(clock.sampleAt(paused.timeline.introSeconds + pause!.endSeconds + 0.05)!.values[key('stopwatch')]).toBeGreaterThan(t + 600);
+  });
+
+  it('are drawn over the map frame by the one renderer, from the layout it was given', () => {
+    const base = canvasTemplate([]);
+    const stopwatch = newCanvasComponent(base, 'metric:stopwatch', { width: 1280, height: 720 }, timeline);
+    const clock = { ...newCanvasComponent(canvasTemplate([stopwatch]), 'metric:clock', { width: 1280, height: 720 }, timeline), clock: { zone: 'utc' as const, hour12: false, seconds: true, date: false } };
+    const figures = createMapVideoFigures({
+      activity: ride,
+      model,
+      settings: settings({ intro: { enabled: true, seconds: 2 }, outro: { enabled: true, seconds: 2 }, overlay: canvasTemplate([stopwatch, clock]) }),
+      units: 'metric',
+      width: 1280,
+      height: 720,
+      readerTimeZone: 'UTC',
+    });
+    const list = displayList((ctx) => figures.drawFrame(ctx, 6));
+    const elapsed = Math.round((model.at(6).position.time! - startMs) / 1000);
+    expect(list).toContain(`fillText("0:${String(elapsed).padStart(2, '0')}"`);
+    expect(list).toContain(`fillText("10:00:${String(elapsed).padStart(2, '0')}"`);
+  });
+});
+
 describe('stops and the trimmed start on the map video (TD-088)', () => {
   it('read power and cadence at zero through a shortened stop, and power zones put it in zone 1 (TD-080)', () => {
     const points: TestPoint[] = straightNorth(1000, 10, 5);

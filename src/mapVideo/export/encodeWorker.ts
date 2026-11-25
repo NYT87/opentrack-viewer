@@ -77,8 +77,10 @@ async function start(request: MapVideoEncodeRequest, controller: AbortController
     codec: mp4 ? 'avc' : 'vp9',
     bitrate: request.bitrate,
     keyFrameInterval: 2,
-    // Asked for, not promised: a browser cannot be made to say which encoder it uses (TD-045).
-    hardwareAcceleration: mp4 ? 'prefer-hardware' : 'no-preference',
+    // The question the panel's own check asked (`canEncodeVideo`, no preference), so the export cannot
+    // refuse what the panel offered: current Chromium answers `prefer-hardware` with "not supported"
+    // on a machine that has only a software H.264 encoder (TD-097). A browser still picks hardware where it has it.
+    hardwareAcceleration: 'no-preference',
   });
   output.addVideoTrack(video, { frameRate: request.fps });
 

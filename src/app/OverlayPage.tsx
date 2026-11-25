@@ -15,6 +15,8 @@ import { ActivityError, toActivityError } from '../domain/errors';
 import { formatDistance, formatDuration, formatFileSize, type UnitSystem } from '../domain/units';
 import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
+import { useCleanedActivity } from '../state/cleanupStore';
+import { CleanupNote } from '../components/CleanupPanel';
 import { useInteractionStore } from '../state/interactionStore';
 import { useMapImageStore } from '../state/mapImageStore';
 import { usePersonalStore } from '../state/personalStore';
@@ -74,7 +76,14 @@ function focusSlot(ref: RefObject<HTMLElement | null>) {
  * only (§5) and does not survive one.
  */
 export function OverlayPage() {
-  const source = useOverlayStore((state) => state.source);
+  const storedSource = useOverlayStore((state) => state.source);
+  // AV-1024 (TD-093). The page reads the cleaned view of the activity when the clean-up is on: the
+  // preview, the exports and the controls all take it from `source`, so they agree.
+  const cleanedActivity = useCleanedActivity(storedSource.activity);
+  const source = useMemo(
+    () => (cleanedActivity === storedSource.activity ? storedSource : { ...storedSource, activity: cleanedActivity }),
+    [storedSource, cleanedActivity],
+  );
   const setVideo = useOverlayStore((state) => state.setVideo);
   const setActivity = useOverlayStore((state) => state.setActivity);
   const clearActivity = useOverlayStore((state) => state.clearActivity);
@@ -197,14 +206,14 @@ export function OverlayPage() {
     setCleared(undefined);
     setVideoState(IDLE);
     try {
-      const { activity, timing, activityError } = await read(file);
+      const { activity, timing, timecode, activityError } = await read(file);
       if (generation !== videoRead.current) return;
       readingVideo.current = undefined;
       // Whatever the reader returned is a video to draw over — it decides
       // which outcomes still are — and what the video could not supply is
       // noted beside it. The store decides whether its telemetry becomes the
       // activity: not over one the reader chose by hand (TD-040).
-      setVideo({ file, timing, telemetryNote: activityError?.message });
+      setVideo({ file, timing, ...(timecode ? { timecode } : {}), telemetryNote: activityError?.message });
       // The still image gives way to the video workspace; a later still image starts without the slot.
       setAddingVideo(false);
       if (activity) offerVideoActivity(activity);
@@ -486,6 +495,7 @@ export function OverlayPage() {
               dropped is never lost to a slot drawn anew.
             */}
             <div className="overlay-sync-slot" ref={setSyncTarget} />
+            <CleanupNote activity={source.activity} />
             {/* AV-1011. With an activity, the reader chooses what to make. */}
             {source.activity && (
               <fieldset className="overlay-mode" aria-label="What to make">

@@ -6,6 +6,7 @@ import { VideoReadProgress } from '../components/VideoReadProgress';
 import { formatDistance, formatDuration, type UnitSystem } from '../domain/units';
 import { ActivityError, toActivityError } from '../domain/errors';
 import type { Activity } from '../domain/activity';
+import type { SourceTimecode } from '../overlay/timecode';
 import { MapVideoLink } from '../components/MapVideoLink';
 import { useActivityStore } from '../state/activityStore';
 import { useInteractionStore } from '../state/interactionStore';
@@ -17,7 +18,7 @@ import { useVideoTelemetryRead } from './useVideoTelemetryRead';
 type PageState =
   | { status: 'idle' }
   /** The file and its clock are kept for the overlay page (AV-1002). */
-  | { status: 'ready'; activity: Activity; video: File; timing: OverlayVideoTiming }
+  | { status: 'ready'; activity: Activity; video: File; timing: OverlayVideoTiming; timecode?: SourceTimecode }
   | { status: 'error'; error: ActivityError };
 
 /**
@@ -46,7 +47,7 @@ export function VideoTelemetryPage() {
   const handleFile = async (file: File) => {
     setState({ status: 'idle' });
     try {
-      const { activity, timing, activityError } = await read(file);
+      const { activity, timing, timecode, activityError } = await read(file);
       if (!activity || !timing) {
         // This page exists to turn the track into an activity; a video that
         // yields none is, here, a failure to explain. The overlay page differs.
@@ -56,7 +57,7 @@ export function VideoTelemetryPage() {
         });
         return;
       }
-      setState({ status: 'ready', activity, video: file, timing });
+      setState({ status: 'ready', activity, video: file, timing, ...(timecode ? { timecode } : {}) });
     } catch (error) {
       const failure = toActivityError(error, 'gopro_extract_failed');
       // A stop is what the reader asked for, not something to explain.
@@ -78,7 +79,7 @@ export function VideoTelemetryPage() {
     // (with the camera's other streams and its warnings inside it) is offered
     // too; the store declines it if the reader chose one there by hand, which
     // is theirs to keep (TD-040).
-    setOverlayVideo({ file: state.video, timing: state.timing });
+    setOverlayVideo({ file: state.video, timing: state.timing, ...(state.timecode ? { timecode: state.timecode } : {}) });
     offerOverlayActivity(state.activity);
     navigate(ROUTES.overlays);
   };

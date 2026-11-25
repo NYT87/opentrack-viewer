@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { extractGpmf } from './extractGpmf';
+import { NoTelemetryTrackError, extractGpmf } from './extractGpmf';
+import { formatStartTimecode } from '../../overlay/timecode';
 import { readBinaryFixture } from '../../test/helpers/fixtures';
 import { virtualVideo } from '../../test/helpers/virtualVideo';
 import { ActivityError } from '../../domain/errors';
@@ -317,6 +318,121 @@ describe('extraction limits and failures (AV-903)', () => {
     );
     expect(error).toBeInstanceOf(ActivityError);
     expect((error as ActivityError).code).toBe('gopro_extract_failed');
+  });
+});
+
+describe('the timecode read in the same pass (AV-1026)', () => {
+  const generated = (options: Partial<Parameters<typeof virtualVideo>[0]> = {}) =>
+    virtualVideo({ payload: hero7Payload(), videoFrames: 510, ...options });
+
+  it('reads the real HERO8 clip’s timecode track: its counter, its rate, non-drop', async () => {
+    const { timing } = await extractGpmf(heroVideo());
+    expect(timing.timecode).toMatchObject({
+      source: 'timecode-track',
+      rate: { numerator: 30000, denominator: 1001 },
+      timebase: 30,
+      dropFrame: false,
+    });
+    // The clip's counter at its first frame, 1,692,868, is 15:40:28 and 28 frames at 30 to the second
+    // (the sample entry states 29 frames a second for its 29.97; the label counts to 30).
+    expect(timing.timecode!.startFrame).toBe(1_692_868);
+    expect(formatStartTimecode(timing.timecode!)).toBe('15:40:28:28');
+  });
+
+  it('reads a drop-frame track at 29.97 as the file states it', async () => {
+    const { timing } = await extractGpmf(
+      generated({
+        timecode: { counter: 1800, timescale: 30000, frameDuration: 1001, framesPerSecond: 30, flags: 0x1 },
+      }),
+    );
+    expect(timing.timecode).toMatchObject({
+      startFrame: 1800,
+      dropFrame: true,
+      source: 'timecode-track',
+      rate: { numerator: 30000, denominator: 1001 },
+    });
+    expect(formatStartTimecode(timing.timecode!)).toBe('00:01:00;02');
+  });
+
+  it('reads a drop-frame track at 59.94 from a 90000 timescale, as the HERO8 writes it', async () => {
+    const { timing } = await extractGpmf(
+      generated({
+        timecode: { counter: 3600, timescale: 60000, frameDuration: 1001, framesPerSecond: 59, flags: 0x3 },
+      }),
+    );
+    expect(timing.timecode).toMatchObject({ dropFrame: true, timebase: 60 });
+    expect(formatStartTimecode(timing.timecode!)).toBe('00:01:00;04');
+  });
+
+  it('reads a non-drop track at 25 fps', async () => {
+    const { timing } = await extractGpmf(
+      generated({
+        timecode: { counter: 25 * 3723 + 7, timescale: 25_000, frameDuration: 1000, framesPerSecond: 25 },
+      }),
+    );
+    expect(timing.timecode).toMatchObject({ dropFrame: false, rate: { numerator: 25, denominator: 1 } });
+    expect(formatStartTimecode(timing.timecode!)).toBe('01:02:03:07');
+  });
+
+  it('treats a drop-frame flag at 25 fps as non-drop, and notes it', async () => {
+    const { timing } = await extractGpmf(
+      generated({ timecode: { counter: 0, timescale: 25_000, frameDuration: 1000, framesPerSecond: 25, flags: 1 } }),
+    );
+    expect(timing.timecode?.dropFrame).toBe(false);
+    expect(timing.timecode?.note).toMatch(/counted without dropping/);
+  });
+
+  it('falls back to the creation time, read as a time of day, when there is no timecode track', async () => {
+    const { timing } = await extractGpmf(generated({ createdAt: new Date('2024-06-01T10:20:30Z') }));
+    expect(timing.timecode).toMatchObject({ source: 'creation-time', dropFrame: false, timebase: 30 });
+    expect(formatStartTimecode(timing.timecode!)).toBe('10:20:30:00');
+  });
+
+  it('has none when the file states neither a timecode track nor a creation time', async () => {
+    const { timing } = await extractGpmf(generated({ createdAt: new Date(-2_082_844_800_000) }));
+    expect(timing.timecode).toBeUndefined();
+  });
+
+  it('prefers the track over the creation time', async () => {
+    const withTrack = await extractGpmf(
+      generated({
+        createdAt: new Date('2024-06-01T10:20:30Z'),
+        timecode: { counter: 30, timescale: 30000, frameDuration: 1001, framesPerSecond: 30 },
+      }),
+    );
+    expect(withTrack.timing.timecode?.source).toBe('timecode-track');
+  });
+
+  it.each([
+    ['a timescale of zero', { timescale: 0, frameDuration: 1001 }],
+    ['a frame duration of zero', { timescale: 30000, frameDuration: 0 }],
+    ['a rate no camera records at', { timescale: 300_000, frameDuration: 1000 }],
+  ])('treats a track with %s as absent and falls back to the creation time', async (_name, fields) => {
+    const { timing } = await extractGpmf(
+      generated({ createdAt: new Date('2024-06-01T10:20:30Z'), timecode: { counter: 5, framesPerSecond: 30, ...fields } }),
+    );
+    expect(timing.timecode?.source).toBe('creation-time');
+  });
+
+  it('keeps the timecode of a video that has no telemetry track', async () => {
+    const error = await extractGpmf(
+      generated({
+        omitTelemetryTrack: true,
+        timecode: { counter: 90, timescale: 30000, frameDuration: 1001, framesPerSecond: 30 },
+      }),
+    ).catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(NoTelemetryTrackError);
+    expect((error as NoTelemetryTrackError).code).toBe('no_telemetry_track');
+    expect(formatStartTimecode((error as NoTelemetryTrackError).timecode!)).toBe('00:00:03:00');
+  });
+
+  it('reads the counter, four bytes, and no more of the file for it', async () => {
+    const video = generated({
+      timecode: { counter: 1, timescale: 30000, frameDuration: 1001, framesPerSecond: 30 },
+    });
+    await extractGpmf(video);
+    const small = video.reads.filter((read) => read.end - read.start === 4);
+    expect(small).toHaveLength(1);
   });
 });
 

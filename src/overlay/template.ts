@@ -7,8 +7,18 @@ import {
   formatPace,
   formatSpeed,
   formatTemperature,
+  formatVerticalSpeed,
   paceUnitLabel,
 } from '../domain/units';
+import {
+  formatClock,
+  formatStopwatch,
+  parseClockSetting,
+  parseStopwatchSetting,
+  stopwatchSeconds,
+  type OverlayClockSetting,
+  type OverlayStopwatchSetting,
+} from './liveFigures';
 import {
   ZONE_FROM_MAX,
   ZONE_LIMITS,
@@ -133,7 +143,10 @@ export interface OverlayDisplaySetting {
   label?: string;
   /** Decimal places for a plain number (speed, distance, elevation, power…); times and pace keep their own form. */
   decimals?: 0 | 1 | 2;
-  /** `distance` only: the distance so far over the whole activity's, "12.40 / 42.20 km" (TD-080). */
+  /**
+   * `distance` only: the distance so far over the whole activity's, "12.40 / 42.20 km" (TD-080). AV-1025: the
+   * lowest and the highest elevation too, so far over the whole activity's, "1050 / 1020 m".
+   */
   ofTotal?: boolean;
 }
 
@@ -457,6 +470,10 @@ export interface OverlayComponent {
   compass?: OverlayCompassSetting;
   /** AV-1021. `splits`: the source, the clock, what is shown and the colours. No data source: it reads the activity's laps and distance. */
   splits?: OverlaySplitsSetting;
+  /** AV-1025 (TD-094). A figure of `stopwatch`: where it starts. Absent is the cut's start, else the activity's. */
+  stopwatch?: OverlayStopwatchSetting;
+  /** AV-1025. A figure of `clock`: the zone, the hours, the seconds and the date. Absent is the reader's zone, 24 hours, seconds, no date. */
+  clock?: OverlayClockSetting;
 }
 
 export interface OverlayTemplate {
@@ -656,6 +673,14 @@ function parseComponent(value: unknown): OverlayComponent | string {
   if (componentType === 'gradient') component.gradient = parseGradientSetting(value.gradient);
   if (componentType === 'compass') component.compass = parseCompassSetting(value.compass);
   if (componentType === 'splits') component.splits = parseSplitsSettings(value.splits);
+  // AV-1025. A stopwatch's start and a clock's zone and format, read by name; absent members are the defaults, and an older layout has neither.
+  if ((componentType === 'text' || componentType === 'gauge') && source?.kind === 'metric') {
+    if (source.metric === 'stopwatch') {
+      const stopwatch = parseStopwatchSetting(value.stopwatch);
+      if (stopwatch) component.stopwatch = stopwatch;
+    }
+    if (source.metric === 'clock' && isRecord(value.clock)) component.clock = parseClockSetting(value.clock);
+  }
   if (LABELLED_TYPES.includes(componentType) && isRecord(value.figure)) {
     const figure = parseFigure(value.figure);
     if (figure) component.figure = figure;
@@ -1030,6 +1055,19 @@ const METRIC_LABELS: Record<OverlayMetricKey, string> = {
   moving: 'Moving time',
   climb: 'Climb so far',
   heading: 'Heading',
+  // AV-1025 (TD-094). On the overlay a label is short; the Add list's names say "so far" (`FIGURE_NAMES`).
+  maxSpeed: 'Max speed',
+  maxHeartRate: 'Max heart rate',
+  maxPower: 'Max power',
+  averageSpeed: 'Avg speed',
+  averageMovingSpeed: 'Avg moving speed',
+  averagePace: 'Avg pace',
+  averageMovingPace: 'Avg moving pace',
+  verticalSpeed: 'Vertical speed',
+  elevationLowest: 'Lowest elevation',
+  elevationHighest: 'Highest elevation',
+  stopwatch: 'Stopwatch',
+  clock: 'Clock',
 };
 
 function describeSource(source: OverlayDataSource, timeline: OverlayTimeline): string {
@@ -1104,7 +1142,7 @@ export function effectiveUnits(component: OverlayComponent, units: UnitSystem): 
   return component.unitMode === 'auto' ? units : component.unitMode;
 }
 
-function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem): string {
+function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem, readerTimeZone?: string): string {
   switch (metric) {
     case 'speed':
       return formatSpeed(value, units);
@@ -1133,6 +1171,28 @@ function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem
       return `${value.toFixed(1)} %`;
     case 'heading':
       return formatHeading(value);
+    // AV-1025 (TD-094).
+    case 'maxSpeed':
+    case 'averageSpeed':
+    case 'averageMovingSpeed':
+      return formatSpeed(value, units);
+    case 'averagePace':
+    case 'averageMovingPace':
+      // No movement so far (TD-080).
+      return value > 0 ? formatPace(value, units) : `0:00 ${paceUnitLabel(units)}`;
+    case 'maxHeartRate':
+      return `${Math.round(value)} bpm`;
+    case 'maxPower':
+      return `${Math.round(value)} W`;
+    case 'verticalSpeed':
+      return formatVerticalSpeed(value, units);
+    case 'elevationLowest':
+    case 'elevationHighest':
+      return formatElevation(value, units);
+    case 'stopwatch':
+      return formatStopwatch(value);
+    case 'clock':
+      return formatClock(value, undefined, readerTimeZone);
   }
 }
 
@@ -1140,35 +1200,48 @@ function formatMetric(metric: OverlayMetricKey, value: number, units: UnitSystem
  * AV-1011. A metric with the decimal places the reader chose. Times and pace
  * are written as clocks, whatever the choice; a plain number takes it.
  */
-export function formatMetricWith(metric: OverlayMetricKey, value: number, units: UnitSystem, decimals: 0 | 1 | 2): string {
+export function formatMetricWith(metric: OverlayMetricKey, value: number, units: UnitSystem, decimals: 0 | 1 | 2, readerTimeZone?: string): string {
   const imperial = units === 'imperial';
   const fixed = (n: number, unit: string) => `${n.toFixed(decimals)} ${unit}`;
   switch (metric) {
     case 'speed':
+    case 'maxSpeed':
+    case 'averageSpeed':
+    case 'averageMovingSpeed':
       return imperial ? fixed((value * 3600) / 1609.344, 'mph') : fixed((value * 3600) / 1000, 'km/h');
     case 'distance':
       return imperial ? fixed(value / 1609.344, 'mi') : fixed(value / 1000, 'km');
     case 'elevation':
     case 'climb':
+    case 'elevationLowest':
+    case 'elevationHighest':
       return imperial ? fixed(value * 3.28084, 'ft') : fixed(value, 'm');
     case 'temperature':
       return imperial ? fixed((value * 9) / 5 + 32, '°F') : fixed(value, '°C');
     case 'heartRate':
+    case 'maxHeartRate':
       return fixed(value, 'bpm');
     case 'runningCadence':
       return fixed(value, 'spm');
     case 'cyclingCadence':
       return fixed(value, 'rpm');
     case 'power':
+    case 'maxPower':
       return fixed(value, 'W');
     case 'grade':
       return fixed(value, '%');
+    case 'verticalSpeed':
+      return formatVerticalSpeed(value, units, decimals);
     case 'pace':
+    case 'averagePace':
+    case 'averageMovingPace':
     case 'elapsed':
     case 'moving':
+    case 'stopwatch':
+    case 'clock':
     case 'heading':
       // Times and pace are clocks, and a heading is degrees and a letter (AV-1019), whatever the decimals.
-      return formatMetric(metric, value, units);
+      return formatMetric(metric, value, units, readerTimeZone);
   }
 }
 
@@ -1186,6 +1259,38 @@ export function distanceOfTotal(meters: number, totalMeters: number, units: Unit
 }
 
 /**
+ * AV-1025 (TD-094). The lowest or the highest elevation so far over the whole activity's, "1050 / 1020 m": both
+ * in the one unit, so the two read against each other, as a distance of the total does.
+ */
+export function elevationOfTotal(meters: number, totalMeters: number, units: UnitSystem, decimals?: 0 | 1 | 2): string {
+  const written = (value: number) => (decimals !== undefined ? formatMetricWith('elevation', value, units, decimals) : formatElevation(value, units));
+  const [done] = written(meters).split(' ');
+  return `${done} / ${written(totalMeters)}`;
+}
+
+/** AV-1025. The whole activity's lowest or highest elevation for an `elevationLowest` or `elevationHighest` figure; absent for any other, or where the timeline cannot say. */
+export function elevationTotalOf(source: OverlayDataSource | undefined, timeline: Pick<OverlayTimeline, 'rangeOf'>): number | undefined {
+  if (source?.kind !== 'metric' || (source.metric !== 'elevationLowest' && source.metric !== 'elevationHighest')) return undefined;
+  const range = timeline.rangeOf?.({ kind: 'metric', metric: 'elevation' });
+  return source.metric === 'elevationLowest' ? range?.min : range?.max;
+}
+
+/**
+ * AV-1025. What a component reads from a sample: the sample's value for its source, except a stopwatch
+ * that has a start of its own, which counts from there on the activity's clock. The renderer and the
+ * contract both read it here, so the two cannot disagree.
+ */
+export function componentSampleValue(component: Pick<OverlayComponent, 'source' | 'stopwatch'>, sample: Pick<OverlaySample, 'values' | 'activityElapsedSeconds'>): number | undefined {
+  const source = component.source;
+  if (!source) return undefined;
+  const raw = sample.values[dataSourceId(source)];
+  if (raw !== undefined && source.kind === 'metric' && source.metric === 'stopwatch') {
+    return stopwatchSeconds(component.stopwatch, sample.activityElapsedSeconds, raw);
+  }
+  return raw;
+}
+
+/**
  * Resolves one component against one sample. Missing data yields `hidden`,
  * never a placeholder: a dash on a speedometer reads as a broken overlay.
  */
@@ -1197,6 +1302,8 @@ export function resolveOverlayComponent(
   units: UnitSystem,
   /** AV-1018. The reader's own figures for this session: the zones' reference. Never read from anywhere else. */
   personal?: PersonalFigures,
+  /** AV-1025. The IANA zone a clock set to the reader's own is written in; the browser's by default. */
+  readerTimeZone?: string,
 ): ResolvedOverlayComponent {
   const componentId = component.id;
   if (!component.visible) return { status: 'hidden', reason: 'disabled', componentId };
@@ -1248,7 +1355,7 @@ export function resolveOverlayComponent(
   }
 
   const source = component.source;
-  const value = source ? sample.values[dataSourceId(source)] : undefined;
+  const value = componentSampleValue(component, sample);
   if (!source || value === undefined) return { status: 'hidden', reason: 'no_data', componentId };
 
   // AV-1016. What a smoothed figure shows is the trailing mean up to this moment; hiding stays by the moment's own value.
@@ -1273,10 +1380,13 @@ export function resolveOverlayComponent(
     };
   }
   const total = timeline.distanceTotalMeters;
+  const elevationTotal = component.display?.ofTotal ? elevationTotalOf(source, timeline) : undefined;
   const text =
     source.kind === 'metric' && source.metric === 'distance' && component.display?.ofTotal && total !== undefined
       ? distanceOfTotal(shown, total, unitSystem, component.display.decimals)
-      : formatSourceValue(source, shown, unitSystem, timeline, component.display?.decimals);
+      : elevationTotal !== undefined
+        ? elevationOfTotal(shown, elevationTotal, unitSystem, component.display?.decimals)
+        : formatSourceValue(source, shown, unitSystem, timeline, component.display?.decimals, { clock: component.clock, readerTimeZone });
 
   let fraction: number | undefined;
   if (component.type === 'gauge' && component.range) {
@@ -1306,8 +1416,11 @@ export function formatSourceValue(
   units: UnitSystem,
   timeline: Pick<OverlayTimeline, 'sensorLabels'>,
   decimals?: 0 | 1 | 2,
+  /** AV-1025. A clock's own setting and the zone the reader's own means. */
+  clock?: { clock?: OverlayClockSetting; readerTimeZone?: string },
 ): string {
   if (source.kind === 'metric') {
+    if (source.metric === 'clock') return formatClock(value, clock?.clock, clock?.readerTimeZone);
     return decimals !== undefined ? formatMetricWith(source.metric, value, units, decimals) : formatMetric(source.metric, value, units);
   }
   const unit = timeline.sensorLabels.get(dataSourceId(source))?.unit;

@@ -14,6 +14,16 @@ export interface GoproMp4Options {
   sampleDurationMs?: number;
   videoFrames?: number;
   createdAt?: Date;
+  /** AV-1026. A `tmcd` track: the counter at the first frame, its rate and flags. */
+  timecode?: {
+    counter: number;
+    timescale: number;
+    frameDuration: number;
+    framesPerSecond: number;
+    flags?: number;
+  };
+  /** AV-1026. Leave the `gpmd` track out. */
+  omitTelemetryTrack?: boolean;
 }
 export function layoutGoproMp4(options: GoproMp4Options): GoproMp4Layout;
 export function buildGoproMp4(options: GoproMp4Options): Uint8Array;

@@ -314,6 +314,30 @@ describe('choosing the files by hand (AV-1002)', () => {
     expect(screen.getByTestId('overlay-file-input')).toBeInTheDocument();
   });
 
+  it('keeps the timecode of a video that carries no telemetry (AV-1026)', async () => {
+    vi.doMock('../parsers/gopro/extractGpmf', async () => {
+      const { ActivityError } = await import('../domain/errors');
+      return {
+        extractGpmf: () =>
+          Promise.reject(
+            Object.assign(new ActivityError('no_telemetry_track', 'This video carries no GoPro telemetry track.'), {
+              timecode: { startFrame: 90, rate: { numerator: 25, denominator: 1 }, timebase: 25, dropFrame: false, source: 'timecode-track' },
+            }),
+          ),
+      };
+    });
+    const { App: Fresh } = await import('./App');
+    const { useOverlayStore: freshStore } = await import('../state/overlayStore');
+    window.location.hash = '#/overlays';
+    render(<Fresh />);
+
+    await userEvent.upload(await screen.findByTestId('overlay-file-input'), heroVideo());
+
+    await inSlot('Video', 'GH010042.mp4');
+    expect(freshStore.getState().source.video?.timing).toBeUndefined();
+    expect(freshStore.getState().source.video?.timecode).toMatchObject({ startFrame: 90, source: 'timecode-track' });
+  });
+
   it('keeps a video whose track has no satellite fix, with its clock and the reason', async () => {
     // The real HERO8 clip, read for real: telemetry, but recorded indoors.
     // The extraction page refuses it; here it is a video a watch's file can

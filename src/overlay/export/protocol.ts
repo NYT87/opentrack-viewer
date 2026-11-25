@@ -2,6 +2,7 @@ import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import type { OverlayExportErrorCode } from './errors';
 import type { OverlayTemplate, PersonalFigures } from '../template';
+import type { SourceTimecode } from '../timecode';
 
 /** Everything the worker needs, structured-cloneable: data, never functions. */
 export interface ExportRequest {
@@ -15,6 +16,13 @@ export interface ExportRequest {
   offsetSeconds: number;
   /** TD-081. Where in the video the first frame is drawn: the trim's start. The frame count sets the end. */
   trimStartSeconds?: number;
+  /**
+   * AV-1026 (TD-095). The source's timecode at the first frame, the cut's start
+   * added in; written to the metadata file. Plain numbers, nothing about the file.
+   */
+  startTimecode?: SourceTimecode;
+  /** AV-1026. Name the frames by the source's frame numbers; only where the rate is the source's. */
+  numberFramesBySource?: boolean;
   units: UnitSystem;
   template: OverlayTemplate;
   activity: Activity;

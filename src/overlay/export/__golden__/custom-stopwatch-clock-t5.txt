@@ -1,0 +1,81 @@
+clearRect(0, 0, 1280, 720)
+save()
+beginPath()
+roundRect(25.6, 14.4, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 14.4, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("STOPWATCH", 42.5, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:05", 42.5, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(307.2, 14.4, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(307.2, 14.4, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("SINCE 0:03", 324.1, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("0:02", 324.1, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(588.8, 14.4, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(588.8, 14.4, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("CLOCK", 605.7, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("10:00:05", 605.7, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(870.4, 14.4, 384, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(870.4, 14.4, 384, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("CLOCK", 887.3, 31.27) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("1 Jan 2024, 3:30:05 PM", 887.3, 49.86) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(25.6, 144, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(25.6, 144, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("MAX SPEED", 42.5, 160.87) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("18.0 km/h", 42.5, 179.46) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(307.2, 144, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(307.2, 144, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("AVG SPEED", 324.1, 160.87) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("15.8 km/h", 324.1, 179.46) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(588.8, 144, 256, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(588.8, 144, 256, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("VERTICAL SPEED", 605.7, 160.87) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("+60 m/min", 605.7, 179.46) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()
+save()
+beginPath()
+roundRect(870.4, 144, 320, 86.4, 11.26)
+clip()
+beginPath()
+roundRect(870.4, 144, 320, 86.4, 11.26)
+fill() fill="rgb(0 0 0 / 0.35)" alpha=1
+fillText("HIGHEST ELEVATION", 887.3, 160.87) fill="#ffffff" font="15.488000000000003px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=0.75
+fillText("105 / 160 m", 887.3, 179.46) fill="#ffffff" font="bold 30.976000000000006px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" alpha=1
+restore()

@@ -23,6 +23,9 @@ import { useMapVideoStore } from '../state/mapVideoStore';
 import { checkInsetExportCached } from '../overlay/insetExportCheck';
 import { hasMapInset } from '../overlay/insetCamera';
 import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
+import { CleanupNote } from './CleanupPanel';
+import { TimecodeNote } from './TimecodeNote';
+import { addSeconds } from '../overlay/timecode';
 
 interface BurnedInExportPanelProps {
   video: OverlayVideo;
@@ -430,10 +433,16 @@ export function BurnedInExportPanel({
               )}
             </>
           )}
+          {/* AV-1026. The MP4 mediabunny writes has no timecode track: said, not implied. */}
+          <TimecodeNote
+            timecode={video.timecode ? addSeconds(video.timecode, range.trimmed ? range.start : 0) : undefined}
+            kind="burned-in"
+          />
           {nothingOn && (
             <p role="status">No component is switched on, so there is nothing to draw.</p>
           )}
           <InsetExportNotes check={insetCheck} />
+          <CleanupNote activity={activity} exporting />
           {outsideActivity && <p role="status">{uncoveredNotice(range, drawnAnyway)}</p>}
 
           <p className="video__actions">

@@ -46,6 +46,8 @@ async function run(request: ExportRequest, controller: AbortController): Promise
     const timeline = buildOverlayTimeline(request.activity, {
       video: { durationSeconds: request.videoDurationSeconds, start: request.videoStart },
       offsetSeconds: request.offsetSeconds,
+      // AV-1025. A stopwatch counts from the cut's start.
+      cutStartSeconds: request.trimStartSeconds,
     });
     const renderer = createOverlayRenderer({
       template: request.template,
@@ -68,6 +70,8 @@ async function run(request: ExportRequest, controller: AbortController): Promise
       telemetryOffsetSeconds: request.offsetSeconds,
       videoStartSeconds: from,
       templateName: request.template.name,
+      startTimecode: request.startTimecode,
+      numberFramesBySource: request.numberFramesBySource,
       signal: controller.signal,
       sink: archive.sink,
       renderFrame: async (index, videoTime) => {

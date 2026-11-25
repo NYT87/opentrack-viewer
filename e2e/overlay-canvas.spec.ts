@@ -497,3 +497,54 @@ test('splits draw the split under way and the last one finished, in the colour o
   expect(pixel(frameAt(40), 640, 360)[3]).toBe(0);
   expect(pixel(frameAt(40), 1276, 716)[3]).toBe(0);
 });
+
+test('a stopwatch and a clock change as the ride goes, and hold within a second: read from exported frames (AV-1025)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');
+  await expect(canvas.getByRole('group', { name: /^Canvas preview, 1280 by 720 pixels/ })).toBeVisible();
+
+  /** Large, on a clear background, so the digits are most of what is drawn in the box. */
+  const style = async () => {
+    await canvas.getByLabel('Background (%)').fill('0');
+    await canvas.getByLabel('Value size (%)').fill('300');
+  };
+  await add(canvas, 'Stopwatch');
+  await style();
+  await canvas.getByRole('button', { name: 'Snap to top left' }).click();
+  const stopwatch = await rectOf(canvas);
+  await add(canvas, 'Clock');
+  await style();
+  // The clock in UTC with its seconds, so it changes each second as the stopwatch does.
+  await canvas.getByLabel('Time zone').selectOption('utc');
+  await canvas.getByRole('button', { name: 'Snap to bottom right' }).click();
+  const clock = await rectOf(canvas);
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-1280x720-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+  const frameAt = (seconds: number) => decodePng(Buffer.from(frames[Math.round(seconds * 10)]!.data));
+
+  /** The pixels inside a box of the frame, to compare as bytes. */
+  const crop = (png: DecodedPng, box: { x: number; y: number; width: number; height: number }) => {
+    const rows: Buffer[] = [];
+    for (let y = Math.floor(box.y * png.height); y < Math.ceil((box.y + box.height) * png.height); y += 1) {
+      const from = (y * png.width + Math.floor(box.x * png.width)) * 4;
+      rows.push(Buffer.from(png.pixels.subarray(from, from + Math.ceil(box.width * png.width) * 4)));
+    }
+    return Buffer.concat(rows);
+  };
+
+  for (const [name, box] of [['stopwatch', stopwatch], ['clock', clock]] as const) {
+    // Both are drawn from the first frame to the last.
+    expect(drawnWithin(frameAt(0), box), `${name} at 0 s`).toBeGreaterThan(200);
+    expect(drawnWithin(frameAt(59), box), `${name} at 59 s`).toBeGreaterThan(200);
+    // The same second reads the same: 12.0 s and 12.5 s are one frame's pixels. Another second reads differently.
+    expect(crop(frameAt(12), box).equals(crop(frameAt(12.5), box)), `${name} within a second`).toBe(true);
+    for (const other of [0, 11, 13, 30, 58]) expect(crop(frameAt(12), box).equals(crop(frameAt(other), box)), `${name} at 12 s against ${other} s`).toBe(false);
+  }
+  // Nothing is drawn where nothing was placed.
+  expect(pixel(frameAt(30), 640, 360)[3]).toBe(0);
+});

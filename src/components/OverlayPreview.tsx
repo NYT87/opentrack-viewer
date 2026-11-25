@@ -131,14 +131,13 @@ export function OverlayPreview({
 
   const durationSeconds = video.timing?.durationSeconds ?? elementDuration;
 
-  const timeline = useMemo(
-    () =>
-      buildOverlayTimeline(activity, {
-        video: { durationSeconds, start: video.timing?.start },
-        offsetSeconds,
-      }),
+  const builtTimeline = useMemo(
+    () => buildOverlayTimeline(activity, { video: { durationSeconds, start: video.timing?.start }, offsetSeconds }),
     [activity, durationSeconds, video.timing?.start, offsetSeconds],
   );
+  // AV-1025. A stopwatch counts from the cut's start, in the preview as in the export. Only its zero
+  // depends on the cut, so dragging the trim handle wraps the timeline rather than rebuilding it.
+  const timeline = useMemo(() => builtTimeline.withCutStart?.(trim?.startSeconds) ?? builtTimeline, [builtTimeline, trim?.startSeconds]);
   const sample = timeline.sampleAt(time);
   // The template follows the controls and what the activity has. With no
   // usable timeline the status line already says why, and listing every

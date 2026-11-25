@@ -6,6 +6,7 @@ import {
   type OverlayPresetId,
 } from './presets';
 import { figureLayout } from './figureLayout';
+import { formatClock } from './liveFigures';
 import { stillElementChoices, newStillComponent, freshComponentId, type StillImageContext } from './staticImage';
 import {
   DEFAULT_CHART,
@@ -107,7 +108,8 @@ export const DIAL_METRICS = ['speed', 'pace', 'heartRate', 'power', 'cyclingCade
 export const CHART_METRICS = ['speed', 'pace', 'heartRate', 'power', 'cyclingCadence', 'runningCadence', 'elevation', 'grade', 'temperature'] as const;
 type DialMetric = (typeof DIAL_METRICS)[number];
 type ChartMetric = (typeof CHART_METRICS)[number];
-const FIGURE_NAMES: Record<OverlayMetricKey, string> = {
+/** What the editor calls each figure, in the Add list and the selected element's name. */
+export const FIGURE_NAMES: Record<OverlayMetricKey, string> = {
   speed: 'Speed',
   pace: 'Pace',
   distance: 'Distance',
@@ -122,6 +124,19 @@ const FIGURE_NAMES: Record<OverlayMetricKey, string> = {
   grade: 'Grade',
   climb: 'Climb so far',
   heading: 'Heading',
+  // AV-1025 (TD-094).
+  maxSpeed: 'Max speed so far',
+  maxHeartRate: 'Max heart rate so far',
+  maxPower: 'Max power so far',
+  averageSpeed: 'Average speed so far',
+  averageMovingSpeed: 'Average moving speed so far',
+  averagePace: 'Average pace so far',
+  averageMovingPace: 'Average moving pace so far',
+  verticalSpeed: 'Vertical speed',
+  elevationLowest: 'Lowest elevation so far',
+  elevationHighest: 'Highest elevation so far',
+  stopwatch: 'Stopwatch',
+  clock: 'Clock',
 };
 
 export interface CanvasElementChoice {
@@ -150,6 +165,19 @@ const LIVE_FIGURES: readonly { metric: OverlayMetricKey; label: string; missing:
     ['power', 'Power'],
     ['cyclingCadence', 'Cycling cadence'],
     ['runningCadence', 'Running cadence'],
+    // AV-1025. The figures so far: maxima, averages, the rate of ascent, the lowest and the highest elevation, a stopwatch and the time of day.
+    ['maxSpeed', 'Max speed so far'],
+    ['maxHeartRate', 'Max heart rate so far'],
+    ['maxPower', 'Max power so far'],
+    ['averageSpeed', 'Average speed so far'],
+    ['averageMovingSpeed', 'Average moving speed so far'],
+    ['averagePace', 'Average pace so far'],
+    ['averageMovingPace', 'Average moving pace so far'],
+    ['verticalSpeed', 'Vertical speed'],
+    ['elevationLowest', 'Lowest elevation so far'],
+    ['elevationHighest', 'Highest elevation so far'],
+    ['stopwatch', 'Stopwatch'],
+    ['clock', 'Clock'],
   ] as const
 ).map(([metric, label]) => ({ metric, label, missing: METRIC_MISSING[metric] }));
 
@@ -582,6 +610,24 @@ export function resizeComponent(components: OverlayComponent[], id: string, widt
 export { TEXT_SCALE_LIMITS };
 
 /**
+ * AV-1025. The moment (seconds since 1970) a clock writes widest in its zone and format: tried over the 24 hours of a day
+ * with two-digit date and minutes, since "10:48 PM" is wider than "8:48 PM" and a zone east of UTC moves the day on.
+ */
+function widestClockMoment(setting: OverlayComponent['clock']): number {
+  let widest = Date.UTC(2026, 8, 28, 20, 48, 28) / 1000;
+  let length = -1;
+  for (let hour = 0; hour < 24; hour += 1) {
+    const moment = Date.UTC(2026, 8, 28, hour, 48, 28) / 1000;
+    const written = formatClock(moment, setting).length;
+    if (written > length) {
+      length = written;
+      widest = moment;
+    }
+  }
+  return widest;
+}
+
+/**
  * AV-1015 (TD-083). The widest a metric can reasonably read, in its stored
  * unit, for sizing a figure's box: a text that fits these fits what the
  * activity shows. Pace is seconds per kilometre.
@@ -601,6 +647,19 @@ const WIDEST_VALUE: Record<OverlayMetricKey, number> = {
   moving: 35_999,
   climb: 9999,
   heading: 359,
+  // AV-1025. A stopwatch grows with the video, as the elapsed time does; a clock is a time of day in September 2026.
+  maxSpeed: 20,
+  maxHeartRate: 199,
+  maxPower: 999,
+  averageSpeed: 20,
+  averageMovingSpeed: 20,
+  averagePace: 900,
+  averageMovingPace: 900,
+  verticalSpeed: 2,
+  elevationLowest: 3000,
+  elevationHighest: 3000,
+  stopwatch: 35_999,
+  clock: Date.UTC(2026, 8, 30, 20, 48, 28) / 1000,
 };
 
 /**
@@ -627,14 +686,18 @@ export function growFigureToFit(
   // AV-1016. The widest value is laid out as it is, not averaged with the activity's own.
   const target: OverlayComponent = { ...found };
   delete target.smoothing;
+  // AV-1025. A stopwatch's own start would read 0 at the widest value's moment: lay out the widest it reads.
+  delete target.stopwatch;
   const source = found.source;
   const { timeline } = context;
   const sourceId = dataSourceId(source);
   const wide =
     source.kind === 'metric'
-      ? source.metric === 'distance' && target.display?.ofTotal && timeline.distanceTotalMeters !== undefined
+      ? source.metric === 'clock'
+        ? widestClockMoment(target.clock)
+        : source.metric === 'distance' && target.display?.ofTotal && timeline.distanceTotalMeters !== undefined
         ? timeline.distanceTotalMeters
-        : source.metric === 'elapsed' || source.metric === 'moving'
+        : source.metric === 'elapsed' || source.metric === 'moving' || source.metric === 'stopwatch'
           ? Math.max(WIDEST_VALUE[source.metric], timeline.alignment?.videoEndInActivity ?? timeline.durationSeconds)
           : source.metric === 'distance'
             ? Math.max(WIDEST_VALUE.distance, timeline.distanceTotalMeters ?? 0)

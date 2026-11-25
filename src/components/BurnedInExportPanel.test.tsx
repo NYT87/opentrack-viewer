@@ -507,3 +507,35 @@ describe('a map in a route inset (AV-1023, TD-092)', () => {
     expect(screen.queryByTestId('inset-tiles')).toBeNull();
   });
 });
+
+const sourceTimecode = {
+  startFrame: 1800,
+  rate: { numerator: 30000, denominator: 1001 },
+  timebase: 30,
+  dropFrame: true,
+  source: 'timecode-track',
+} as const;
+
+describe('the source’s timecode (AV-1026, TD-095)', () => {
+  const note = () => screen.getByTestId('timecode-note');
+
+  it('says the timecode at the first frame, with the cut added, and that the file does not hold it', () => {
+    setup({ video: { ...video, timecode: sourceTimecode }, trim: { startSeconds: 2, endSeconds: 7 } });
+    expect(note()).toHaveTextContent("Timecode at the first frame: 00:01:02;02 (from the video's timecode track).");
+    expect(note()).toHaveTextContent(
+      "This file does not carry the timecode itself; the PNG sequence's metadata file does.",
+    );
+  });
+
+  it('says it is from the creation time when it is', () => {
+    setup({ video: { ...video, timecode: { ...sourceTimecode, dropFrame: false, source: 'creation-time' } } });
+    expect(note()).toHaveTextContent("(from the file's creation time)");
+    expect(note()).toHaveTextContent('00:01:00:00');
+  });
+
+  it('says the source has none', () => {
+    setup();
+    expect(note()).toHaveTextContent('The source has no timecode.');
+    expect(note()).not.toHaveTextContent('does not carry');
+  });
+});

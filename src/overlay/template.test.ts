@@ -517,3 +517,83 @@ describe('the privacy trim in a template (AV-1022, TD-091)', () => {
     expect(read({ privacyTrim: { start: 'a', end: null } }).privacyTrim).toBeUndefined();
   });
 });
+
+describe('the figures so far in a layout (AV-1025)', () => {
+  const read = (components: object[]) => {
+    const parsed = parseOverlayTemplate(JSON.stringify({ version: 2, name: 'Canvas', style: {}, components }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed;
+  };
+  const figure = (id: string, metric: string, extra: object = {}) => ({ id, type: 'text', rect, source: { kind: 'metric', metric }, ...extra });
+
+  it('round-trips a stopwatch’s start and a clock’s zone and format, in version 2, and keeps neither where there is none', () => {
+    const first = read([
+      figure('sw', 'stopwatch', { stopwatch: { startSeconds: 125 } }),
+      figure('sw-default', 'stopwatch'),
+      figure('clock', 'clock', { clock: { zone: 'offset', offsetMinutes: 330, hour12: true, seconds: false, date: true } }),
+      figure('clock-default', 'clock'),
+      figure('max', 'maxSpeed'),
+    ]);
+    const [sw, swDefault, clock, clockDefault] = first.template.components;
+    expect(sw!.stopwatch).toEqual({ startSeconds: 125 });
+    expect(swDefault!.stopwatch).toBeUndefined();
+    expect(clock!.clock).toEqual({ zone: 'offset', offsetMinutes: 330, hour12: true, seconds: false, date: true });
+    expect(clockDefault!.clock).toBeUndefined();
+    expect(first.template.version).toBe(2);
+    const again = parseOverlayTemplate(serializeOverlayTemplate(first.template));
+    expect(again).toEqual({ ok: true, template: first.template, warnings: [] });
+    expect(JSON.parse(serializeOverlayTemplate(first.template)).version).toBe(2);
+  });
+
+  it('drops the settings where the figure is not a stopwatch or a clock, and a start that does not read', () => {
+    const parsed = read([
+      figure('speed', 'speed', { stopwatch: { startSeconds: 5 }, clock: { zone: 'utc' } }),
+      figure('sw', 'stopwatch', { stopwatch: { startSeconds: 'soon' }, clock: { zone: 'utc' } }),
+    ]);
+    expect(parsed.template.components.map((entry) => [entry.stopwatch, entry.clock])).toEqual([[undefined, undefined], [undefined, undefined]]);
+  });
+
+  it('is skipped with a warning where a build does not know the figure: the same path an earlier build takes, and the version stays 2', () => {
+    // An earlier build's list of figures has none of the new ones, so each reads as one it does not know.
+    const parsed = read([figure('speed', 'speed'), figure('future', 'maxPowerNextYear'), figure('also', 'clockwork')]);
+    expect(parsed.template.version).toBe(2);
+    expect(parsed.template.components.map((entry) => entry.id)).toEqual(['speed']);
+    expect(parsed.warnings).toEqual(['Component 2 was skipped: missing or invalid data source.', 'Component 3 was skipped: missing or invalid data source.']);
+  });
+
+  const timeline = buildOverlayTimeline(
+    makeActivity(Array.from({ length: 61 }, (_, i) => ({ time: at(i), distanceMeters: i * 5, elevationMeters: 100 + (i % 20), heartRateBpm: 100 + i }))),
+    { video: { durationSeconds: 60 } },
+  );
+  const textAt = (item: object, seconds: number, units: 'metric' | 'imperial' = 'metric', zone?: string) => {
+    const parsed = read([item]);
+    const resolved = resolveOverlayComponent(parsed.template, parsed.template.components[0]!, timeline.sampleAt(seconds), timeline, units, undefined, zone);
+    return resolved.status === 'ready' ? resolved.text : resolved.status;
+  };
+
+  it('writes each figure as the app writes its kind, and the decimals the reader chose', () => {
+    expect(textAt(figure('a', 'maxHeartRate'), 30)).toBe('130 bpm');
+    expect(textAt(figure('a', 'maxHeartRate', { display: { decimals: 1 } }), 30)).toBe('130.0 bpm');
+    expect(textAt(figure('a', 'averageSpeed'), 30)).toBe('18.0 km/h');
+    expect(textAt(figure('a', 'averageSpeed', { display: { decimals: 0 } }), 30, 'imperial')).toBe('11 mph');
+    expect(textAt(figure('a', 'averagePace'), 30)).toBe('3:20 /km');
+    expect(textAt(figure('a', 'averageMovingPace', { display: { decimals: 2 } }), 30)).toBe('3:20 /km');
+    expect(textAt(figure('a', 'averagePace'), 30, 'imperial')).toBe('5:22 /mi');
+    expect(textAt(figure('a', 'elevationHighest'), 30)).toBe('119 m');
+    expect(textAt(figure('a', 'elevationLowest', { display: { decimals: 1 } }), 30)).toBe('100.0 m');
+    expect(textAt(figure('a', 'elevationHighest', { display: { ofTotal: true } }), 30)).toBe('119 / 119 m');
+    expect(textAt(figure('a', 'elevationHighest', { display: { ofTotal: true, decimals: 1 } }), 10, 'imperial')).toBe('360.9 / 390.4 ft');
+    expect(textAt(figure('a', 'stopwatch'), 59.9)).toBe('0:59');
+    expect(textAt(figure('a', 'clock'), 30, 'metric', 'UTC')).toBe('10:00:30');
+    // Times are clocks whatever the decimals.
+    expect(textAt(figure('a', 'stopwatch', { display: { decimals: 2 } }), 30)).toBe('0:30');
+    expect(textAt(figure('a', 'clock', { display: { decimals: 2 } }), 30, 'metric', 'UTC')).toBe('10:00:30');
+  });
+
+  it('hides a figure with no value at the moment, and leaves a stopwatch of its own start at 0:00 before it', () => {
+    expect(textAt(figure('a', 'averageSpeed'), 0)).toBe('hidden');
+    expect(textAt(figure('a', 'stopwatch', { stopwatch: { startSeconds: 40 } }), 30)).toBe('0:00');
+    expect(textAt(figure('a', 'stopwatch', { stopwatch: { startSeconds: 40 } }), 50)).toBe('0:10');
+    expect(textAt(figure('a', 'clock', { clock: { zone: 'offset', offsetMinutes: -300 } }), 30)).toBe('05:00:30');
+  });
+});

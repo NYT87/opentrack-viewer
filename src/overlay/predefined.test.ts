@@ -70,6 +70,9 @@ describe('the registry of predefined components (AV-1016)', () => {
       'Power zones',
       'Heart rate zones',
       'Climb so far',
+      'Max speed so far',
+      'Average speed so far',
+      'Vertical speed',
       'Elevation profile',
       'Splits',
     ]);
@@ -79,11 +82,17 @@ describe('the registry of predefined components (AV-1016)', () => {
       'Heart rate zones',
       'Running cadence',
       'Splits',
+      'Average pace so far',
       'Distance of the total',
     ]);
     expect(PREDEFINED_ENTRIES.filter((entry) => entry.sport === 'any').map((entry) => entry.name)).toEqual([
       'Speed against time',
       'Heart rate against time',
+      'Max heart rate so far',
+      'Lowest elevation so far',
+      'Highest elevation so far',
+      'Stopwatch',
+      'Clock',
       'Compass',
       'Elevation profile',
       'Progress bar',
@@ -167,9 +176,9 @@ describe('the registry of predefined components (AV-1016)', () => {
     const activity = full(['powerWatts', 'gradePercent', 'elevationMeters']);
     const choices = canvasElementChoices(timelineOf(activity), still(activity));
     const of = (id: string) => choices.find((choice) => choice.key === `predefined:${id}`)!;
-    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(13);
-    expect(choices.filter((choice) => choice.group === 'Running')).toHaveLength(6);
-    expect(choices.filter((choice) => choice.group === 'Any sport')).toHaveLength(6);
+    expect(choices.filter((choice) => choice.group === 'Cycling')).toHaveLength(16);
+    expect(choices.filter((choice) => choice.group === 'Running')).toHaveLength(7);
+    expect(choices.filter((choice) => choice.group === 'Any sport')).toHaveLength(11);
     expect(of('cycling.speed')).toMatchObject({ available: true, group: 'Cycling' });
     expect(of('cycling.power-3s')).toMatchObject({ available: false, reason: 'This activity has no power.' });
     expect(of('cycling.gradient')).toMatchObject({ available: false, reason: expect.stringContaining('This activity has no gradient') });
@@ -194,6 +203,45 @@ describe('the registry of predefined components (AV-1016)', () => {
     expect(of('cycling.splits')).toMatchObject({ available: true, label: 'Splits (Cycling)', group: 'Cycling' });
     expect(of('running.splits')).toMatchObject({ available: true, label: 'Splits (Running)', group: 'Running' });
     expect(choices.find((choice) => choice.key === 'splits')).toMatchObject({ available: true, label: 'Splits', group: 'Live figures' });
+  });
+
+  it('offers the figures so far by sport, each with the reason it is disabled (AV-1025)', () => {
+    const lacking = full(['speedMetersPerSecond', 'heartRateBpm', 'elevationMeters']);
+    const choices = canvasElementChoices(timelineOf(lacking), still(lacking));
+    const of = (id: string) => choices.find((choice) => choice.key === `predefined:${id}`)!;
+    // The reader's own wording where this activity can supply them: they all come from positions, times and a clock.
+    for (const id of ['cycling.max-speed', 'cycling.average-speed', 'running.average-pace', 'any.stopwatch', 'any.clock']) expect(of(id), id).toMatchObject({ available: true });
+    expect(of('cycling.max-speed').label).toBe('Max speed so far (Cycling)');
+    expect(of('running.average-pace')).toMatchObject({ label: 'Average pace so far (Running)', group: 'Running' });
+    expect(of('any.clock')).toMatchObject({ label: 'Clock (Any sport)', group: 'Any sport' });
+    expect(of('any.max-heart-rate')).toMatchObject({ available: false, reason: 'This activity has no heart rate.' });
+    for (const id of ['cycling.vertical-speed', 'any.lowest-elevation', 'any.highest-elevation']) {
+      expect(of(id), id).toMatchObject({ available: false, reason: 'This activity has no elevation.' });
+    }
+    // The plain list has them too, with the same reasons and each told apart from its entry.
+    expect(choices.find((choice) => choice.key === 'metric:elevationLowest')).toMatchObject({ available: false, label: 'Lowest elevation so far', reason: 'This activity has no elevation.' });
+    expect(choices.find((choice) => choice.key === 'metric:maxHeartRate')).toMatchObject({ available: false, reason: 'This activity has no heart rate.' });
+    expect(choices.find((choice) => choice.key === 'metric:stopwatch')).toMatchObject({ available: true, label: 'Stopwatch', group: 'Live figures' });
+    const labels = choices.map((choice) => choice.label);
+    expect(new Set(labels).size).toBe(labels.length);
+
+    // None of them can be offered for an activity with no timestamps.
+    const untimed = makeActivity([{ lat: 1, lon: 1 }, { lat: 1.001, lon: 1 }]);
+    const none = canvasElementChoices(buildOverlayTimeline(untimed), still(untimed));
+    expect(none.find((choice) => choice.key === 'predefined:any.clock')).toMatchObject({ available: false, reason: expect.stringContaining('no timestamps') });
+    expect(none.find((choice) => choice.key === 'predefined:any.stopwatch')?.available).toBe(false);
+  });
+
+  it('builds the figures so far as ordinary figures, the vertical speed smoothed and the elevations of the total on request (AV-1025)', () => {
+    const timeline = timelineOf(full());
+    const one = (id: string) => predefinedEntry(id)!.build(canvasTemplate([]), SIZES[0]!, timeline)[0]!;
+    expect(one('cycling.max-speed')).toMatchObject({ type: 'text', source: { kind: 'metric', metric: 'maxSpeed' } });
+    expect(one('cycling.vertical-speed').smoothing).toEqual({ windowSeconds: 5 });
+    expect(one('running.average-pace').source).toEqual({ kind: 'metric', metric: 'averagePace' });
+    // A total has no smoothing to offer, and none is set.
+    expect(one('any.lowest-elevation').smoothing).toBeUndefined();
+    expect(one('any.stopwatch').source).toEqual({ kind: 'metric', metric: 'stopwatch' });
+    expect(one('any.clock').source).toEqual({ kind: 'metric', metric: 'clock' });
   });
 
   it('builds splits with the rate a sport reads, and offers them only where the activity can be split (AV-1021)', () => {

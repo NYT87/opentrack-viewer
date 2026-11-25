@@ -1,5 +1,6 @@
 import type { Activity } from '../domain/activity';
 import { ActivityError, toActivityError } from '../domain/errors';
+import type { SourceTimecode } from '../overlay/timecode';
 import type { OverlayVideoTiming } from '../state/overlayStore';
 
 /** The container formats a GoPro writes — the one list both video intakes use. */
@@ -13,6 +14,12 @@ export interface ReadVideoTelemetryOptions {
 export interface VideoTelemetry {
   /** The container's clock, known whenever a telemetry track was found. */
   timing?: OverlayVideoTiming;
+  /**
+   * AV-1026. The video's timecode, from its timecode track or its creation
+   * time. Kept even where there is no telemetry track: a camera that is not a
+   * GoPro still has one.
+   */
+  timecode?: SourceTimecode;
   /** Absent when the video yielded no activity. */
   activity?: Activity;
   /**
@@ -53,13 +60,18 @@ export async function readVideoTelemetry(
     payload = await extractGpmf(file, options);
   } catch (error) {
     const failure = toActivityError(error, 'gopro_extract_failed');
-    if (failure.code === 'no_telemetry_track') return { activityError: failure };
+    if (failure.code === 'no_telemetry_track') {
+      // Read off the error, not by its class: the extractor is loaded on demand.
+      const { timecode } = error as { timecode?: SourceTimecode };
+      return { ...(timecode ? { timecode } : {}), activityError: failure };
+    }
     throw failure;
   }
   // The extractor honours the signal; the parser cannot, so a stop that lands
   // during it is honoured here, before anything is handed back.
   throwIfAborted(options.signal);
 
+  const { timecode } = payload.timing;
   const timing: OverlayVideoTiming = {
     durationSeconds: payload.timing.videoDurationSeconds,
     frameIntervalSeconds: payload.timing.frameIntervalSeconds,
@@ -69,11 +81,11 @@ export async function readVideoTelemetry(
   try {
     const activity = await parseGopro(payload, { fileName: file.name, fileSizeBytes: file.size });
     throwIfAborted(options.signal);
-    return { timing, activity };
+    return { timing, ...(timecode ? { timecode } : {}), activity };
   } catch (error) {
     const failure = toActivityError(error, 'gopro_extract_failed');
     if (failure.code === 'no_telemetry_track' || failure.code === 'no_location_stream') {
-      return { timing, activityError: failure };
+      return { timing, ...(timecode ? { timecode } : {}), activityError: failure };
     }
     throw failure;
   }
