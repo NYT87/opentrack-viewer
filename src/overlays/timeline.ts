@@ -1,5 +1,6 @@
 import type { Activity } from '../domain/activity';
 import { buildSeries } from '../domain/series';
+import { computeDistance } from '../domain/stats';
 
 /**
  * AV-1003. The clock that ties a video to an activity.
@@ -138,7 +139,9 @@ export function buildTimeline(activity: Activity): TimelineResult {
   };
   const speed = perPoint('speed');
   const pace = perPoint('pace');
-  const cumulative = activity.points.map((point) => point.distanceMeters);
+  // Parsers do not store a distance on each point; the stats module derives it
+  // (preferring a recorded distance stream), and the viewer shows that figure.
+  const cumulative = computeDistance(activity.points).cumulativeMeters;
 
   const read: Record<Channel, (position: number) => number | undefined> = {
     lat: (i) => activity.points[i]!.lat,

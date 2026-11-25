@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // The viewer mounts a map once an activity loads, and jsdom has no WebGL.
@@ -237,5 +237,172 @@ describe('handoff from the viewer (AV-1009)', () => {
     render(<App />);
     expect(await screen.findByRole('button', { name: 'Create route overlay' })).toBeDisabled();
     expect(screen.getByText(/no GPS coordinates, so there is no route to draw/)).toBeInTheDocument();
+  });
+});
+
+describe('previewing on a video (AV-1004)', () => {
+  /** A context that accepts any drawing call and remembers the text it was given. */
+  let spoken: string[] = [];
+  beforeEach(() => {
+    spoken = [];
+    const context = new Proxy(
+      {},
+      {
+        get: (_target, name) => {
+          if (name === 'fillText') return (text: string) => spoken.push(text);
+          if (name === 'measureText') return () => ({ width: 0 });
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      (() => context) as unknown as HTMLCanvasElement['getContext'],
+    );
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve());
+  });
+
+  const withActivity = async (fixture = 'overlay-sync.gpx') => {
+    const activity = await parseGpx(readFixture(fixture), { fileName: fixture });
+    useOverlayStore.getState().setActivity(activity);
+    window.location.hash = '#/overlays';
+    render(<App />);
+    return activity;
+  };
+  const videoFile = () => new File(['x'], 'ride.webm', { type: 'video/webm' });
+  const loadVideo = async (duration = 4) => {
+    await userEvent.upload(screen.getByTestId('file-input'), videoFile());
+    const video = (await screen.findByTestId('overlay-video')) as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { value: duration, configurable: true });
+    fireEvent.loadedMetadata(video);
+    return video;
+  };
+  const section = () => within(screen.getByRole('region', { name: 'Video overlay' }));
+
+  it('asks for a video once there is a route with a clock, and offers the templates', async () => {
+    await withActivity();
+    const video = section();
+    expect(video.getByLabelText('Template')).toHaveValue('compact-hud');
+    expect(video.getByRole('option', { name: 'Route inset' })).toBeInTheDocument();
+    expect(video.getByRole('option', { name: 'Gauge dashboard' })).toBeInTheDocument();
+    expect(screen.getByTestId('file-input')).toBeInTheDocument();
+  });
+
+  it('plays the chosen file locally and shows its length', async () => {
+    await withActivity();
+    const video = await loadVideo(12);
+    expect(video.getAttribute('src')).toMatch(/^blob:/);
+    expect(await screen.findByText('0:00 / 0:12')).toBeInTheDocument();
+  });
+
+  it('draws the overlay for the frame being shown, and redraws on a seek', async () => {
+    await withActivity();
+    const video = await loadVideo();
+    expect(spoken).toContain('DISTANCE');
+    const atStart = [...spoken];
+
+    spoken = [];
+    video.currentTime = 3;
+    fireEvent.seeked(video);
+    expect(spoken).toContain('DISTANCE');
+    expect(spoken).not.toEqual(atStart);
+  });
+
+  it('follows the scrub bar', async () => {
+    await withActivity();
+    const video = await loadVideo();
+    fireEvent.change(screen.getByLabelText('Video position'), { target: { value: '2.5' } });
+    expect(video.currentTime).toBeCloseTo(2.5, 5);
+  });
+
+  it('re-lines the telemetry when the offset changes', async () => {
+    await withActivity();
+    await loadVideo();
+    const before = [...spoken];
+    spoken = [];
+    fireEvent.change(screen.getByLabelText('Offset (seconds)'), { target: { value: '4' } });
+    expect(spoken.length).toBeGreaterThan(0);
+    expect(spoken).not.toEqual(before);
+
+    spoken = [];
+    fireEvent.change(screen.getByLabelText('Offset (seconds)'), { target: { value: '500' } });
+    // Past the end of the telemetry: nothing from it is drawn.
+    expect(spoken).toEqual([]);
+  });
+
+  it('nudges the offset by a second each way, and ignores nonsense', async () => {
+    await withActivity();
+    await loadVideo();
+    const offset = screen.getByLabelText('Offset (seconds)');
+    await userEvent.click(screen.getByRole('button', { name: 'Telemetry earlier 1 s' }));
+    expect(offset).toHaveValue(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Telemetry later 1 s' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Telemetry later 1 s' }));
+    expect(offset).toHaveValue(-1);
+    fireEvent.change(offset, { target: { value: '99999999' } });
+    expect(Number((offset as HTMLInputElement).value)).toBeLessThanOrEqual(24 * 3600);
+  });
+
+  it('switches template and says which components it had to hide, and why', async () => {
+    await withActivity();
+    await loadVideo();
+    await userEvent.selectOptions(screen.getByLabelText('Template'), 'gauge-dashboard');
+    const hidden = within(screen.getByRole('list', { name: 'Hidden components' }));
+    // The file has no power or pedal cadence, and a dial for either would be empty.
+    expect(hidden.getByText(/Power is not in this activity/)).toBeInTheDocument();
+    expect(hidden.getByText(/Pedal cadence is not in this activity/)).toBeInTheDocument();
+    expect(spoken.some((t) => /bpm$/.test(t))).toBe(true);
+  });
+
+  it('switches the figures to imperial', async () => {
+    await withActivity();
+    await loadVideo();
+    await userEvent.selectOptions(screen.getByLabelText('Units'), 'imperial');
+    expect(spoken.some((t) => /ft$/.test(t))).toBe(true);
+  });
+
+  it('explains a video the browser cannot decode', async () => {
+    await withActivity();
+    const video = await loadVideo();
+    fireEvent.error(video);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot play that video/);
+    expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();
+  });
+
+  it('lets the video be swapped', async () => {
+    await withActivity();
+    await loadVideo();
+    await userEvent.click(screen.getByRole('button', { name: 'Choose another video' }));
+    expect(screen.queryByTestId('overlay-video')).not.toBeInTheDocument();
+    expect(screen.getByTestId('file-input')).toBeInTheDocument();
+  });
+
+  it('says so, and offers no video, for an activity with no timestamps', async () => {
+    await withActivity('simple-route-no-time.gpx');
+    expect(section().getByRole('note')).toHaveTextContent(/no timestamps to line up with a video/);
+    expect(section().queryByLabelText('Template')).not.toBeInTheDocument();
+    // The still route image is still there.
+    expect(screen.getByRole('button', { name: 'Save as PNG' })).toBeInTheDocument();
+  });
+
+  it('keeps a handed-over video, and releases its object URL when it goes', async () => {
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true, writable: true });
+    const activity = await parseGpx(readFixture('overlay-sync.gpx'), { fileName: 'overlay-sync.gpx' });
+    useOverlayStore.getState().setActivity(activity, { video: videoFile() });
+    window.location.hash = '#/overlays';
+    const { unmount } = render(<App />);
+    expect(await screen.findByTestId('overlay-video')).toBeInTheDocument();
+    unmount();
+    expect(revoke).toHaveBeenCalled();
+  });
+
+  it('makes no network request', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await withActivity();
+    await loadVideo();
+    fireEvent.change(screen.getByLabelText('Video position'), { target: { value: '1' } });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

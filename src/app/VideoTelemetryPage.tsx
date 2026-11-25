@@ -7,6 +7,7 @@ import { ActivityError, toActivityError } from '../domain/errors';
 import type { Activity } from '../domain/activity';
 import { useActivityStore } from '../state/activityStore';
 import { useInteractionStore } from '../state/interactionStore';
+import { useOverlayStore } from '../state/overlayStore';
 import { ROUTES } from './routes';
 
 /** The container formats a GoPro writes. */
@@ -15,7 +16,7 @@ const VIDEO_EXTENSIONS = ['mp4', 'mov'];
 type PageState =
   | { status: 'idle' }
   | { status: 'extracting'; fileName: string; fraction: number }
-  | { status: 'ready'; activity: Activity }
+  | { status: 'ready'; activity: Activity; file: File }
   | { status: 'error'; error: ActivityError };
 
 /**
@@ -34,6 +35,7 @@ type PageState =
 export function VideoTelemetryPage() {
   const navigate = useNavigate();
   const setActivity = useActivityStore((state) => state.setActivity);
+  const setOverlayActivity = useOverlayStore((state) => state.setActivity);
   const unitSystem = useInteractionStore((state) => state.unitSystem);
 
   const [state, setState] = useState<PageState>({ status: 'idle' });
@@ -64,12 +66,19 @@ export function VideoTelemetryPage() {
         fileName: file.name,
         fileSizeBytes: file.size,
       });
-      setState({ status: 'ready', activity });
+      setState({ status: 'ready', activity, file });
     } catch (error) {
       setState({ status: 'error', error: toActivityError(error, 'gopro_extract_failed') });
     } finally {
       abortRef.current = undefined;
     }
+  };
+
+  /** AV-1002. The same activity, plus the video it came from, to the overlay page. */
+  const openInOverlays = () => {
+    if (state.status !== 'ready') return;
+    setOverlayActivity(state.activity, { video: state.file });
+    navigate(ROUTES.overlays);
   };
 
   const cancel = () => abortRef.current?.abort();
@@ -142,6 +151,7 @@ export function VideoTelemetryPage() {
             activity={state.activity}
             units={unitSystem}
             onOpen={openInViewer}
+            onOverlay={openInOverlays}
             onReset={() => setState({ status: 'idle' })}
           />
         )}
@@ -154,11 +164,13 @@ function ExtractionSummary({
   activity,
   units,
   onOpen,
+  onOverlay,
   onReset,
 }: {
   activity: Activity;
   units: UnitSystem;
   onOpen: () => void;
+  onOverlay: () => void;
   onReset: () => void;
 }) {
   const derived = activity.derived;
@@ -192,6 +204,9 @@ function ExtractionSummary({
       <p className="video__actions">
         <button type="button" className="button button--primary" onClick={onOpen}>
           Open in viewer
+        </button>
+        <button type="button" className="button" onClick={onOverlay}>
+          Make an overlay
         </button>
         <button type="button" className="button" onClick={onReset}>
           Read another video

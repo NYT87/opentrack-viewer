@@ -49,6 +49,24 @@ export function projectRoute(
   points: readonly ActivityPoint[],
   options: ProjectionOptions,
 ): ProjectedRoute {
+  return createRouteProjector(points, options).route;
+}
+
+export interface RouteProjector {
+  route: ProjectedRoute;
+  /**
+   * Where any position falls in the same fitted frame — for a marker that
+   * follows the route. A position outside the route's own extent is placed
+   * consistently, not clamped, so a marker can never jump to a wrong place.
+   */
+  toScreen: (lat: number, lon: number) => ScreenPoint;
+}
+
+/** `projectRoute`, keeping the projection so more points can be placed in it. */
+export function createRouteProjector(
+  points: readonly ActivityPoint[],
+  options: ProjectionOptions,
+): RouteProjector {
   const { width, height, padding } = options;
   const innerWidth = width - 2 * padding;
   const innerHeight = height - 2 * padding;
@@ -111,6 +129,7 @@ export function projectRoute(
     x: offsetX + (x - minX) * toRadians * scale,
     y: offsetY + (maxY - y) * scale,
   });
+  const place = (lat: number, lon: number): ScreenPoint => toScreen(lonOf(lon), mercatorY(lat));
 
   const segments: ScreenPoint[][] = [];
   let current: ScreenPoint[] = [];
@@ -127,5 +146,8 @@ export function projectRoute(
 
   const first = segments[0]![0]!;
   const lastSegment = segments.at(-1)!;
-  return { width, height, segments, start: first, end: lastSegment.at(-1)! };
+  return {
+    route: { width, height, segments, start: first, end: lastSegment.at(-1)! },
+    toScreen: place,
+  };
 }

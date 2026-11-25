@@ -1885,6 +1885,105 @@ test('hands the viewer\'s activity to the overlay page (AV-1009)', async ({ page
   await expect(page.getByRole('region', { name: 'Route map' })).toHaveCount(0);
 });
 
+/** What the overlay canvas currently holds: how much is drawn, and a fingerprint of it. */
+async function overlayPixels(page: Page) {
+  return page.getByTestId('overlay-video-canvas').evaluate((node) => {
+    const canvas = node as HTMLCanvasElement;
+    const context = canvas.getContext('2d')!;
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    let drawn = 0;
+    let fingerprint = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3]! > 0) {
+        drawn += 1;
+        fingerprint = (fingerprint * 31 + data[i]! + data[i + 1]! * 3 + data[i + 3]! * 7 + i) >>> 0;
+      }
+    }
+    return { drawn, fingerprint, width: canvas.width, height: canvas.height };
+  });
+}
+
+async function openOverlayPreview(page: Page) {
+  await page.goto('./#/overlays');
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
+  await expect(page.getByRole('region', { name: 'Video overlay' })).toBeVisible();
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'sync-test.webm'));
+  await expect(page.getByTestId('overlay-video')).toBeVisible();
+  // Metadata has loaded once the duration is known.
+  await expect(page.getByText(/\/ 0:04/)).toBeVisible();
+}
+
+test('draws the overlay over a playing video and follows a seek (AV-1004)', async ({ page }) => {
+  const requests = recordRequests(page);
+  await openOverlayPreview(page);
+
+  const scrub = page.getByLabel('Video position');
+  const seekTo = async (seconds: number) => {
+    await scrub.evaluate((node, value) => {
+      const input = node as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, String(value));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, seconds);
+    await expect.poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeCloseTo(seconds, 0);
+  };
+
+  // The canvas takes the video's own size, so overlays match the picture.
+  await seekTo(1);
+  const at1 = await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100).then(() => overlayPixels(page));
+  expect([at1.width, at1.height]).toEqual([160, 90]);
+
+  // A different moment shows different figures.
+  await seekTo(3);
+  await expect.poll(async () => (await overlayPixels(page)).fingerprint).not.toBe(at1.fingerprint);
+
+  // Playing advances the clock, and the overlay keeps pace with it.
+  await seekTo(0);
+  const before = (await overlayPixels(page)).fingerprint;
+  await page.getByRole('button', { name: 'Play' }).click();
+  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await expect.poll(() => page.getByTestId('overlay-video').evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0.5);
+  await expect.poll(async () => (await overlayPixels(page)).fingerprint).not.toBe(before);
+  await page.getByRole('button', { name: 'Pause' }).click();
+
+  // Nothing about the video or the telemetry left the browser. The video's own
+  // object URL is this tab reading a local file, not a network request.
+  expect(
+    requests.map((request) => request.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
+  ).toEqual([]);
+  expect(requests.some((request) => request.url().startsWith('blob:'))).toBe(true);
+});
+
+test('lines the telemetry up with an offset, and blanks outside it (AV-1004)', async ({ page }) => {
+  await openOverlayPreview(page);
+  const scrub = page.getByLabel('Video position');
+  await scrub.evaluate((node) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(node as HTMLInputElement, '1');
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100);
+  const baseline = await overlayPixels(page);
+
+  // Four seconds later in the telemetry: different figures at the same frame.
+  const offset = page.getByLabel('Offset (seconds)');
+  await offset.fill('4');
+  await expect.poll(async () => (await overlayPixels(page)).fingerprint).not.toBe(baseline.fingerprint);
+  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100);
+
+  // Shifted past the end of the recording, nothing is drawn.
+  await offset.fill('100');
+  await expect.poll(async () => (await overlayPixels(page)).drawn).toBe(0);
+
+  // And the buttons move it by a second each way.
+  await offset.fill('0');
+  await page.getByRole('button', { name: 'Telemetry earlier 1 s' }).click();
+  await expect(offset).toHaveValue('1');
+  await page.getByRole('button', { name: 'Telemetry later 1 s' }).click();
+  await page.getByRole('button', { name: 'Telemetry later 1 s' }).click();
+  await expect(offset).toHaveValue('-1');
+});
+
 test('fixture files are never read by the server', async () => {
   // Sanity check that fixtures are local test data, not network resources.
   const gpx = readFileSync(join(FIXTURE_DIR, 'simple-route.gpx'), 'utf-8');

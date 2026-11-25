@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { download } from '../components/ExportPanel';
 import { FileDropZone } from '../components/FileDropZone';
+import { OverlayVideoPreview } from '../components/OverlayVideoPreview';
 import { toActivityError } from '../domain/errors';
 import { projectRoute } from '../domain/routeProjection';
 import {
@@ -13,7 +14,15 @@ import {
   type RouteImageOptions,
 } from '../overlays/routeImage';
 import { parseActivityFile } from '../parsers';
+import { createOverlayRenderer } from '../overlays/renderOverlay';
+import { BUILT_IN_TEMPLATES, availabilityOf, staticAvailability } from '../overlays/template';
+import { buildTimeline } from '../overlays/timeline';
+import type { UnitSystem } from '../domain/units';
+import { useInteractionStore } from '../state/interactionStore';
 import { useOverlayStore } from '../state/overlayStore';
+
+/** The containers a camera or phone writes that a browser may play. */
+const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'm4v'];
 
 /**
  * AV-1002 / AV-1009. Makes overlays from an activity.
@@ -30,7 +39,10 @@ export function OverlayPage() {
   const activity = useOverlayStore((state) => state.activity);
   const isSection = useOverlayStore((state) => state.isSection);
   const setActivity = useOverlayStore((state) => state.setActivity);
+  const video = useOverlayStore((state) => state.video);
+  const setVideo = useOverlayStore((state) => state.setVideo);
   const clear = useOverlayStore((state) => state.clear);
+  const defaultUnits = useInteractionStore((state) => state.unitSystem);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [options, setOptions] = useState<RouteImageOptions>(DEFAULT_ROUTE_IMAGE);
@@ -38,6 +50,23 @@ export function OverlayPage() {
   const [intakeError, setIntakeError] = useState<string | undefined>();
   const [saved, setSaved] = useState<string | undefined>();
   const [isReading, setIsReading] = useState(false);
+  const [templateId, setTemplateId] = useState<string>(BUILT_IN_TEMPLATES[0].id);
+  const [units, setUnits] = useState<UnitSystem>(defaultUnits);
+  const [offsetSeconds, setOffsetSeconds] = useState(0);
+
+  // AV-1004. The clock the video is lined up against, and what it can supply.
+  const timelineResult = useMemo(() => (activity ? buildTimeline(activity) : undefined), [activity]);
+  const overlayRenderer = useMemo(() => {
+    if (!activity || !timelineResult) return undefined;
+    const entry = BUILT_IN_TEMPLATES.find((t) => t.id === templateId) ?? BUILT_IN_TEMPLATES[0];
+    return createOverlayRenderer({
+      activity,
+      template: entry.create(units),
+      ...(timelineResult.ok
+        ? { timeline: timelineResult.timeline, availability: availabilityOf(timelineResult.timeline) }
+        : { availability: staticAvailability(activity.streams.hasLocation) }),
+    });
+  }, [activity, timelineResult, templateId, units]);
 
   /**
    * What is wrong with the current settings or route, if anything. Worked out
@@ -67,6 +96,11 @@ export function OverlayPage() {
       /* reported by handleExport */
     }
   }, [activity, options, problem]);
+
+  const handleVideo = (file: File) => {
+    setOffsetSeconds(0);
+    setVideo(file);
+  };
 
   const handleFile = async (file: File) => {
     setIsReading(true);
@@ -242,6 +276,77 @@ export function OverlayPage() {
                 data-testid="overlay-canvas"
                 aria-label="Route overlay preview"
               />
+            </section>
+
+            <section className="box route-tools" aria-label="Video overlay">
+              <h3 className="prose__title">Preview on a video</h3>
+              {timelineResult && !timelineResult.ok && (
+                <p role="note">{timelineResult.reason}</p>
+              )}
+              {timelineResult?.ok && overlayRenderer && (
+                <>
+                  <div className="route-tools__row">
+                    <label className="export__label">
+                      Template{' '}
+                      <select
+                        className="select"
+                        value={templateId}
+                        onChange={(event) => setTemplateId(event.target.value)}
+                      >
+                        {BUILT_IN_TEMPLATES.map((entry) => (
+                          <option key={entry.id} value={entry.id}>
+                            {entry.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="export__label">
+                      Units{' '}
+                      <select
+                        className="select"
+                        value={units}
+                        onChange={(event) => setUnits(event.target.value as UnitSystem)}
+                      >
+                        <option value="metric">Metric</option>
+                        <option value="imperial">Imperial</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {overlayRenderer.resolved.hidden.length > 0 && (
+                    <ul className="export__warnings" aria-label="Hidden components">
+                      {overlayRenderer.resolved.hidden.map(({ component, reason }) => (
+                        <li key={component.id}>{reason}</li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {!video && (
+                    <>
+                      <p>Choose the video these figures belong to. It stays on this device.</p>
+                      <FileDropZone
+                        acceptedExtensions={VIDEO_EXTENSIONS}
+                        onFile={handleVideo}
+                      />
+                    </>
+                  )}
+                  {video && (
+                    <>
+                      <OverlayVideoPreview
+                        file={video}
+                        renderer={overlayRenderer}
+                        offsetSeconds={offsetSeconds}
+                        onOffsetChange={setOffsetSeconds}
+                      />
+                      <p>
+                        <button type="button" className="button" onClick={() => setVideo(undefined)}>
+                          Choose another video
+                        </button>
+                      </p>
+                    </>
+                  )}
+                </>
+              )}
             </section>
 
             <section className="box route-tools" aria-label="Save overlay">

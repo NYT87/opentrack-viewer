@@ -162,6 +162,20 @@ describe('overlay timeline (AV-1003)', () => {
   });
 
   describe('derived and auxiliary data', () => {
+    it('derives distance from positions when points carry none, as the viewer does', () => {
+      // Parsers leave `distanceMeters` unset; the figure must still be there.
+      const bare = activityOf(
+        Array.from({ length: 10 }, (_, s) => at(s, { lat: 42 + s * 3.6e-5, distanceMeters: undefined })),
+      );
+      const timeline = build(bare);
+      expect(timeline.available.has('distance')).toBe(true);
+      const sample = sampleTimeline(timeline, 5);
+      // 5 s at about 4 m/s.
+      expect(sample.values.distance).toBeGreaterThan(15);
+      expect(sample.values.distance).toBeLessThan(25);
+      expect(sampleTimeline(timeline, 0).values.distance).toBe(0);
+    });
+
     it('derives speed and pace from position when the file has none', () => {
       // About 4 m/s: 0.00001° of latitude is ~1.11 m per second here, so move faster.
       const fast = activityOf(

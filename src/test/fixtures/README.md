@@ -31,6 +31,8 @@ device identifier is committed here (plan §13, Fixture Policy).
 | `hero8.mp4` | **A real GoPro HERO8 clip, 4.2 MB.** Taken from [`gopro/gpmf-parser/samples`](https://github.com/gopro/gpmf-parser/tree/main/samples), which is licensed Apache-2.0 or MIT — © GoPro, Inc. The only fixture here that is not generated, because no synthetic file can stand in for a real `moov`, a real `gpmd` track and real GPMF payloads. Its size is the price of testing extraction against something a camera actually wrote. It was also recorded **indoors**: all 231 of its GPS samples report no fix and land in the North Pacific at nine kilometres altitude, which makes it the fixture for rejecting a track that never had a lock. |
 | `gopro-with-telemetry.mp4` | An MP4 container whose tail carries GoPro's `gpmd` and `GoPro` markers, where a camera actually writes them. Generated: detection reads boxes, not pictures, so it holds no video. |
 | `plain-video.mp4` | The same container with no telemetry track — the "recognized, but not for us" case. |
+| `overlay-sync.gpx` | Eleven points one second apart, with elevation and heart rate rising a unit a second, so an overlay's values at a given video time are exactly predictable. Pairs with `sync-test.webm`. |
+| `sync-test.webm` | A 4-second, 160×90, 10 fps VP8 test pattern with no audio (27 KB), for the overlay preview's play and seek tests. Generated, with ffmpeg: `ffmpeg -f lavfi -i testsrc=size=160x90:rate=10:duration=4 -c:v libvpx -b:v 40k -g 5 -an sync-test.webm`. VP8 so a headless Chromium can decode it. |
 | `malformed.tcx` | Unclosed elements; must fail as `invalid_tcx_xml`. |
 
 ## The `.fit` fixtures are generated

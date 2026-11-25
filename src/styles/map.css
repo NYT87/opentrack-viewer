@@ -65,3 +65,16 @@
   background-size: 20px 20px;
   background-position: 0 0, 10px 10px;
 }
+
+/* AV-1004: the video preview, with the overlay canvas laid exactly over it. */
+.overlay-video { display: flex; flex-direction: column; gap: 12px; }
+.overlay-video__stage { position: relative; background: #000; line-height: 0; }
+.overlay-video__video { display: block; width: 100%; height: auto; }
+.overlay-video__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.overlay-video__scrub { flex: 1 1 200px; min-width: 120px; }

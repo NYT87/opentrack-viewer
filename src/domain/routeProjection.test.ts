@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActivityPoint } from './activity';
-import { projectRoute } from './routeProjection';
+import { createRouteProjector, projectRoute } from './routeProjection';
 
 const at = (lat: number, lon: number, extra: Partial<ActivityPoint> = {}, index = 0): ActivityPoint => ({
   index,
@@ -99,5 +99,25 @@ describe('route projection (AV-1009)', () => {
     for (const p of allPoints(route)) {
       expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true);
     }
+  });
+
+  it('places a position in the same frame as the route, for a following marker', () => {
+    const points = [at(42, -8), at(42.05, -8), at(42.05, -7.9), at(42.1, -7.95, {}, 3)];
+    const projector = createRouteProjector(points, box);
+    const route = projectRoute(points, box);
+    expect(projector.route).toEqual(route);
+    for (const [i, p] of points.entries()) {
+      const placed = projector.toScreen(p.lat!, p.lon!);
+      const drawn = route.segments[0]![i]!;
+      expect(placed.x).toBeCloseTo(drawn.x, 6);
+      expect(placed.y).toBeCloseTo(drawn.y, 6);
+    }
+  });
+
+  it('places a marker correctly on a route that crosses the antimeridian', () => {
+    const points = [at(0.5, 179.9), at(0.5, -179.9, {}, 1)];
+    const projector = createRouteProjector(points, box);
+    const placed = projector.toScreen(0.5, -179.9);
+    expect(placed.x).toBeCloseTo(projector.route.segments[0]![1]!.x, 6);
   });
 });

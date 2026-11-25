@@ -113,6 +113,26 @@ describe('reading a video, and handing it over (AV-907)', () => {
     expect(within(summary).getByRole('button', { name: 'Open in viewer' })).toBeInTheDocument();
   }, 60_000);
 
+  it('hands the activity and its video to the overlay page (AV-1002)', async () => {
+    mockExtractionFrom('hero7.raw');
+    const { App: Fresh } = await import('./App');
+    const { useOverlayStore: freshOverlay } = await import('../state/overlayStore');
+    render(<Fresh />);
+    await goToTool();
+    const video = heroVideo();
+    await userEvent.upload(await screen.findByTestId('file-input'), video);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Make an overlay' }, { timeout: 30_000 }),
+    );
+
+    await waitFor(() => expect(window.location.hash).toBe('#/overlays'));
+    expect(freshOverlay.getState().activity?.source.format).toBe('gopro');
+    // The very file the user chose, still local, for the preview to play.
+    expect(freshOverlay.getState().video).toBe(video);
+    expect(await screen.findByRole('region', { name: 'Overlay settings' })).toBeInTheDocument();
+  }, 60_000);
+
   it('opens the extracted activity in the viewer', async () => {
     mockExtractionFrom('hero7.raw');
     const { App: Fresh } = await import('./App');

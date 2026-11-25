@@ -6,7 +6,13 @@ interface OverlayState {
   activity?: Activity;
   /** True when the viewer handed over a selected section, not the whole activity. */
   isSection: boolean;
-  setActivity: (activity: Activity, options?: { isSection?: boolean }) => void;
+  /** A local video to preview the overlay on, handed over or chosen. */
+  video?: File;
+  setActivity: (
+    activity: Activity,
+    options?: { isSection?: boolean; video?: File },
+  ) => void;
+  setVideo: (video: File | undefined) => void;
   clear: () => void;
 }
 
@@ -17,6 +23,9 @@ interface OverlayState {
 export const useOverlayStore = create<OverlayState>((set) => ({
   activity: undefined,
   isSection: false,
-  setActivity: (activity, options) => set({ activity, isSection: options?.isSection ?? false }),
-  clear: () => set({ activity: undefined, isSection: false }),
+  video: undefined,
+  setActivity: (activity, options) =>
+    set({ activity, isSection: options?.isSection ?? false, video: options?.video }),
+  setVideo: (video) => set({ video }),
+  clear: () => set({ activity: undefined, isSection: false, video: undefined }),
 }));
