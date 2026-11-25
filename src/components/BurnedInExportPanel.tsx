@@ -23,6 +23,7 @@ import { useMapVideoStore } from '../state/mapVideoStore';
 import { checkInsetExportCached } from '../overlay/insetExportCheck';
 import { hasMapInset } from '../overlay/insetCamera';
 import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
+import { CleanupNote } from './CleanupPanel';
 
 interface BurnedInExportPanelProps {
   video: OverlayVideo;
@@ -434,6 +435,7 @@ export function BurnedInExportPanel({
             <p role="status">No component is switched on, so there is nothing to draw.</p>
           )}
           <InsetExportNotes check={insetCheck} />
+          <CleanupNote activity={activity} exporting />
           {outsideActivity && <p role="status">{uncoveredNotice(range, drawnAnyway)}</p>}
 
           <p className="video__actions">

@@ -5,6 +5,7 @@ import {
   type ActivityPoint,
   type ActivityWarning,
 } from './activity';
+import { DEFAULT_PAUSE_SETTINGS, movingSteps, type PauseSettings, type PauseStep } from './pause';
 
 const EARTH_RADIUS_METERS = 6_371_008.8;
 
@@ -15,9 +16,6 @@ const EARTH_RADIUS_METERS = 6_371_008.8;
  * industry default and keeps flat-route gain near zero.
  */
 export const ELEVATION_NOISE_THRESHOLD_METERS = 3;
-
-/** A point is "moving" when its speed exceeds this (used for moving time). */
-const MOVING_SPEED_THRESHOLD_MPS = 0.5;
 
 /** Great-circle distance between two WGS84 coordinates, in meters. */
 export function haversineMeters(
@@ -300,33 +298,44 @@ function computeSensorSummary(points: ActivityPoint[]): SensorSummary {
   };
 }
 
-/** Elapsed time spent above the moving-speed threshold, when time+distance exist. */
+/**
+ * Elapsed time spent moving, when time+distance exist. Which steps are moving is
+ * the shared pause rule (AV-1024, TD-093), the same the overlay's stops read.
+ */
 function computeMovingDuration(
   points: ActivityPoint[],
   cumulative: (number | undefined)[],
+  pause: PauseSettings,
 ): number | undefined {
-  let moving = 0;
+  const steps: PauseStep[] = [];
   let previousIndex: number | undefined;
-  let counted = false;
 
   for (let i = 0; i < points.length; i += 1) {
     const time = points[i]!.time;
     const distance = cumulative[i];
-    if (!(time instanceof Date) || Number.isNaN(time.getTime()) || distance === undefined) continue;
+    if (!(time instanceof Date) || Number.isNaN(time.getTime()) || distance === undefined) {
+      continue;
+    }
     if (previousIndex !== undefined &&
         (points[previousIndex]!.segmentIndex ?? 0) === (points[i]!.segmentIndex ?? 0)) {
       const previousTime = points[previousIndex]!.time as Date;
-      const seconds = (time.getTime() - previousTime.getTime()) / 1000;
-      const meters = distance - (cumulative[previousIndex] as number);
-      if (seconds > 0 && meters / seconds >= MOVING_SPEED_THRESHOLD_MPS) {
-        moving += seconds;
-        counted = true;
-      }
-    }
+      steps.push({
+        seconds: (time.getTime() - previousTime.getTime()) / 1000,
+        meters: distance - (cumulative[previousIndex] as number),
+      });
+    } else steps.push({ seconds: 0, meters: 0, breakBefore: true });
     previousIndex = i;
   }
 
-  return counted ? moving : undefined;
+  const moving = movingSteps(steps, pause);
+  let total = 0;
+  let counted = false;
+  moving.forEach((isMoving, k) => {
+    if (!isMoving) return;
+    total += steps[k]!.seconds;
+    counted = true;
+  });
+  return counted ? total : undefined;
 }
 
 export interface ComputeStatsResult {
@@ -337,7 +346,10 @@ export interface ComputeStatsResult {
 }
 
 /** Runs the full stats engine over an activity's points. */
-export function computeStats(points: ActivityPoint[]): ComputeStatsResult {
+export function computeStats(
+  points: ActivityPoint[],
+  pause: PauseSettings = DEFAULT_PAUSE_SETTINGS,
+): ComputeStatsResult {
   const distance = computeDistance(points);
   const time = computeTimeBounds(points);
   const elevation = computeElevation(points);
@@ -371,7 +383,7 @@ export function computeStats(points: ActivityPoint[]): ComputeStatsResult {
    * training log expects as "average pace": a run with a four-minute stop at a
    * crossing should not read as a walk. Both are kept, each labelled.
    */
-  const movingDurationSeconds = computeMovingDuration(points, distance.cumulativeMeters);
+  const movingDurationSeconds = computeMovingDuration(points, distance.cumulativeMeters, pause);
   const averageMovingSpeedMetersPerSecond =
     distance.totalMeters !== undefined && movingDurationSeconds !== undefined && movingDurationSeconds > 0
       ? distance.totalMeters / movingDurationSeconds
@@ -406,7 +418,8 @@ export function computeStats(points: ActivityPoint[]): ComputeStatsResult {
 
 /** Returns a copy of the activity with `derived` populated and warnings merged. */
 export function withDerivedStats(activity: Activity): Activity {
-  const { stats, warnings } = computeStats(activity.points);
+  // A cleaned activity (AV-1024) carries the pause setting its stats are worked out with.
+  const { stats, warnings } = computeStats(activity.points, activity.cleanup?.pause);
   return {
     ...activity,
     derived: stats,

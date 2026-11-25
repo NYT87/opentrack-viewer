@@ -109,6 +109,10 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
     }
   };
 
+  const isCleanupNote = (warning: ActivityWarning) => warning.code.startsWith('cleanup_');
+  const lost = outcome?.warnings.filter((warning) => !isCleanupNote(warning)) ?? [];
+  const cleanupNotes = outcome?.warnings.filter(isCleanupNote) ?? [];
+
   return (
     <div className="export">
       <h2 className="export__title">Export</h2>
@@ -190,19 +194,27 @@ export function ExportPanel({ activity, selectedRange }: ExportPanelProps) {
           <p className="export__saved">
             Saved <strong>{outcome.fileName}</strong>.
           </p>
-          {outcome.warnings.length > 0 && (
+          {lost.length > 0 && (
             <>
               <p className="export__note">
-                {outcome.warnings.length === 1
+                {lost.length === 1
                   ? 'One thing this format could not carry:'
-                  : `${outcome.warnings.length} things this format could not carry:`}
+                  : `${lost.length} things this format could not carry:`}
               </p>
               <ul className="export__warnings">
-                {outcome.warnings.map((warning) => (
+                {lost.map((warning) => (
                   <li key={warning.code}>{warning.message}</li>
                 ))}
               </ul>
             </>
+          )}
+          {/* AV-1024: whether the file holds cleaned or raw data is said, not a loss of the format. */}
+          {cleanupNotes.length > 0 && (
+            <ul className="export__warnings" data-testid="export-cleanup-notes">
+              {cleanupNotes.map((warning) => (
+                <li key={warning.code}>{warning.message}</li>
+              ))}
+            </ul>
           )}
         </div>
       )}

@@ -19,6 +19,8 @@ import { formatDistance, formatDuration } from '../domain/units';
 import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { routeTotalMeters } from '../overlay/privacyTrim';
+import { useCleanedActivity } from '../state/cleanupStore';
+import { CleanupNote } from '../components/CleanupPanel';
 import { useInteractionStore } from '../state/interactionStore';
 import {
   effectiveMapVideoSettings,
@@ -59,7 +61,9 @@ const ORIGIN_LABEL: Record<MapVideoActivityOrigin, string | undefined> = {
  * activity already read, and the preview shows it at once.
  */
 export function MapVideoPage() {
-  const activity = useMapVideoStore((state) => state.activity);
+  const storedActivity = useMapVideoStore((state) => state.activity);
+  // AV-1024 (TD-093). The model, the preview, the figures and the exports read the cleaned view when the clean-up is on.
+  const activity = useCleanedActivity(storedActivity);
   const origin = useMapVideoStore((state) => state.origin);
   const setActivity = useMapVideoStore((state) => state.setActivity);
   const clear = useMapVideoStore((state) => state.clear);
@@ -260,6 +264,7 @@ export function MapVideoPage() {
                   </dl>
                   {origin && ORIGIN_LABEL[origin] && <p className="overlay-slot__note">{ORIGIN_LABEL[origin]}.</p>}
                   <WarningList warnings={activity.warnings} />
+                  <CleanupNote activity={activity} />
                   <p className="overlay-slot__actions">
                     <button type="button" className="button" onClick={() => replace.current?.click()} disabled={busy}>
                       Choose another activity
@@ -377,7 +382,8 @@ export function MapVideoPage() {
             )}
             {activity && (
               <MapVideoProjectFile
-                activity={activity}
+                // The project names the activity as the file gave it, whether or not the clean-up is on.
+                activity={storedActivity ?? activity}
                 // Every photo on the page goes into the project by name, placed as it is now (TD-071).
                 settings={model ? { ...settings, photos: { ...settings.photos, items: photoItemsForSave(settings.photos, model.photos) } } : settings}
                 onOpen={replaceSettings}

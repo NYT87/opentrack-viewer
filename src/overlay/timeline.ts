@@ -4,6 +4,7 @@ import { deriveSpeed } from '../domain/series';
 import { computeDistance, elevationClimb } from '../domain/stats';
 import { zoneIndex, type ZoneTimes } from './zones';
 import type { SplitSources, SplitStreams } from './splits';
+import { DEFAULT_PAUSE_SETTINGS, isBelowPauseSpeed, isStopped, movingSteps, type PauseSettings, type PauseStep } from '../domain/pause';
 import { circularMeanDegrees, deriveGrade, deriveHeading, lerpDegrees } from './derivedSeries';
 
 /**
@@ -134,6 +135,11 @@ export interface OverlayTimeline {
   sensorLabels: ReadonlyMap<string, OverlaySensorInfo>;
   sampleAt: (videoTimeSeconds: number) => OverlaySample | undefined;
   /**
+   * AV-1024 (TD-093). The pause setting this timeline reads its stops, its moving time and its
+   * "standing still" pace from: the activity's own (a cleaned one carries it), else the defaults.
+   */
+  pause?: PauseSettings;
+  /**
    * AV-1019 (TD-087). The lowest and highest value a source takes across the
    * whole activity, by its own readings (moving pace only, for pace): what a dial's
    * default range is rounded from. `undefined` for a source with no values; absent
@@ -224,14 +230,13 @@ interface DerivedStreams {
   moving: (number | undefined)[];
   /** AV-1016. Elevation gained up to each point, by point index; see `elevationClimb`. */
   climb: (number | undefined)[];
+  /** AV-1024. Whether the step that ends at a point (by point index) is moving by the shared pause rule, runs of slow steps included. */
+  movingStep: Map<number, boolean>;
   /** AV-1019. The recorded grade where there is one, else the derived one; see `deriveGrade`. */
   grade: (number | undefined)[];
   /** AV-1019. The bearing of the last 20 m of the route; see `deriveHeading`. */
   heading: (number | undefined)[];
 }
-
-/** A step is moving at or above this, as the stats count moving time (TD-058). */
-const MOVING_SPEED_THRESHOLD_MPS = 0.5;
 
 /**
  * TD-080. What reads zero while the activity stands still: the figures of
@@ -242,29 +247,37 @@ export const STILL_AT_ZERO: readonly string[] = ['metric:speed', 'metric:running
 /**
  * AV-1011. Moving time so far at each point, counted the way the stats count
  * the activity's moving time: a step between two points with a distance is
- * moving when it covers at least 0.5 m a second, and a recording gap (a new
- * segment) is never moving. Points with no distance have none.
+ * moving by the shared pause rule (TD-093; 0.5 m/s or more by default), and a
+ * recording gap (a new segment) is never moving. Points with no distance have none.
  */
 function movingSoFar(
   points: { index: number; seconds: number; point: ActivityPoint }[],
   distance: (number | undefined)[],
   size: number,
-): (number | undefined)[] {
+  pause: PauseSettings,
+): { moving: (number | undefined)[]; movingStep: Map<number, boolean> } {
   const moving: (number | undefined)[] = new Array(size).fill(undefined);
-  let total = 0;
+  const movingStep = new Map<number, boolean>();
+  const steps: PauseStep[] = [];
+  const at: number[] = [];
   let previous: { seconds: number; meters: number; segment: number } | undefined;
   for (const { index, seconds, point } of points) {
     const meters = distance[index];
     if (typeof meters !== 'number' || !Number.isFinite(meters)) continue;
     const segment = point.segmentIndex ?? 0;
-    if (previous && previous.segment === segment) {
-      const step = seconds - previous.seconds;
-      if (step > 0 && (meters - previous.meters) / step >= MOVING_SPEED_THRESHOLD_MPS) total += step;
-    }
+    const follows = previous !== undefined && previous.segment === segment;
+    steps.push(follows ? { seconds: seconds - previous!.seconds, meters: meters - previous!.meters } : { seconds: 0, meters: 0, breakBefore: true });
+    at.push(index);
     previous = { seconds, meters, segment };
-    moving[index] = total;
   }
-  return moving;
+  const flags = movingSteps(steps, pause);
+  let total = 0;
+  steps.forEach((step, k) => {
+    if (flags[k]) total += step.seconds;
+    moving[at[k]!] = total;
+    movingStep.set(at[k]!, flags[k]!);
+  });
+  return { moving, movingStep };
 }
 
 function metricReaders({ distance, speed, moving, climb, grade, heading }: DerivedStreams): Record<OverlayMetricKey, Reader> {
@@ -322,7 +335,7 @@ export function canSmooth(source: OverlayDataSource | undefined): boolean {
  * turned back into pace by the same rule as a single moment (0 when stopped).
  */
 export function smoothedValueAt(
-  timeline: Pick<OverlayTimeline, 'sampleAt'>,
+  timeline: Pick<OverlayTimeline, 'sampleAt' | 'pause'>,
   source: OverlayDataSource,
   videoTimeSeconds: number,
   windowSeconds: number,
@@ -331,6 +344,7 @@ export function smoothedValueAt(
   const window = Math.min(windowSeconds, SMOOTHING_LIMITS.max);
   const pace = source.kind === 'metric' && source.metric === 'pace';
   const heading = isHeading(source);
+  const pause = timeline.pause ?? DEFAULT_PAUSE_SETTINGS;
   const id = pace ? 'metric:speed' : dataSourceId(source);
   const steps = Math.ceil(window / SMOOTHING_STEP_SECONDS);
   const step = window / steps;
@@ -354,7 +368,7 @@ export function smoothedValueAt(
   const mean = sum / count;
   // A mean speed under the moving threshold is standing still: through a stop the mean decays towards 0, and
   // its reciprocal would read an hour a kilometre before it read 0 (AV-1016).
-  return pace ? (mean < MOVING_SPEED_THRESHOLD_MPS ? 0 : (paceFromSpeed(mean) ?? 0)) : mean;
+  return pace ? (isBelowPauseSpeed(mean, pause) ? 0 : (paceFromSpeed(mean) ?? 0)) : mean;
 }
 
 /** Interpolates a longitude along the shorter arc, across the antimeridian. */
@@ -383,14 +397,16 @@ function timedPointsOf(activity: Activity): { points: TimedPoint[]; firstMs: num
 }
 
 /** Every stream the timeline reads that is derived from the points, by point index. */
-function deriveStreams(activity: Activity, points: TimedPoint[]): { derived: DerivedStreams; distance: (number | undefined)[] } {
+function deriveStreams(activity: Activity, points: TimedPoint[], pause: PauseSettings): { derived: DerivedStreams; distance: (number | undefined)[] } {
   const distance = computeDistance(activity.points).cumulativeMeters;
+  const { moving, movingStep } = movingSoFar(points, distance, activity.points.length, pause);
   return {
     distance,
     derived: {
       distance,
       speed: deriveSpeed(activity),
-      moving: movingSoFar(points, distance, activity.points.length),
+      moving,
+      movingStep,
       climb: elevationClimb(activity.points).gainSoFar,
       grade: deriveGrade(activity.points, distance),
       heading: deriveHeading(activity.points, distance),
@@ -422,15 +438,16 @@ function sourceReaders(activity: Activity, derived: DerivedStreams): { id: strin
 export function pointValuesOf(activity: Activity, source: OverlayDataSource): (number | undefined)[] | undefined {
   const placed = timedPointsOf(activity);
   if (!placed) return undefined;
+  const pause = activity.cleanup?.pause ?? DEFAULT_PAUSE_SETTINGS;
   const pace = source.kind === 'metric' && source.metric === 'pace';
   const wanted = pace ? 'metric:speed' : dataSourceId(source);
-  const read = sourceReaders(activity, deriveStreams(activity, placed.points).derived).find((entry) => entry.id === wanted)?.read;
+  const read = sourceReaders(activity, deriveStreams(activity, placed.points, pause).derived).find((entry) => entry.id === wanted)?.read;
   if (!read) return undefined;
   const values: (number | undefined)[] = new Array(activity.points.length).fill(undefined);
   let any = false;
   for (const timedPoint of placed.points) {
     let value = read(timedPoint);
-    if (pace && value !== undefined) value = value >= MOVING_SPEED_THRESHOLD_MPS ? 1000 / value : undefined;
+    if (pace && value !== undefined) value = !isBelowPauseSpeed(value, pause) ? 1000 / value : undefined;
     if (value === undefined) continue;
     values[timedPoint.index] = value;
     any = true;
@@ -478,7 +495,8 @@ export function buildOverlayTimeline(
     typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? (anchorMs - firstMs) / 1000 : 0;
   const toActivitySeconds = (videoTime: number) => anchorSeconds + videoTime - offsetSeconds;
 
-  const { derived, distance } = deriveStreams(activity, points);
+  const pause = activity.cleanup?.pause ?? DEFAULT_PAUSE_SETTINGS;
+  const { derived, distance } = deriveStreams(activity, points, pause);
   const sources = sourceReaders(activity, derived);
   const sensorLabels = new Map<string, OverlaySensorInfo>();
   for (const stream of activity.sensorStreams ?? []) {
@@ -560,7 +578,8 @@ export function buildOverlayTimeline(
     // then it is a dropout, and nothing is known there.
     const da = finite(derived.distance[a.index]);
     const db = finite(derived.distance[b.index]);
-    const movedAcross = sameSegment && da !== undefined && db !== undefined && (db - da) / gap >= MOVING_SPEED_THRESHOLD_MPS;
+    // TD-093: a gap is a stop by the shared pause rule, so one shorter than the minimum stop is not.
+    const movedAcross = sameSegment && da !== undefined && db !== undefined && (derived.movingStep.get(b.index) ?? !isStopped(db - da, gap, pause));
     const stopped = !exact && !bridges && !movedAcross;
 
     const values: Partial<Record<string, number>> = {};
@@ -633,6 +652,8 @@ export function buildOverlayTimeline(
       zone: number;
     }
     const steps: Step[] = [];
+    // Every step first, then the shared pause rule says which are moving (TD-093).
+    const all: { from: number; to: number; step: PauseStep }[] = [];
     let previous: { position: number; meters: number; segment: number } | undefined;
     points.forEach((timedPoint, position) => {
       const meters = finite(distance[timedPoint.index]);
@@ -640,12 +661,15 @@ export function buildOverlayTimeline(
       const segment = timedPoint.point.segmentIndex ?? 0;
       if (previous && previous.segment === segment) {
         const seconds = timedPoint.seconds - pointAt(previous.position).seconds;
-        const value = read(pointAt(previous.position));
-        if (seconds > 0 && (meters - previous.meters) / seconds >= MOVING_SPEED_THRESHOLD_MPS && value !== undefined) {
-          steps.push({ from: previous.position, to: position, zone: zoneIndex(value, bounds) });
-        }
-      }
+        all.push({ from: previous.position, to: position, step: { seconds, meters: meters - previous.meters } });
+      } else all.push({ from: position, to: position, step: { seconds: 0, meters: 0, breakBefore: true } });
       previous = { position, meters, segment };
+    });
+    const flags = movingSteps(all.map((entry) => entry.step), pause);
+    all.forEach((entry, k) => {
+      if (!flags[k]) return;
+      const value = read(pointAt(entry.from));
+      if (value !== undefined) steps.push({ from: entry.from, to: entry.to, zone: zoneIndex(value, bounds) });
     });
     // Nothing moving with a value: the activity cannot say, so there is no time to show.
     if (steps.length === 0) return undefined;
@@ -695,7 +719,7 @@ export function buildOverlayTimeline(
         let value = read(timedPoint);
         if (value === undefined) continue;
         if (pace) {
-          if (value < MOVING_SPEED_THRESHOLD_MPS) continue;
+          if (isBelowPauseSpeed(value, pause)) continue;
           value = 1000 / value;
         }
         if (value < min) min = value;
@@ -794,6 +818,7 @@ export function buildOverlayTimeline(
     ...(distanceSpan > 0 && endDistance !== undefined ? { distanceTotalMeters: endDistance } : {}),
     sensorLabels,
     sampleAt,
+    pause,
     rangeOf,
     activityStartMs: firstMs,
     zoneTimes,

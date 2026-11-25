@@ -1,3 +1,4 @@
+import { MOVING_SPEED_THRESHOLD_MPS } from '../domain/pause';
 import type { MapVideoRoute } from './route';
 
 /**
@@ -26,10 +27,12 @@ export interface MapVideoTimingOptions {
   outroSeconds: number;
   /** AV-1208. Places where the marker waits a while, each a photo shown: metres along the route, and for how long. */
   holds?: { id: string; distance: number; seconds: number }[];
+  /** AV-1024 (TD-093). The pause setting's speed threshold, when the activity was cleaned with another; else `STOPPED_SPEED_MPS`. */
+  stoppedSpeedMps?: number;
 }
 
 /** Slower than this, a stretch is standing still: the moving-time rule of the stats (`computeStats`). */
-export const STOPPED_SPEED_MPS = 0.5;
+export const STOPPED_SPEED_MPS = MOVING_SPEED_THRESHOLD_MPS;
 /** A stop at least this long is shortened to a beat; a shorter one plays at the recorded pace. */
 export const MIN_PAUSE_SECONDS = 60;
 /** The follow is never shorter than this. */
@@ -122,7 +125,7 @@ function distanceKnots(route: MapVideoRoute, follow: number): Knots {
  * A run of stopped edges lasting `MIN_PAUSE_SECONDS` or more is a pause and
  * takes `beat` video seconds; the rest of the time is scaled to fill the follow.
  */
-function timeKnots(route: MapVideoRoute, follow: number, beatWanted: number): Knots | undefined {
+function timeKnots(route: MapVideoRoute, follow: number, beatWanted: number, stoppedSpeed: number = STOPPED_SPEED_MPS): Knots | undefined {
   const { vertices } = route;
   interface Run { from: number; to: number; seconds: number }
   const pauseRuns: Run[] = [];
@@ -131,7 +134,7 @@ function timeKnots(route: MapVideoRoute, follow: number, beatWanted: number): Kn
     const a = vertices[i]!;
     const b = vertices[i + 1]!;
     const seconds = (b.time! - a.time!) / 1000;
-    const stopped = b.segment !== a.segment || (seconds > 0 && (b.distance - a.distance) / seconds < STOPPED_SPEED_MPS);
+    const stopped = b.segment !== a.segment || (seconds > 0 && (b.distance - a.distance) / seconds < stoppedSpeed);
     if (stopped) {
       if (run && run.to === i) {
         run.to = i + 1;
@@ -216,7 +219,7 @@ export function buildMapVideoTimeline(route: MapVideoRoute, options: MapVideoTim
   let knots: Knots | undefined;
   if (mode === 'time') {
     modeNote = timeModeRefusal(route);
-    knots = modeNote ? undefined : timeKnots(route, riding, options.pauseBeatSeconds);
+    knots = modeNote ? undefined : timeKnots(route, riding, options.pauseBeatSeconds, options.stoppedSpeedMps);
     if (!knots) {
       modeNote ??= 'The route is all stops, so the video follows it at an even pace.';
       mode = 'distance';

@@ -5,6 +5,8 @@
  * and chart layers depend on this module only — never on parser output types.
  */
 
+import type { PauseSettings } from './pause';
+
 export type ActivitySourceFormat =
   | 'gpx'
   | 'fit'
@@ -267,6 +269,17 @@ export interface ActivityWarning {
   pointIndex?: number;
 }
 
+/**
+ * AV-1024 (TD-093). What a cleaned view of an activity says about itself: the
+ * pause setting its stats and the overlay's stops were worked out with, how it
+ * was smoothed, and what was dropped. Absent on an activity as read from a file.
+ */
+export interface ActivityCleanup {
+  pause: PauseSettings;
+  smoothing: { method: 'none' | 'movingAverage' | 'kalman'; strength: number };
+  dropped: { speed: number; elevation: number; total: number };
+}
+
 export interface Activity {
   id: string;
   source: ActivitySource;
@@ -279,6 +292,8 @@ export interface Activity {
   sensorStreams?: ActivitySensorStream[];
   derived?: ActivityDerivedStats;
   warnings: ActivityWarning[];
+  /** AV-1024. Set only on the cleaned view of an activity; the file's own never has it. */
+  cleanup?: ActivityCleanup;
 }
 
 /**

@@ -35,6 +35,7 @@ import { useMapVideoStore } from '../state/mapVideoStore';
 import { checkInsetExportCached } from '../overlay/insetExportCheck';
 import { hasMapInset } from '../overlay/insetCamera';
 import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
+import { CleanupNote } from './CleanupPanel';
 
 interface OverlayExportPanelProps {
   /**
@@ -531,6 +532,7 @@ export function OverlayExportPanel({
             <p role="status">No component is switched on, so there is nothing to export.</p>
           )}
           <InsetExportNotes check={insetCheck} />
+          <CleanupNote activity={activity} exporting />
           {asWebm && insetCheck && !insetCheck.refusal && (
             <p className="overlay-controls__hint">The map’s tiles are all loaded before the recording starts, which can take a while; then it is recorded in real time.</p>
           )}

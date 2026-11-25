@@ -1499,6 +1499,26 @@ Acceptance criteria:
 - **Saved** in the layout as the inset's settings, within template version 2; older layouts open as a whole-route, line-only inset.
 - Tests: the camera (centre held while following, zoom, heading-up from the smoothed heading, held through a stop, across 359°/0°); the Mercator projection against MapLibre's at known points; the trail and the route ahead; the trim (camera held, no marker, no tile for a hidden stretch); providers per export kind (MapTiler never for the PNG sequence); the editor's controls; at most two map insets; the layout round trip; golden renders of a following, heading-up line-only inset; and browser tests over fixture tiles (never a live provider): an exported frame's pixels show the map, the route and a centred marker, every tile asked once, by GET, with nothing of the activity, and none for the trimmed ends.
 
+#### AV-1024: Clean Up the Telemetry: an Outlier Filter, Pause Detection and Smoothing Methods
+
+Dependencies: AV-1016, TD-058, TD-080
+
+GitHub issue #43. A clean-up that is a **view** of the activity, never a change to the file: it drops impossible points (counted and said), detects pauses with one shared setting, and smooths the derived series with a chosen method. The same cleaned data feeds the viewer's charts and stats, the overlay, the map video and the exports.
+
+Acceptance criteria:
+- **Off by default.** With the clean-up off every figure, chart, stat and export is exactly what it is today. The settings live for the session in memory only (nothing but the theme is stored).
+- **Outlier filter:**
+  - A point is dropped when the position implies a speed from the previous kept point above the sport's ceiling (cycling 35 m/s as `MAX_PLAUSIBLE_CYCLING_SPEED_MPS`; running 12 m/s; walking, hiking and unknown sports use the cycling ceiling), or when its elevation is a spike (differs by more than 50 m from both neighbours, which agree within 10 m).
+  - Never silent: the count dropped per reason is said beside the setting, in the activity's warnings (`cleanup_points_dropped`, info) and in every export that holds cleaned data.
+  - Dropped points are removed from the cleaned activity's `points`; segments, laps and events stay consistent.
+- **Pause detection:** one setting, a speed threshold (default 0.5 m/s, today's) and a minimum duration (default 0 s, today's behaviour), read by moving time (TD-058), the stops (TD-080) and the overlay's auto-pause gaps, so the three cannot disagree. A stop shorter than the minimum is counted as moving.
+- **Smoothing methods** for the derived series (speed, grade, vertical speed, heading): *None*, *Moving average* and *Kalman* (a constant-velocity filter on position and speed), with a strength setting (a window of 0 to 30 s, or the Kalman's process noise). Per-component smoothing (AV-1016) still applies on top.
+- **Viewer:** a *Clean-up* panel with the three settings, the count dropped, and a before/after table of distance, moving time, average and maximum speed (and elevation gain) from the raw and the cleaned activity. Reachable by keyboard, announced politely when the counts change.
+- **Same data everywhere:** the viewer, the overlay page, the map video page and the exports read the one cleaned activity when the clean-up is on.
+- **Exports** state in their warnings whether they hold cleaned or raw data.
+- **The file is never changed**, and the raw activity stays in memory for the before view and so that turning the clean-up off restores it exactly.
+- Tests cover: outliers removed from fixtures with known spikes and the count said; pause detection against a known stop, and that moving time, TD-080's stops and the overlay's gaps agree; each smoothing method against synthetic noise (error reduced, lag bounded); stats consistent with the cleaned series; off means identical output; settings kept in memory only; a component test for the panel; and exports stating cleaned or raw.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

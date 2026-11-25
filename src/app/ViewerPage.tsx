@@ -25,6 +25,8 @@ import { sliceActivity } from '../domain/activitySlice';
 import { hasDrawableRoute, lapPointRange } from '../domain/range';
 import { activityToRouteGeoJSON, pointToGeoJSON } from '../domain/geojson';
 import { selectViewerState, useActivityStore } from '../state/activityStore';
+import { useCleanedActivity } from '../state/cleanupStore';
+import { CleanupPanel } from '../components/CleanupPanel';
 import { activePointIndex, useInteractionStore } from '../state/interactionStore';
 /**
  * MapLibre is by far the largest dependency, and an activity without a route
@@ -55,16 +57,20 @@ function openedMessage(activity: Activity, units: UnitSystem, metric: Performanc
  */
 export function ViewerPage() {
   const status = useActivityStore((state) => state.status);
-  const activity = useActivityStore((state) => state.activity);
+  const rawActivity = useActivityStore((state) => state.activity);
   const error = useActivityStore((state) => state.error);
   const fileName = useActivityStore((state) => state.fileName);
   const loadFile = useActivityStore((state) => state.loadFile);
   const replaceFile = useActivityStore((state) => state.replaceFile);
 
   const viewerState = useMemo(
-    () => selectViewerState({ status, activity, error, fileName }),
-    [status, activity, error, fileName],
+    () => selectViewerState({ status, activity: rawActivity, error, fileName }),
+    [status, rawActivity, error, fileName],
   );
+  // AV-1024 (TD-093). Everything below reads the cleaned view when the clean-up is on, and the
+  // activity itself when it is off. The open/close announcements above watch the raw activity, so a
+  // settings change is not mistaken for a new file.
+  const activity = useCleanedActivity(rawActivity);
   const clear = useActivityStore((state) => state.clear);
 
   const hoveredPointIndex = useInteractionStore((state) => state.hoveredPointIndex);
@@ -113,12 +119,13 @@ export function ViewerPage() {
 
     if (viewerState.status === 'ready' && metric) {
       document.getElementById(ACTIVITY_TITLE_ID)?.focus();
-      announce(openedMessage(viewerState.activity, unitSystem, metric));
+      // What the page shows: the cleaned figures when the clean-up is on.
+      announce(openedMessage(activity ?? viewerState.activity, unitSystem, metric));
     } else if (previous === 'ready' && viewerState.status === 'empty') {
       intakeRef.current?.querySelector<HTMLElement>('.dropzone__target')?.focus();
       announce('Activity closed. Choose a file to open another.');
     }
-  }, [viewerState, unitSystem, metric]);
+  }, [viewerState, activity, unitSystem, metric]);
   const liveRegion = <p ref={liveRef} className="visually-hidden" role="status" aria-live="polite" />;
 
   /*
@@ -278,7 +285,9 @@ export function ViewerPage() {
     );
   }
 
-  const readyActivity = viewerState.activity;
+  // A ready viewer holds an activity, and so its cleaned view.
+  const readyActivity = activity as Activity;
+  const rawReadyActivity = viewerState.activity;
 
   // AV-011: only sections that actually render get a link.
   const laps = readyActivity.laps;
@@ -347,6 +356,10 @@ export function ViewerPage() {
             <DeviceInfoPanel device={readyActivity.metadata.device} />
             <SensorStreamPanel streams={readyActivity.sensorStreams} />
             <WarningList warnings={readyActivity.warnings} />
+          </section>
+
+          <section className="box" id="activity-cleanup" aria-label="Telemetry clean-up">
+            <CleanupPanel activity={rawReadyActivity} units={unitSystem} />
           </section>
 
           {/*

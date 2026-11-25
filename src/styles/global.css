@@ -1869,3 +1869,13 @@ input[type='range'].privacy-trim__handle { appearance: none; -webkit-appearance:
 .inset-map-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .inset-map { position: absolute; overflow: hidden; background: #11161c; }
 .inset-map__map { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+/* AV-1024 (TD-093): the telemetry clean-up panel and its raw-and-cleaned table. */
+.cleanup__settings { margin-top: 12px; }
+.cleanup__number { width: 9ch; }
+.cleanup__dropped { margin-top: 12px; min-height: 1.2em; }
+.cleanup__table { margin-top: 12px; border-collapse: collapse; font-size: var(--text-control); font-variant-numeric: tabular-nums; }
+.cleanup__table caption { text-align: left; padding-bottom: 6px; }
+.cleanup__table th, .cleanup__table td { padding: 4px 16px 4px 0; text-align: left; border-bottom: 1px solid var(--border); }
+.cleanup__table thead th { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.cleanup__table tbody th { font-weight: 400; }
