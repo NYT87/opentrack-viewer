@@ -371,7 +371,8 @@ describe('previewing on a video (AV-1004)', () => {
     await withActivity();
     const video = await loadVideo();
     fireEvent.error(video);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot play that video/);
+    // The preview's own message, not the export panels' (which have alerts of their own).
+    expect(await within(screen.getByTestId('overlay-video').closest('.overlay-video') as HTMLElement).findByRole('alert')).toHaveTextContent(/cannot play that video/);
     expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();
   });
 
@@ -587,7 +588,7 @@ describe('customizing the template (AV-1005)', () => {
       await open();
       const before = JSON.stringify(useOverlayTemplateStore.getState());
       await userEvent.upload(screen.getByTestId('project-input'), new File(['{"nope":1}'], 'x.json'));
-      const alert = await screen.findByRole('alert');
+      const alert = await editor().findByRole('alert');
       expect(alert).toHaveTextContent(/could not be loaded/);
       expect(alert).toHaveTextContent(/not an OpenTrack overlay project/);
       expect(JSON.stringify(useOverlayTemplateStore.getState())).toBe(before);
@@ -598,18 +599,18 @@ describe('customizing the template (AV-1005)', () => {
         template: { name: 'x', units: 'metric', components: [{ id: 'a', type: 'text', visible: true, box: { x: 2, y: 0, width: 1, height: 1 }, style: { color: 'url(x)', accentColor: 'red', backgroundColor: 'red', fontScale: 1 }, binding: { kind: 'metric', metric: 'speed' } }] },
       });
       await userEvent.upload(screen.getByTestId('project-input'), new File([bad], 'y.json'));
-      await vi.waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/must be/));
+      await vi.waitFor(() => expect(editor().getByRole('alert')).toHaveTextContent(/must be/));
       expect(useOverlayTemplateStore.getState().selectedId).toBe('compact-hud');
     });
 
     it('can be loaded again after a failure', async () => {
       await open();
       await userEvent.upload(screen.getByTestId('project-input'), new File(['nope'], 'x.json'));
-      await screen.findByRole('alert');
+      await editor().findByRole('alert');
       await userEvent.click(screen.getByRole('button', { name: 'Save project file' }));
       const text = await saved_files()[0]!.blob.text();
       await userEvent.upload(screen.getByTestId('project-input'), new File([text], 'x.json'));
-      await vi.waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(editor().queryByRole('alert')).not.toBeInTheDocument());
     });
   });
 

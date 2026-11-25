@@ -94,6 +94,18 @@ const W = 1000;
 const H = 500;
 
 describe('overlay frames (AV-1004)', () => {
+  it('can draw over what is already on the canvas, without clearing it', () => {
+    const { context, calls } = recorder();
+    setup(points(), compactHudTemplate()).render(context, W, H, 5, 0, { clear: false });
+    expect(calls.some((c) => c.op === 'clearRect')).toBe(false);
+    // Still draws the overlay.
+    expect(calls.some((c) => c.op === 'fillText')).toBe(true);
+    // And clears by default, and when asked to.
+    const cleared = recorder();
+    setup(points(), compactHudTemplate()).render(cleared.context, W, H, 5, 0, { clear: true });
+    expect(cleared.calls[0]!.op).toBe('clearRect');
+  });
+
   it('clears the frame first, so nothing from a previous one lingers', () => {
     const { context, calls } = recorder();
     setup(points(), compactHudTemplate()).render(context, W, H, 5, 0);

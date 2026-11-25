@@ -64,7 +64,17 @@ export interface OverlayRenderer {
     height: number,
     videoSeconds: number,
     offsetSeconds: number,
+    options?: RenderFrameOptions,
   ): void;
+}
+
+export interface RenderFrameOptions {
+  /**
+   * Clear the canvas before drawing (the default), so the frame is the overlay
+   * alone on transparency. Burned-in export turns it off: the video frame is
+   * already on the canvas and the overlay is drawn over it.
+   */
+  clear?: boolean;
 }
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -128,8 +138,9 @@ export function createOverlayRenderer(input: OverlayRenderInput): OverlayRendere
     height: number,
     videoSeconds: number,
     offsetSeconds: number,
+    options: RenderFrameOptions = {},
   ): void {
-    context.clearRect(0, 0, width, height);
+    if (options.clear !== false) context.clearRect(0, 0, width, height);
     const sample = timeline ? sampleTimeline(timeline, videoSeconds, offsetSeconds) : undefined;
 
     for (const component of resolved.components) {

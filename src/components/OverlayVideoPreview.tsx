@@ -8,6 +8,8 @@ export interface OverlayVideoPreviewProps {
   /** Seconds the telemetry is shifted against the video. */
   offsetSeconds: number;
   onOffsetChange: (seconds: number) => void;
+  /** Locks the preview while something else is playing the video (an export). */
+  disabled?: boolean;
   /** Reported once the browser knows the video's length and size. */
   onMetadata?: (info: { duration?: number; width: number; height: number }) => void;
 }
@@ -33,6 +35,7 @@ export function OverlayVideoPreview({
   offsetSeconds,
   onOffsetChange,
   onMetadata,
+  disabled = false,
 }: OverlayVideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,6 +79,11 @@ export function OverlayVideoPreview({
       URL.revokeObjectURL(url);
     };
   }, [file]);
+
+  // An export is playing its own copy of the video; this one steps aside.
+  useEffect(() => {
+    if (disabled) videoRef.current?.pause();
+  }, [disabled]);
 
   // Redraw whenever what is drawn changes while paused.
   useEffect(() => {
@@ -178,7 +186,7 @@ export function OverlayVideoPreview({
       )}
 
       <div className="route-tools__row">
-        <button type="button" className="button" onClick={togglePlay} disabled={Boolean(error)}>
+        <button type="button" className="button" onClick={togglePlay} disabled={Boolean(error) || disabled}>
           {isPlaying ? 'Pause' : 'Play'}
         </button>
         <input
@@ -189,7 +197,7 @@ export function OverlayVideoPreview({
           max={duration || 0}
           step={0.01}
           value={Math.min(time, duration || 0)}
-          disabled={!duration}
+          disabled={!duration || disabled}
           onChange={(event) => seek(Number(event.target.value))}
         />
         <span className="route-tools__status" aria-live="off">

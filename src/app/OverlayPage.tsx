@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { download } from '../components/ExportPanel';
 import { FileDropZone } from '../components/FileDropZone';
+import { OverlayBurnInExport } from '../components/OverlayBurnInExport';
 import { OverlayFrameExport, type VideoInfo } from '../components/OverlayFrameExport';
 import { OverlayTemplateEditor } from '../components/OverlayTemplateEditor';
 import { OverlayVideoPreview } from '../components/OverlayVideoPreview';
@@ -70,6 +71,7 @@ export function OverlayPage() {
   );
   const [offsetSeconds, setOffsetSeconds] = useState(0);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | undefined>();
+  const [exporting, setExporting] = useState(false);
 
   // AV-1004. The clock the video is lined up against, and what it can supply.
   const timelineResult = useMemo(() => (activity ? buildTimeline(activity) : undefined), [activity]);
@@ -382,6 +384,7 @@ export function OverlayPage() {
                         offsetSeconds={offsetSeconds}
                         onOffsetChange={setOffsetSeconds}
                         onMetadata={setVideoInfo}
+                        disabled={exporting}
                       />
                       <p>
                         <button
@@ -400,6 +403,16 @@ export function OverlayPage() {
                 </>
               )}
             </section>
+
+            {timelineResult?.ok && overlayRenderer && video && videoInfo && (
+              <OverlayBurnInExport
+                file={video}
+                renderer={overlayRenderer}
+                offsetSeconds={offsetSeconds}
+                video={videoInfo}
+                onBusyChange={setExporting}
+              />
+            )}
 
             {timelineResult?.ok && overlayRenderer && video && videoInfo && (
               <OverlayFrameExport

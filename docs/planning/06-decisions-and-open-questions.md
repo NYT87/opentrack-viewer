@@ -388,6 +388,27 @@ Built (AV-1006): the PNG frame sequence. Frames are drawn one at a time by the s
 
 Spike questions still to answer: alpha support in `VideoEncoder` per browser; memory for a 5-minute 1080p30 overlay (≈9,000 frames); whether `ffmpeg.wasm` is acceptable at its bundle size; mobile limits.
 
+### TD-038: Burned-In Export Records the Preview in Real Time (AV-1001 spike, run for AV-1007)
+
+Status: **decided from measurements** in the Chromium 151 that Playwright ships (a desktop build; no other browser was available to measure, so Firefox and Safari behaviour below is from API support alone and is unverified).
+
+What was measured:
+- **Encoding:** WebCodecs `VideoEncoder` runs about 95 fps (VP8), 75 fps (VP9) and 81 fps (H.264 High) at 1080p, and about 27 fps (VP9) at 4K — faster than real time at 1080p, roughly real time at 4K. **Alpha encoding (`alpha: "keep"`) is unsupported for every codec**, so a transparent WebM cannot be produced this way here.
+- **Decoding:** H.264, VP8, VP9 and AV1 decode and play; **HEVC does not**. The real HERO8 sample (`hero8.mp4`, 848×480 H.264 + AAC, 12.6 s) is playable. Many newer GoPro clips are HEVC, which only plays where the operating system provides a decoder; the exporter can only use what the preview can play.
+- **Recording:** `MediaRecorder` on a `canvas.captureStream()` accepts WebM (VP8/VP9/AV1/H.264) and MP4 (`avc1`) here. A 4 s clip took 4.0 s of wall time.
+- **Audio:** the video element **must not be muted**: a muted element records pure silence (−91 dB). Routed through `createMediaElementSource` into a `MediaStreamDestination` — and *not* connected to the speakers — an unmuted element records the source's sound exactly (−21.1 dB mean, matching the source) and plays nothing aloud.
+- **Container:** `MediaRecorder` WebM carries **no duration**, so players and editors cannot show length or seek well. The exporter writes the duration into the file's header after recording.
+
+Decision: composite each video frame and the overlay onto a canvas, record that with `MediaRecorder`, and patch the duration. It needs no new dependency and no demuxer, works wherever the preview can play the video, carries the sound, and produces a file any player opens.
+
+Constraints this accepts, and says in the interface:
+- **It runs at the video's own speed**: a ten-minute clip takes ten minutes.
+- **The tab must stay visible**: browsers throttle hidden tabs, which would drop frames, so the export pauses itself while the tab is hidden and resumes when it returns.
+- Memory is about `bitrate × duration`; an export is refused above an estimated 1 GiB, and stopped if it grows past it.
+- WebM (or MP4 in browsers that record it) only; no alpha; no HEVC source unless the browser can play it.
+
+Not chosen, and why: an **offline WebCodecs pipeline** would be 2–3× faster than real time at 1080p but needs an MP4 demuxer (a dependency, and a large piece of code) plus a muxer for the output, to save time on a task that is run once. Worth revisiting if exports of long clips are common.
+
 ## 17. Open Questions
 
 ### Answered by what was built
@@ -460,7 +481,6 @@ question deleted, so the reasoning stays findable.
 - What GoPro models and telemetry streams are in the first supported scope: GPS only, GPS plus speed/altitude, or GPS plus IMU/camera streams?
 - How should GoPro high-frequency IMU streams be represented in the domain without bloating `ActivityPoint`?
 - What small redistributable GoPro/GPMF fixtures can be committed for automated tests?
-- Is burned-in browser-side video export viable for realistic GoPro clips with acceptable quality, memory usage, duration limits, browser support, and audio handling?
 - For Route Builder, should the first implementation support manual straight-line point editing only, or should road/path snapping be added later through an optional routing provider?
 - Which user-facing label should ship for the viewer action: `Create Custom Track`, `Plan Route from Activity`, or another phrase?
 - Should planned-track exports include timestamps when the source activity had them, synthesize neutral timestamps, or omit time data by default?

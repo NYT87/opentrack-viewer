@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2489,6 +2489,244 @@ test('the network watch actually sees a leak when there is one (AV-1008)', async
   // And on the wire, outside the "plain GET for our own files" rule.
   const leaked = outsideTheSite(network.wire).map((r) => `${r.method} ${r.url}`);
   expect(leaked).toEqual(expect.arrayContaining([expect.stringContaining('POST'), expect.stringContaining('PUT')]));
+});
+
+interface MediaProbe {
+  video?: { codec: string; width: number; height: number };
+  audio?: { codec: string };
+  durationSeconds?: number;
+}
+
+/** What `ffprobe` finds in a saved video. */
+function probeMedia(path: string): MediaProbe {
+  const out = JSON.parse(
+    execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path]).toString(),
+  ) as { streams: { codec_type: string; codec_name: string; width?: number; height?: number }[]; format: { duration?: string } };
+  const video = out.streams.find((st) => st.codec_type === 'video');
+  const audio = out.streams.find((st) => st.codec_type === 'audio');
+  const duration = Number(out.format.duration);
+  return {
+    ...(video ? { video: { codec: video.codec_name, width: video.width!, height: video.height! } } : {}),
+    ...(audio ? { audio: { codec: audio.codec_name } } : {}),
+    ...(Number.isFinite(duration) ? { durationSeconds: duration } : {}),
+  };
+}
+
+/** One decoded frame of a video, at `seconds`. */
+function frameAt(path: string, seconds: number) {
+  const dir = mkdtempSync(join(tmpdir(), 'burn-frame-'));
+  const png = join(dir, 'frame.png');
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', String(seconds), '-i', path, '-frames:v', '1', png]);
+  return decodePng(readFileSync(png));
+}
+
+/** Pixels of one colour in a region (fractions of the frame), and their centroid. */
+function colourIn(
+  image: ReturnType<typeof decodePng>,
+  rgb: [number, number, number],
+  region: { x0: number; y0: number; x1: number; y1: number },
+  tolerance = 90,
+) {
+  let count = 0;
+  for (let y = Math.floor(region.y0 * image.height); y < Math.ceil(region.y1 * image.height); y += 1) {
+    for (let x = Math.floor(region.x0 * image.width); x < Math.ceil(region.x1 * image.width); x += 1) {
+      const i = (y * image.width + x) * 4;
+      if (
+        Math.abs(image.pixels[i]! - rgb[0]) < tolerance &&
+        Math.abs(image.pixels[i + 1]! - rgb[1]) < tolerance &&
+        Math.abs(image.pixels[i + 2]! - rgb[2]) < tolerance
+      ) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+/** Mean absolute difference between two frames over a region, per channel. */
+function regionDifference(
+  a: ReturnType<typeof decodePng>,
+  b: ReturnType<typeof decodePng>,
+  region: { x0: number; y0: number; x1: number; y1: number },
+) {
+  let total = 0;
+  let n = 0;
+  for (let y = Math.floor(region.y0 * a.height); y < Math.ceil(region.y1 * a.height); y += 1) {
+    for (let x = Math.floor(region.x0 * a.width); x < Math.ceil(region.x1 * a.width); x += 1) {
+      const i = (y * a.width + x) * 4;
+      for (let c = 0; c < 3; c += 1) {
+        total += Math.abs(a.pixels[i + c]! - b.pixels[i + c]!);
+        n += 1;
+      }
+    }
+  }
+  return total / n;
+}
+
+/** Mean volume of a file's sound in dB, or undefined if it has none. */
+function meanVolume(path: string): number | undefined {
+  const out = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', path, '-af', 'volumedetect', '-vn', '-f', 'null', '-']);
+  const match = /mean_volume: (-?[\d.]+) dB/.exec(out.stderr.toString());
+  return match ? Number(match[1]) : undefined;
+}
+
+const BURN_IN = { name: 'Save video with overlay' };
+
+test('records the video with the overlay burned into the picture (AV-1007)', async ({ page }, testInfo) => {
+  const requests = recordRequests(page);
+  await openOverlayPreview(page);
+  await page.getByTestId('project-input').setInputFiles(join(FIXTURE_DIR, 'overlay-project-test-pattern.json'));
+  await expect(page.getByRole('option', { name: 'Test pattern (loaded)' })).toBeAttached();
+
+  const panel = page.getByRole('region', BURN_IN);
+  await expect(panel.getByLabel('Video width')).toHaveValue('160');
+  await panel.getByLabel('Video frame rate').fill('10');
+  await expect(panel.getByText(/Takes about 4 s/)).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Save video with overlay' }).click();
+  // The preview steps aside while the export plays the video itself.
+  await expect(page.getByRole('button', { name: 'Play' })).toBeDisabled();
+  await expect(panel.getByRole('progressbar', { name: 'Recording progress' })).toBeVisible();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('video-with-overlay.webm');
+  await expect(panel.getByText(/Saved/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play' })).toBeEnabled();
+
+  const path = testInfo.outputPath('burned.webm');
+  await file.saveAs(path);
+
+  // A real video of the right size and length (the length is the patched header).
+  const media = probeMedia(path);
+  expect(media.video).toMatchObject({ codec: 'vp9', width: 160, height: 90 });
+  expect(media.durationSeconds).toBeGreaterThan(3.5);
+  expect(media.durationSeconds).toBeLessThan(5);
+  // The source had no sound, so there is none, and the panel says so.
+  expect(media.audio).toBeUndefined();
+  await expect(panel.getByText(/It has no sound/)).toBeVisible();
+  // It decodes end to end.
+  execFileSync('ffmpeg', ['-v', 'error', '-i', path, '-f', 'null', '-']);
+
+  const BAR = { x0: 0.05, y0: 0.85, x1: 0.55, y1: 0.93 };
+  const STRIP = { x0: 0, y0: 0.94, x1: 1, y1: 1 };
+  const MAGENTA: [number, number, number] = [255, 0, 255];
+  const early = frameAt(path, 1);
+  const late = frameAt(path, 3);
+
+  // The overlay is in the picture, and moves with the video: the progress bar fills.
+  expect(colourIn(early, MAGENTA, BAR)).toBeGreaterThan(10);
+  expect(colourIn(late, MAGENTA, BAR)).toBeGreaterThan(colourIn(early, MAGENTA, BAR) * 1.5);
+  expect(colourIn(late, [255, 255, 0], { x0: 0.6, y0: 0.1, x1: 0.95, y1: 0.65 })).toBeGreaterThan(3);
+
+  // And the video is still there under it: a strip the overlay never touches matches the source.
+  const source = frameAt(join(FIXTURE_DIR, 'sync-test.webm'), 3);
+  expect(regionDifference(late, source, STRIP)).toBeLessThan(30);
+  // ...and is not simply a blank canvas with an overlay on it.
+  expect(colourIn(late, [0, 0, 0], { x0: 0, y0: 0, x1: 1, y1: 1 }, 30)).toBeLessThan(late.width * late.height * 0.5);
+
+  // Nothing left the browser.
+  expect(
+    requests.map((r) => r.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
+  ).toEqual([]);
+});
+
+test('carries the video\'s sound across, or leaves it out when asked (AV-1007)', async ({ page }, testInfo) => {
+  await page.goto('./#/overlays');
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
+  // The same input first takes the route and then the video: wait for the swap.
+  await expect(page.getByRole('region', { name: 'Video overlay' })).toBeVisible();
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'sync-test-audio.webm'));
+  await expect(page.getByText(/\/ 0:04/)).toBeVisible();
+  const panel = page.getByRole('region', BURN_IN);
+  await panel.getByLabel('Video frame rate').fill('10');
+
+  const record = async (name: string) => {
+    const download = page.waitForEvent('download');
+    await panel.getByRole('button', { name: 'Save video with overlay' }).click();
+    const file = await download;
+    await expect(panel.getByText(/Saved/)).toBeVisible({ timeout: 20_000 });
+    const path = testInfo.outputPath(name);
+    await file.saveAs(path);
+    return path;
+  };
+
+  // With sound: it is really there, and about as loud as the source (a muted
+  // element would record silence at about -91 dB).
+  const withSound = await record('with-sound.webm');
+  expect(probeMedia(withSound).audio).toMatchObject({ codec: 'opus' });
+  const sourceVolume = meanVolume(join(FIXTURE_DIR, 'sync-test-audio.webm'))!;
+  const recordedVolume = meanVolume(withSound)!;
+  expect(recordedVolume).toBeGreaterThan(-40);
+  expect(Math.abs(recordedVolume - sourceVolume)).toBeLessThan(6);
+  await expect(panel.getByText(/It has no sound/)).toHaveCount(0);
+
+  // Without: no audio stream at all.
+  await panel.getByLabel(/Include the video's sound/).uncheck();
+  const withoutSound = await record('without-sound.webm');
+  expect(probeMedia(withoutSound).audio).toBeUndefined();
+  expect(probeMedia(withoutSound).video).toBeDefined();
+});
+
+test('records a real GoPro clip, a range of it, with its sound (AV-1007)', async ({ page }, testInfo) => {
+  // Recording runs at the video's own speed and decodes and encodes as it goes,
+  // so on a loaded machine it takes longer than the clip. Allow for that.
+  test.setTimeout(120_000);
+  // The real HERO8 sample: 848x480 H.264 with AAC sound, 12.6 s. The overlay
+  // comes from a separate telemetry file, as it would for a clip with no GPS fix.
+  await page.goto('./#/overlays');
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'overlay-sync.gpx'));
+  // The same input first takes the route and then the video: wait for the swap.
+  await expect(page.getByRole('region', { name: 'Video overlay' })).toBeVisible();
+  await page.getByTestId('file-input').setInputFiles(join(FIXTURE_DIR, 'hero8.mp4'));
+  await expect(page.getByText(/\/ 0:1[23]/)).toBeVisible({ timeout: 60_000 });
+
+  const panel = page.getByRole('region', BURN_IN);
+  await expect(panel.getByLabel('Video width')).toHaveValue('848');
+  await expect(panel.getByLabel('Video height')).toHaveValue('480');
+  // Two seconds in, for four seconds: the range is honoured.
+  await panel.getByLabel('Video from').fill('2');
+  await panel.getByLabel('Video to').fill('6');
+  await expect(panel.getByText(/Takes about 4 s/)).toBeVisible();
+
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Save video with overlay' }).click();
+  const file = await download;
+  await expect(panel.getByText(/Saved/)).toBeVisible({ timeout: 90_000 });
+  const path = testInfo.outputPath('gopro.webm');
+  await file.saveAs(path);
+
+  const media = probeMedia(path);
+  expect(media.video).toMatchObject({ width: 848, height: 480 });
+  expect(media.durationSeconds).toBeGreaterThan(3.4);
+  expect(media.durationSeconds).toBeLessThan(5.5);
+  expect(media.audio).toMatchObject({ codec: 'opus' });
+  // The camera's own sound came through.
+  expect(meanVolume(path)!).toBeGreaterThan(-70);
+  // The overlay is drawn over real footage: text-sized panels in the corner, so
+  // some of the frame is overlay-dark and the rest is varied picture.
+  const frame = frameAt(path, 1.5);
+  const distinct = new Set<number>();
+  for (let i = 0; i < frame.pixels.length; i += 4 * 97) {
+    distinct.add((frame.pixels[i]! >> 4) * 256 + (frame.pixels[i + 1]! >> 4) * 16 + (frame.pixels[i + 2]! >> 4));
+  }
+  expect(distinct.size).toBeGreaterThan(40);
+  // The source file itself was not touched.
+  expect(readFileSync(join(FIXTURE_DIR, 'hero8.mp4')).length).toBe(4_402_730);
+});
+
+test('stops a recording when asked, saving nothing (AV-1007)', async ({ page }) => {
+  await openOverlayPreview(page);
+  const panel = page.getByRole('region', BURN_IN);
+  let downloads = 0;
+  page.on('download', () => (downloads += 1));
+
+  await panel.getByRole('button', { name: 'Save video with overlay' }).click();
+  await expect(panel.getByRole('progressbar', { name: 'Recording progress' })).toBeVisible();
+  await panel.getByRole('button', { name: 'Stop' }).click();
+  await expect(panel.getByText(/Stopped\. Nothing was saved\./)).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Save video with overlay' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Play' })).toBeEnabled();
+  expect(downloads).toBe(0);
 });
 
 test('fixture files are never read by the server', async () => {
