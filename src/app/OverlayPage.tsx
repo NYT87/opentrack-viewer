@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { download } from '../components/ExportPanel';
 import { FileDropZone } from '../components/FileDropZone';
+import { OverlayTemplateEditor } from '../components/OverlayTemplateEditor';
 import { OverlayVideoPreview } from '../components/OverlayVideoPreview';
 import { toActivityError } from '../domain/errors';
 import { projectRoute } from '../domain/routeProjection';
@@ -19,6 +20,7 @@ import { BUILT_IN_TEMPLATES, availabilityOf, staticAvailability } from '../overl
 import { buildTimeline } from '../overlays/timeline';
 import type { UnitSystem } from '../domain/units';
 import { useInteractionStore } from '../state/interactionStore';
+import { CUSTOM_TEMPLATE_ID, currentTemplate, useOverlayTemplateStore } from '../state/overlayTemplateStore';
 import { useOverlayStore } from '../state/overlayStore';
 
 /** The containers a camera or phone writes that a browser may play. */
@@ -50,23 +52,45 @@ export function OverlayPage() {
   const [intakeError, setIntakeError] = useState<string | undefined>();
   const [saved, setSaved] = useState<string | undefined>();
   const [isReading, setIsReading] = useState(false);
-  const [templateId, setTemplateId] = useState<string>(BUILT_IN_TEMPLATES[0].id);
-  const [units, setUnits] = useState<UnitSystem>(defaultUnits);
+  // AV-1005. The template lives in a session store so edits survive moving
+  // between pages and switching templates, and nothing else.
+  const selectedId = useOverlayTemplateStore((state) => state.selectedId);
+  const savedTemplates = useOverlayTemplateStore((state) => state.saved);
+  const chosenUnits = useOverlayTemplateStore((state) => state.units);
+  const selectTemplate = useOverlayTemplateStore((state) => state.select);
+  const saveTemplate = useOverlayTemplateStore((state) => state.save);
+  const changeUnits = useOverlayTemplateStore((state) => state.setUnits);
+  const importTemplate = useOverlayTemplateStore((state) => state.importTemplate);
+  const resetTemplate = useOverlayTemplateStore((state) => state.reset);
+  const units: UnitSystem = chosenUnits ?? defaultUnits;
+  const template = useMemo(
+    () => currentTemplate({ selectedId, saved: savedTemplates }, units),
+    [selectedId, savedTemplates, units],
+  );
   const [offsetSeconds, setOffsetSeconds] = useState(0);
 
   // AV-1004. The clock the video is lined up against, and what it can supply.
   const timelineResult = useMemo(() => (activity ? buildTimeline(activity) : undefined), [activity]);
   const overlayRenderer = useMemo(() => {
     if (!activity || !timelineResult) return undefined;
-    const entry = BUILT_IN_TEMPLATES.find((t) => t.id === templateId) ?? BUILT_IN_TEMPLATES[0];
     return createOverlayRenderer({
       activity,
-      template: entry.create(units),
+      template,
       ...(timelineResult.ok
         ? { timeline: timelineResult.timeline, availability: availabilityOf(timelineResult.timeline) }
         : { availability: staticAvailability(activity.streams.hasLocation) }),
     });
-  }, [activity, timelineResult, templateId, units]);
+  }, [activity, timelineResult, template]);
+
+  const sensorChoices = useMemo(
+    () =>
+      timelineResult?.ok
+        ? (activity?.sensorStreams ?? [])
+            .filter((stream) => timelineResult.timeline.availableSensors.has(stream.key))
+            .map((stream) => ({ key: stream.key, label: stream.label }))
+        : [],
+    [activity, timelineResult],
+  );
 
   /**
    * What is wrong with the current settings or route, if anything. Worked out
@@ -290,14 +314,19 @@ export function OverlayPage() {
                       Template{' '}
                       <select
                         className="select"
-                        value={templateId}
-                        onChange={(event) => setTemplateId(event.target.value)}
+                        value={selectedId}
+                        onChange={(event) => selectTemplate(event.target.value, units)}
                       >
                         {BUILT_IN_TEMPLATES.map((entry) => (
                           <option key={entry.id} value={entry.id}>
                             {entry.label}
                           </option>
                         ))}
+                        {savedTemplates[CUSTOM_TEMPLATE_ID] && (
+                          <option value={CUSTOM_TEMPLATE_ID}>
+                            {savedTemplates[CUSTOM_TEMPLATE_ID].name} (loaded)
+                          </option>
+                        )}
                       </select>
                     </label>
                     <label className="export__label">
@@ -305,7 +334,7 @@ export function OverlayPage() {
                       <select
                         className="select"
                         value={units}
-                        onChange={(event) => setUnits(event.target.value as UnitSystem)}
+                        onChange={(event) => changeUnits(event.target.value as UnitSystem, template)}
                       >
                         <option value="metric">Metric</option>
                         <option value="imperial">Imperial</option>
@@ -320,6 +349,18 @@ export function OverlayPage() {
                       ))}
                     </ul>
                   )}
+
+                  <OverlayTemplateEditor
+                    template={template}
+                    availability={
+                      timelineResult.ok ? availabilityOf(timelineResult.timeline) : staticAvailability(false)
+                    }
+                    hidden={overlayRenderer.resolved.hidden}
+                    sensors={sensorChoices}
+                    onChange={saveTemplate}
+                    onImport={importTemplate}
+                    onReset={resetTemplate}
+                  />
 
                   {!video && (
                     <>

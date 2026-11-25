@@ -271,6 +271,11 @@ function readStyle(value: unknown, path: string, problems: Problems): OverlaySty
 const COLOR_PATTERN =
   /^(#[0-9a-f]{3,8}|(?:rgb|hsl)a?\(\s*[0-9.%\s,/deg-]+\)|[a-z]{3,30})$/i;
 
+/** True for a colour this app will hand to the canvas. */
+export function isAcceptableColor(value: string): boolean {
+  return value.length <= MAX_TEXT && COLOR_PATTERN.test(value.trim());
+}
+
 function readColor(value: unknown, path: string, problems: Problems): string | undefined {
   const text = readText(value, path, problems);
   if (text === undefined) return undefined;

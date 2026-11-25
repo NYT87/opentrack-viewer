@@ -1984,6 +1984,77 @@ test('lines the telemetry up with an offset, and blanks outside it (AV-1004)', a
   await expect(offset).toHaveValue('-1');
 });
 
+test('customizes the overlay and restores the look from a project file (AV-1005)', async ({ page }, testInfo) => {
+  const requests = recordRequests(page);
+  await openOverlayPreview(page);
+  const scrub = page.getByLabel('Video position');
+  await scrub.evaluate((node) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(node as HTMLInputElement, '2');
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(100);
+
+  // Switch every readout off: nothing is left to draw.
+  for (const name of ['Speed', 'Distance', 'Time', 'Elevation']) {
+    await page.getByLabel(`Show ${name} readout`).uncheck();
+  }
+  await expect.poll(async () => (await overlayPixels(page)).drawn).toBe(0);
+
+  // Move one back on, and it is drawn where the sliders put it.
+  await page.getByLabel('Show Distance readout').check();
+  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(50);
+  // The position controls live inside the component's own section: open it.
+  await page.locator('details', { has: page.getByLabel('Show Distance readout') }).evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  await page.getByLabel('Distance readout left').fill('60');
+
+  // Save the look.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save project file' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('compact-hud-overlay-template.json');
+  const path = testInfo.outputPath('look.json');
+  await file.saveAs(path);
+  const project = JSON.parse(readFileSync(path, 'utf-8'));
+  expect(project.template.components.filter((c: { visible: boolean }) => c.visible).map((c: { id: string }) => c.id)).toEqual(['distance']);
+  expect(readFileSync(path, 'utf-8')).not.toMatch(/overlay-sync|Overlay Sync|"lat"/);
+
+  // Throw the edits away: the shipped template is back.
+  await page.getByRole('button', { name: 'Reset template' }).click();
+  await expect(page.getByLabel('Show Speed readout')).toBeChecked();
+
+  // Load the file: the saved look is restored, and the edits are in force again.
+  await page.getByTestId('project-input').setInputFiles(path);
+  await expect(page.getByRole('option', { name: 'Compact HUD (loaded)' })).toBeAttached();
+  await expect(page.getByLabel('Show Speed readout')).not.toBeChecked();
+  await expect(page.getByLabel('Show Distance readout')).toBeChecked();
+  await expect.poll(async () => (await overlayPixels(page)).drawn).toBeGreaterThan(50);
+
+  // Nothing was stored on the device or sent anywhere.
+  expect(await page.evaluate(() => localStorage.length)).toBeLessThanOrEqual(1);
+  expect(
+    requests.map((r) => r.url()).filter((url) => !url.startsWith(ORIGIN) && !url.startsWith('blob:')),
+  ).toEqual([]);
+});
+
+test('keeps the template controls usable on a phone (AV-1005)', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await openOverlayPreview(page);
+  await page.locator('details', { has: page.getByLabel('Show Speed readout') }).evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  for (const name of ['Speed readout left', 'Speed readout colour', 'Speed readout background']) {
+    await expect(page.getByLabel(name)).toBeVisible();
+  }
+  await expect(page.getByRole('button', { name: 'Save project file' })).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 test('fixture files are never read by the server', async () => {
   // Sanity check that fixtures are local test data, not network resources.
   const gpx = readFileSync(join(FIXTURE_DIR, 'simple-route.gpx'), 'utf-8');

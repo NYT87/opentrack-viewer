@@ -17,6 +17,7 @@ import { App } from './App';
 import { useActivityStore } from '../state/activityStore';
 import { useInteractionStore } from '../state/interactionStore';
 import { useOverlayStore } from '../state/overlayStore';
+import { useOverlayTemplateStore } from '../state/overlayTemplateStore';
 import { fixtureFile, readFixture } from '../test/helpers/fixtures';
 import { parseGpx } from '../parsers/gpx/parseGpx';
 import { metadataForRoute } from './seo';
@@ -25,11 +26,13 @@ import { ROUTES } from './routes';
 /** jsdom has no canvas: a recording stand-in sees what the page asks of one. */
 let drawn: string[] = [];
 let saved: { fileName: string; blob: Blob }[] = [];
+const saved_downloads_ref = { get current() { return saved; } };
 
 beforeEach(() => {
   drawn = [];
   saved = [];
   useOverlayStore.getState().clear();
+  useOverlayTemplateStore.setState({ selectedId: 'compact-hud', units: undefined, saved: {} });
   useActivityStore.getState().clear();
   window.location.hash = '';
 
@@ -284,8 +287,9 @@ describe('previewing on a video (AV-1004)', () => {
     await withActivity();
     const video = section();
     expect(video.getByLabelText('Template')).toHaveValue('compact-hud');
-    expect(video.getByRole('option', { name: 'Route inset' })).toBeInTheDocument();
-    expect(video.getByRole('option', { name: 'Gauge dashboard' })).toBeInTheDocument();
+    const templates = within(video.getByLabelText('Template'));
+    expect(templates.getByRole('option', { name: 'Route inset' })).toBeInTheDocument();
+    expect(templates.getByRole('option', { name: 'Gauge dashboard' })).toBeInTheDocument();
     expect(screen.getByTestId('file-input')).toBeInTheDocument();
   });
 
@@ -405,4 +409,220 @@ describe('previewing on a video (AV-1004)', () => {
     fireEvent.change(screen.getByLabelText('Video position'), { target: { value: '1' } });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+});
+
+describe('customizing the template (AV-1005)', () => {
+  let spoken: string[] = [];
+  beforeEach(() => {
+    spoken = [];
+    const context = new Proxy(
+      {},
+      {
+        get: (_target, name) => {
+          if (name === 'fillText') return (text: string) => spoken.push(text);
+          if (name === 'measureText') return () => ({ width: 0 });
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      (() => context) as unknown as HTMLCanvasElement['getContext'],
+    );
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+  });
+
+  const open = async (fixture = 'overlay-sync.gpx') => {
+    const activity = await parseGpx(readFixture(fixture), { fileName: fixture });
+    useOverlayStore.getState().setActivity(activity, { video: new File(['x'], 'v.webm', { type: 'video/webm' }) });
+    window.location.hash = '#/overlays';
+    render(<App />);
+    const video = (await screen.findByTestId('overlay-video')) as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { value: 4, configurable: true });
+    fireEvent.loadedMetadata(video);
+    return video;
+  };
+  const saved = (id = 'compact-hud') => useOverlayTemplateStore.getState().saved[id]!;
+  const component = (id: string, templateId = 'compact-hud') => saved(templateId).components.find((c) => c.id === id)!;
+  const setRange = (name: string, value: number) =>
+    fireEvent.change(screen.getByLabelText(name), { target: { value: String(value) } });
+  const editor = () => within(screen.getByRole('group', { name: 'Customize template' }));
+
+  it('turns a component off and on, and the frame follows', async () => {
+    await open();
+    expect(spoken).toContain('DISTANCE');
+    await userEvent.click(screen.getByLabelText('Show Distance readout'));
+    spoken = [];
+    fireEvent.seeked(screen.getByTestId('overlay-video'));
+    expect(spoken).not.toContain('DISTANCE');
+    expect(component('distance').visible).toBe(false);
+
+    await userEvent.click(screen.getByLabelText('Show Distance readout'));
+    spoken = [];
+    fireEvent.seeked(screen.getByTestId('overlay-video'));
+    expect(spoken).toContain('DISTANCE');
+  });
+
+  it('enables a component the data can support, and one it cannot is hidden with the reason', async () => {
+    await open();
+    await userEvent.click(screen.getByLabelText('Show Heart rate readout'));
+    fireEvent.seeked(screen.getByTestId('overlay-video'));
+    expect(spoken).toContain('HEART RATE');
+
+    await userEvent.selectOptions(screen.getByLabelText('Template'), 'gauge-dashboard');
+    expect(await screen.findByText(/hidden: Power is not in this activity/)).toBeInTheDocument();
+  });
+
+  it('moves and resizes a component, and keeps it inside the frame', async () => {
+    await open();
+    setRange('Speed readout left', 50);
+    expect(component('speed').box.x).toBeCloseTo(0.5, 5);
+    setRange('Speed readout width', 90);
+    const { box } = component('speed');
+    expect(box.width).toBeCloseTo(0.9, 5);
+    expect(box.x + box.width).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it('changes colours, text size, background and label', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('Speed readout colour'), { target: { value: '#ff0000' } });
+    fireEvent.change(screen.getByLabelText('Speed readout accent colour'), { target: { value: '#00ff00' } });
+    setRange('Speed readout text size', 150);
+    await userEvent.selectOptions(screen.getByLabelText('Speed readout background'), 'none');
+    fireEvent.change(screen.getByLabelText('Speed readout label'), { target: { value: 'Velocity' } });
+
+    expect(component('speed')).toMatchObject({
+      label: 'Velocity',
+      style: { color: '#ff0000', accentColor: '#00ff00', fontScale: 1.5, backgroundColor: 'transparent' },
+    });
+  });
+
+  it('keeps edits for the session across switching templates, and discards them on reset', async () => {
+    await open();
+    await userEvent.click(screen.getByLabelText('Show Distance readout'));
+    await userEvent.selectOptions(screen.getByLabelText('Template'), 'route-inset');
+    expect(screen.queryByLabelText('Show Distance readout')).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Template'), 'compact-hud');
+    expect(screen.getByLabelText('Show Distance readout')).not.toBeChecked();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset template' }));
+    expect(screen.getByLabelText('Show Distance readout')).toBeChecked();
+    expect(useOverlayTemplateStore.getState().saved['compact-hud']).toBeUndefined();
+  });
+
+  it('keeps the edits when the units change, and stores nothing on the device', async () => {
+    await open();
+    setRange('Speed readout left', 40);
+    await userEvent.selectOptions(screen.getByLabelText('Units'), 'imperial');
+    expect(component('speed').box.x).toBeCloseTo(0.4, 5);
+    expect(saved().units).toBe('imperial');
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('adds a component, listing what the activity cannot supply', async () => {
+    await open();
+    const measurement = screen.getByLabelText('Measurement');
+    expect(within(measurement).getByRole('option', { name: 'Power (not in this activity)' })).toBeInTheDocument();
+    expect(within(measurement).getByRole('option', { name: 'Heart rate' })).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Component type'), 'gauge');
+    await userEvent.selectOptions(measurement, 'metric:heartRate');
+    await userEvent.click(screen.getByRole('button', { name: 'Add component' }));
+    expect(saved().components.at(-1)).toMatchObject({ type: 'gauge', binding: { kind: 'metric', metric: 'heartRate' } });
+    expect(screen.getByLabelText('Show Heart rate gauge')).toBeChecked();
+  });
+
+  it('adds a route inset or progress bar without asking what it shows', async () => {
+    await open();
+    await userEvent.selectOptions(screen.getByLabelText('Component type'), 'route');
+    expect(screen.queryByLabelText('Measurement')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Add component' }));
+    expect(saved().components.at(-1)!.type).toBe('route');
+  });
+
+  it('removes a component', async () => {
+    await open();
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Elevation readout' }));
+    expect(saved().components.map((c) => c.id)).not.toContain('elevation');
+    expect(screen.queryByLabelText('Show Elevation readout')).not.toBeInTheDocument();
+  });
+
+  describe('the project file', () => {
+    it('saves the template as JSON a person can keep', async () => {
+      await open();
+      setRange('Speed readout left', 50);
+      await userEvent.click(screen.getByRole('button', { name: 'Save project file' }));
+
+      expect(saved_files()).toHaveLength(1);
+      const file = saved_files()[0]!;
+      expect(file.fileName).toBe('compact-hud-overlay-template.json');
+      const parsed = JSON.parse(await file.blob.text());
+      expect(parsed).toMatchObject({ format: 'opentrack-overlay', version: 1 });
+      expect(parsed.template.components.find((c: { id: string }) => c.id === 'speed').box.x).toBeCloseTo(0.5, 5);
+      // The template and nothing else: no figures, no route, no file names.
+      expect(await file.blob.text()).not.toMatch(/overlay-sync|"lat"|"lon"|Overlay Sync/);
+    });
+
+    it('loads a saved file back, as the same template', async () => {
+      await open();
+      setRange('Speed readout left', 50);
+      await userEvent.click(screen.getByRole('button', { name: 'Save project file' }));
+      const text = await saved_files()[0]!.blob.text();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Reset template' }));
+      expect(component_exists('speed')).toBe(false);
+
+      await userEvent.upload(
+        screen.getByTestId('project-input'),
+        new File([text], 'look.json', { type: 'application/json' }),
+      );
+      expect(await screen.findByRole('option', { name: 'Compact HUD (loaded)' })).toBeInTheDocument();
+      expect(useOverlayTemplateStore.getState().selectedId).toBe('custom');
+      expect(component('speed', 'custom').box.x).toBeCloseTo(0.5, 5);
+    });
+
+    it('says what is wrong with a file it cannot use, and changes nothing', async () => {
+      await open();
+      const before = JSON.stringify(useOverlayTemplateStore.getState());
+      await userEvent.upload(screen.getByTestId('project-input'), new File(['{"nope":1}'], 'x.json'));
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(/could not be loaded/);
+      expect(alert).toHaveTextContent(/not an OpenTrack overlay project/);
+      expect(JSON.stringify(useOverlayTemplateStore.getState())).toBe(before);
+
+      const bad = JSON.stringify({
+        format: 'opentrack-overlay',
+        version: 1,
+        template: { name: 'x', units: 'metric', components: [{ id: 'a', type: 'text', visible: true, box: { x: 2, y: 0, width: 1, height: 1 }, style: { color: 'url(x)', accentColor: 'red', backgroundColor: 'red', fontScale: 1 }, binding: { kind: 'metric', metric: 'speed' } }] },
+      });
+      await userEvent.upload(screen.getByTestId('project-input'), new File([bad], 'y.json'));
+      await vi.waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/must be/));
+      expect(useOverlayTemplateStore.getState().selectedId).toBe('compact-hud');
+    });
+
+    it('can be loaded again after a failure', async () => {
+      await open();
+      await userEvent.upload(screen.getByTestId('project-input'), new File(['nope'], 'x.json'));
+      await screen.findByRole('alert');
+      await userEvent.click(screen.getByRole('button', { name: 'Save project file' }));
+      const text = await saved_files()[0]!.blob.text();
+      await userEvent.upload(screen.getByTestId('project-input'), new File([text], 'x.json'));
+      await vi.waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    });
+  });
+
+  it('shows the controls inside the Customize group', async () => {
+    await open();
+    expect(editor().getByRole('button', { name: 'Save project file' })).toBeInTheDocument();
+    expect(editor().getByRole('button', { name: 'Reset template' })).toBeInTheDocument();
+  });
+
+  // Helpers that read the captured downloads from the shared stub.
+  function saved_files() {
+    return saved_downloads_ref.current;
+  }
+  function component_exists(id: string) {
+    return Boolean(useOverlayTemplateStore.getState().saved['compact-hud']?.components.some((c) => c.id === id));
+  }
 });

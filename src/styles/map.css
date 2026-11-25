@@ -78,3 +78,19 @@
   pointer-events: none;
 }
 .overlay-video__scrub { flex: 1 1 200px; min-width: 120px; }
+
+/* AV-1005: template controls. */
+.template-editor { display: flex; flex-direction: column; gap: 12px; }
+.template-editor__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.template-editor__component { border: 1px solid var(--border, #2a2f36); border-radius: 6px; padding: 8px 12px; }
+.template-editor__component summary { cursor: pointer; }
+.template-editor__reason { font-size: 13px; opacity: 0.8; }
+.template-editor__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 16px;
+  padding-top: 12px;
+}
+.template-editor__field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.template-editor__file { cursor: pointer; position: relative; display: inline-flex; align-items: center; }
+.template-editor__file-input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
