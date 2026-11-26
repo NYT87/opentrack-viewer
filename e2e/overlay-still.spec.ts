@@ -160,7 +160,8 @@ test('draws a figure’s own value and replaced caption in the exported PNG (AV-
   const replaced = await download(page, panel);
   const [appBox, replacedBox] = [drawnBox(app.png), drawnBox(replaced.png)];
   expect(replacedBox.maxX - replacedBox.minX).toBeLessThan(appBox.maxX - appBox.minX);
-  expect(replacedBox.maxY - replacedBox.minY).toBe(appBox.maxY - appBox.minY);
+  // The same lines, in the same place: a pixel or two either way is the glyphs' own height ("Hi" against "Distance"), which differs by font.
+  expect(Math.abs(replacedBox.maxY - replacedBox.minY - (appBox.maxY - appBox.minY))).toBeLessThanOrEqual(2);
   expect(replaced.png.pixels.equals(app.png.pixels)).toBe(false);
 });
 
