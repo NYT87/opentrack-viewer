@@ -3,6 +3,7 @@ import type { UnitSystem } from '../../domain/units';
 import type { OverlayExportErrorCode } from './errors';
 import type { OverlayTemplate, PersonalFigures } from '../template';
 import type { SourceTimecode } from '../timecode';
+import type { VideoTimeWarp } from '../timeline';
 
 /** Everything the worker needs, structured-cloneable: data, never functions. */
 export interface ExportRequest {
@@ -13,6 +14,8 @@ export interface ExportRequest {
   videoDurationSeconds: number;
   /** The video's wall-clock start, where the container states one. */
   videoStart?: Date;
+  /** AV-1027 (TD-099). How video seconds become activity seconds; absent is real time. */
+  videoWarp?: VideoTimeWarp;
   offsetSeconds: number;
   /** TD-081. Where in the video the first frame is drawn: the trim's start. The frame count sets the end. */
   trimStartSeconds?: number;
@@ -55,6 +58,8 @@ export interface BurnRequest {
   frameRate?: number;
   videoDurationSeconds: number;
   videoStart?: Date;
+  /** AV-1027 (TD-099). How video seconds become activity seconds; absent is real time. */
+  videoWarp?: VideoTimeWarp;
   offsetSeconds: number;
   /** TD-081. The part of the video rendered, in its own seconds; absent, the whole. */
   trim?: { start: number; end: number };

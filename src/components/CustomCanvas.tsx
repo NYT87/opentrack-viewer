@@ -77,7 +77,7 @@ import {
   type ZonesShape,
   type ZonesSource,
 } from '../overlay/template';
-import { SMOOTHING_LIMITS, buildOverlayTimeline, canSmooth, type OverlayTimeline } from '../overlay/timeline';
+import { SMOOTHING_LIMITS, buildOverlayTimeline, canSmooth, type OverlayTimeline, type VideoTimeWarp } from '../overlay/timeline';
 import type { VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { GITHUB_URL } from './SiteFooter';
@@ -128,6 +128,8 @@ interface CustomCanvasProps {
   video?: OverlayVideo;
   media?: OverlayMedia;
   offsetSeconds: number;
+  /** AV-1027. How video seconds become activity seconds; absent is real time. */
+  videoWarp?: VideoTimeWarp;
   /** TD-081. The part of the video exported, as set in Sync. */
   trim?: VideoTrim;
   units: UnitSystem;
@@ -204,6 +206,7 @@ export function CustomCanvas({
   video,
   media,
   offsetSeconds,
+  videoWarp,
   trim,
   units,
   onOpenSync,
@@ -264,10 +267,10 @@ export function CustomCanvas({
   const builtTimeline = useMemo(
     () =>
       buildOverlayTimeline(activity, {
-        video: { durationSeconds, start: video?.timing?.start },
+        video: { durationSeconds, start: video?.timing?.start, warp: video ? videoWarp : undefined },
         offsetSeconds: video ? offsetSeconds : 0,
       }),
-    [activity, durationSeconds, video, offsetSeconds],
+    [activity, durationSeconds, video, videoWarp, offsetSeconds],
   );
   // AV-1025. A stopwatch counts from the cut's start here as it does in the exports; applied to the
   // built timeline, so dragging the trim handle does not rebuild it.
@@ -613,6 +616,7 @@ export function CustomCanvas({
             template={template}
             size={size}
             offsetSeconds={offsetSeconds}
+            videoWarp={videoWarp}
             trim={trim}
             units={units}
             media={media}
@@ -626,6 +630,7 @@ export function CustomCanvas({
               template={template}
               size={size}
               offsetSeconds={offsetSeconds}
+              videoWarp={videoWarp}
               trim={trim}
               units={units}
               media={media}

@@ -1552,6 +1552,20 @@ Acceptance criteria:
 - **Privacy:** the timecode stays in the reader's own export; nothing is sent anywhere.
 - Tests cover: timecode read from fixture clips (with a `tmcd` track, without one, drop-frame and non-drop), drop-frame arithmetic against known values, the start moving with the cut, the metadata file's fields, frame naming by source frame and its refusal at another frame rate, and the panels' wording.
 
+#### AV-1027: Time-Lapse and TimeWarp Footage: Video Time Mapped to Activity Time by a Factor or the Camera's Own Timing
+
+Dependencies: AV-1004, TD-059, TD-080, TD-081, TD-098
+
+GitHub issue #42. Today video time maps to activity time one to one plus an offset (TD-059), so a 10× time-lapse shows the activity ten times too slow. References read for ideas only (gpx2video is GPL-3.0; no code copied).
+
+Acceptance criteria:
+- **One mapping.** Video time maps to activity time as `anchor − offset + warp(t)`, where `warp(0) = 0` and `warp` is the identity (real time), a fixed factor (`k · t`), or the camera's own timing (piecewise linear, so a TimeWarp speed ramp is followed). The preview, the sync bar, every export (PNG sequence, transparent WebM, burned-in video) and the contract adapter use this one function; a test pins that the preview and an export sample the same activity moment at the same video time under a factor and under a ramp.
+- **Detection from the camera.** For a GoPro video with GPS dates, the telemetry's GPS time (real) against its sample times (video) gives the timing. When real time runs at least 1.25× video time over the clip, the video is time-lapse or TimeWarp and its timing is used, ramps included; otherwise it is real time and nothing changes (a normal video's mapping is exactly today's). Without GPS dates nothing is detected.
+- **The reader's factor.** In the sync section, a *Video speed* control: *Real time*, *N× faster* (a number from 1 to 1000, with "1 second of video = N seconds of activity" said beside it) and, where detected, *From the camera's timing* (with its overall factor, e.g. "about 10×, TimeWarp ramps followed"), which is the default then; otherwise *Real time* is. Kept for the session with the offset, and cleared when another video is loaded.
+- **Figures stay real.** Speed, pace, distance, elapsed time, the stopwatch and the clock are the activity's, at the mapped moment; stops (TD-080) are found in activity time. Smoothing windows stay in seconds of video (they steady what is on screen), and the docs say so.
+- **Sync and cut** (TD-059, TD-081) work in video time: the video's lane spans its mapped length in activity time, steps and drags are held by that span, the cut is set in video seconds, and the sync line says the speed ("The video runs 10× faster than real time.").
+- Tests cover: a fixed factor; a ramp from timing data; sync with a factor; figures unchanged by the factor (speed at a moment is the activity's); detection from a fixture whose telemetry runs 10× faster than its video, and none from the HERO7 fixture at real time; the control's choices and defaults; the browser test that sets a factor and sees the sync bar and the preview follow.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

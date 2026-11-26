@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportError } from '../overlay/export/errors';
@@ -210,6 +210,16 @@ describe('the burned-in export panel (AV-1007)', () => {
     });
     expect(request.bitrate).toBeGreaterThan(1_000_000);
     expect((request.template as { name: string }).name).toBe('Metric strip');
+  });
+
+  it('renders with the video speed the preview shows, and none for real time (AV-1027)', async () => {
+    const { start } = setup({ videoWarp: { kind: 'factor', factor: 4 } });
+    await userEvent.click(renderButton());
+    expect(start.mock.calls[0]![0]).toMatchObject({ videoWarp: { kind: 'factor', factor: 4 } });
+    cleanup();
+    const real = setup();
+    await userEvent.click(renderButton());
+    expect(real.start.mock.calls[0]![0]).not.toHaveProperty('videoWarp');
   });
 
   it('shows progress, and stops on request without saving anything', async () => {

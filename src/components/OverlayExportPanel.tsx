@@ -28,7 +28,7 @@ import { ZIP_MAX_BYTES } from '../overlay/export/zip';
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
 import { addSeconds, sameFrameRate } from '../overlay/timecode';
 import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
-import { buildOverlayTimeline } from '../overlay/timeline';
+import { buildOverlayTimeline, type VideoTimeWarp } from '../overlay/timeline';
 import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { usePersonalStore } from '../state/personalStore';
@@ -52,6 +52,8 @@ interface OverlayExportPanelProps {
   /** AV-1011. The canvas's own resolution, which takes the place of the picture-size choice. */
   size?: { width: number; height: number };
   offsetSeconds: number;
+  /** AV-1027. How video seconds become activity seconds; absent is real time. */
+  videoWarp?: VideoTimeWarp;
   /** TD-081. The part of the video exported; absent, the whole. */
   trim?: VideoTrim;
   units: UnitSystem;
@@ -133,6 +135,7 @@ export function OverlayExportPanel({
   template: customTemplate,
   size,
   offsetSeconds,
+  videoWarp,
   trim,
   units,
   media,
@@ -210,10 +213,10 @@ export function OverlayExportPanel({
   const timeline = useMemo(
     () =>
       buildOverlayTimeline(activity, {
-        video: { durationSeconds: durationSeconds ?? 0, start: videoStart },
+        video: { durationSeconds: durationSeconds ?? 0, start: videoStart, warp: video ? videoWarp : undefined },
         offsetSeconds: effectiveOffset,
       }),
-    [activity, durationSeconds, videoStart, effectiveOffset],
+    [activity, durationSeconds, videoStart, videoWarp, video, effectiveOffset],
   );
 
   // TD-081. A video's frames run over the part kept; an activity alone has nothing to trim.
@@ -270,7 +273,7 @@ export function OverlayExportPanel({
   const sessionFigures = usePersonalStore((state) => state.personal);
   const personal = built.template.components.some((component) => component.type === 'zones') ? sessionFigures : {};
   // Everything that changes the picture. A finished export is compared with it.
-  const signature = JSON.stringify([built.template, personal, units, effectiveOffset, range?.start, range?.end, plan.fps, plan.width, plan.height, asWebm, startTimecode?.startFrame, bySource]);
+  const signature = JSON.stringify([built.template, personal, units, effectiveOffset, video ? videoWarp : undefined, range?.start, range?.end, plan.fps, plan.width, plan.height, asWebm, startTimecode?.startFrame, bySource]);
   const fallbackFps = plan.fitsArchive || asWebm
     ? undefined
     : highestFittingFrameRate({
@@ -341,6 +344,7 @@ export function OverlayExportPanel({
         frameCount: plan.frameCount,
         videoDurationSeconds: durationSeconds ?? 0,
         videoStart,
+        ...(video && videoWarp ? { videoWarp } : {}),
         offsetSeconds: effectiveOffset,
         ...(range?.trimmed ? { trimStartSeconds: range.start } : {}),
         ...(startTimecode ? { startTimecode } : {}),

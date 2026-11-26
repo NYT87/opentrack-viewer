@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import type { Activity } from '../domain/activity';
 import { formatDateTime, formatDuration, type UnitSystem } from '../domain/units';
 import { buildOverlay, type OverlayControls as Controls } from '../overlay/presets';
-import { buildOverlayTimeline, type OverlayAlignment } from '../overlay/timeline';
+import { buildOverlayTimeline, unwarpVideoSeconds, warpVideoSeconds, type OverlayAlignment, type VideoTimeWarp } from '../overlay/timeline';
 import { MIN_TRIM_SECONDS, activityCoversPart, trimRange, withTrimEnd, withTrimStart, type TrimRange, type VideoTrim } from '../overlay/trim';
-import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
+import { MAX_SPEED_FACTOR, overallFactor } from '../overlay/videoSpeed';
+import type { OverlayMedia, OverlaySpeed, OverlayVideo } from '../state/overlayStore';
 import { OverlayControls } from './OverlayControls';
 import { OverlayLayer } from './OverlayLayer';
 
@@ -14,6 +15,11 @@ interface OverlayPreviewProps {
   activity: Activity | undefined;
   offsetSeconds: number;
   onOffsetChange: (seconds: number) => void;
+  /** AV-1027 (TD-099). How video seconds become activity seconds; absent is real time. */
+  videoWarp?: VideoTimeWarp;
+  /** The reader's video speed, absent for the video's default; changed by the Sync section's control. */
+  speed?: OverlaySpeed;
+  onSpeedChange?: (speed: OverlaySpeed | undefined) => void;
   /** TD-081. The part of the video exported, set on the video's lane; absent, the whole. */
   trim?: VideoTrim;
   onTrimChange?: (trim: VideoTrim | undefined) => void;
@@ -112,6 +118,9 @@ export function OverlayPreview({
   activity,
   offsetSeconds,
   onOffsetChange,
+  videoWarp,
+  speed,
+  onSpeedChange,
   trim,
   onTrimChange,
   units,
@@ -132,8 +141,8 @@ export function OverlayPreview({
   const durationSeconds = video.timing?.durationSeconds ?? elementDuration;
 
   const builtTimeline = useMemo(
-    () => buildOverlayTimeline(activity, { video: { durationSeconds, start: video.timing?.start }, offsetSeconds }),
-    [activity, durationSeconds, video.timing?.start, offsetSeconds],
+    () => buildOverlayTimeline(activity, { video: { durationSeconds, start: video.timing?.start, warp: videoWarp }, offsetSeconds }),
+    [activity, durationSeconds, video.timing?.start, videoWarp, offsetSeconds],
   );
   // AV-1025. A stopwatch counts from the cut's start, in the preview as in the export. Only its zero
   // depends on the cut, so dragging the trim handle wraps the timeline rather than rebuilding it.
@@ -294,7 +303,9 @@ export function OverlayPreview({
   const kept = trimRange(trim, durationSeconds);
   const stepVideoStart = (start: number) => {
     if (!alignment) return;
-    setVideoStart(Math.min(Math.max(start, -durationSeconds), alignment.activitySpanSeconds));
+    // AV-1027. The video's length in activity seconds, which a speed other than real time changes.
+    const videoSpan = alignment.videoEndInActivity - alignment.videoStartInActivity;
+    setVideoStart(Math.min(Math.max(start, -videoSpan), alignment.activitySpanSeconds));
   };
 
   const stage = (
@@ -414,6 +425,9 @@ export function OverlayPreview({
         onReset={() => onOffsetChange(0)}
         videoTime={time}
       />
+      {onSpeedChange && (
+        <VideoSpeedControl cameraWarp={video.timing?.warp} speed={speed} onChange={onSpeedChange} />
+      )}
       {onTrimChange && durationSeconds > 0 && (
         <div className="overlay-trim" role="group" aria-label="Part exported">
           <p className="overlay-trim__line">
@@ -461,6 +475,11 @@ export function OverlayPreview({
   );
 }
 
+/** A speed factor as said aloud: a whole number from 10 up, else one decimal without a trailing zero. */
+function formatFactor(factor: number): string {
+  return factor >= 10 ? String(Math.round(factor)) : String(Number(factor.toFixed(1)));
+}
+
 /** A day: past this, two clocks that disagree are told as two dates, not as an hour count. */
 const FAR_APART_SECONDS = 86_400;
 
@@ -493,6 +512,14 @@ function SyncStatus({ alignment }: { alignment: OverlayAlignment }) {
         {alignment.overlaps &&
           `It covers ${signedDuration(start)} to ${signedDuration(end)} of the activity's ${formatDuration(span)}.`}
       </p>
+      {alignment.warp && (
+        // AV-1027. A time-lapse or TimeWarp clip: its seconds are not the activity's.
+        <p className="overlay-sync__line">
+          {`The video runs ${formatFactor(overallFactor(alignment.warp))}× faster than real time${
+            alignment.warp.kind === 'map' ? " — the camera's timing, ramps followed" : ''
+          }.`}
+        </p>
+      )}
       {!alignment.overlaps && (
         // A status, not an alert: it holds while a time is typed, and an alert
         // would be said again at every key.
@@ -549,6 +576,10 @@ function SyncBar({
   const { videoStartInActivity: start, videoEndInActivity: end, activitySpanSeconds: span } = alignment;
   const { low, high, drawable } = syncGeometry(alignment);
   if (!drawable) return null;
+  // AV-1027. The video's seconds, laid on the lane as the activity's.
+  const warp = alignment.warp;
+  const mapped = (seconds: number) => warpVideoSeconds(warp, seconds);
+  const videoSpan = end - start;
 
   const at = (seconds: number) => `${((seconds - low) / (high - low)) * 100}%`;
   const width = (seconds: number) => `${(seconds / (high - low)) * 100}%`;
@@ -586,9 +617,9 @@ function SyncBar({
           role="slider"
           tabIndex={0}
           aria-label="Where the video starts in the activity"
-          aria-valuemin={Math.floor(-videoDuration)}
+          aria-valuemin={Math.floor(-videoSpan)}
           aria-valuemax={Math.ceil(span)}
-          aria-valuenow={Math.round(Math.min(Math.max(start, -videoDuration), span) * 10) / 10}
+          aria-valuenow={Math.round(Math.min(Math.max(start, -videoSpan), span) * 10) / 10}
           aria-valuetext={`Video at ${signedDuration(start)} to ${signedDuration(end)} of ${formatDuration(span)}`}
           onKeyDown={(event) => {
             const step = keySteps[event.key];
@@ -618,8 +649,8 @@ function SyncBar({
             // A click: the video's frame at that moment of the activity, if it has one.
             const rect = event.currentTarget.getBoundingClientRect();
             const moment = press.low + ((event.clientX - rect.left) / (rect.width || 1)) * (press.high - press.low);
-            const seconds = moment - start;
-            if (seconds >= 0 && seconds <= videoDuration) onSeek(seconds);
+            const into = moment - start;
+            if (into >= 0 && into <= videoSpan) onSeek(unwarpVideoSeconds(warp, into, videoDuration));
           }}
           onPointerCancel={() => {
             drag.current = null;
@@ -635,9 +666,9 @@ function SyncBar({
           </div>
           <div className="overlay-sync__bar overlay-sync__bar--video">
             <span className="overlay-sync__clip" style={{ left: at(start), width: width(end - start) }} />
-            <span className="overlay-sync__video" style={{ left: at(start + kept.start), width: width(kept.length) }} />
+            <span className="overlay-sync__video" style={{ left: at(start + mapped(kept.start)), width: width(mapped(kept.end) - mapped(kept.start)) }} />
           </div>
-          <span className="overlay-sync__playhead" style={{ left: at(start + videoTime) }} />
+          <span className="overlay-sync__playhead" style={{ left: at(start + mapped(videoTime)) }} />
         </div>
         {/* Beside the bar's slider, not in it: a slider's children are only drawn, never read out. */}
         {(onTrimStart || onTrimEnd) && (
@@ -649,8 +680,9 @@ function SyncBar({
                 value={kept.start}
                 min={0}
                 max={Math.max(0, kept.end - shortest)}
-                left={at(start + kept.start)}
+                left={at(start + mapped(kept.start))}
                 secondsPerPixel={() => (high - low) / barWidth()}
+                moveBy={(value, delta) => unwarpVideoSeconds(warp, mapped(value) + delta, videoDuration)}
                 onChange={onTrimStart}
               />
             )}
@@ -661,8 +693,9 @@ function SyncBar({
                 value={kept.end}
                 min={Math.min(videoDuration, kept.start + shortest)}
                 max={videoDuration}
-                left={at(start + kept.end)}
+                left={at(start + mapped(kept.end))}
                 secondsPerPixel={() => (high - low) / barWidth()}
+                moveBy={(value, delta) => unwarpVideoSeconds(warp, mapped(value) + delta, videoDuration)}
                 onChange={onTrimEnd}
               />
             )}
@@ -703,6 +736,7 @@ function TrimHandle({
   max,
   left,
   secondsPerPixel,
+  moveBy,
   onChange,
 }: {
   label: string;
@@ -711,7 +745,10 @@ function TrimHandle({
   min: number;
   max: number;
   left: string;
+  /** Activity seconds per pixel of the lane. */
   secondsPerPixel: () => number;
+  /** The video second `activity seconds` of lane away from `value` (AV-1027: a warp makes them differ). */
+  moveBy: (value: number, activitySeconds: number) => number;
   onChange: (videoSeconds: number) => void;
 }) {
   const drag = useRef<{ x: number; value: number; scale: number } | null>(null);
@@ -746,7 +783,7 @@ function TrimHandle({
         const press = drag.current;
         if (!press) return;
         event.stopPropagation();
-        onChange(Math.round((press.value + (event.clientX - press.x) * press.scale) * 10) / 10);
+        onChange(Math.round(moveBy(press.value, (event.clientX - press.x) * press.scale) * 10) / 10);
       }}
       onPointerUp={(event) => {
         if (!drag.current) return;
@@ -827,7 +864,7 @@ function VideoStartControl({
   const applyLineUp = () => {
     if (lineUpTarget === undefined || lineUpProblem) return;
     setDraft(null);
-    onVideoStart(lineUpTarget - videoTime);
+    onVideoStart(lineUpTarget - warpVideoSeconds(alignment.warp, videoTime));
     setLineUp('');
   };
 
@@ -929,6 +966,100 @@ function VideoStartControl({
           </span>
         )}
       </form>
+    </fieldset>
+  );
+}
+
+/**
+ * AV-1027 (TD-099). How fast the video runs against real time: as filmed, a time-lapse by a factor the
+ * reader states, or (where the camera's own timing was read) that timing, ramps and all.
+ */
+function VideoSpeedControl({
+  cameraWarp,
+  speed,
+  onChange,
+}: {
+  cameraWarp: VideoTimeWarp | undefined;
+  speed: OverlaySpeed | undefined;
+  onChange: (speed: OverlaySpeed | undefined) => void;
+}) {
+  const selectId = useId();
+  const factorId = useId();
+  const hintId = useId();
+  const sayingId = useId();
+  const [draft, setDraft] = useState<string | null>(null);
+  const mode: 'real' | 'factor' | 'camera' = !speed
+    ? cameraWarp
+      ? 'camera'
+      : 'real'
+    : speed.mode === 'camera'
+      ? 'camera'
+      : speed.factor !== 1
+        ? 'factor'
+        : 'real';
+  const factor = speed?.mode === 'factor' ? speed.factor : 1;
+  const parsed = draft === null ? undefined : Number(draft.trim());
+  const invalid = mode === 'factor' && draft !== null && draft.trim() !== '' && !(parsed !== undefined && parsed >= 1 && parsed <= MAX_SPEED_FACTOR);
+
+  return (
+    <fieldset className="overlay-preview__offset overlay-preview__speed">
+      <legend>Video speed</legend>
+      <div className="overlay-preview__steps">
+        <span className="overlay-preview__field">
+          <label htmlFor={selectId}>Video runs</label>
+          <select
+            id={selectId}
+            className="select"
+            value={mode}
+            onChange={(event) => {
+              const next = event.target.value;
+              setDraft(null);
+              onChange(next === 'camera' ? { mode: 'camera' } : { mode: 'factor', factor: next === 'real' ? 1 : factor > 1 ? factor : 10 });
+            }}
+          >
+            <option value="real">Real time</option>
+            <option value="factor">N× faster</option>
+            {cameraWarp && (
+              <option value="camera">
+                From the camera's timing (about {formatFactor(overallFactor(cameraWarp))}×, ramps followed)
+              </option>
+            )}
+          </select>
+        </span>
+        {mode === 'factor' && (
+          <span className="overlay-preview__field">
+            <label htmlFor={factorId}>Times faster</label>
+            <input
+              id={factorId}
+              className="input"
+              type="number"
+              min={1}
+              max={MAX_SPEED_FACTOR}
+              step={0.1}
+              aria-describedby={`${sayingId} ${hintId}`}
+              aria-invalid={invalid || undefined}
+              value={draft ?? String(factor)}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                const next = Number(event.target.value.trim());
+                // 1 is real time and would remove this field mid-edit: it is taken when the reader leaves it.
+                if (event.target.value.trim() !== '' && next > 1 && next <= MAX_SPEED_FACTOR) onChange({ mode: 'factor', factor: next });
+              }}
+              onBlur={() => {
+                const next = Number((draft ?? '').trim());
+                if (draft !== null && draft.trim() !== '' && next >= 1 && next <= MAX_SPEED_FACTOR) onChange({ mode: 'factor', factor: next });
+                if (!invalid) setDraft(null);
+              }}
+            />
+            <span id={sayingId}>1 second of video = {formatFactor(factor)} seconds of activity</span>
+          </span>
+        )}
+      </div>
+      <p id={hintId} className={invalid ? 'overlay-preview__hint is-invalid' : 'overlay-preview__hint'}>
+        {invalid
+          ? `"${draft}" is not a speed, so the video still runs ${formatFactor(factor)}× faster. Use a number from 1 to ${MAX_SPEED_FACTOR}.`
+          : 'Speed, pace and distance stay the activity\'s own. A time-lapse is told by its factor: 10 means each second of video shows ten seconds of the activity.'}
+      </p>
     </fieldset>
   );
 }

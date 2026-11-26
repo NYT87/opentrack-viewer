@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseGopro, GOPRO_PARSER_VERSION } from './parseGopro';
+import { parseGopro, detectVideoWarp, GOPRO_PARSER_VERSION } from './parseGopro';
 import { extractGpmf } from './extractGpmf';
 import { readBinaryFixture } from '../../test/helpers/fixtures';
 import { DISPLAYABLE_DEVICE_FIELDS } from '../../domain/activity';
@@ -308,5 +308,40 @@ describe('a video with a fix, end to end (AV-906)', () => {
     expect(activity.streams.hasTime).toBe(true);
     expect(activity.derived?.distanceMeters).toBeGreaterThan(0);
     expect(activity.metadata.device?.name).toMatch(/hero7/i);
+  });
+});
+
+describe('detectVideoWarp (AV-1027)', () => {
+  const points = (seconds: number[]) =>
+    seconds.map((s, index) => ({ index, lat: 0, lon: 0, time: new Date(Date.UTC(2024, 0, 1, 10, 0, 0) + s * 1000) }));
+  // One fix a second of video, for 20 s.
+  const ctsMs = Array.from({ length: 21 }, (_, i) => i * 1000);
+
+  it('finds nothing at real time, or without GPS dates or camera times', () => {
+    expect(detectVideoWarp(points(ctsMs.map((c) => c / 1000)), ctsMs)).toBeUndefined();
+    expect(detectVideoWarp(points([0, 1]).map(({ time: _t, ...p }) => p), [0, 1000])).toBeUndefined();
+    expect(detectVideoWarp(points([0, 10]), undefined)).toBeUndefined();
+  });
+
+  it('follows a ramp: real time for ten seconds, then ten times as fast', () => {
+    const real = ctsMs.map((c) => (c <= 10_000 ? c / 1000 : 10 + (c / 1000 - 10) * 10));
+    const warp = detectVideoWarp(points(real), ctsMs);
+    expect(warp).toEqual({ kind: 'map', video: ctsMs.map((c) => c / 1000), real });
+  });
+
+  it('starts from video 0, carrying the first rate back to it', () => {
+    const warp = detectVideoWarp(points(ctsMs.map((c) => (c / 1000) * 10)), ctsMs.map((c) => c + 2000));
+    expect(warp?.kind === 'map' && warp.video[0]).toBe(0);
+    expect(warp?.kind === 'map' && warp.video[1]).toBe(2);
+    expect(warp?.kind === 'map' && warp.real[1]).toBeCloseTo(20);
+  });
+
+  it('does not let a sliver of a last segment set the rate past the end', () => {
+    // Ten times as fast throughout, then a last fix 50 ms on whose date has not moved.
+    const cts = [...ctsMs, 20_050];
+    const real = [...ctsMs.map((c) => (c / 1000) * 10), 200];
+    const warp = detectVideoWarp(points(real), cts);
+    expect(warp?.kind === 'map' && warp.video.at(-1)).toBe(20.05);
+    expect(warp?.kind === 'map' && warp.video.at(-2)).toBe(19);
   });
 });

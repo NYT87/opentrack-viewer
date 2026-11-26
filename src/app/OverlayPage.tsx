@@ -30,6 +30,7 @@ import {
 } from '../state/overlayStore';
 import type { VideoReadProgressState } from '../components/VideoReadProgress';
 import { classifyOverlayFile, sortOverlayFiles, type OverlayFileKind } from './overlayFiles';
+import { effectiveWarp } from '../overlay/videoSpeed';
 import { VIDEO_EXTENSIONS } from './readVideoTelemetry';
 import { useVideoTelemetryRead } from './useVideoTelemetryRead';
 
@@ -92,6 +93,8 @@ export function OverlayPage() {
   const restore = useOverlayStore((state) => state.restore);
   const offsetSeconds = useOverlayStore((state) => state.offsetSeconds);
   const setOffsetSeconds = useOverlayStore((state) => state.setOffsetSeconds);
+  const speed = useOverlayStore((state) => state.speed);
+  const setSpeed = useOverlayStore((state) => state.setSpeed);
   const trim = useOverlayStore((state) => state.trim);
   const setTrim = useOverlayStore((state) => state.setTrim);
   const controls = useOverlayStore((state) => state.controls);
@@ -314,13 +317,15 @@ export function OverlayPage() {
   // The controls sit in the side column, so the page builds the timeline they
   // ask about: the same one the preview builds, from the same inputs.
   const durationSeconds = source.video?.timing?.durationSeconds ?? media?.durationSeconds ?? 0;
+  // AV-1027. One warp for the preview and both exports: the reader's speed, or the video's own.
+  const videoWarp = useMemo(() => effectiveWarp(source.video?.timing, speed), [source.video?.timing, speed]);
   const timeline = useMemo(
     () =>
       buildOverlayTimeline(source.activity, {
-        video: { durationSeconds, start: source.video?.timing?.start },
+        video: { durationSeconds, start: source.video?.timing?.start, warp: videoWarp },
         offsetSeconds,
       }),
-    [source.activity, durationSeconds, source.video?.timing?.start, offsetSeconds],
+    [source.activity, durationSeconds, source.video?.timing?.start, videoWarp, offsetSeconds],
   );
 
   /** Start over, and its confirm; `beside` is another action on the same row. */
@@ -457,7 +462,10 @@ export function OverlayPage() {
                 video={source.video}
                 activity={source.activity}
                 offsetSeconds={offsetSeconds}
+                videoWarp={videoWarp}
                 onOffsetChange={setOffsetSeconds}
+                speed={speed}
+                onSpeedChange={setSpeed}
                 trim={trim}
                 onTrimChange={setTrim}
                 units={unitSystem}
@@ -604,6 +612,7 @@ export function OverlayPage() {
                 video={source.video}
                 media={media}
                 offsetSeconds={offsetSeconds}
+                videoWarp={videoWarp}
                 trim={trim}
                 units={unitSystem}
                 onOpenSync={source.video ? () => setCanvasMode(false) : undefined}
@@ -677,6 +686,7 @@ export function OverlayPage() {
                   activity={source.activity}
                   controls={controls}
                   offsetSeconds={offsetSeconds}
+                  videoWarp={videoWarp}
                   trim={trim}
                   units={unitSystem}
                   media={media}
@@ -687,6 +697,7 @@ export function OverlayPage() {
                   activity={source.activity}
                   controls={controls}
                   offsetSeconds={offsetSeconds}
+                  videoWarp={videoWarp}
                   trim={trim}
                   units={unitSystem}
                   media={media}

@@ -15,6 +15,7 @@ import {
 import { ActivityError } from '../../domain/errors';
 import { withDerivedStats } from '../../domain/stats';
 import type { GpmfPayload } from './extractGpmf';
+import { warpVideoSeconds, type VideoTimeWarp } from '../../overlay/timeline';
 
 export const GOPRO_PARSER_VERSION = '1.0.0';
 
@@ -57,7 +58,7 @@ interface GoproSample {
 export async function parseGopro(
   payload: GpmfPayload,
   options: ParseGoproOptions = {},
-): Promise<Activity & { gpsVideoStart?: Date }> {
+): Promise<Activity & { gpsVideoStart?: Date; videoWarp?: VideoTimeWarp }> {
   const { default: goproTelemetry } = await import('gopro-telemetry');
   const warnings: ActivityWarning[] = [];
 
@@ -227,9 +228,62 @@ export async function parseGopro(
   const firstTime = points[0]?.time?.getTime();
   const firstCts = pointCtsMs?.[0];
   if (firstTime === undefined || firstCts === undefined) return withStats;
-  const gpsVideoStart = firstTime - firstCts;
-  const datedFromEpoch = payload.timing.start === undefined && gpsVideoStart < Date.UTC(2000, 0, 1);
-  return datedFromEpoch ? withStats : Object.assign(withStats, { gpsVideoStart: new Date(gpsVideoStart) });
+  const realStart = firstTime - firstCts;
+  const datedFromEpoch = payload.timing.start === undefined && realStart < Date.UTC(2000, 0, 1);
+  if (datedFromEpoch) return withStats;
+  // AV-1027. A time-lapse's first fix is `warp(cts)` seconds of activity after video 0, not `cts`.
+  const videoWarp = detectVideoWarp(points, pointCtsMs);
+  const gpsVideoStart = videoWarp ? firstTime - warpVideoSeconds(videoWarp, firstCts / 1000) * 1000 : realStart;
+  return Object.assign(withStats, { gpsVideoStart: new Date(gpsVideoStart) }, videoWarp ? { videoWarp } : {});
+}
+
+/** AV-1027 (TD-099). Real time running at least this much faster than the video is a time-lapse. */
+const MIN_WARP_RATE = 1.25;
+
+/**
+ * The camera's own timing: each kept point's GPS date (real) against its place in the video. Pairs are
+ * taken about once per video second, real time never going back, and the first from video 0 (the
+ * first segment's rate carried back to it). Undefined for a clip at real time, or one with no GPS
+ * dates to say otherwise.
+ */
+export function detectVideoWarp(
+  points: ActivityPoint[],
+  pointCtsMs: number[] | undefined,
+): VideoTimeWarp | undefined {
+  const first = points[0]?.time?.getTime();
+  if (!pointCtsMs || first === undefined) return undefined;
+  const video: number[] = [];
+  const real: number[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const time = points[i]!.time?.getTime();
+    const cts = pointCtsMs[i];
+    if (time === undefined || cts === undefined) continue;
+    const v = cts / 1000;
+    const last = video.length - 1;
+    if (last >= 0 && v - video[last]! < 1) continue;
+    video.push(v);
+    real.push(Math.max((time - first) / 1000, real[last] ?? 0));
+  }
+  // The last point closes the span; one under a second from the last pair replaces it, so the rate
+  // read past the end is a second's worth, not a jittery sliver's.
+  const lastIndex = points.length - 1;
+  const lastTime = points[lastIndex]?.time?.getTime();
+  const lastCts = pointCtsMs[lastIndex];
+  if (lastTime !== undefined && lastCts !== undefined && lastCts / 1000 > video[video.length - 1]!) {
+    if (video.length > 1 && lastCts / 1000 - video[video.length - 1]! < 1) {
+      video.pop();
+      real.pop();
+    }
+    video.push(lastCts / 1000);
+    real.push(Math.max((lastTime - first) / 1000, real[real.length - 1]!));
+  }
+  if (video.length < 2) return undefined;
+  const span = video[video.length - 1]! - video[0]!;
+  if (!(span > 0) || real[real.length - 1]! / span < MIN_WARP_RATE) return undefined;
+  const lead = video[0]! * ((real[1]! - real[0]!) / (video[1]! - video[0]!));
+  const mapVideo = video[0]! > 0 ? [0, ...video] : video;
+  const mapReal = video[0]! > 0 ? [0, ...real.map((r) => r + lead)] : real;
+  return { kind: 'map', video: mapVideo, real: mapReal };
 }
 
 /**

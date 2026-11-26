@@ -55,3 +55,25 @@ describe('where the video starts (#54)', () => {
     expect(firstFix - start).toBeLessThan(5_000);
   });
 });
+
+describe('time-lapse and TimeWarp footage (AV-1027)', () => {
+  it('reads no warp from a clip at real time', async () => {
+    const read = await readVideoTelemetry(video());
+    expect(read.timing?.warp).toBeUndefined();
+  });
+
+  it('reads the camera’s timing from telemetry that runs about ten times faster than its video', async () => {
+    const read = await readVideoTelemetry(video({ sampleDurationMs: 100 }));
+    const warp = read.timing?.warp;
+    expect(warp?.kind).toBe('map');
+    if (warp?.kind !== 'map') return;
+    expect(warp.video[0]).toBe(0);
+    expect(warp.real[0]).toBe(0);
+    const last = warp.video.length - 1;
+    expect(warp.real[last]! / warp.video[last]!).toBeGreaterThan(8);
+    expect(warp.real[last]! / warp.video[last]!).toBeLessThan(12);
+    // The video's start allows for the first fix being warped time into it.
+    const firstFix = read.activity!.points[0]!.time!.getTime();
+    expect(read.timing!.start!.getTime()).toBeLessThanOrEqual(firstFix);
+  });
+});

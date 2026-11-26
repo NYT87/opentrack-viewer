@@ -15,7 +15,7 @@ import { EXPORT_HEIGHT_PRESETS, exportDimensions, formatBytes } from '../overlay
 import type { ArchiveStorage, BurnSourceInfo } from '../overlay/export/protocol';
 import { buildOverlay, type OverlayControls } from '../overlay/presets';
 import { drawnWithoutTelemetry, type OverlayTemplate } from '../overlay/template';
-import { buildOverlayTimeline } from '../overlay/timeline';
+import { buildOverlayTimeline, type VideoTimeWarp } from '../overlay/timeline';
 import { activityCoversPart, trimRange, uncoveredNotice, type VideoTrim } from '../overlay/trim';
 import type { OverlayMedia, OverlayVideo } from '../state/overlayStore';
 import { usePersonalStore } from '../state/personalStore';
@@ -39,6 +39,8 @@ interface BurnedInExportPanelProps {
    */
   size?: { width: number; height: number };
   offsetSeconds: number;
+  /** AV-1027. How video seconds become activity seconds; absent is real time. */
+  videoWarp?: VideoTimeWarp;
   /** TD-081. The part of the video rendered; absent, the whole. */
   trim?: VideoTrim;
   units: UnitSystem;
@@ -103,6 +105,7 @@ export function BurnedInExportPanel({
   template: customTemplate,
   size,
   offsetSeconds,
+  videoWarp,
   trim,
   units,
   media,
@@ -128,10 +131,10 @@ export function BurnedInExportPanel({
   const timeline = useMemo(
     () =>
       buildOverlayTimeline(activity, {
-        video: { durationSeconds: durationSeconds ?? 0, start: video.timing?.start },
+        video: { durationSeconds: durationSeconds ?? 0, start: video.timing?.start, warp: videoWarp },
         offsetSeconds,
       }),
-    [activity, durationSeconds, video.timing?.start, offsetSeconds],
+    [activity, durationSeconds, video.timing?.start, videoWarp, offsetSeconds],
   );
 
   const ready = media !== undefined && durationSeconds !== undefined && durationSeconds > 0;
@@ -258,7 +261,7 @@ export function BurnedInExportPanel({
   const drawnAnyway = built.template.components.some((component) => component.visible && drawnWithoutTelemetry(component));
   const noOverlap = outsideActivity && !drawnAnyway;
 
-  const signature = JSON.stringify([built.template, personal, units, offsetSeconds, range.start, range.end, outWidth, outHeight]);
+  const signature = JSON.stringify([built.template, personal, units, offsetSeconds, videoWarp, range.start, range.end, outWidth, outHeight]);
   const running = phase.status === 'running';
   const nothingOn = built.template.components.length === 0;
   const readiness =
@@ -291,6 +294,7 @@ export function BurnedInExportPanel({
           frameRate,
           videoDurationSeconds: durationSeconds ?? 0,
           videoStart: video.timing?.start,
+          ...(videoWarp ? { videoWarp } : {}),
           offsetSeconds,
           ...(range.trimmed ? { trim: { start: range.start, end: range.end } } : {}),
           units,

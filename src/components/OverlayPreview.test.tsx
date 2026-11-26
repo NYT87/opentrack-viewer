@@ -6,8 +6,9 @@ import type { VideoTrim } from '../overlay/trim';
 import { OverlayPreview } from './OverlayPreview';
 import { DEFAULT_OVERLAY_CONTROLS } from '../overlay/presets';
 import { makeActivity } from '../test/helpers/activity';
-import type { OverlayVideo } from '../state/overlayStore';
-import { buildOverlayTimeline } from '../overlay/timeline';
+import type { OverlaySpeed, OverlayVideo } from '../state/overlayStore';
+import { effectiveWarp } from '../overlay/videoSpeed';
+import { buildOverlayTimeline, type VideoTimeWarp } from '../overlay/timeline';
 
 vi.mock('../overlay/timeline', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../overlay/timeline')>();
@@ -66,19 +67,24 @@ function stubMedia() {
   return state;
 }
 
-function Harness(props: { source?: ReturnType<typeof activity> | null }) {
+function Harness(props: { source?: ReturnType<typeof activity> | null; cameraWarp?: VideoTimeWarp }) {
   // `null` is no activity; leaving it out is the default one (a default
   // parameter would swallow `undefined`).
   const source = props.source === null ? undefined : (props.source ?? activity());
   const [offset, setOffset] = useState(0);
   const [trim, setTrim] = useState<VideoTrim | undefined>(undefined);
   const [controls, setControls] = useState(DEFAULT_OVERLAY_CONTROLS);
+  const [speed, setSpeed] = useState<OverlaySpeed | undefined>(undefined);
+  const shown: OverlayVideo = props.cameraWarp ? { ...video, timing: { ...video.timing!, warp: props.cameraWarp } } : video;
   return (
     <OverlayPreview
-      video={video}
+      video={shown}
       activity={source}
       offsetSeconds={offset}
       onOffsetChange={setOffset}
+      videoWarp={effectiveWarp(shown.timing, speed)}
+      speed={speed}
+      onSpeedChange={setSpeed}
       trim={trim}
       onTrimChange={setTrim}
       units="metric"
@@ -700,5 +706,80 @@ describe('the sync panel (TD-059)', () => {
     // A different offset is a different timeline.
     rerender(<OverlayPreview {...props} offsetSeconds={1} trim={{ startSeconds: 3 }} />);
     expect(vi.mocked(buildOverlayTimeline).mock.calls.length).toBe(builds + 1);
+  });
+});
+
+describe('video speed: time-lapse and TimeWarp footage (AV-1027)', () => {
+  const speedGroup = () => screen.getByRole('group', { name: 'Video speed' });
+  const choose = (name: string) => userEvent.selectOptions(within(speedGroup()).getByRole('combobox', { name: 'Video runs' }), name);
+
+  it('is real time by default, with no factor field and nothing said about speed', () => {
+    render(<Harness />);
+    expect(within(speedGroup()).getByRole('combobox', { name: 'Video runs' })).toHaveValue('real');
+    expect(within(speedGroup()).queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(within(speedGroup()).queryByRole('option', { name: /camera/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/faster than real time/)).not.toBeInTheDocument();
+  });
+
+  it('takes a factor: the overlay shows the activity that much further on, and the sync line says so', async () => {
+    render(<Harness />);
+    await choose('N× faster');
+    const factor = within(speedGroup()).getByRole('spinbutton', { name: 'Times faster' });
+    await userEvent.clear(factor);
+    await userEvent.type(factor, '2');
+    expect(within(speedGroup()).getByText('1 second of video = 2 seconds of activity')).toBeInTheDocument();
+    act(() => seekTo(2)); // The activity at 4 s: 4 m/s.
+    expect(within(layer()).getByText('14.4 km/h')).toBeInTheDocument();
+    expect(screen.getByText('The video runs 2× faster than real time.')).toBeInTheDocument();
+    // Back to the activity's own pace.
+    await choose('Real time');
+    expect(within(layer()).getByText('7.2 km/h')).toBeInTheDocument();
+    expect(screen.queryByText(/faster than real time/)).not.toBeInTheDocument();
+  });
+
+  it('keeps N× faster chosen while 1 is typed, takes it as real time on leaving, and holds a number out of range as typed, saying why', async () => {
+    render(<Harness />);
+    await choose('N× faster');
+    const factor = within(speedGroup()).getByRole('spinbutton', { name: 'Times faster' });
+    await userEvent.clear(factor);
+    expect(factor).not.toHaveAttribute('aria-invalid');
+    await userEvent.type(factor, '1');
+    expect(within(speedGroup()).getByRole('combobox', { name: 'Video runs' })).toHaveValue('factor');
+    await userEvent.clear(factor);
+    await userEvent.type(factor, '0');
+    expect(factor).toHaveAttribute('aria-invalid', 'true');
+    expect(within(speedGroup()).getByText(/is not a speed/)).toBeInTheDocument();
+    await userEvent.tab();
+    expect(factor).toHaveValue(0); // kept as typed, with the reason, like the start field
+    await userEvent.clear(factor);
+    await userEvent.type(factor, '1');
+    await userEvent.tab();
+    expect(within(speedGroup()).getByRole('combobox', { name: 'Video runs' })).toHaveValue('real');
+  });
+
+  it('offers the camera’s timing where it was detected, makes it the default, and says it was followed', async () => {
+    render(<Harness cameraWarp={{ kind: 'map', video: [0, 5, 10], real: [0, 5, 50] }} />);
+    const select = within(speedGroup()).getByRole('combobox', { name: 'Video runs' });
+    expect(select).toHaveValue('camera');
+    expect(within(speedGroup()).getByRole('option', { name: /about 5×, ramps followed/ })).toBeInTheDocument();
+    expect(screen.getByText("The video runs 5× faster than real time — the camera's timing, ramps followed.")).toBeInTheDocument();
+    // Video 7.5 s is 5 + 2.5 * 9 = 27.5 s: past this ten-second activity, so nothing is drawn; 1 s is real time.
+    act(() => seekTo(1));
+    expect(within(layer()).getByText('3.6 km/h')).toBeInTheDocument();
+    await choose('Real time');
+    expect(select).toHaveValue('real');
+    expect(screen.queryByText(/faster than real time/)).not.toBeInTheDocument();
+  });
+
+  it('holds a step to the video’s mapped length, not its own', async () => {
+    render(<Harness />);
+    await choose('N× faster');
+    const factor = within(speedGroup()).getByRole('spinbutton', { name: 'Times faster' });
+    await userEvent.clear(factor);
+    await userEvent.type(factor, '3');
+    const field = screen.getByRole('textbox', { name: 'Video starts at' });
+    field.focus();
+    await userEvent.keyboard('{PageDown}');
+    expect(field).toHaveValue('-30'); // The video is 30 s long on the activity's clock, not 10.
   });
 });

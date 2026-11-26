@@ -1,4 +1,4 @@
-import { buildOverlayTimeline } from '../timeline';
+import { buildOverlayTimeline, videoClockOf } from '../timeline';
 import type { ExportJob, ExportOutput } from './client';
 import { createOverlayRenderer, type OverlayContext2D } from './drawOverlay';
 import { hasMapInset } from '../insetCamera';
@@ -200,7 +200,7 @@ export function startWebmExport(
 ): ExportJob {
   const controller = new AbortController();
   const timeline = buildOverlayTimeline(request.activity, {
-    video: { durationSeconds: request.videoDurationSeconds, start: request.videoStart },
+    video: videoClockOf(request),
     offsetSeconds: request.offsetSeconds,
     // AV-1025. A stopwatch counts from the cut's start.
     cutStartSeconds: request.trimStartSeconds,
