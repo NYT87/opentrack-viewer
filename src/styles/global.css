@@ -1173,6 +1173,11 @@ input[type='color']:focus-visible {
 .overlay-item__profile { width: 100%; height: 100%; display: block; }
 .overlay-preview__controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 12px; }
 .overlay-preview__scrub { flex: 1 1 200px; min-width: 0; }
+/* AV-1029: the selected component's window, a band behind the slider. */
+.overlay-preview__scrub-wrap { position: relative; flex: 1 1 200px; display: flex; min-width: 0; }
+.overlay-preview__scrub-wrap .overlay-preview__scrub { position: relative; width: 100%; background: transparent; }
+.overlay-preview__window { position: absolute; top: 50%; height: 8px; min-width: 3px; margin-top: -4px; border-radius: 4px; background: var(--accent, #3b82f6); opacity: 0.35; pointer-events: none; }
+.overlay-controls__hint.is-invalid { color: var(--error); }
 .overlay-preview__time { font-variant-numeric: tabular-nums; color: var(--text-muted); }
 .overlay-preview__offset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 0; border: 1px solid var(--border); border-radius: var(--radius); }
 .overlay-preview__offset input[type='number'] { width: 6em; }

@@ -1435,3 +1435,127 @@ describe('the route inset’s view, shape, trail and map (AV-1023, TD-092)', () 
     expect((await layoutRoute()).routeInset).toMatchObject({ view: 'follow', map: { provider: 'openfreemap' } });
   });
 });
+
+describe('a component shown for part of the video (AV-1029, TD-101)', () => {
+  const shown = () => within(editor()).getByRole('group', { name: 'Shown' });
+  const saved0 = async () => (await layoutJson()).template.components[0]!;
+  const undo = () => userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+  const type = (label: string, value: string) => {
+    fireEvent.change(within(shown()).getByLabelText(label), { target: { value } });
+    fireEvent.blur(within(shown()).getByLabelText(label));
+  };
+
+  it('shows a component always, until a window is chosen, and writes none for Always', async () => {
+    setup();
+    await add('Speed');
+    expect(within(shown()).getByRole('radio', { name: 'Always' })).toBeChecked();
+    expect(within(shown()).queryByLabelText('From')).not.toBeInTheDocument();
+    expect(await saved0()).not.toHaveProperty('visibility');
+  });
+
+  it('sets From … to … in m:ss, with fades, in one Undo step each, and clamps the fades to the window', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    type('To', '0:20.5');
+    expect(await saved0()).toMatchObject({ visibility: { from: 10, to: 20.5 } });
+    type('Fade in (s)', '4');
+    type('Fade out (s)', '30');
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 20.5, fadeIn: 4, fadeOut: 10 });
+    expect(shown()).toHaveTextContent('Shown from 0:10 to 0:20.5, fading in over 4 s, fading out over 10 s.');
+    await undo();
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 20.5, fadeIn: 4 });
+  });
+
+  it('keeps what is typed, with a reason, when it is not a time or the end is not after the start', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    type('To', 'soon');
+    expect(within(shown()).getByLabelText('To')).toHaveValue('soon');
+    expect(within(shown()).getByLabelText('To')).toBeInvalid();
+    expect(within(shown()).getByLabelText('To')).toHaveAccessibleDescription(/"soon" is not a time/);
+    type('To', '0:05');
+    expect(within(shown()).getByLabelText('To')).toHaveAccessibleDescription(/not after the start/);
+    expect((await saved0()).visibility).toEqual({ from: 10 });
+  });
+
+  it('applies a field when it is left, so typing it through is one Undo step, and a From after To is refused', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    type('To', '0:30');
+    type('Fade in (s)', '5');
+    const to = within(shown()).getByLabelText('To');
+    await userEvent.clear(to);
+    await userEvent.type(to, '0:35');
+    // Nothing is written until it is left, so the fade is not clamped by "0:3" on the way.
+    await userEvent.tab();
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 35, fadeIn: 5 });
+    await undo();
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 30, fadeIn: 5 });
+    type('From', '0:50');
+    expect(within(shown()).getByLabelText('From')).toHaveAccessibleDescription(/not before the end/);
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 30, fadeIn: 5 });
+  });
+
+  it('shows the window again under From … to … when Undo brings it back after Always', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'Always' }));
+    await undo();
+    expect(within(shown()).getByRole('radio', { name: 'From … to …' })).toBeChecked();
+    expect(within(shown()).getByLabelText('From')).toHaveValue('0:10');
+  });
+
+  it('writes to = from + N for For … seconds from …, and moves the end with the start', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'For … seconds from …' }));
+    type('From', '0:10');
+    type('For (s)', '8');
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 18 });
+    expect(within(shown()).getByLabelText('For (s)')).toHaveValue('8');
+    type('From', '0:30');
+    expect((await saved0()).visibility).toEqual({ from: 30, to: 38 });
+  });
+
+  it('sets a time to the playhead, the canvas’s own moment', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    fireEvent.change(within(region()).getByLabelText('Canvas time'), { target: { value: '12' } });
+    await userEvent.click(within(shown()).getByRole('button', { name: 'Set to the playhead, from' }));
+    fireEvent.change(within(region()).getByLabelText('Canvas time'), { target: { value: '30' } });
+    await userEvent.click(within(shown()).getByRole('button', { name: 'Set to the playhead, to' }));
+    expect((await saved0()).visibility).toEqual({ from: 12, to: 30 });
+    // Back to Always clears the window.
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'Always' }));
+    expect(await saved0()).not.toHaveProperty('visibility');
+  });
+
+  it('marks the selected component’s window on the time slider, and says it in text', async () => {
+    const { container } = setup();
+    await add('Speed');
+    expect(container.querySelector('.overlay-preview__window')).toBeNull();
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:15');
+    type('To', '0:30');
+    const band = container.querySelector('.overlay-preview__window') as HTMLElement;
+    expect(band).toHaveAttribute('aria-hidden', 'true');
+    expect(band.style.left).toBe('25%');
+    expect(band.style.width).toBe('25%');
+  });
+
+  it('is not offered on a still', () => {
+    const activity = ride();
+    const host = { title: 'Figures', intro: 'x', frame: { width: 1280, height: 720 }, timeline: buildOverlayTimeline(activity, { video: { durationSeconds: 60 } }), seconds: 0, onSeek: () => {}, onComponentsChange: () => {}, still: true };
+    render(<CustomCanvas activity={activity} offsetSeconds={0} units="metric" readerTimeZone="UTC" host={host} />);
+    expect(screen.queryByRole('group', { name: 'Shown' })).not.toBeInTheDocument();
+  });
+});

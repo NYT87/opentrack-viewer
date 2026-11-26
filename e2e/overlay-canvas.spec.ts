@@ -548,3 +548,35 @@ test('a stopwatch and a clock change as the ride goes, and hold within a second:
   // Nothing is drawn where nothing was placed.
   expect(pixel(frameAt(30), 640, 360)[3]).toBe(0);
 });
+
+test('a shape shown only from 0:20 to 0:40 is in the frame at 30 s and not at 5 s: read from exported frames (AV-1029)', async ({ page }) => {
+  const canvas = await openCanvas(page);
+  await canvas.getByLabel('Size', { exact: true }).selectOption('1280x720');
+  await expect(canvas.getByRole('group', { name: /^Canvas preview, 1280 by 720 pixels/ })).toBeVisible();
+  await add(canvas, 'Rounded rectangle');
+  await canvas.getByLabel('Fill colour').fill('#ff0000');
+  await canvas.getByLabel('Fill opacity (%)').fill('100');
+  await canvas.getByRole('button', { name: 'Snap to top left' }).click();
+  const card = await rectOf(canvas);
+
+  const shown = canvas.getByRole('group', { name: 'Shown' });
+  await shown.getByRole('radio', { name: 'From … to …' }).check();
+  await shown.getByLabel('From', { exact: true }).fill('0:20');
+  await shown.getByLabel('From', { exact: true }).blur();
+  await shown.getByLabel('To', { exact: true }).fill('0:40');
+  await shown.getByLabel('To', { exact: true }).blur();
+  await expect(shown).toContainText('Shown from 0:20 to 0:40.');
+
+  const exporter = canvas.getByRole('region', { name: 'Export overlay' });
+  await exporter.getByLabel('Frame rate').selectOption('10');
+  await exporter.getByRole('button', { name: 'Export PNG sequence' }).click();
+  const link = exporter.getByRole('link', { name: /overlay-1280x720-10fps\.zip/ });
+  await expect(link).toBeVisible({ timeout: 180_000 });
+  const frames = readZip(new Uint8Array(await fetchBlobBytes(page, (await link.getAttribute('href'))!))).slice(1);
+
+  const centre = (index: number) => pixel(decodePng(Buffer.from(frames[index]!.data)), (card.x + card.width / 2) * 1280, (card.y + card.height / 2) * 720);
+  // Frame n is at n / 10 s: 5 s is before the window, 30 s inside it, 50 s after.
+  expect(centre(50)[3]).toBe(0);
+  expect(centre(300)).toEqual([255, 0, 0, 255]);
+  expect(centre(500)[3]).toBe(0);
+});

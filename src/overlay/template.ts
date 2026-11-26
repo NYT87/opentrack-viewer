@@ -36,6 +36,7 @@ import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial'
 import { DEFAULT_GRADIENT, GRADIENT_BAND_LIMITS, GRADIENT_FROM_LIMITS } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
 import { MAX_MAP_INSETS, parseRouteInsetSetting, type OverlayRouteInsetSetting } from './routeInset';
+import { parseVisibility, type OverlayVisibility } from './visibility';
 import {
   DEFAULT_SPLITS,
   SPLITS_EVERY_METERS,
@@ -458,6 +459,8 @@ export interface OverlayComponent {
    * value over this many seconds, 0 to 30. Absent is off, as 0 is.
    */
   smoothing?: { windowSeconds: number };
+  /** AV-1029 (TD-101). The part of the video it is shown for, with fades. Absent is the whole video. */
+  visibility?: OverlayVisibility;
   /** AV-1018. `zones`: the zones and how they are drawn. `source` is the zones' source. */
   zones?: OverlayZonesSetting;
   /** AV-1019. `dial`: the arc, the ticks, the pointer and the colours. The range is `range`. */
@@ -691,6 +694,8 @@ function parseComponent(value: unknown): OverlayComponent | string {
       component.smoothing = { windowSeconds: Math.min(SMOOTHING_LIMITS.max, seconds) };
     }
   }
+  const visibility = parseVisibility(value.visibility);
+  if (visibility) component.visibility = visibility;
   // AV-1023. The inset's own setting, read as it may be drawn; absent stays absent, so an older layout is the old inset.
   if (componentType === 'routeInset' && isRecord(value.routeInset)) component.routeInset = parseRouteInsetSetting(value.routeInset);
   if (componentType === 'routeInset' && isRecord(value.route)) {

@@ -84,6 +84,8 @@ import { GITHUB_URL } from './SiteFooter';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { DateSettings, PercentField } from './RouteOverlayPanel';
+import { ShownEditor } from './ShownEditor';
+import { visibilityAt } from '../overlay/visibility';
 import { usePersonalStore } from '../state/personalStore';
 import {
   PERSONAL_LIMITS,
@@ -227,6 +229,8 @@ export function CustomCanvas({
   const [notice, setNotice] = useState<{ kind: 'status' | 'alert'; message: string; warnings?: string[] }>();
   const [preset, setPreset] = useState<StartLayoutId>('compact-hud');
   const loadInput = useRef<HTMLInputElement>(null);
+  // AV-1029. The preview's moment, for the editor's *Set to the playhead* buttons; a ref, so a playing preview does not redraw the editor.
+  const playhead = useRef(0);
   const { components, selectedId } = state;
   // AV-1018 (TD-086). The reader's own figures are in a layout file only if this is ticked: it starts, and stays, unticked.
   const personal = usePersonalStore((store) => store.personal);
@@ -355,7 +359,10 @@ export function CustomCanvas({
     setSize(String(fitted.width), String(fitted.height));
     // A still (the map image) shows no moment, so what only means something at one (zones, dials, charts, the gradient indicator and the compass: AV-1018, AV-1019) is left out of it, as the still image leaves out a video's figures.
     const readable = host?.still
-      ? parsed.layout.template.components.filter((component) => !MOMENT_COMPONENT_TYPES.includes(component.type))
+      ? parsed.layout.template.components
+          .filter((component) => !MOMENT_COMPONENT_TYPES.includes(component.type))
+          // AV-1029. A still has no time to set a window by, so one saved in a layout is dropped rather than hiding the component with no way to bring it back.
+          .map(({ visibility: _window, ...rest }) => rest)
       : parsed.layout.template.components;
     // AV-1023. A map's own canvas has the map already: an inset in it keeps its view and its line, not a second map.
     const opened = host
@@ -421,6 +428,7 @@ export function CustomCanvas({
         clock={host ? { seconds: host.seconds, onSeek: host.onSeek, still } : undefined}
         backdrop={host?.backdrop}
         liveMaps={!host}
+        playhead={playhead}
       />
       {sizeProblem && (
         <p role="alert" className="export__error">
@@ -534,6 +542,8 @@ export function CustomCanvas({
             units={units}
             host={host !== undefined}
             trimmed={hasPrivacyTrim(privacyTrim)}
+            timed={!still}
+            playhead={() => playhead.current}
             onChange={(next, ...selected) => change(next, ...selected)}
           />
         )}
@@ -815,7 +825,10 @@ function CanvasPreview({
   clock,
   backdrop,
   liveMaps,
+  playhead: playheadRef,
 }: {
+  /** AV-1029. Written with the moment drawn, for the editor to read. */
+  playhead: React.MutableRefObject<number>;
   /** AV-1023 (TD-092). Whether a route inset's map is shown live under the canvas: not inside a map's own canvas. */
   liveMaps: boolean;
   /** The host's time, shown and moved here instead of a clock of the preview's own (AV-1207). */
@@ -919,21 +932,20 @@ function CanvasPreview({
     const timer = setTimeout(() => setRestedKey(typedKey), typedKey === '' ? 0 : 700);
     return () => clearTimeout(timer);
   }, [typedKey]);
-  const liveIds = useMemo(
-    () =>
-      new Set(
-        liveMaps
-          ? template.components
-              .filter((component) => component.visible && cappedMapIds(template.components).has(component.id) && component.routeInset && insetStyleUrl(component.routeInset, maptilerKey) !== undefined)
-              .map((component) => component.id)
-          : [],
-      ),
-    [liveMaps, template, maptilerKey],
-  );
+  // AV-1029. A map is under the canvas only while its inset's window is open (it is not faded: the preview's map is a layer of its own); the key keeps the set the same between ticks.
+  const liveKey = liveMaps
+    ? template.components
+        .filter((component) => component.visible && visibilityAt(component.visibility, time) > 0 && cappedMapIds(template.components).has(component.id) && component.routeInset && insetStyleUrl(component.routeInset, maptilerKey) !== undefined)
+        .map((component) => component.id)
+        .join('\n')
+    : '';
+  const liveIds = useMemo(() => new Set(liveKey === '' ? [] : liveKey.split('\n')), [liveKey]);
   useEffect(() => {
     const ctx = canvas.current?.getContext('2d');
     if (!ctx) return;
-    renderer.drawFrame(ctx, time, liveIds.size > 0 ? { maps: { live: liveIds } } : undefined);
+    playheadRef.current = time;
+    // AV-1029. Only the editor's canvas shows a component outside its window, faded.
+    renderer.drawFrame(ctx, time, { ghostHidden: true, ...(liveIds.size > 0 ? { maps: { live: liveIds } } : {}) });
     const box = selectedId ? boxes.get(selectedId) : undefined;
     if (box) {
       // The outline and the corner handle are the preview's own; never in the export.
@@ -947,7 +959,18 @@ function CanvasPreview({
       ctx.fillRect(box.x + box.w - HANDLE / 2, box.y + box.h - HANDLE / 2, HANDLE, HANDLE);
       ctx.restore();
     }
-  }, [renderer, time, boxes, selectedId, liveIds]);
+  }, [renderer, time, boxes, selectedId, liveIds, playheadRef]);
+
+  // AV-1029 (TD-101). The selected component's window, as a band under the time slider.
+  const shownWindow = template.components.find((component) => component.id === selectedId)?.visibility;
+  const band =
+    shownWindow && durationSeconds > 0
+      ? (() => {
+          const start = Math.min(durationSeconds, shownWindow.from ?? 0);
+          const end = Math.min(durationSeconds, shownWindow.to ?? durationSeconds);
+          return { left: `${(start / durationSeconds) * 100}%`, width: `${(Math.max(0, end - start) / durationSeconds) * 100}%` };
+        })()
+      : undefined;
 
   const togglePlay = () => {
     const media = element.current;
@@ -1085,17 +1108,20 @@ function CanvasPreview({
             {playing ? 'Pause' : 'Play'}
           </button>
         )}
-        <input
-          type="range"
-          className="overlay-preview__scrub"
-          aria-label="Canvas time"
-          min={0}
-          max={durationSeconds || 0}
-          step={0.1}
-          value={Math.min(time, durationSeconds || 0)}
-          disabled={!(durationSeconds > 0)}
-          onChange={(event) => seek(Number(event.target.value))}
-        />
+        <span className="overlay-preview__scrub-wrap">
+          {band && <span className="overlay-preview__window" aria-hidden="true" style={band} />}
+          <input
+            type="range"
+            className="overlay-preview__scrub"
+            aria-label="Canvas time"
+            min={0}
+            max={durationSeconds || 0}
+            step={0.1}
+            value={Math.min(time, durationSeconds || 0)}
+            disabled={!(durationSeconds > 0)}
+            onChange={(event) => seek(Number(event.target.value))}
+          />
+        </span>
         <span className="overlay-preview__time" role="timer" aria-label="Canvas time shown">
           {formatDuration(time)} / {formatDuration(durationSeconds)}
         </span>
@@ -1114,8 +1140,13 @@ function ComponentEditor({
   units,
   host,
   trimmed,
+  timed,
+  playhead,
   onChange,
 }: {
+  /** AV-1029. Whether the canvas has a time, so a window can be set: not on a still. */
+  timed: boolean;
+  playhead: () => number;
   component: OverlayComponent;
   components: OverlayComponent[];
   frame: { width: number; height: number };
@@ -1225,6 +1256,21 @@ function ComponentEditor({
         <p className="overlay-controls__note" role="status">
           {ELEVATION_MISSING} The profile stays empty until an activity with elevation is opened.
         </p>
+      )}
+
+      {timed && (
+        <ShownEditor
+          visibility={component.visibility}
+          playhead={playhead}
+          onChange={(visibility) =>
+            update((current) => {
+              const next = { ...current };
+              if (visibility) next.visibility = visibility;
+              else delete next.visibility;
+              return next;
+            })
+          }
+        />
       )}
 
       <div className="still-image__position">

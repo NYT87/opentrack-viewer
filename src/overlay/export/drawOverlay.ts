@@ -23,6 +23,7 @@ import {
 } from '../template';
 import type { OverlayTimeline } from '../timeline';
 import { DEFAULT_CHART } from '../template';
+import { visibilityAt } from '../visibility';
 import { chartMoment, chartSeriesOf } from '../chart';
 import { drawChart, drawSeries } from './drawChart';
 import { drawCompass } from './drawCompass';
@@ -75,8 +76,9 @@ export interface OverlayRenderer {
    * cleared first, so what is not overlay is transparent; a burned-in render
    * passes `clear: false` to draw over a video frame already on the canvas.
    * AV-1023: `maps` is what stands behind the route insets that have a basemap.
+   * AV-1029: `ghostHidden` (the canvas editor's preview only, never an export) draws a component outside its window faded, with a dashed outline.
    */
-  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number, options?: { clear?: boolean; maps?: InsetMapSource }): void;
+  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number, options?: { clear?: boolean; maps?: InsetMapSource; ghostHidden?: boolean }): void;
   /**
    * AV-1023 (TD-092). The route insets that need a basemap picture for this moment, by component id: those
    * with a map that are drawn here. Empty when none is, so an export asks its page for nothing.
@@ -97,6 +99,28 @@ function roundedRect(ctx: OverlayContext2D, box: Box, radius: number): void {
   ctx.beginPath();
   if (typeof ctx.roundRect === 'function') ctx.roundRect(box.x, box.y, box.w, box.h, radius);
   else ctx.rect(box.x, box.y, box.w, box.h);
+}
+
+/** AV-1029. How faded the editor's preview draws a component outside its window. */
+const GHOST_ALPHA = 0.3;
+
+/**
+ * AV-1029 (TD-101). A context whose `globalAlpha` writes are multiplied by `alpha`, because the draw
+ * helpers set their own (0.75 for a label, 1 to finish) and a plain write would undo the fade.
+ * `save`/`restore` act on the real context, so the stack still balances.
+ */
+function scaledAlpha(ctx: OverlayContext2D, alpha: number): OverlayContext2D {
+  return new Proxy(ctx, {
+    get(target, key) {
+      if (key === 'globalAlpha') return target.globalAlpha / alpha;
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set(target, key, value) {
+      Reflect.set(target, key, key === 'globalAlpha' ? value * alpha : value, target);
+      return true;
+    },
+  });
 }
 
 export function createOverlayRenderer(input: OverlayRendererInput): OverlayRenderer {
@@ -286,7 +310,9 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
   return {
     insetsAt(videoTimeSeconds) {
       const ids: string[] = [];
-      for (const [id, model] of insetModels) if (model.hasMap && model.momentAt(videoTimeSeconds)) ids.push(id);
+      for (const [id, model] of insetModels) {
+        if (model.hasMap && model.component.visible && visibilityAt(model.component.visibility, videoTimeSeconds) > 0 && model.momentAt(videoTimeSeconds)) ids.push(id);
+      }
       return ids;
     },
     drawFrame(ctx, videoTimeSeconds, options) {
@@ -294,15 +320,14 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
       if (options?.clear !== false) ctx.clearRect(0, 0, width, height);
       // Where the activity does not reach, only what describes the whole of it is drawn.
       const sample = timeline.sampleAt(videoTimeSeconds);
-      stillTexts ??= setStillTexts(ctx);
+      const texts = (stillTexts ??= setStillTexts(ctx));
 
-      for (const component of template.components) {
-        if (!component.visible) continue;
+      const drawComponent = (ctx: OverlayContext2D, component: OverlayComponent) => {
         if (component.type === 'shape') {
           if (component.shape) drawShape(ctx, boxOf(component), component.shape, Math.min(width, height));
-          continue;
+          return;
         }
-        const still = stillTexts.get(component.id);
+        const still = texts.get(component.id);
         if (still) {
           ctx.save();
           ctx.fillStyle = still.color;
@@ -314,11 +339,11 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
             ctx.fillText(line.text, line.x, line.y);
           }
           ctx.restore();
-          continue;
+          return;
         }
-        if (!sample) continue;
+        if (!sample) return;
         const ready = resolveOverlayComponent(template, component, sample, timeline, units, input.personal, input.readerTimeZone);
-        if (ready.status !== 'ready') continue;
+        if (ready.status !== 'ready') return;
 
         const box = boxOf(component);
         const em = BASE_FONT_FRACTION * width * ready.style.fontScale;
@@ -326,7 +351,7 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
         // A chart with no place on its axis at this moment (a dropout) draws nothing, background included, as the contract has no props for it.
         if (component.type === 'chart') {
           const chartSeries = seriesOf(component);
-          if (!chartSeries || !component.source || chartMoment(chartSeries, component.source, sample, timeline).centre === undefined) continue;
+          if (!chartSeries || !component.source || chartMoment(chartSeries, component.source, sample, timeline).centre === undefined) return;
         }
         ctx.save();
         // Each component stays inside its own box, as the preview's tile does; a round inset inside its circle.
@@ -389,6 +414,28 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
           drawFigure(ctx, box, ready, em);
         }
         ctx.restore();
+      };
+      for (const component of template.components) {
+        if (!component.visible) continue;
+        // AV-1029 (TD-101). Outside its window a component is not drawn (the editor's preview alone shows it faded); inside, what it draws is multiplied by the fade.
+        const shown = visibilityAt(component.visibility, videoTimeSeconds);
+        if (shown >= 1) drawComponent(ctx, component);
+        else if (shown > 0 || options?.ghostHidden) {
+          const alpha = shown > 0 ? shown : GHOST_ALPHA;
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          drawComponent(scaledAlpha(ctx, alpha), component);
+          ctx.restore();
+          if (shown === 0) {
+            const box = boxOf(component);
+            ctx.save();
+            ctx.setLineDash?.([6, 4]);
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgb(255 255 255 / 0.7)';
+            ctx.strokeRect(box.x, box.y, box.w, box.h);
+            ctx.restore();
+          }
+        }
       }
     },
   };
