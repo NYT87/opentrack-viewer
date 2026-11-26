@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   defaultPerformanceMetric,
   isAmbiguousSport,
@@ -6,7 +6,13 @@ import {
   resolvePerformanceMetric,
 } from './performance';
 import { makeActivity } from '../test/helpers/activity';
+import { computeDistance } from './stats';
 import type { ActivitySport } from './activity';
+
+vi.mock('./stats', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./stats')>();
+  return { ...actual, computeDistance: vi.fn(actual.computeDistance) };
+});
 
 /** A minute of movement: enough for both a speed and a pace to exist. */
 const moving = (sport?: ActivitySport) => {
@@ -114,5 +120,17 @@ describe('resolving the metric against a preference (AV-908)', () => {
     // TD-006: switching is a view decision, not a change to the file's data —
     // and for a video, nothing is re-read to answer it.
     expect(JSON.stringify(activity)).toBe(before);
+  });
+});
+
+describe('asking on every render', () => {
+  it('works out whether pace is possible once per activity', () => {
+    const activity = moving();
+    vi.mocked(computeDistance).mockClear();
+    for (let i = 0; i < 3; i += 1) {
+      expect(isPerformanceMetricSelectable(activity)).toBe(true);
+      expect(resolvePerformanceMetric(activity, 'pace')).toBe('pace');
+    }
+    expect(computeDistance).toHaveBeenCalledTimes(1);
   });
 });

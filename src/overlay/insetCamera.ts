@@ -1,5 +1,6 @@
 import type { Activity, Coordinate } from '../domain/activity';
 import { toValidCoordinate } from '../domain/activity';
+import { EARTH_RADIUS_METERS } from '../domain/stats';
 import { keptRoute, markerVisible, sampleActivityMs, type KeptRoute } from './privacyTrim';
 import { MAX_MAP_INSETS, hasInsetMap, isPlainInset, routeInsetOf, type OverlayRouteInsetSetting } from './routeInset';
 import type { OverlayComponent, OverlayTemplate } from './template';
@@ -246,7 +247,7 @@ const metersBetween = (a: [number, number], b: [number, number]): number => {
   const dLat = (b[1] - a[1]) * RAD;
   const dLon = (b[0] - a[0]) * RAD;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * RAD) * Math.cos(b[1] * RAD) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6_371_008.8 * Math.asin(Math.min(1, Math.sqrt(h)));
+  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(h)));
 };
 
 /**

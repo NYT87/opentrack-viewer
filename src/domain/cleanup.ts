@@ -9,7 +9,7 @@ import {
   type ActivityWarning,
 } from './activity';
 import { DEFAULT_PAUSE_SETTINGS, isPauseGap, type PauseSettings } from './pause';
-import { computeDistance, computeStats, haversineMeters } from './stats';
+import { EARTH_RADIUS_METERS, computeDistance, computeStats, haversineMeters } from './stats';
 import { deriveSpeed } from './series';
 import { deriveGrade } from '../overlay/derivedSeries';
 
@@ -119,9 +119,8 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
   let speed = 0;
   let anchor: Fix | undefined;
   let firstLocated: number | undefined;
+  // A run of fixes, each plausible from the one before it, all implausible from the anchor.
   let streak: Fix[] = [];
-  // Whether each fix of the streak is plausible from the one before it: a run that agrees with itself.
-  let streakAgrees = true;
   // At least a second is allowed between two fixes: at 10 or 18 Hz the metres of ordinary fix noise are not a speed.
   const plausible = (a: Fix, b: Fix) =>
     haversineMeters(a.lat, a.lon, b.lat, b.lon) / Math.max(Math.abs(b.ms - a.ms) / 1000, 1) <= ceiling;
@@ -135,7 +134,7 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
   };
   /** A bad first fix: the run after it agrees with itself and with the point that ended it. */
   const firstFixWasBad = (next?: Fix) =>
-    anchor !== undefined && anchor.position === firstLocated && streak.length >= 2 && streakAgrees && (next === undefined || plausible(streak[streak.length - 1]!, next));
+    anchor !== undefined && anchor.position === firstLocated && streak.length >= 2 && (next === undefined || plausible(streak[streak.length - 1]!, next));
   points.forEach((point, position) => {
     const where = toValidCoordinate(point.lat, point.lon);
     const ms = timeMs(point);
@@ -143,24 +142,23 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
     firstLocated ??= position;
     const here: Fix = { position, lat: where.lat, lon: where.lon, ms };
     if (anchor && !plausible(anchor, here)) {
-      if (streak.length > 0 && !plausible(streak[streak.length - 1]!, here)) streakAgrees = false;
+      // A fix that disagrees with the run before it starts a new run, so one glitch cannot keep a relocation from standing.
+      if (streak.length > 0 && !plausible(streak[streak.length - 1]!, here)) streak = [];
       dropped.add(position);
       speed += 1;
       streak.push(here);
       // A long run that keeps agreeing with itself is a relocation, not a spike: it stands. Only when the
       // anchor is the recording's first fix is the anchor itself the likelier bad one, and that goes.
-      if (streak.length >= MAX_CONSECUTIVE_SPEED_DROPS && streakAgrees && here.ms - streak[0]!.ms >= MIN_RELOCATION_SECONDS * 1000) {
+      if (streak.length >= MAX_CONSECUTIVE_SPEED_DROPS && here.ms - streak[0]!.ms >= MIN_RELOCATION_SECONDS * 1000) {
         restore(anchor.position === firstLocated);
         anchor = here;
         streak = [];
-        streakAgrees = true;
       }
       return;
     }
     // The run has ended. If it was after a bad first fix, that fix goes and the run is restored.
     if (firstFixWasBad(here)) restore(true);
     streak = [];
-    streakAgrees = true;
     anchor = here;
   });
   if (firstFixWasBad()) restore(true);
@@ -187,7 +185,6 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
 // ---------------------------------------------------------------------------------------------
 // Smoothing
 
-const EARTH_RADIUS_METERS = 6_371_008.8;
 const METERS_PER_DEGREE = (EARTH_RADIUS_METERS * Math.PI) / 180;
 /** What a consumer GPS fix is trusted to within, for the Kalman filter's measurement noise. */
 const KALMAN_MEASUREMENT_SIGMA_METERS = 5;

@@ -124,6 +124,19 @@ describe('pace series (AV-505)', () => {
       })),
     );
 
+  it('keeps a pace wherever speed keeps a speed: a steady 12 m/s is not a gap', () => {
+    const fast = makeActivity(
+      Array.from({ length: 12 }, (_, index) => ({
+        lat: (index * 120) / 111_195,
+        lon: 0.0001,
+        time: new Date(Date.UTC(2024, 0, 1, 10, 0, index * 10)),
+      })),
+    );
+
+    expect(buildSeries(fast, 'pace', 'time').samples).toHaveLength(buildSeries(fast, 'speed', 'time').samples.length);
+    expect(buildSeries(fast, 'pace', 'time').isEmpty).toBe(false);
+  });
+
   it('derives seconds per kilometre from distance and time', () => {
     const series = buildSeries(steadyRun(), 'pace', 'time');
 

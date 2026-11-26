@@ -26,7 +26,8 @@ export function formatDistance(meters: number | undefined, units: UnitSystem = '
     const miles = value / METERS_PER_MILE;
     return miles < 0.1 ? `${Math.round(value / METERS_PER_FOOT)} ft` : `${miles.toFixed(2)} mi`;
   }
-  return value < 1000 ? `${Math.round(value)} m` : `${(value / 1000).toFixed(2)} km`;
+  // Rounded first, so 999.6 m reads "1.00 km" and not "1000 m".
+  return Math.round(value) < 1000 ? `${Math.round(value)} m` : `${(value / 1000).toFixed(2)} km`;
 }
 
 /**
@@ -45,7 +46,7 @@ export function formatDistanceOnScale(
       ? `${Math.round(meters / METERS_PER_FOOT)} ft`
       : `${(meters / METERS_PER_MILE).toFixed(2)} mi`;
   }
-  return scaleMaxMeters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(2)} km`;
+  return Math.round(scaleMaxMeters) < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(2)} km`;
 }
 
 export function formatElevation(meters: number | undefined, units: UnitSystem = 'metric'): string {
@@ -139,10 +140,7 @@ export function formatSpeed(
   units: UnitSystem = 'metric',
 ): string {
   if (!Number.isFinite(metersPerSecond)) return MISSING;
-  const value = metersPerSecond as number;
-  return units === 'imperial'
-    ? `${((value * 3600) / METERS_PER_MILE).toFixed(1)} mph`
-    : `${((value * 3600) / 1000).toFixed(1)} km/h`;
+  return `${toDisplaySpeed(metersPerSecond as number, units).toFixed(1)} ${speedUnitLabel(units)}`;
 }
 
 /**

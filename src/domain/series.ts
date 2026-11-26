@@ -128,12 +128,6 @@ const DEFINITIONS: Record<ChartSeriesKey, SeriesDefinition> = {
  */
 export const PACE_WINDOW_SECONDS = 15;
 
-/**
- * Speeds above this are not plausible for a human on foot, so the interval that
- * produced them is treated as a gap rather than plotted (AV-505).
- */
-const MAX_PLAUSIBLE_SPEED_MPS = 10;
-
 /** The span between the two ends of a point's trailing window. */
 interface WindowSpan {
   index: number;
@@ -218,7 +212,8 @@ function derivePace(activity: Activity): (number | undefined)[] {
   eachWindowSpan(activity, ({ index, meters, seconds }) => {
     // Zero-duration or stationary intervals have no meaningful pace: gap them.
     if (seconds <= 0 || meters <= 0) return;
-    if (meters / seconds > MAX_PLAUSIBLE_SPEED_MPS) return;
+    // The same limit as speed, so pace and speed gap the same intervals (AV-505).
+    if (!isPlausibleSpeed(meters / seconds)) return;
     out[index] = (seconds / meters) * 1000;
   });
 

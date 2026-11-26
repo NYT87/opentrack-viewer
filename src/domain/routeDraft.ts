@@ -34,32 +34,6 @@ import { haversineMeters, withDerivedStats } from './stats';
  * separate segments: nothing says the ground between them was travelled.
  */
 
-export const DRAFT_RETAINED_FIELDS = [
-  'lat',
-  'lon',
-  'elevationMeters',
-  'time',
-  'distanceMeters (as a reading of the source only)',
-  'segmentIndex',
-] as const;
-
-export const DRAFT_DROPPED_FIELDS = [
-  'heartRateBpm',
-  'runningCadenceSpm',
-  'cyclingCadenceRpm',
-  'powerWatts',
-  'temperatureCelsius',
-  'speedMetersPerSecond',
-  'gradePercent',
-  'accuracyMeters',
-  'extensions',
-  'laps',
-  'events',
-  'sensorStreams',
-  'metadata.device',
-  'warnings',
-] as const;
-
 /** Where a point came from: placed by hand, copied from an activity, or imported. */
 export type DraftPointOrigin =
   | { kind: 'manual' }
@@ -325,22 +299,6 @@ export function appendImportedRoute(
   const result = add(draft, activity, 'imported', options);
   if (!result.ok) return result;
   return ok({ ...result.value, kind: draft.kind === 'blank' ? 'appended' : result.value.kind });
-}
-
-/** A draft made by appending routes, in order. The first one that cannot be taken is the failure. */
-export function draftFromImports(
-  activities: readonly Activity[],
-  options: CreateDraftOptions = {},
-): DraftResult<RouteDraft> {
-  let draft = createBlankDraft(options);
-  for (const activity of activities) {
-    const next = appendImportedRoute(draft, activity);
-    if (!next.ok) return next;
-    draft = next.value;
-  }
-  return draft.points.length
-    ? ok(draft)
-    : fail('empty_draft', 'There are no routes to build a track from.');
 }
 
 export interface DraftActivityOptions {

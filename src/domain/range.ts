@@ -109,7 +109,8 @@ export function lapPointRange(
   for (const point of activity.points) {
     const time = point.time instanceof Date ? point.time.getTime() : undefined;
     if (time === undefined || time < start) continue;
-    if (end !== undefined && time > end) break;
+    // Not a break: times may be out of order, and a later point can fall back inside the lap.
+    if (end !== undefined && time > end) continue;
 
     first ??= point.index;
     last = point.index;

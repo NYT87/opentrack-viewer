@@ -52,7 +52,19 @@ export function defaultPerformanceMetric(activity: Activity): PerformanceMetric 
  * stationary activity has a speed of zero and no pace, which the summary says
  * for itself.
  */
+// The viewer asks on every render (every hover); an Activity is never changed in place.
+const paceCache = new WeakMap<Activity, boolean>();
+
 function paceIsPossible(activity: Activity): boolean {
+  let possible = paceCache.get(activity);
+  if (possible === undefined) {
+    possible = computePaceIsPossible(activity);
+    paceCache.set(activity, possible);
+  }
+  return possible;
+}
+
+function computePaceIsPossible(activity: Activity): boolean {
   const distance = computeDistance(activity.points);
   // Ground actually covered, not merely a distance that could be computed: a
   // recording made standing still has coordinates and timestamps and a total

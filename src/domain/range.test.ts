@@ -180,6 +180,19 @@ describe('lapPointRange', () => {
     ).toEqual({ startIndex: 4, endIndex: 5 });
   });
 
+  it('finds the lap when the times are out of order', () => {
+    const shuffled = makeActivity(
+      [0, 10, 50, 20, 30, 40].map((seconds) => ({ lat: 51.5, lon: -0.1, time: new Date(Date.UTC(2024, 0, 1, 10, 0, seconds)) })),
+    );
+    expect(
+      lapPointRange(shuffled, {
+        index: 0,
+        startTime: new Date('2024-01-01T10:00:20Z'),
+        endTime: new Date('2024-01-01T10:00:40Z'),
+      }),
+    ).toEqual({ startIndex: 3, endIndex: 5 });
+  });
+
   it('has no range for a lap that states no start', () => {
     expect(lapPointRange(activity, { index: 0 })).toBeUndefined();
   });

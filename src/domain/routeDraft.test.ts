@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DRAFT_DROPPED_FIELDS,
-  DRAFT_RETAINED_FIELDS,
   RouteDraftError,
   appendImportedRoute,
   createBlankDraft,
   draftFromActivity,
-  draftFromImports,
   draftToActivity,
+  type DraftResult,
   type RouteDraft,
 } from './routeDraft';
 import { haversineMeters, withDerivedStats } from './stats';
@@ -64,6 +62,13 @@ const deepFreeze = <T,>(value: T): T => {
   }
   return value;
 };
+
+/** Appends each route to a blank draft in turn, as the Route Builder page does one file at a time. */
+function appendAll(activities: readonly Activity[], options: { id?: string } = {}): DraftResult<RouteDraft> {
+  let result: DraftResult<RouteDraft> = { ok: true, value: createBlankDraft(options) };
+  for (const activity of activities) if (result.ok) result = appendImportedRoute(result.value, activity);
+  return result;
+}
 
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: RouteDraftError }): T {
   if (!result.ok) throw new Error(`expected ok, got ${result.error.code}: ${result.error.message}`);
@@ -159,13 +164,6 @@ describe('draftFromActivity (AV-1101)', () => {
     expect(Object.keys(point).sort()).toEqual(
       ['distanceMeters', 'elevationMeters', 'id', 'lat', 'lon', 'origin', 'segmentIndex', 'time'].sort(),
     );
-  });
-
-  it('states the policy it applies, and the two lists do not overlap', () => {
-    expect(DRAFT_RETAINED_FIELDS).toEqual(expect.arrayContaining(['lat', 'lon', 'elevationMeters', 'time', 'segmentIndex']));
-    expect(DRAFT_DROPPED_FIELDS).toEqual(expect.arrayContaining(['heartRateBpm', 'powerWatts', 'laps', 'metadata.device']));
-    const retained = new Set(DRAFT_RETAINED_FIELDS.map((field) => field.split(' ')[0]));
-    for (const field of DRAFT_DROPPED_FIELDS) expect(retained.has(field)).toBe(false);
   });
 
   it('leaves out points with no usable location, and counts them', () => {
@@ -265,7 +263,7 @@ describe('stretches with no location (AV-1101)', () => {
   });
 
   it('does the same for an appended import, after the segments already there', () => {
-    const first = unwrap(draftFromImports([makeActivity([{ lat: 5, lon: 5 }, { lat: 5.001, lon: 5 }])], { id: 'd' }));
+    const first = unwrap(appendAll([makeActivity([{ lat: 5, lon: 5 }, { lat: 5.001, lon: 5 }])], { id: 'd' }));
     const more = unwrap(appendImportedRoute(first, withGap));
     expect(more.points.map((point) => point.segmentIndex)).toEqual([0, 0, 1, 2]);
   });
@@ -300,7 +298,7 @@ describe('appending imported routes (AV-1101)', () => {
   });
 
   it('does not join the routes: each starts a segment of its own, so no line or distance crosses the jump', () => {
-    const draft = unwrap(draftFromImports([route(10), route(11), route(12)], { id: 'd' }));
+    const draft = unwrap(appendAll([route(10), route(11), route(12)], { id: 'd' }));
     expect(draft.points.map((point) => point.segmentIndex)).toEqual([0, 0, 0, 1, 1, 1, 2, 2, 2]);
     const activity = unwrap(draftToActivity(draft));
     // Three roughly 222 m legs of two steps each, and nothing for the 111 km jumps between them.
@@ -325,23 +323,14 @@ describe('appending imported routes (AV-1101)', () => {
   it('refuses an import with nothing usable, and leaves the draft as it was', () => {
     const draft = unwrap(appendImportedRoute(createBlankDraft({ id: 'd' }), route(10)));
     const result = appendImportedRoute(draft, makeActivity([{ elevationMeters: 2 }]));
-    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ ok: false, error: { code: 'no_route_points' } });
     expect(draft.points).toHaveLength(3);
     expect(draft.sources).toHaveLength(1);
   });
 
-  it('builds a draft from imports, and refuses none and the first that fails', () => {
-    const none = draftFromImports([], { id: 'd' });
-    expect(none.ok).toBe(false);
-    if (!none.ok) expect(none.error.code).toBe('empty_draft');
-    const bad = draftFromImports([route(10), makeActivity([{ elevationMeters: 1 }])]);
-    expect(bad.ok).toBe(false);
-    if (!bad.ok) expect(bad.error.code).toBe('no_route_points');
-  });
-
   it('counts the unlocated points of every source', () => {
     const withGaps = makeActivity([{ lat: 10, lon: 20 }, { elevationMeters: 1 }, { lat: 10.1, lon: 20 }]);
-    const draft = unwrap(draftFromImports([withGaps, withGaps], { id: 'd' }));
+    const draft = unwrap(appendAll([withGaps, withGaps], { id: 'd' }));
     expect(draft.dropped.unlocatedPoints).toBe(2);
   });
 });
@@ -377,7 +366,7 @@ describe('draftToActivity (AV-1101)', () => {
   });
 
   it('makes an activity of a draft with no clock or elevation', () => {
-    const draft = unwrap(draftFromImports([makeActivity([{ lat: 1, lon: 2 }, { lat: 1.001, lon: 2 }])], { id: 'd' }));
+    const draft = unwrap(appendAll([makeActivity([{ lat: 1, lon: 2 }, { lat: 1.001, lon: 2 }])], { id: 'd' }));
     const activity = unwrap(draftToActivity(draft));
     expect(activity.streams.hasTime).toBe(false);
     expect(activity.streams.hasElevation).toBe(false);
@@ -412,12 +401,12 @@ describe('elevation totals of appended routes (AV-1101)', () => {
     makeActivity(Array.from({ length: 3 }, (_, i) => ({ lat: 10 + i * 0.001, lon: 20, elevationMeters })));
 
   it('does not count the height between two separate routes as climbed or descended', () => {
-    const up = unwrap(draftToActivity(unwrap(draftFromImports([flat(100), flat(1000)], { id: 'd' }))));
+    const up = unwrap(draftToActivity(unwrap(appendAll([flat(100), flat(1000)], { id: 'd' }))));
     expect(up.derived!.elevationGainMeters).toBe(0);
     expect(up.derived!.elevationLossMeters).toBe(0);
     expect([up.derived!.minElevationMeters, up.derived!.maxElevationMeters]).toEqual([100, 1000]);
 
-    const down = unwrap(draftToActivity(unwrap(draftFromImports([flat(1000), flat(100)], { id: 'd' }))));
+    const down = unwrap(draftToActivity(unwrap(appendAll([flat(1000), flat(100)], { id: 'd' }))));
     expect(down.derived!.elevationGainMeters).toBe(0);
     expect(down.derived!.elevationLossMeters).toBe(0);
   });
@@ -621,7 +610,7 @@ describe('discarding a section (AV-1105)', () => {
   it('joins across a cut that straddled two stretches, and leaves later stretches alone', () => {
     // Three appended routes: p0-2 | p3-5 | p6-8, then p9 appended as a fourth.
     const draft = unwrap(
-      draftFromImports([
+      appendAll([
         makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }, { lat: 10.002, lon: 20 }]),
         makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }, { lat: 11.002, lon: 20 }]),
         makeActivity([{ lat: 12, lon: 20 }, { lat: 12.001, lon: 20 }, { lat: 12.002, lon: 20 }]),
@@ -638,7 +627,7 @@ describe('discarding a section (AV-1105)', () => {
 
   it('joins and splits stretches by hand, and says when there is nothing to do', () => {
     const draft = unwrap(
-      draftFromImports([
+      appendAll([
         makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }]),
         makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }]),
       ]),
@@ -665,7 +654,7 @@ describe('discarding a section (AV-1105)', () => {
   it('splits only the run at the point, not a later run that reused the number', () => {
     // p0 p1 | p2 p3 | p4 p5, then join p4 to the previous: [0,0,1,1,1,1].
     let draft = unwrap(
-      draftFromImports([
+      appendAll([
         makeActivity([{ lat: 10, lon: 20 }, { lat: 10.001, lon: 20 }]),
         makeActivity([{ lat: 11, lon: 20 }, { lat: 11.001, lon: 20 }]),
         makeActivity([{ lat: 12, lon: 20 }, { lat: 12.001, lon: 20 }]),
