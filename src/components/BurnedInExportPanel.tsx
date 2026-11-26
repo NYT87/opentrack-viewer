@@ -23,6 +23,7 @@ import { useMapVideoStore } from '../state/mapVideoStore';
 import { checkInsetExportCached } from '../overlay/insetExportCheck';
 import { hasMapInset } from '../overlay/insetCamera';
 import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
+import { brokenImagesMessage, closeImages, decodeTemplateImages, imageRefusal } from '../overlay/images';
 import { CleanupNote } from './CleanupPanel';
 import { TimecodeNote } from './TimecodeNote';
 import { addSeconds } from '../overlay/timecode';
@@ -155,6 +156,8 @@ export function BurnedInExportPanel({
     () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, outWidth / outHeight)),
     [customTemplate, controls, timeline, outWidth, outHeight],
   );
+  // AV-1030 (TD-102). An image that cannot be drawn stops the export before it starts, with the reason.
+  const imageProblem = useMemo(() => imageRefusal(built.template.components), [built.template]);
   // AV-1018 (TD-086). The reader's figures go with the request only when a zones component can use them.
   const sessionFigures = usePersonalStore((state) => state.personal);
   const personal = built.template.components.some((component) => component.type === 'zones') ? sessionFigures : {};
@@ -221,6 +224,16 @@ export function BurnedInExportPanel({
   }, [support.supported, probeStorage, freeSpace]);
 
   // The rendered file is stored until the reader has it; leaving the page frees it.
+  // AV-1030. Whether the panel has gone, so pictures decoded for a render that never starts are let go.
+  const gone = useRef(false);
+  /** A stop pressed while the images decode: nothing has started to cancel, so the start is dropped. */
+  const stopped = useRef(false);
+  useEffect(() => {
+    gone.current = false;
+    return () => {
+      gone.current = true;
+    };
+  }, []);
   useEffect(
     () => () => {
       job.current?.cancel();
@@ -274,7 +287,8 @@ export function BurnedInExportPanel({
           fileStorage: storage === 'opfs',
         })
       : undefined;
-  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn || noOverlap || shapeMismatch || insetCheck?.refusal !== undefined;
+  // AV-1030 (TD-102). An image that cannot be drawn stops the render before it starts, with the reason.
+  const blocked = (readiness?.errors.length ?? 1) > 0 || nothingOn || noOverlap || shapeMismatch || insetCheck?.refusal !== undefined || imageProblem !== undefined;
 
   const begin = () => {
     if (!ready || running || blocked) return;
@@ -282,6 +296,22 @@ export function BurnedInExportPanel({
     output.current = undefined;
     setWaiting(undefined);
     setPhase({ status: 'running', fraction: 0, seconds: 0 });
+    stopped.current = false;
+    if (!built.template.components.some((component) => component.type === 'image' && component.visible)) {
+      launch();
+      return;
+    }
+    // Each image is decoded once, here, and transferred to the worker, which closes it.
+    void decodeTemplateImages(built.template.components, { width: outWidth, height: outHeight }).then((decoded) => {
+      if (gone.current || stopped.current || decoded.broken.length > 0) {
+        closeImages(decoded.images.values());
+        if (!gone.current) setPhase(stopped.current ? { status: 'stopped' } : { status: 'error', message: brokenImagesMessage(decoded.broken) });
+        return;
+      }
+      launch(Object.fromEntries(decoded.images));
+    });
+  };
+  const launch = (images?: Record<string, ImageBitmap>) => {
 
     let active: ExportJob;
     try {
@@ -301,12 +331,14 @@ export function BurnedInExportPanel({
           template: built.template,
           activity,
           ...(Object.keys(personal).length > 0 ? { personal } : {}),
+          ...(images ? { images } : {}),
         },
         (fraction, seconds) => setPhase({ status: 'running', fraction, seconds }),
         // AV-1023. The key stays on the page, where the maps are; it goes with the render only when a route inset has a map.
         ...(insetCheck ? [{ maptilerKey, onWaiting: setWaiting }] : []),
       );
     } catch (error) {
+      closeImages(Object.values(images ?? {}));
       setPhase({
         status: 'error',
         message: error instanceof Error ? error.message : 'The render could not be started.',
@@ -446,12 +478,16 @@ export function BurnedInExportPanel({
             <p role="status">No component is switched on, so there is nothing to draw.</p>
           )}
           <InsetExportNotes check={insetCheck} />
+          {imageProblem && <p role="alert">{imageProblem}</p>}
           <CleanupNote activity={activity} exporting />
           {outsideActivity && <p role="status">{uncoveredNotice(range, drawnAnyway)}</p>}
 
           <p className="video__actions">
             {running ? (
-              <button type="button" className="button" onClick={() => job.current?.cancel()}>
+              <button type="button" className="button" onClick={() => {
+                  stopped.current = true;
+                  job.current?.cancel();
+                }}>
                 Stop render
               </button>
             ) : (

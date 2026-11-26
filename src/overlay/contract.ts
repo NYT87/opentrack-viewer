@@ -603,7 +603,9 @@ export function contractSectionOf(component: OverlayComponent): ContractSection 
       return 'compass';
     case 'splits':
       return 'splits';
+    // AV-1030 (TD-102). A picture carries no data either: a component of your own is not given the reader's image.
     case 'shape':
+    case 'image':
       return undefined;
   }
 }

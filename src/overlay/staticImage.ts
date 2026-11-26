@@ -1,3 +1,4 @@
+import { LAYOUT_IMAGES_MAX_CHARS } from './imageSetting';
 import type { Activity } from '../domain/activity';
 import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
@@ -264,6 +265,9 @@ export function describeStillComponent(component: OverlayComponent): string {
       return component.summary ? SUMMARY_CAPTIONS[component.summary.stat] : 'Figure';
     case 'date':
       return 'Date';
+    // AV-1030. A picture is named for the warning a still gives when it leaves it out.
+    case 'image':
+      return 'Image';
     case 'elevationProfile':
       return 'Elevation profile';
     // AV-1019. Named for the warning a still gives when it leaves them out.
@@ -640,8 +644,11 @@ export function itemAt(plan: StillImagePlan, x: number, y: number): string | und
 
 export const LAYOUT_FILE_KIND = 'opentrack-overlay-layout';
 export const LAYOUT_FILE_VERSION = 1;
-/** Larger than any layout a person makes; a guard against reading a wrong file whole. */
-export const LAYOUT_FILE_MAX_BYTES = 256 * 1024;
+/**
+ * Larger than any layout a person makes; a guard against reading a wrong file whole. AV-1030: images
+ * are embedded, so room for `LAYOUT_IMAGES_MAX_CHARS` of them besides the 256 KB the layout itself takes.
+ */
+export const LAYOUT_FILE_MAX_BYTES = 256 * 1024 + LAYOUT_IMAGES_MAX_CHARS;
 
 /**
  * The layout as a JSON file: its size, and the overlay template. It holds the

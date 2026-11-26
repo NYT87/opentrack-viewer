@@ -21,6 +21,8 @@ import {
   videoMapColors,
 } from '../mapVideo/videoMap';
 import { canvasTemplate } from '../overlay/customCanvas';
+import type { OverlayComponent } from '../overlay/template';
+import { useTemplateImages } from './useTemplateImages';
 import { createOverlayRenderer } from '../overlay/export/drawOverlay';
 import { usePersonalStore } from '../state/personalStore';
 
@@ -60,6 +62,8 @@ const sameCamera = (a: MapImageCamera, b: MapImageCamera) =>
  *
  * The map is made once; the page makes a new preview for another basemap.
  */
+const NO_COMPONENTS: OverlayComponent[] = [];
+
 export default function MapImagePreview({ activity, plan, settings, units, onCamera, onSnapshot, readerTimeZone }: MapImagePreviewProps) {
   const personal = usePersonalStore((state) => state.personal);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -202,6 +206,10 @@ export default function MapImagePreview({ activity, plan, settings, units, onCam
 
   // Over the map: the canvas's elements, then the credit, as the export lays them.
   const clock = useMemo(() => stillOverlayClock(plan.shown), [plan.shown]);
+  // AV-1030 (TD-102). The canvas's images, decoded for the picture's own size and drawn scaled to the preview's.
+  const decodedImages = useTemplateImages(settings.layout === 'canvas' ? settings.overlay : NO_COMPONENTS, { width: plan.width, height: plan.height });
+  const overlayImages = decodedImages.images;
+  const brokenIds = useMemo(() => new Set(decodedImages.broken.map((entry) => entry.id)), [decodedImages.broken]);
   useEffect(() => {
     const drawn = prepare(overRef.current);
     if (!drawn) return;
@@ -209,14 +217,14 @@ export default function MapImagePreview({ activity, plan, settings, units, onCam
     if (settings.layout === 'canvas' && settings.overlay.length > 0) {
       const width = Math.round(plan.width * scale);
       const height = Math.round(plan.height * scale);
-      const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone, personal });
-      renderer.drawFrame(ctx, clock.seconds, { clear: false });
+      const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone, personal, images: overlayImages, frameWidth: plan.width });
+      renderer.drawFrame(ctx, clock.seconds, { clear: false, placeholders: brokenIds });
     }
     if (plan.credit) {
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
       drawAttribution(ctx, plan.credit, plan.width, plan.mapHeight);
     }
-  }, [prepare, plan, settings.layout, settings.overlay, clock, units, readerTimeZone, personal, previewWidth]);
+  }, [prepare, plan, settings.layout, settings.overlay, overlayImages, brokenIds, clock, units, readerTimeZone, personal, previewWidth]);
 
   return (
     <div className="map-image-preview">

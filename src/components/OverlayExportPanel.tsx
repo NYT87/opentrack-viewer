@@ -36,6 +36,7 @@ import { useMapVideoStore } from '../state/mapVideoStore';
 import { checkInsetExportCached } from '../overlay/insetExportCheck';
 import { hasMapInset } from '../overlay/insetCamera';
 import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
+import { brokenImagesMessage, closeImages, decodeTemplateImages, imageRefusal } from '../overlay/images';
 import { CleanupNote } from './CleanupPanel';
 import { TimecodeNote } from './TimecodeNote';
 
@@ -253,6 +254,8 @@ export function OverlayExportPanel({
     () => (customTemplate ? { template: customTemplate } : buildOverlay(controls, timeline, exportWidth / exportHeight)),
     [customTemplate, controls, timeline, exportWidth, exportHeight],
   );
+  // AV-1030 (TD-102). An image that cannot be drawn stops the export before it starts, with the reason.
+  const imageProblem = useMemo(() => imageRefusal(built.template.components), [built.template]);
   // AV-1023 (TD-092). A map in a route inset: what its export asks of the provider, counted before it starts, and whether it may go ahead.
   const maptilerKey = useMapVideoStore((state) => state.maptilerKey);
   const insetCheck = hasMapInset(built.template)
@@ -284,6 +287,16 @@ export function OverlayExportPanel({
       });
 
   // The archive is stored until the reader has it; leaving the page frees it.
+  // AV-1030. Whether the panel has gone, so pictures decoded for an export that never starts are let go.
+  const gone = useRef(false);
+  /** A stop pressed while the images decode: nothing has started to cancel, so the start is dropped. */
+  const stopped = useRef(false);
+  useEffect(() => {
+    gone.current = false;
+    return () => {
+      gone.current = true;
+    };
+  }, []);
   useEffect(
     () => () => {
       job.current?.cancel();
@@ -328,11 +341,28 @@ export function OverlayExportPanel({
   const trimmedPart = range?.trimmed ? `, from ${formatDuration(range.start)} to ${formatDuration(range.end)} of the video` : '';
   const nothingOn = built.template.components.length === 0;
 
+  // AV-1030 (TD-102). An image that cannot be drawn stops the export before it starts, with the reason.
   const begin = () => {
-    if (!ready || running || insetCheck?.refusal) return;
+    if (!ready || running || insetCheck?.refusal || imageProblem) return;
     void output.current?.dispose();
     output.current = undefined;
     setPhase({ status: 'running', done: 0, total: plan.frameCount });
+    stopped.current = false;
+    if (!built.template.components.some((component) => component.type === 'image' && component.visible)) {
+      launch();
+      return;
+    }
+    // Each image is decoded once, here, and handed to the export (a worker's, transferred; the WebM's, drawn on this page).
+    void decodeTemplateImages(built.template.components, { width: plan.width, height: plan.height }).then((decoded) => {
+      if (gone.current || stopped.current || decoded.broken.length > 0) {
+        closeImages(decoded.images.values());
+        if (!gone.current) setPhase(stopped.current ? { status: 'stopped' } : { status: 'error', message: brokenImagesMessage(decoded.broken) });
+        return;
+      }
+      launch(Object.fromEntries(decoded.images));
+    });
+  };
+  const launch = (images?: Record<string, ImageBitmap>) => {
     const madeAs: ExportFormat = asWebm ? 'webm' : 'png';
 
     let active: ExportJob;
@@ -353,6 +383,7 @@ export function OverlayExportPanel({
         template: built.template,
         activity,
         ...(Object.keys(personal).length > 0 ? { personal } : {}),
+        ...(images ? { images } : {}),
       };
       const progress = (done: number, total: number) => setPhase({ status: 'running', done, total });
       // AV-1023. The key stays on the page, where the maps are; it goes with the export only when a route inset has a map.
@@ -368,6 +399,7 @@ export function OverlayExportPanel({
             ? start(body, progress, withMap)
             : start(body, progress);
     } catch (error) {
+      closeImages(Object.values(images ?? {}));
       // The export could not even be started: say so, and leave the panel ready to try again.
       setPhase({
         status: 'error',
@@ -410,7 +442,10 @@ export function OverlayExportPanel({
     );
   };
 
-  const stop = () => job.current?.cancel();
+  const stop = () => {
+    stopped.current = true;
+    job.current?.cancel();
+  };
   // One primary at a time: the export until a file is ready, then its download,
   // and the export again once that file no longer matches the preview.
   const stale =
@@ -577,6 +612,7 @@ export function OverlayExportPanel({
             <p role="status">No component is switched on, so there is nothing to export.</p>
           )}
           <InsetExportNotes check={insetCheck} />
+          {imageProblem && <p role="alert">{imageProblem}</p>}
           <CleanupNote activity={activity} exporting />
           {asWebm && insetCheck && !insetCheck.refusal && (
             <p className="overlay-controls__hint">The map’s tiles are all loaded before the recording starts, which can take a while; then it is recorded in real time.</p>
@@ -593,7 +629,7 @@ export function OverlayExportPanel({
                 type="button"
                 className={downloadFirst ? 'button' : 'button button--primary'}
                 onClick={begin}
-                disabled={!fits || nothingOn || noOverlap || insetCheck?.refusal !== undefined}
+                disabled={!fits || nothingOn || noOverlap || insetCheck?.refusal !== undefined || imageProblem !== undefined}
               >
                 {stale ? 'Export again' : asWebm ? 'Export transparent video' : 'Export PNG sequence'}
               </button>

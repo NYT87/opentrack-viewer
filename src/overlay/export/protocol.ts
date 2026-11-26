@@ -36,6 +36,11 @@ export interface ExportRequest {
    */
   personal?: PersonalFigures;
   /**
+   * AV-1030 (TD-102). Each image component's decoded picture, by component id: decoded once on the
+   * page (an SVG rasterized there, so the worker never parses one) and transferred; the worker closes them.
+   */
+  images?: Record<string, ImageBitmap>;
+  /**
    * Chosen by the page, so the page can delete the file even if the worker is
    * stopped mid-write and never reports it.
    */
@@ -68,6 +73,8 @@ export interface BurnRequest {
   activity: Activity;
   /** AV-1018 (TD-086). As in `ExportRequest`. */
   personal?: PersonalFigures;
+  /** AV-1030 (TD-102). As in `ExportRequest`. */
+  images?: Record<string, ImageBitmap>;
   archiveName: string;
 }
 

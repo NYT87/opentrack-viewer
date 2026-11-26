@@ -35,6 +35,7 @@ import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type Start
 import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import type { MeasureText } from './staticImage';
 import type { UnitSystem } from '../domain/units';
+import type { OverlayImageSetting } from './imageSetting';
 
 /**
  * AV-1011 (TD-062). The custom canvas: a video overlay laid out freely, with
@@ -101,6 +102,8 @@ export type CanvasElementKey =
   | 'elevationProfile'
   | `still:${string}`
   | `shape:${ShapeKind}`
+  /** AV-1030 (TD-102). The reader's own picture: chosen from a file, so it is added by `newImageComponent`. */
+  | 'image'
   /** AV-1016. An entry of the registry of predefined components, by its id. */
   | `predefined:${string}`;
 
@@ -143,7 +146,7 @@ export const FIGURE_NAMES: Record<OverlayMetricKey, string> = {
 export interface CanvasElementChoice {
   key: CanvasElementKey;
   label: string;
-  group: 'Live figures' | 'Along the route' | 'Whole activity' | 'Shapes' | 'Cycling' | 'Running' | 'Any sport';
+  group: 'Live figures' | 'Along the route' | 'Whole activity' | 'Shapes' | 'Pictures' | 'Cycling' | 'Running' | 'Any sport';
   available: boolean;
   reason?: string;
 }
@@ -262,6 +265,7 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
     group: 'Shapes',
     available: true,
   }));
+  const pictures: CanvasElementChoice[] = [{ key: 'image', label: 'Image from a file', group: 'Pictures', available: true }];
   // AV-1016. The registry's entries, by sport; the editor only reads this list, so a sport is added in the registry.
   const predefined: CanvasElementChoice[] = PREDEFINED_ENTRIES.map((entry) => {
     const available = predefinedAvailability(entry, timeline);
@@ -281,7 +285,7 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
       ? { ...choice, label: `${choice.label} (${choice.group})` }
       : choice,
   );
-  return [...live, ...gauges, ...told, ...whole, ...shapes];
+  return [...live, ...gauges, ...told, ...whole, ...shapes, ...pictures];
 }
 
 const SPORT_GROUPS = { cycling: 'Cycling', running: 'Running', any: 'Any sport' } as const;
@@ -305,6 +309,7 @@ export function newCanvasComponent(
     if (!built) throw new Error(`No predefined component "${key}".`);
     return built;
   }
+  if (key === 'image') throw new Error('An image is added from a file: see newImageComponent.');
   const aspect = size.width / size.height;
   const tileW = Math.min(0.3, (BASE_FONT_CQW / 100) * TILE_WIDTH_EMS);
   const tileH = Math.min(0.2, 0.075 * aspect);
@@ -537,6 +542,29 @@ export function newCanvasComponents(
     if (built.length > 0) return built;
   }
   return [newCanvasComponent(template, key, size, timeline, units)];
+}
+
+/**
+ * AV-1030 (TD-102). A new image component for a picture read from a file: a fifth of the frame wide at the
+ * picture's own shape (shorter if it would be taller than the frame), in the top left a margin in.
+ */
+export function newImageComponent(
+  template: OverlayTemplate,
+  size: { width: number; height: number },
+  image: OverlayImageSetting,
+  natural: { width: number; height: number },
+): OverlayComponent {
+  const shape = size.width / size.height / (natural.width / natural.height);
+  const width = Math.min(0.2, 0.9 / shape);
+  return {
+    id: freshComponentId(template, 'image'),
+    type: 'image',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width, height: Math.min(0.9, width * shape) }),
+    image,
+  };
 }
 
 /** A speed gauge's top: the fastest the activity went, rounded up, or 15 m/s (54 km/h). */

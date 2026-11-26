@@ -1559,3 +1559,66 @@ describe('a component shown for part of the video (AV-1029, TD-101)', () => {
     expect(screen.queryByRole('group', { name: 'Shown' })).not.toBeInTheDocument();
   });
 });
+
+describe('an image on the canvas (AV-1030, TD-102)', () => {
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const logo = (name = 'logo.png', bytes: Uint8Array = PNG) => new File([bytes as BlobPart], name, { type: 'image/png' });
+  const closed = vi.fn();
+  const choose = async (file: File) => {
+    await userEvent.selectOptions(within(region()).getByLabelText('Add'), within(region()).getByRole('option', { name: 'Image from a file' }));
+    // The button opens the browser's picker; the file arrives at the input it opens.
+    fireEvent.change(within(region()).getByTestId('canvas-image-input'), { target: { files: [file] } });
+  };
+
+  beforeEach(() => {
+    closed.mockClear();
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 200, height: 100, close: closed })));
+  });
+
+  it('adds a picture from a file as an element, named for the file, selected, with its fit and opacity to edit', async () => {
+    setup();
+    await choose(logo());
+    expect(await within(region()).findByText(/Added logo\.png/)).toBeTruthy();
+    expect(names()).toEqual(['Image: logo.png']);
+    expect(editor()).toBeTruthy();
+    await userEvent.selectOptions(field('Fit'), 'cover');
+    fireEvent.change(field('Opacity (%)'), { target: { value: '40' } });
+    fireEvent.blur(field('Opacity (%)'));
+    const saved = (await layoutJson()).template.components[0]! as { image: { fit: string; opacity: number; name: string; src: string } };
+    expect(saved.image).toMatchObject({ fit: 'cover', opacity: 0.4, name: 'logo.png' });
+    // The layout file carries the picture itself.
+    expect(saved.image.src).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('refuses a file of another kind, one too large and one that will not decode, each with its reason, and adds nothing', async () => {
+    setup();
+    await choose(logo('notes.png', new TextEncoder().encode('just words')));
+    expect((await within(region()).findByRole('alert')).textContent).toMatch(/notes\.png is not a PNG, JPEG, WebP or SVG/);
+    await choose(Object.defineProperty(logo('big.png'), 'size', { value: 2 * 1024 * 1024 + 1 }));
+    await vi.waitFor(() => expect(within(region()).getByRole('alert').textContent).toMatch(/big\.png is larger than 2 MB/));
+    vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error('bad'));
+    await choose(logo('torn.png'));
+    await vi.waitFor(() => expect(within(region()).getByRole('alert').textContent).toMatch(/torn\.png could not be read as a picture/));
+    expect(names()).toEqual([]);
+  });
+
+  it('opens a layout whose picture cannot be read with the element and the reason, and replacing the picture mends it', async () => {
+    setup();
+    const layout = {
+      kind: 'opentrack-overlay-layout',
+      version: 1,
+      image: { width: 1920, height: 1080 },
+      template: { version: 2, name: 'x', style: {}, components: [{ id: 'logo-1', type: 'image', visible: true, unitMode: 'auto', style: {}, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, image: { src: 'https://example.com/a.png', fit: 'contain', opacity: 1, name: 'a.png' } }] },
+    };
+    fireEvent.change(screen.getByTestId('canvas-layout-input'), { target: { files: [new File([JSON.stringify(layout)], 'layout.json', { type: 'application/json' })] } });
+    await vi.waitFor(() => expect(names()).toEqual(['Image: a.png']));
+    // Decoding it fails: the editor says why, in an alert, beside the way out.
+    vi.mocked(createImageBitmap).mockRejectedValue(new Error('no picture'));
+    await userEvent.click(within(region()).getByRole('button', { name: 'Image: a.png' }));
+    await vi.waitFor(() => expect(within(editor()).getAllByRole('alert')[0]!.textContent).toMatch(/Replace it with a file below/));
+    vi.mocked(createImageBitmap).mockResolvedValue({ width: 10, height: 10, close: closed } as unknown as ImageBitmap);
+    await userEvent.upload(within(editor()).getByLabelText('Replace the picture'), logo('new.png'));
+    await vi.waitFor(() => expect(within(editor()).queryByRole('alert')).toBeNull());
+    expect(names()).toEqual(['Image: new.png']);
+  });
+});

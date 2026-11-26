@@ -549,3 +549,29 @@ describe('the source’s timecode (AV-1026, TD-095)', () => {
     expect(note()).not.toHaveTextContent('does not carry');
   });
 });
+
+describe('an image in the layout (AV-1030, TD-102)', () => {
+  const PNG = `data:image/png;base64,${btoa('\x89PNG\r\n\x1a\n.....')}`;
+  const withImage = (src: string) =>
+    canvasTemplate([
+      { id: 'logo', type: 'image', visible: true, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, unitMode: 'auto', style: {}, image: { src, fit: 'contain', opacity: 1, name: 'logo.png' } },
+    ]);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('refuses to render while an image is broken, saying which and why', async () => {
+    const { start } = setup({ template: withImage('') });
+    await screen.findByText(/logo\.png cannot be drawn/);
+    expect(renderButton()).toBeDisabled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('decodes each image once and hands the bitmaps to the render', async () => {
+    const made = { width: 10, height: 10, close: vi.fn() } as unknown as ImageBitmap;
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => made));
+    const { start } = setup({ template: withImage(PNG) });
+    await userEvent.click(renderButton());
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0]).toMatchObject({ images: { logo: made } });
+  });
+});

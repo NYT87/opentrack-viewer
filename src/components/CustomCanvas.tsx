@@ -1,7 +1,10 @@
 import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
 import { PrivacyTrimField } from './PrivacyTrimField';
+import { useTemplateImages } from './useTemplateImages';
+import { readImageFile } from '../overlay/images';
+import { IMAGE_ACCEPT, IMAGE_FITS, LAYOUT_IMAGES_MAX_CHARS, type ImageFit, type OverlayImageSetting } from '../overlay/imageSetting';
 import { hasPrivacyTrim, type PrivacyTrim } from '../overlay/privacyTrim';
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
 import {
@@ -17,6 +20,7 @@ import {
   moveComponent,
   moveLayer,
   newCanvasComponents,
+  newImageComponent,
   nudgeComponent,
   pushHistory,
   removeComponent,
@@ -313,6 +317,9 @@ export function CustomCanvas({
   /** A new layout, and with it the selection: given, or the current one kept. One commit, so one Undo. */
   const change = (next: OverlayComponent[], ...selected: [string | undefined] | []) =>
     commit({ components: next, selectedId: selected.length > 0 ? selected[0] : selectedId });
+  // AV-1030. The images' pictures, decoded for the preview and shared with the editor, which says which cannot be read.
+  const decodedImages = useTemplateImages(components, frame);
+  const brokenImageIds = useMemo(() => new Set(decodedImages.broken.map((entry) => entry.id)), [decodedImages.broken]);
   const select = (next: string | undefined) => {
     if (next !== selectedId) commit({ components, selectedId: next });
   };
@@ -329,11 +336,42 @@ export function CustomCanvas({
     change([...components, ...added], added[0]?.id);
   };
 
+  // AV-1030 (TD-102). A file read on this device: refused with the reason, or taken. The layout's images together stay within what a layout file can carry, so what is saved can be opened again.
+  // What the layout is *after* a file has been read: an edit, an Undo or another add made meanwhile is kept, not written over.
+  const live = useRef({ components, template, frame, change });
+  useLayoutEffect(() => {
+    live.current = { components, template, frame, change };
+  });
+  const takeImage = async (file: File, replacing?: string) => {
+    const read = await readImageFile(file);
+    if (!read.ok) return read;
+    const others = live.current.components.reduce((sum, entry) => (entry.type === 'image' && entry.id !== replacing ? sum + (entry.image?.src.length ?? 0) : sum), 0);
+    if (others + read.image.src.length > LAYOUT_IMAGES_MAX_CHARS) {
+      return { ok: false as const, reason: `${file.name} would make the layout's images larger than a layout file can carry (about 8 MB together). Remove an image first.` };
+    }
+    return read;
+  };
+  const addImage = async (file: File) => {
+    const read = await takeImage(file);
+    if (!read.ok) {
+      setNotice({ kind: 'alert', message: read.reason });
+      return;
+    }
+    const now = live.current;
+    const added = newImageComponent(now.template, now.frame, read.image, { width: read.width, height: read.height });
+    now.change([...now.components, added], added.id);
+    setNotice({ kind: 'status', message: `Added ${file.name}. It stays in this tab and in the layout file you save.` });
+  };
+
   const saveLayout = () => {
     if (!size) return;
     // AV-1018. Each zones component carries the figures only when asked; otherwise none is written, even one the layout held.
     const filed = { ...template, components: componentsForLayoutFile(template.components, { include: includePersonal, session: personal }) };
     const json = serializeStillLayout({ ...size, template: filed });
+    if (json.length > LAYOUT_FILE_MAX_BYTES) {
+      setNotice({ kind: 'alert', message: 'The layout is too large to be opened again, because of its images. Remove or replace an image to save it.' });
+      return;
+    }
     downloadBlob(new Blob([json], { type: 'application/json' }), 'overlay-layout.json');
     const written = includePersonal && personalHeldBy(filed.components);
     const withFigures = written && (written.maxHeartRate !== undefined || written.ftp !== undefined);
@@ -429,6 +467,8 @@ export function CustomCanvas({
         backdrop={host?.backdrop}
         liveMaps={!host}
         playhead={playhead}
+        images={decodedImages.images}
+        brokenIds={brokenImageIds}
       />
       {sizeProblem && (
         <p role="alert" className="export__error">
@@ -502,7 +542,7 @@ export function CustomCanvas({
           ) : (
             <p className="overlay-controls__hint">The canvas is empty. Add an element, or start from a template.</p>
           )}
-          <AddElement choices={choices} onAdd={add} />
+          <AddElement choices={choices} onAdd={add} onAddImage={(file) => void addImage(file)} />
           {unavailable.length > 0 && (
             <ul className="still-image__unavailable" aria-label="Not in this activity">
               {groupByReason(unavailable).map((group) => (
@@ -543,6 +583,15 @@ export function CustomCanvas({
             host={host !== undefined}
             trimmed={hasPrivacyTrim(privacyTrim)}
             timed={!still}
+            imageProblem={decodedImages.broken.find((entry) => entry.id === selected.id)?.reason}
+            onReplaceImage={async (file) => {
+              const read = await takeImage(file, selected.id);
+              if (read.ok) {
+                const now = live.current;
+                now.change(now.components.map((entry) => (entry.id === selected.id && entry.image ? { ...entry, image: { ...entry.image, src: read.image.src, name: read.image.name } } : entry)));
+              }
+              return read;
+            }}
             playhead={() => playhead.current}
             onChange={(next, ...selected) => change(next, ...selected)}
           />
@@ -668,6 +717,7 @@ export function fitCanvasSize(width: number, height: number): { width: number; h
 
 export function describeCanvasComponent(component: OverlayComponent): string {
   if (component.type === 'shape') return component.shape ? SHAPE_LABELS[component.shape.kind] : 'Shape';
+  if (component.type === 'image') return component.image?.name ? `Image: ${component.image.name}` : 'Image';
   if (component.type === 'text' || component.type === 'gauge') {
     const source = component.source;
     const name = component.display?.label?.trim();
@@ -712,13 +762,14 @@ function NumberInput({ id, label, value, onChange }: { id: string; label: string
 /** AV-1017. The README of the component contract, in the repository. */
 export const COMPONENT_DOCS_URL = `${GITHUB_URL}/blob/main/docs/components/README.md`;
 
-function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd: (key: CanvasElementKey) => void }) {
+function AddElement({ choices, onAdd, onAddImage }: { choices: CanvasElementChoice[]; onAdd: (key: CanvasElementKey) => void; onAddImage: (file: File) => void }) {
   const id = useId();
+  const picker = useRef<HTMLInputElement>(null);
   const firstAvailable = choices.find((choice) => choice.available)?.key;
   const [wanted, setWanted] = useState<CanvasElementKey | undefined>();
   const chosen = choices.find((choice) => choice.key === wanted && choice.available)?.key ?? firstAvailable;
   // TD-088 (AV-1019). The groups the choices bring, in a fixed preferred order and any other after them: a still's "Along the route" is not left out.
-  const preferred: CanvasElementChoice['group'][] = ['Live figures', 'Along the route', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes'];
+  const preferred: CanvasElementChoice['group'][] = ['Live figures', 'Along the route', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes', 'Pictures'];
   const present = new Set(choices.map((choice) => choice.group));
   const groups = [...preferred.filter((group) => present.has(group)), ...[...present].filter((group) => !preferred.includes(group))];
   return (
@@ -739,9 +790,28 @@ function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd:
             </optgroup>
           ))}
         </select>
-        <button type="button" className="button" disabled={!chosen} onClick={() => chosen && onAdd(chosen)}>
-          Add to the canvas
+        <button
+          type="button"
+          className="button"
+          disabled={!chosen}
+          onClick={() => (chosen === 'image' ? picker.current?.click() : chosen && onAdd(chosen))}
+        >
+          {chosen === 'image' ? 'Choose a file to add' : 'Add to the canvas'}
         </button>
+        {/* AV-1030. Read on this device: nothing is uploaded. */}
+        <input
+          ref={picker}
+          type="file"
+          hidden
+          accept={IMAGE_ACCEPT}
+          aria-label="Image file to add"
+          data-testid="canvas-image-input"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (file) onAddImage(file);
+          }}
+        />
       </div>
       <p className="overlay-controls__hint">
         {/* AV-1017 (TD-085). Where the documented component contract lives; a component of your own is not loaded yet. */}
@@ -826,7 +896,13 @@ function CanvasPreview({
   backdrop,
   liveMaps,
   playhead: playheadRef,
+  images,
+  brokenIds,
 }: {
+  /** AV-1030. The images known to be unreadable: the preview draws a box saying so for each. */
+  brokenIds: ReadonlySet<string>;
+  /** AV-1030. The decoded pictures of the image components, drawn at the preview's size. */
+  images: ReadonlyMap<string, ImageBitmap> | undefined;
   /** AV-1029. Written with the moment drawn, for the editor to read. */
   playhead: React.MutableRefObject<number>;
   /** AV-1023 (TD-092). Whether a route inset's map is shown live under the canvas: not inside a map's own canvas. */
@@ -867,8 +943,8 @@ function CanvasPreview({
   const pw = Math.max(1, Math.round(frame.width * factor));
   const ph = Math.max(1, Math.round(frame.height * factor));
   const renderer = useMemo(
-    () => createOverlayRenderer({ template, timeline, activity, units, width: pw, height: ph, readerTimeZone, personal }),
-    [template, timeline, activity, units, pw, ph, readerTimeZone, personal],
+    () => createOverlayRenderer({ template, timeline, activity, units, width: pw, height: ph, readerTimeZone, personal, images, frameWidth: frame.width }),
+    [template, timeline, activity, units, pw, ph, readerTimeZone, personal, images, frame.width],
   );
   const boxes = useMemo(() => boxesOf(template.components, stillContext, pw, ph), [template, stillContext, pw, ph]);
 
@@ -945,7 +1021,7 @@ function CanvasPreview({
     if (!ctx) return;
     playheadRef.current = time;
     // AV-1029. Only the editor's canvas shows a component outside its window, faded.
-    renderer.drawFrame(ctx, time, { ghostHidden: true, ...(liveIds.size > 0 ? { maps: { live: liveIds } } : {}) });
+    renderer.drawFrame(ctx, time, { ghostHidden: true, placeholders: brokenIds, ...(liveIds.size > 0 ? { maps: { live: liveIds } } : {}) });
     const box = selectedId ? boxes.get(selectedId) : undefined;
     if (box) {
       // The outline and the corner handle are the preview's own; never in the export.
@@ -959,7 +1035,7 @@ function CanvasPreview({
       ctx.fillRect(box.x + box.w - HANDLE / 2, box.y + box.h - HANDLE / 2, HANDLE, HANDLE);
       ctx.restore();
     }
-  }, [renderer, time, boxes, selectedId, liveIds, playheadRef]);
+  }, [renderer, time, boxes, selectedId, liveIds, playheadRef, brokenIds]);
 
   // AV-1029 (TD-101). The selected component's window, as a band under the time slider.
   const shownWindow = template.components.find((component) => component.id === selectedId)?.visibility;
@@ -1131,6 +1207,82 @@ function CanvasPreview({
   );
 }
 
+const FIT_LABELS: Record<ImageFit, string> = {
+  contain: 'Contain (the whole picture)',
+  cover: 'Cover (cropped to the box)',
+  stretch: 'Stretch',
+  original: 'Original size (centred, clipped to the box)',
+};
+
+/** AV-1030 (TD-102). An image's fit, opacity and file, and why it cannot be drawn when it cannot. */
+function ImageEditor({
+  id,
+  setting,
+  problem,
+  onReplace,
+  onChange,
+}: {
+  id: string;
+  setting: OverlayImageSetting;
+  problem: string | undefined;
+  onReplace: (file: File) => Promise<{ ok: true; image: OverlayImageSetting } | { ok: false; reason: string }>;
+  onChange: (patch: Partial<OverlayImageSetting>) => void;
+}) {
+  const [refused, setRefused] = useState<string>();
+  return (
+    <>
+      {problem && (
+        <p role="alert" className="export__error">
+          {problem} Replace it with a file below, or remove the element.
+        </p>
+      )}
+      {refused && (
+        <p role="alert" className="export__error">
+          {refused}
+        </p>
+      )}
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-fit`}>Fit</label>
+        <select id={`${id}-fit`} className="select" value={setting.fit} onChange={(event) => onChange({ fit: event.target.value as ImageFit })}>
+          {IMAGE_FITS.map((fit) => (
+            <option key={fit} value={fit}>
+              {FIT_LABELS[fit]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <PercentField
+        id={`${id}-image-opacity`}
+        label="Opacity (%)"
+        value={String(Math.round(setting.opacity * 100))}
+        onCommit={(value) => onChange({ opacity: Math.min(1, Math.max(0, value / 100)) })}
+      />
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-image-file`}>Replace the picture</label>
+        <input
+          id={`${id}-image-file`}
+          className="input"
+          type="file"
+          accept={IMAGE_ACCEPT}
+          onChange={async (event) => {
+            const input = event.target;
+            const file = input.files?.[0];
+            if (!file) return;
+            const read = await onReplace(file);
+            input.value = '';
+            if (!read.ok) {
+              setRefused(read.reason);
+              return;
+            }
+            setRefused(undefined);
+          }}
+        />
+      </div>
+      <p className="overlay-controls__hint">Read on this device and kept in the layout file; nothing is uploaded. PNG, JPEG, WebP or SVG, at most 2 MB.</p>
+    </>
+  );
+}
+
 function ComponentEditor({
   component,
   components,
@@ -1142,8 +1294,13 @@ function ComponentEditor({
   trimmed,
   timed,
   playhead,
+  imageProblem,
+  onReplaceImage,
   onChange,
 }: {
+  /** AV-1030 (TD-102). Why the selected image cannot be drawn, if it cannot; and reading a file to replace its picture. */
+  imageProblem: string | undefined;
+  onReplaceImage: (file: File) => Promise<{ ok: true; image: OverlayImageSetting } | { ok: false; reason: string }>;
   /** AV-1029. Whether the canvas has a time, so a window can be set: not on a still. */
   timed: boolean;
   playhead: () => number;
@@ -1338,6 +1495,16 @@ function ComponentEditor({
             ))}
           </select>
         </div>
+      )}
+
+      {component.type === 'image' && component.image && (
+        <ImageEditor
+          id={id}
+          setting={component.image}
+          problem={imageProblem}
+          onReplace={onReplaceImage}
+          onChange={(patch) => update((current) => ({ ...current, image: { ...(current.image as OverlayImageSetting), ...patch } }))}
+        />
       )}
 
       {shape && (

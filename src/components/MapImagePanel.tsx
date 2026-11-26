@@ -10,6 +10,7 @@ import { colorByChoices } from '../mapVideo/style';
 import type { RenderWaiting } from '../mapVideo/export/renderMapVideo';
 import { usePersonalStore } from '../state/personalStore';
 import { canvasTemplate, type CanvasDraft } from '../overlay/customCanvas';
+import { imageRefusal } from '../overlay/images';
 import { OverlayExportError } from '../overlay/export/errors';
 import { measureText } from '../overlay/measureText';
 import { routeTotalMeters, shareOfRouteText } from '../overlay/privacyTrim';
@@ -137,7 +138,9 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const stop = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => stop.current?.abort(), []);
-  const blocked = Boolean(sizeProblem) || !plan || phase.status === 'rendering';
+  // AV-1030 (TD-102). An image of the canvas that cannot be drawn stops the picture, with the reason.
+  const imageProblem = useMemo(() => (settings.layout === 'canvas' ? imageRefusal(settings.overlay) : undefined), [settings.layout, settings.overlay]);
+  const blocked = Boolean(sizeProblem) || !plan || phase.status === 'rendering' || imageProblem !== undefined;
   const exportImage = async () => {
     if (blocked) return;
     const controller = new AbortController();
@@ -300,6 +303,7 @@ export function MapImagePanel({ activity, units, readerTimeZone, render, save = 
             />
           )}
 
+          {imageProblem && <p role="alert">{imageProblem}</p>}
           {!planned.ok && (
             <div className="panel panel--error" role="alert">
               <p className="panel__message">{planned.error}</p>

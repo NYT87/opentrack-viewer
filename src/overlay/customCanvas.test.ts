@@ -12,6 +12,7 @@ import {
   moveComponent,
   moveLayer,
   newCanvasComponent,
+  newImageComponent,
   nudgeComponent,
   pushHistory,
   removeComponent,
@@ -181,7 +182,8 @@ describe('what the canvas offers (AV-1011)', () => {
     const activity = ride((i) => ({ heartRateBpm: 120 + i }));
     const timeline = timelineOf(activity);
     let template = canvasTemplate([]);
-    for (const key of canvasElementChoices(timeline, still(activity)).map((choice) => choice.key)) {
+    // AV-1030. An image needs its file, so it is made by `newImageComponent` (below).
+    for (const key of canvasElementChoices(timeline, still(activity)).map((choice) => choice.key).filter((key) => key !== 'image')) {
       const component = newCanvasComponent(template, key, { width: 1920, height: 1080 }, timeline);
       expect(component.rect.x + component.rect.width, key).toBeLessThanOrEqual(1);
       expect(component.rect.y + component.rect.height, key).toBeLessThanOrEqual(1);
@@ -443,5 +445,41 @@ describe('the video’s size fitted to the canvas (AV-1028)', () => {
       const fit = fitCanvasSize(w, h);
       expect(checkCanvasSize(fit.width, fit.height), `${w}x${h} -> ${fit.width}x${fit.height}`).toBeUndefined();
     }
+  });
+});
+
+describe('an image on the canvas (AV-1030, TD-102)', () => {
+  const activity = ride();
+  const template = canvasTemplate([]);
+  const setting = { src: 'data:image/png;base64,AAAA', fit: 'contain' as const, opacity: 1, name: 'logo.png' };
+
+  it('is offered once, as a file to choose, whatever the activity holds', () => {
+    const choices = canvasElementChoices(timelineOf(activity), still(activity)).filter((choice) => choice.key === 'image');
+    expect(choices).toEqual([{ key: 'image', label: 'Image from a file', group: 'Pictures', available: true }]);
+    // It has no preset: it needs its file, so adding it by key alone is refused.
+    expect(() => newCanvasComponent(template, 'image', { width: 1920, height: 1080 }, timelineOf(activity))).toThrow(/from a file/);
+  });
+
+  it('starts a fifth of the frame wide at the picture’s own shape, inside the frame', () => {
+    const wide = newImageComponent(template, { width: 1920, height: 1080 }, setting, { width: 400, height: 100 });
+    expect(wide).toMatchObject({ type: 'image', visible: true, image: setting });
+    expect(wide.rect.width).toBeCloseTo(0.2);
+    // 0.2 x 1920 = 384 px wide, 96 px tall: 96 / 1080 of the height.
+    expect(wide.rect.height).toBeCloseTo(96 / 1080);
+    const tall = newImageComponent(template, { width: 1920, height: 1080 }, setting, { width: 100, height: 4000 });
+    expect(tall.rect.height).toBeLessThanOrEqual(0.9 + 1e-9);
+    expect(tall.rect.x + tall.rect.width).toBeLessThanOrEqual(1);
+    expect(tall.rect.y + tall.rect.height).toBeLessThanOrEqual(1);
+  });
+
+  it('is an ordinary component: held by a shape, moved with it, in the layer order, and removed', () => {
+    const image = newImageComponent(template, { width: 1000, height: 1000 }, setting, { width: 10, height: 10 });
+    const card = newCanvasComponent(template, 'shape:rect', { width: 1000, height: 1000 }, timelineOf(activity));
+    const held = setHolder([card, image], image.id, card.id);
+    expect(held.find((entry) => entry.id === image.id)!.parentId).toBe(card.id);
+    const moved = moveComponent(held, card.id, 0.5, 0.5);
+    expect(moved.find((entry) => entry.id === image.id)!.rect.x).toBeGreaterThan(0.4);
+    expect(moveLayer(held, card.id, 'front').map((entry) => entry.id)).toEqual([image.id, card.id]);
+    expect(removeComponent(held, image.id).map((entry) => entry.id)).toEqual([card.id]);
   });
 });

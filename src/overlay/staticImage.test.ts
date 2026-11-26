@@ -369,6 +369,28 @@ describe('the layout file (AV-1010)', () => {
     expect(parsed.layout.template.components[1]!.content).toBe('Day 1 <b>&amp;</b> "Imabari"\nShimanami');
   });
 
+  it('carries an image in the layout file; a canvas opens it, one that is broken keeps its component, and the still leaves it out (AV-1030)', () => {
+    const src = `data:image/png;base64,${btoa('\x89PNG\r\n\x1a\n....')}`;
+    const withImage = layout();
+    const logo = { id: 'logo', type: 'image' as const, visible: true, unitMode: 'auto' as const, style: {}, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, image: { src, fit: 'original' as const, opacity: 0.5, name: 'logo.png' } };
+    withImage.template.components.push(logo);
+    const json = serializeStillLayout(withImage);
+    expect(json).toContain(src);
+    const opened = parseOverlayLayout(json);
+    if (!opened.ok) throw new Error(opened.error);
+    expect(opened.layout.template.components.find((entry) => entry.id === 'logo')).toEqual(logo);
+
+    const broken = parseOverlayLayout(json.replace(src, 'data:image/gif;base64,AAAA'));
+    if (!broken.ok) throw new Error(broken.error);
+    expect(broken.layout.template.components.find((entry) => entry.id === 'logo')?.image?.src).toBe('');
+
+    // The still image has no picture: it says so, like any component of a video.
+    const still = parseStillLayout(json);
+    if (!still.ok) throw new Error(still.error);
+    expect(still.layout.template.components.find((entry) => entry.id === 'logo')).toBeUndefined();
+    expect(still.warnings.join(' ')).toMatch(/Image was left out/);
+  });
+
   it('carries nothing of the activity', () => {
     const json = serializeStillLayout(layout());
     expect(json).not.toMatch(/"lat"|"lon"|"time"|46\.0/);

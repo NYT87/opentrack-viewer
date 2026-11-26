@@ -597,3 +597,39 @@ describe('the figures so far in a layout (AV-1025)', () => {
     expect(textAt(figure('a', 'clock', { clock: { zone: 'offset', offsetMinutes: -300 } }), 30)).toBe('05:00:30');
   });
 });
+
+describe('an image component (AV-1030, TD-102)', () => {
+  const PNG = `data:image/png;base64,${btoa('\x89PNG\r\n\x1a\n....')}`;
+  const base = { rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, unitMode: 'auto' as const, style: {}, visible: true };
+  const image: OverlayComponent = { ...base, id: 'logo', type: 'image', image: { src: PNG, fit: 'cover', opacity: 0.4, name: 'logo.png' } };
+  const holder: OverlayTemplate = { version: OVERLAY_TEMPLATE_VERSION, name: 'logo', style: DEFAULT_OVERLAY_STYLE, components: [image] };
+
+  it('round-trips through the layout unchanged, picture included, with its window and its holder', () => {
+    const card: OverlayComponent = { ...base, id: 'card', type: 'shape', shape: { kind: 'rect', fill: '#000000', fillOpacity: 0.5, stroke: '#ffffff', strokeOpacity: 0, strokeWidth: 0, radius: 0 } };
+    const timed: OverlayComponent = { ...image, parentId: 'card', visibility: { from: 2, to: 8, fadeIn: 1 } };
+    const template: OverlayTemplate = { ...holder, components: [card, timed] };
+    expect(parseOverlayTemplate(serializeOverlayTemplate(template))).toEqual({ ok: true, template, warnings: [] });
+  });
+
+  it('keeps the component when its picture cannot be read, with none, so the editor and the exports can say so', () => {
+    for (const src of ['', 'https://example.com/logo.png', 'data:image/gif;base64,R0lGODlh', 'data:image/png;base64,@@', 42]) {
+      const parsed = parseOverlayTemplate(JSON.stringify({ ...holder, components: [{ ...image, image: { ...image.image, src } }] }));
+      expect(parsed).toMatchObject({ ok: true, warnings: [] });
+      if (!parsed.ok) throw new Error(parsed.error);
+      expect(parsed.template.components[0]).toMatchObject({ id: 'logo', type: 'image', image: { src: '', fit: 'cover', opacity: 0.4 } });
+    }
+  });
+
+  it('reads a fit and an opacity as they may be used, and a missing setting as the defaults', () => {
+    const read = (value: unknown) => {
+      const parsed = parseOverlayTemplate(JSON.stringify({ ...holder, components: [{ ...image, image: value }] }));
+      if (!parsed.ok) throw new Error(parsed.error);
+      return parsed.template.components[0]!.image;
+    };
+    expect(read({ src: PNG, fit: 'sideways', opacity: 7 })).toEqual({ src: PNG, fit: 'contain', opacity: 1 });
+    expect(read({ src: PNG, opacity: -3 })).toMatchObject({ opacity: 0 });
+    expect(read(undefined)).toEqual({ src: '', fit: 'contain', opacity: 1 });
+    // The name is plain text, on one line.
+    expect(read({ src: PNG, name: '<b>a</b>\nb' })?.name).toBe('<b>a</b>');
+  });
+});
