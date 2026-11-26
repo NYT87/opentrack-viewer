@@ -266,6 +266,49 @@ describe('the burned-in render (AV-1007)', () => {
     expect(seen.formatOptions).toEqual({ fastStart: false });
   });
 
+  describe('the font the template draws in (AV-1031, TD-103)', () => {
+    const fonts = [{ family: 'Oswald', weight: 400, bytes: new ArrayBuffer(8) }];
+    class Face {
+      constructor(
+        readonly family: string,
+        readonly source: ArrayBuffer,
+        readonly descriptors: { weight: string },
+      ) {}
+      get weight() {
+        return this.descriptors.weight;
+      }
+      async load() {
+        events.push(`load:${this.family}`);
+        return this;
+      }
+    }
+    beforeEach(() => {
+      vi.stubGlobal('FontFace', Face);
+      Object.defineProperty(document, 'fonts', { value: { add: (face: Face) => events.push(`registered:${face.family}`), forEach: () => undefined }, configurable: true });
+    });
+    afterEach(() => Reflect.deleteProperty(document, 'fonts'));
+
+    it('registers the page’s font bytes and waits for them to load before the first frame is drawn', async () => {
+      const { promise } = run({ frames: [0] }, { request: request({ fonts }) });
+      await promise;
+      expect(events.indexOf('load:Oswald')).toBeGreaterThanOrEqual(0);
+      expect(events.indexOf('registered:Oswald')).toBeGreaterThan(events.indexOf('load:Oswald'));
+      expect(events.indexOf('frame')).toBeGreaterThan(events.indexOf('registered:Oswald'));
+    });
+
+    it('stops with the reason before any frame when a font cannot be loaded, and closes the pictures it was handed', async () => {
+      Face.prototype.load = async () => {
+        throw new Error('invalid font data');
+      };
+      const close = vi.fn();
+      const { promise, seen } = run({ frames: [0] }, { request: request({ fonts, images: { logo: { close } as unknown as ImageBitmap } }) });
+      await expect(promise).rejects.toMatchObject({ code: 'render_failed', message: 'The font Oswald could not be loaded (invalid font data).' });
+      expect(events).not.toContain('frame');
+      expect(seen.drawn).toEqual([]);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('draws the video frame, then the overlay over it, and hands back the canvas', async () => {
     const { promise, seen } = run({ frames: [0, 5] });
     const result = await promise;

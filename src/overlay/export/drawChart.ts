@@ -1,6 +1,7 @@
+import { fontStack } from '../fonts';
 import type { UnitSystem } from '../../domain/units';
 import { chartLabels, chartView, type ChartMoment } from '../chart';
-import { FIGURE_FONT_FAMILY, haloShadow } from '../figureLayout';
+import { haloShadow } from '../figureLayout';
 import type { ProjectedSeries, SeriesPoint } from '../series';
 import { DEFAULT_CHART, needsHalo, type OverlayChartSetting, type ResolvedOverlayComponent } from '../template';
 import type { OverlayTimeline } from '../timeline';
@@ -98,7 +99,7 @@ export function drawChart(
   const unitSystem = ready.component.unitMode === 'auto' ? units : ready.component.unitMode;
   const labels = chartLabels(view, series, setting, source, unitSystem, timeline, ready.component.display?.decimals);
   const shadow = needsHalo(ready.style) ? haloShadow(figure) : undefined;
-  ctx.font = `${labelSize}px ${FIGURE_FONT_FAMILY}`;
+  ctx.font = `${labelSize}px ${fontStack(ready.style.fontFamily)}`;
   ctx.fillStyle = figure?.labelColor ?? ready.style.textColor;
   ctx.textBaseline = 'middle';
   if (shadow) {

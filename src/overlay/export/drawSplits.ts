@@ -1,4 +1,5 @@
-import { FIGURE_FONT_FAMILY, haloShadow } from '../figureLayout';
+import { fontStack } from '../fonts';
+import { haloShadow } from '../figureLayout';
 import { splitsMetrics, type SplitRow, type SplitVerdict, type SplitsView } from '../splits';
 import { needsHalo, type ResolvedOverlayComponent } from '../template';
 import type { Box, OverlayContext2D } from './drawOverlay';
@@ -30,8 +31,8 @@ export function drawSplits(ctx: OverlayContext2D, box: Box, ready: Ready, em: nu
 
   const { pad, labelSize, valueSize, lastSize, rowSize, labelAdvance, showLabel } = splitsMetrics(em, frameWidth, figure);
   const rateSize = (size: number) => Math.max(size * 0.5, 0.4 * em);
-  const labelFont = `${labelSize}px ${FIGURE_FONT_FAMILY}`;
-  const font = (size: number, bold = false) => `${bold ? 'bold ' : ''}${size}px ${FIGURE_FONT_FAMILY}`;
+  const labelFont = `${labelSize}px ${fontStack(ready.style.fontFamily)}`;
+  const font = (size: number, bold = false) => `${bold ? 'bold ' : ''}${size}px ${fontStack(ready.style.fontFamily)}`;
   const left = box.x + pad;
   const right = box.x + box.w - pad;
   const inner = Math.max(1, right - left);

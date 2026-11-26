@@ -1566,6 +1566,74 @@ Acceptance criteria:
 - **Sync and cut** (TD-059, TD-081) work in video time: the video's lane spans its mapped length in activity time, steps and drags are held by that span, the cut is set in video seconds, and the sync line says the speed ("The video runs 10× faster than real time.").
 - Tests cover: a fixed factor; a ramp from timing data; sync with a factor; figures unchanged by the factor (speed at a moment is the activity's); detection from a fixture whose telemetry runs 10× faster than its video, and none from the HERO7 fixture at real time; the control's choices and defaults; the browser test that sets a factor and sees the sync bar and the preview follow.
 
+#### AV-1028: Move a Template's Components by Hand: Open Its Layout on the Custom Canvas
+
+Dependencies: AV-1003, AV-1011, AV-1016
+
+GitHub issue #69. A built-in template's components cannot be moved (template mode has no dragging by design), and switching to the custom canvas starts from nothing or from a template at its default settings, so the reader's layout is lost.
+
+Acceptance criteria:
+- **Edit on the canvas.** In template mode, beside the template's controls, a button *Move and resize on the canvas* opens the custom canvas holding the template's components as the reader set them: the same places and sizes at the canvas's frame, the template's style (accent and text colours, background opacity, text size) carried onto each component, the units, the components switched on and off, and the privacy trim. The canvas's frame is the video's size (else the canvas's current size). Its first frame looks the same as the template preview's at the same moment (a test compares the two renderers' drawn pixels or their resolved components).
+- **Nothing lost.** The template's own controls are not changed, so going back to template mode shows the template as it was. A canvas that already held a layout is replaced as one Undo step, so Undo brings that layout back.
+- **Then as the canvas.** Every component can be dragged, resized, nudged with the arrow keys and edited, as on any canvas; sync, speed (TD-099) and cut (TD-081) carry over, as they are the page's.
+- **Said where it is missed.** The template preview says in its hint line that the components are moved on the canvas, next to the button.
+- Tests: the conversion (each preset, style carried, components off left out, the trim carried); the button replacing a held layout in one Undo step; the template controls unchanged; a browser test that picks a template, opens it on the canvas, drags a figure and exports a PNG frame where it has moved.
+
+#### AV-1029: Overlay Components Shown for Part of the Video, With Fades
+
+Dependencies: AV-1011, TD-081, TD-099
+
+GitHub issue #40. Every component is shown for the whole video. References read for ideas only (gpx2video is GPL-3.0; no code copied).
+
+Acceptance criteria:
+- **The window.** A component may carry `visibility: { from?, to?, fadeIn?, fadeOut? }`, in seconds of the video (the output's own time on the map video, and the overlay's time with no video). Absent means always shown. `from`/`to` are clamped to 0 and above with `to > from`; fades are 0 to 10 s and no longer than the window. A cut (TD-081) does not move the window, since it is in video time.
+- **One rule for drawing.** The renderer draws a component at video time t only within [from, to), at an opacity that rises linearly over `fadeIn` after `from` and falls over `fadeOut` before `to`, multiplied into everything it draws. The preview and every export (PNG sequence, transparent WebM, burned-in video, map video) use it, so the same frames show it; a test pins the frame boundaries.
+- **The editor.** On the canvas, a *Shown* group per component: *Always*, *From … to …* (two time fields in the video's m:ss.s, each with *Set to the playhead*), or *For N seconds from …*, and *Fade in* / *Fade out* in seconds. Outside its window the selected component is drawn faded (about 30 %) with a dashed outline on the canvas only, never in an export, and its window is marked on the canvas's time slider.
+- **Layouts.** Saved in the layout file within template version 2; an older layout opens with every component always shown, unchanged.
+- Tests: the window at frame boundaries, both fades and their clamps, a cut leaving the window where it is, the layout round trip and an older layout unchanged, the editor's fields and the playhead buttons, and a browser test exporting two PNG frames, one inside and one outside a figure's window.
+
+#### AV-1030: An Image Component: Logos and Badges, With Fit Modes
+
+Dependencies: AV-1011, AV-1029
+
+GitHub issue #41. The overlay can draw no picture of the reader's own. References read for ideas only (gpx2video is GPL-3.0; no code copied).
+
+Acceptance criteria:
+- **Loading.** *Image* in the canvas's Add list takes a PNG, JPEG, WebP or SVG file from the device, of at most 2 MB. It is read on this device and never uploaded. A file of another kind, too large, or that fails to decode is refused with the reason.
+- **In the layout.** The image is embedded in the component as a data URL, so the layout file carries it and opens it anywhere; no file path and no browser storage. A layout whose image cannot be decoded opens with a placeholder box saying so, and the export refuses to start until it is replaced or removed.
+- **Fit and look.** *Contain*, *Cover* (cropped to the box), *Stretch* and *Original size* (centred, clipped to the box), and an opacity of 0 to 100 %. Otherwise an ordinary component: position, size, layer order, held by a shape (TD-062), and the timed window (AV-1029).
+- **Safe.** An SVG is only ever drawn as an image (decoded through an `<img>` or `createImageBitmap`), never put into the page, so its scripts and links cannot run; it is rasterized on the page at the box's output size before it reaches an export worker.
+- **The same everywhere.** The preview and every export draw the same picture, decoded before the export starts (each image once per export, handed to the worker as an `ImageBitmap`).
+- Tests: each fit mode's geometry, the opacity, the refusals (type, size, decode), an SVG with a script drawn with nothing run, the layout round trip, a layout with a broken image, and a browser test reading an exported frame for the image's pixels.
+
+#### AV-1031: The Overlay's Font: for the Layout or per Component, Bundled or the Reader's Own, Optionally Kept in the Browser
+
+Dependencies: AV-1010, AV-1011, AV-1015
+
+GitHub issue #26. Every text is drawn in the system font, so a layout looks different on another computer.
+
+Acceptance criteria:
+- **Choosing.** A *Font* for the whole layout (on the canvas, beside the frame) and one per text-bearing component overriding it; *System font* stays the default. Weight stays the existing bold switch.
+- **Bundled fonts.** A small set served from the app itself, loaded only when chosen: Inter, Roboto Condensed, JetBrains Mono and Oswald (regular and bold, Latin subset, WOFF2), each with its licence file shipped beside it (SIL Open Font License) and listed in the app. No request to a font service; the CSP is unchanged.
+- **The reader's fonts.** Load a TTF, OTF, WOFF or WOFF2 of at most 10 MB; it is read on this device, registered with `FontFace` from its bytes, and offered under its own name. A file that fails to load is refused with the reason. *Keep loaded fonts in this browser* is off by default; on, the font's bytes are kept in IndexedDB (at most 50 MB in all), listed, and each can be removed; the page says they stay in this browser only.
+- **The same everywhere.** The preview, the PNG sequence, the transparent WebM, the burned-in video, the still image and the map video draw with the chosen font: the export workers register it from the same bytes (`self.fonts`) before the first frame, and an export never draws a frame in a fallback font. Boxes that grow to fit (TD-086) and the still image's layout are measured in it.
+- **Layouts** save the font's name, never its file, within template version 2. A layout naming a font not available here draws in the system font and says which font is missing, with a way to load it; older layouts open unchanged.
+- Tests: resolution (component over layout over system); a missing font's fallback and message; loading good, corrupt and too-large files; keeping, listing and removing, and nothing kept with the switch off; the worker registering the font before drawing; a measurement changing with the font; layout round trips and an older layout unchanged; a browser test exporting a frame with a fixture font whose text pixels differ from the system font's, with no request for a font beyond the app's own.
+
+#### AV-1032: Still Image: the Reader's Own Captions, Values and the Date's Language
+
+Dependencies: AV-1010, AV-1015
+
+GitHub issue #25. The still image writes English captions and dates and the app's own values.
+
+Acceptance criteria:
+- **Caption.** Each summary figure on the still image has a *Caption* field replacing its words (empty keeps the app's), shown or hidden as now.
+- **Value.** *Decimal places* (app default, 0, 1, 2), so 9.99 km can be written 10 km. *Write my own value* turns the value into a text field pre-filled with the app's value; while on, the editor marks the figure *edited by hand* and offers *Use the activity's value*. A hand-written value is never recalculated, and when the activity changes the editor says which figures were written by hand.
+- **Date.** *Language* (the browser's by default, and a list of common languages) writes month and day names through `Intl.DateTimeFormat` with that locale, in each existing format; *Write my own text* does for the date what it does for a value.
+- **Safe text.** Captions and hand-written values and dates are the reader's text: drawn as text only, cleaned and length-limited as free text is (`sanitizeLabel`).
+- **Layouts** keep all of it within template version 2; older layouts open unchanged (the app's captions and values, English dates). The map image's panel keeps its English captions for now (a follow-up).
+- Tests: a caption replaced and hidden; decimal places (9.99 → 10); a hand-written value drawn as written, the mark and the way back; date names in es, fr, de and ja for each format; sanitising and the length limit; layout round trips and an older layout unchanged; a browser test reading the exported PNG for a replaced caption and value.
+
 ### Epic E11: Route Builder and Custom Track Export
 
 #### AV-1101: Define Route Draft Domain Model

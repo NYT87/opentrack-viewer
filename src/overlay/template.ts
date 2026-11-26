@@ -31,11 +31,15 @@ import {
   withinZone,
 } from './zones';
 import { formatHeading } from './derivedSeries';
+import { supportedLocale } from './dateFormat';
+import { cleanFamily } from './fonts';
 import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial';
 import { DEFAULT_GRADIENT, GRADIENT_BAND_LIMITS, GRADIENT_FROM_LIMITS } from './gradient';
 import { DEFAULT_COMPASS } from './compass';
 import { MAX_MAP_INSETS, parseRouteInsetSetting, type OverlayRouteInsetSetting } from './routeInset';
+import { parseVisibility, type OverlayVisibility } from './visibility';
+import { IMAGE_FITS, imageSrcProblem, type ImageFit, type OverlayImageSetting } from './imageSetting';
 import {
   DEFAULT_SPLITS,
   SPLITS_EVERY_METERS,
@@ -95,7 +99,9 @@ export type OverlayComponentType =
   /** AV-1019. The direction of travel, as a rose that turns or a needle on a fixed rose. */
   | 'compass'
   /** AV-1021. The split under way and the ones that finished: the file's laps, or every kilometre or mile. */
-  | 'splits';
+  | 'splits'
+  /** AV-1030 (TD-102). The reader's own picture, embedded in the layout as a data URL. */
+  | 'image';
 
 export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'text',
@@ -114,6 +120,7 @@ export const OVERLAY_COMPONENT_TYPES: readonly OverlayComponentType[] = [
   'gradient',
   'compass',
   'splits',
+  'image',
 ];
 
 /** AV-1011. What a shape is. */
@@ -323,7 +330,7 @@ export const STILL_IMAGE_COMPONENT_TYPES: readonly OverlayComponentType[] = ['la
  * whole activity. These are drawn even where the activity does not reach.
  */
 export function drawnWithoutTelemetry(component: OverlayComponent): boolean {
-  return component.type === 'shape' || STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
+  return component.type === 'shape' || component.type === 'image' || STILL_IMAGE_COMPONENT_TYPES.includes(component.type);
 }
 
 /** A figure from the activity's summary, for the still image. */
@@ -398,6 +405,8 @@ export interface OverlayStyle {
   backgroundOpacity: number;
   /** Multiplier on the component's base type size. */
   fontScale: number;
+  /** AV-1031 (TD-103). A font family by name, never its file; absent is the system font, and a component's overrides the layout's. */
+  fontFamily?: string;
 }
 
 export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
@@ -432,10 +441,22 @@ export interface OverlayComponent {
   windowSeconds?: number;
   /** `label`: the text itself. */
   content?: string;
-  /** `summary`: which figure. */
-  summary?: { stat: SummaryStatKey };
-  /** `date`: how it is written, and in which time zone. */
-  date?: { format: DateFormatId; withTime: boolean; timeZone: DateTimeZoneChoice };
+  /**
+   * `summary`: which figure. AV-1032 (TD-104), still image: `caption` replaces the app's words, `decimals`
+   * the number's places (time figures ignore it), `ownValue` is drawn as written, never recalculated.
+   */
+  summary?: { stat: SummaryStatKey; caption?: string; decimals?: 0 | 1 | 2; ownValue?: string };
+  /**
+   * `date`: how it is written, and in which time zone. AV-1032 (TD-104): `locale` names the month and day
+   * (absent is English, as every older layout wrote it), `ownValue` is drawn as written.
+   */
+  date?: {
+    format: DateFormatId;
+    withTime: boolean;
+    timeZone: DateTimeZoneChoice;
+    locale?: string;
+    ownValue?: string;
+  };
   /** `label`, `summary`, `date`: alignment, weight and caption. */
   text?: OverlayTextSetting;
   /** `routeInset` on the still image: line, padding and markers. */
@@ -458,6 +479,10 @@ export interface OverlayComponent {
    * value over this many seconds, 0 to 30. Absent is off, as 0 is.
    */
   smoothing?: { windowSeconds: number };
+  /** AV-1030 (TD-102). `image`: the picture, its fit and its opacity. */
+  image?: OverlayImageSetting;
+  /** AV-1029 (TD-101). The part of the video it is shown for, with fades. Absent is the whole video. */
+  visibility?: OverlayVisibility;
   /** AV-1018. `zones`: the zones and how they are drawn. `source` is the zones' source. */
   zones?: OverlayZonesSetting;
   /** AV-1019. `dial`: the arc, the ticks, the pointer and the colours. The range is `range`. */
@@ -547,6 +572,8 @@ function parseStyle(value: unknown): Partial<OverlayStyle> {
   if (typeof value.accentColor === 'string') style.accentColor = value.accentColor;
   if (isNumber(value.backgroundOpacity)) style.backgroundOpacity = clamp01(value.backgroundOpacity);
   if (isNumber(value.fontScale) && value.fontScale > 0) style.fontScale = value.fontScale;
+  const fontFamily = cleanFamily(value.fontFamily);
+  if (fontFamily) style.fontFamily = fontFamily;
   return style;
 }
 
@@ -587,6 +614,7 @@ function parseComponent(value: unknown): OverlayComponent | string {
     componentType !== 'progress' &&
     componentType !== 'elevationProfile' &&
     componentType !== 'shape' &&
+    componentType !== 'image' &&
     !stillOnly;
   if (componentType === 'shape') {
     const kind = isRecord(value.shape) ? value.shape.kind : undefined;
@@ -635,7 +663,12 @@ function parseComponent(value: unknown): OverlayComponent | string {
   }
   if (componentType === 'label') component.content = sanitizeLabel(value.content as string);
   if (componentType === 'summary' && isRecord(value.summary)) {
+    const { caption, decimals, ownValue } = value.summary;
     component.summary = { stat: value.summary.stat as SummaryStatKey };
+    const words = typeof caption === 'string' ? sanitizeLabel(caption).split('\n')[0]! : '';
+    if (words.trim() !== '') component.summary.caption = words;
+    if (decimals === 0 || decimals === 1 || decimals === 2) component.summary.decimals = decimals;
+    if (typeof ownValue === 'string') component.summary.ownValue = sanitizeLabel(ownValue).split('\n')[0]!;
   }
   if (componentType === 'date' && isRecord(value.date)) {
     component.date = {
@@ -643,6 +676,9 @@ function parseComponent(value: unknown): OverlayComponent | string {
       withTime: value.date.withTime === true,
       timeZone: value.date.timeZone === 'activity' ? 'activity' : 'reader',
     };
+    const locale = typeof value.date.locale === 'string' ? supportedLocale(value.date.locale) : undefined;
+    if (locale) component.date.locale = locale;
+    if (typeof value.date.ownValue === 'string') component.date.ownValue = sanitizeLabel(value.date.ownValue).split('\n')[0]!;
   }
   if (stillOnly) {
     const text = isRecord(value.text) ? value.text : {};
@@ -653,6 +689,7 @@ function parseComponent(value: unknown): OverlayComponent | string {
     };
   }
   if (componentType === 'shape' && isRecord(value.shape)) component.shape = parseShape(value.shape);
+  if (componentType === 'image') component.image = parseImageSetting(value.image);
   if (typeof value.parentId === 'string' && value.parentId.length > 0 && value.parentId !== id) {
     component.parentId = value.parentId;
   }
@@ -691,6 +728,8 @@ function parseComponent(value: unknown): OverlayComponent | string {
       component.smoothing = { windowSeconds: Math.min(SMOOTHING_LIMITS.max, seconds) };
     }
   }
+  const visibility = parseVisibility(value.visibility);
+  if (visibility) component.visibility = visibility;
   // AV-1023. The inset's own setting, read as it may be drawn; absent stays absent, so an older layout is the old inset.
   if (componentType === 'routeInset' && isRecord(value.routeInset)) component.routeInset = parseRouteInsetSetting(value.routeInset);
   if (componentType === 'routeInset' && isRecord(value.route)) {
@@ -704,6 +743,23 @@ function parseComponent(value: unknown): OverlayComponent | string {
     }
   }
   return component;
+}
+
+/**
+ * AV-1030 (TD-102). An image as it may be drawn. One whose `src` cannot be used is kept, with an
+ * empty `src` (a 2 MB string that is not a picture is not carried): the editor and the export
+ * panels say why, and the layout still opens.
+ */
+function parseImageSetting(raw: unknown): OverlayImageSetting {
+  const value = isRecord(raw) ? raw : {};
+  const src = typeof value.src === 'string' && imageSrcProblem(value.src) === undefined ? value.src : '';
+  const name = typeof value.name === 'string' ? sanitizeLabel(value.name).split('\n')[0]!.slice(0, 80) : '';
+  return {
+    src,
+    fit: IMAGE_FITS.includes(value.fit as ImageFit) ? (value.fit as ImageFit) : 'contain',
+    opacity: isNumber(value.opacity) ? Math.min(1, Math.max(0, value.opacity)) : 1,
+    ...(name ? { name } : {}),
+  };
 }
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;

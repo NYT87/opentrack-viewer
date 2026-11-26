@@ -59,6 +59,38 @@ describe('the export client (AV-1006)', () => {
     expect(start.request.archiveName).toMatch(/^overlay-export-.+\.zip$/);
   });
 
+  it('transfers the decoded images with the start message, and lets go of them only if it never goes (AV-1030)', async () => {
+    const bitmap = () => ({ close: vi.fn() }) as unknown as ImageBitmap;
+    const sent: { message: ToWorker; transfer?: Transferable[] }[] = [];
+    const { worker } = fakeWorker();
+    worker.postMessage = (message, transfer) => void sent.push({ message, transfer });
+    const logo = bitmap();
+    startOverlayExport({ ...request, images: { logo } }, () => undefined, { createWorker: () => worker });
+    await tick();
+    expect(sent[0]!.transfer).toEqual([logo]);
+    expect((sent[0]!.message as Extract<ToWorker, { type: 'start' }>).request.images).toEqual({ logo });
+    // Sent: the worker's now, so the page does not close what it has handed over.
+    expect(logo.close).not.toHaveBeenCalled();
+
+    const { worker: unstarted } = fakeWorker();
+    const kept = bitmap();
+    const job = startOverlayExport({ ...request, images: { kept } }, () => undefined, { createWorker: () => unstarted });
+    job.cancel();
+    await expect(job.done).rejects.toMatchObject({ code: 'cancelled' });
+    expect(kept.close).toHaveBeenCalled();
+  });
+
+  it('copies the font bytes into the start message, never transfers them: the page keeps its own (AV-1031)', async () => {
+    const sent: { message: ToWorker; transfer?: Transferable[] }[] = [];
+    const { worker } = fakeWorker();
+    worker.postMessage = (message, transfer) => void sent.push({ message, transfer });
+    const fonts = [{ family: 'Oswald', weight: 400, bytes: new ArrayBuffer(8) }];
+    startOverlayExport({ ...request, fonts }, () => undefined, { createWorker: () => worker });
+    await tick();
+    expect((sent[0]!.message as Extract<ToWorker, { type: 'start' }>).request.fonts).toBe(fonts);
+    expect(sent[0]!.transfer).toBeUndefined();
+  });
+
   it('relays progress and resolves with the finished file, ending the worker', async () => {
     const { worker } = fakeWorker();
     const onProgress = vi.fn();

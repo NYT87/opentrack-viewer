@@ -1,6 +1,8 @@
 import { buildOverlayTimeline, videoClockOf } from '../timeline';
 import type { ExportJob, ExportOutput } from './client';
 import { createOverlayRenderer, type OverlayContext2D } from './drawOverlay';
+import { closeImages } from '../images';
+import { installFonts } from '../fonts';
 import { hasMapInset } from '../insetCamera';
 import { createInsetMaps, type InsetMapSession, type InsetMapsInput } from './insetMaps';
 import { OverlayExportError, isOverlayExportError } from './errors';
@@ -205,6 +207,8 @@ export function startWebmExport(
     // AV-1025. A stopwatch counts from the cut's start.
     cutStartSeconds: request.trimStartSeconds,
   });
+  // AV-1030 (TD-102). The decoded pictures are this job's: drawn here on the page, and closed when it ends.
+  const images = new Map(Object.entries(request.images ?? {}));
   const renderer = createOverlayRenderer({
     template: request.template,
     timeline,
@@ -213,6 +217,7 @@ export function startWebmExport(
     width: request.width,
     height: request.height,
     personal: request.personal,
+    images,
   });
 
   // AV-1023. The maps are the page's own, since the recording is on the page: warmed once over the plan's cameras, then drawn from.
@@ -230,6 +235,8 @@ export function startWebmExport(
     : undefined;
   const from = request.trimStartSeconds ?? 0;
   const record = async () => {
+    // AV-1031 (TD-103). The recording is on this page, so the fonts are its own; waited for before the clock starts.
+    await installFonts(request.fonts ?? []);
     if (maps) {
       // Every tile the plan needs is loaded before the clock starts: a recording in real time cannot wait for one.
       onProgress(0, request.frameCount);
@@ -259,7 +266,10 @@ export function startWebmExport(
       deps,
     });
   };
-  const done = record().finally(() => maps?.close()).then(
+  const done = record().finally(() => {
+    maps?.close();
+    closeImages(images.values());
+  }).then(
     (result): ExportOutput => ({
       file: result.file,
       bytes: result.file.size,

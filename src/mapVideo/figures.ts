@@ -158,6 +158,9 @@ export interface MapVideoFiguresInput {
   personal?: PersonalFigures;
   /** AV-1208. The photos' pixels, decoded in the page: drawn as pixels, so nothing of their EXIF goes with them. */
   photoImages?: ReadonlyMap<string, PhotoImage>;
+  /** AV-1030 (TD-102). The decoded pictures of the overlay's image components, and the video's own width when this canvas is a preview of it. */
+  images?: ReadonlyMap<string, CanvasImageSource>;
+  frameWidth?: number;
 }
 
 /** A photo as drawn: its decoded pixels and their size. */
@@ -199,11 +202,11 @@ export function drawPhoto(ctx: OverlayContext2D, photo: PhotoImage, shown: { ela
 
 /** The figures of a map video, ready to draw at any moment. */
 export function createMapVideoFigures(input: MapVideoFiguresInput): MapVideoFigures {
-  const { activity, model, settings, units, width, height, readerTimeZone, photoImages, personal } = input;
+  const { activity, model, settings, units, width, height, readerTimeZone, photoImages, personal, images, frameWidth } = input;
   const timeline = mapVideoOverlayTimeline(activity, model, settings);
   const shown = shownActivity(activity, model, settings);
   const overlay = settings.overlay && settings.overlay.components.length > 0
-    ? createOverlayRenderer({ template: settings.overlay, timeline, activity: shown, units, width, height, readerTimeZone, personal })
+    ? createOverlayRenderer({ template: settings.overlay, timeline, activity: shown, units, width, height, readerTimeZone, personal, images, frameWidth })
     : undefined;
   const card = settings.summaryCard.enabled
     ? createOverlayRenderer({ template: summaryCardTemplate(activity.metadata.sport, { width, height }), timeline, activity: shown, units, width, height, readerTimeZone })

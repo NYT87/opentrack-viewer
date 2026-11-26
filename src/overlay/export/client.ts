@@ -195,6 +195,7 @@ export function startOverlayExport(
   deps: ExportClientDeps = {},
 ): ExportJob {
   if (hasMaptilerInset(request.template)) {
+    for (const bitmap of Object.values(request.images ?? {})) bitmap.close();
     return { cancel: () => undefined, done: Promise.reject(new OverlayExportError('render_failed', MAPTILER_PNG_REFUSAL)) };
   }
   return startWorkerJob(
@@ -204,6 +205,7 @@ export function startOverlayExport(
     },
     deps,
     openInsetBridge(request, deps),
+    request.images,
   );
 }
 
@@ -220,6 +222,7 @@ export function startBurnedInExport(
     },
     deps,
     openInsetBridge(request, deps),
+    request.images,
   );
 }
 
@@ -285,6 +288,8 @@ function startWorkerJob(
   onWorkerMessage: (message: FromWorker) => void,
   deps: ExportClientDeps,
   insets?: InsetBridge,
+  /** AV-1030 (TD-102). The page's decoded pictures: transferred with the start message, and closed here if that never goes out. */
+  images?: Record<string, ImageBitmap>,
 ): ExportJob {
   const archiveName = newArchiveName();
   // A worker that cannot even be constructed (a blocked script, a policy) is a
@@ -294,11 +299,14 @@ function startWorkerJob(
   try {
     worker = (deps.createWorker ?? defaultWorker)();
   } catch (error) {
+    for (const bitmap of Object.values(images ?? {})) bitmap.close();
     return { cancel: () => undefined, done: Promise.reject(startupError(error)) };
   }
   /** The worker is ended, and with it the maps the page held for it. */
+  let imagesSent = false;
   const stopWorker = () => {
     worker.terminate();
+    if (!imagesSent) for (const bitmap of Object.values(images ?? {})) bitmap.close();
     // A map still waiting on a tile stops at once rather than poll for two minutes for a job that is over.
     insets?.controller.abort();
     insets?.session.close();
@@ -412,7 +420,10 @@ function startWorkerJob(
     }
     started = true;
     try {
-      worker.postMessage(startMessage(archiveName));
+      const pictures = Object.values(images ?? {});
+      if (pictures.length > 0) worker.postMessage(startMessage(archiveName), pictures);
+      else worker.postMessage(startMessage(archiveName));
+      imagesSent = true;
     } catch (error) {
       // A request that cannot be sent (it could not be cloned) would otherwise
       // leave the job waiting for a worker that never heard of it.

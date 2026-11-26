@@ -1,4 +1,4 @@
-import { FIGURE_FONT_FAMILY } from '../figureLayout';
+import { fontStack } from '../fonts';
 import {
   createInsetProjection,
   lowerIndex,
@@ -220,12 +220,12 @@ function drawCredit(ctx: OverlayContext2D, model: InsetComponentModel, provider:
   const lift = round ? 0.08 * frame.w : 0;
   const available = Math.max(1, round ? 0.54 * frame.w : frame.w - 4);
   let size = Math.max(6, Math.min(0.4 * em, frame.w * 0.05));
-  ctx.font = `${size}px ${FIGURE_FONT_FAMILY}`;
+  ctx.font = `${size}px ${fontStack()}`;
   const measured = ctx.measureText(text).width;
   // Squeezed to fit rather than cut: a credit is shown whole.
   if (measured > available - 6) {
     size = Math.max(3, (size * (available - 6)) / measured);
-    ctx.font = `${size}px ${FIGURE_FONT_FAMILY}`;
+    ctx.font = `${size}px ${fontStack()}`;
   }
   const w = Math.min(available, ctx.measureText(text).width + 6);
   const h = size * 1.4;

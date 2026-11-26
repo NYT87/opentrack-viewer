@@ -1,7 +1,9 @@
+import { fontStack } from './fonts';
+import { LAYOUT_IMAGES_MAX_CHARS } from './imageSetting';
 import type { Activity } from '../domain/activity';
 import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
-import { formatStillDate, formatUtcOffset, type DateZone } from './dateFormat';
+import { formatStillDate, formatUtcOffset, supportedLocale, type DateZone } from './dateFormat';
 import { keptRoute, TRIMMED_AWAY_TEXT } from './privacyTrim';
 import {
   DEFAULT_ROUTE_IMAGE_OPTIONS,
@@ -21,6 +23,7 @@ import {
   STILL_IMAGE_COMPONENT_TYPES,
   parseOverlayTemplate,
   sanitizeLabel,
+  formatMetricWith,
   type DateFormatId,
   type DateTimeZoneChoice,
   type OverlayComponent,
@@ -114,7 +117,13 @@ const SUMMARY_CAPTIONS: Record<SummaryStatKey, string> = {
  * activity cannot supply it. Speed and pace are over moving time where there
  * is one (TD-058), and over elapsed time otherwise, and say which.
  */
-export function summaryValue(stat: SummaryStatKey, activity: Activity, units: UnitSystem): StaticValue {
+export function summaryValue(
+  stat: SummaryStatKey,
+  activity: Activity,
+  units: UnitSystem,
+  /** AV-1032 (TD-104). The number's places; absent is the app's. Times and pace are clocks and ignore it. */
+  decimals?: 0 | 1 | 2,
+): StaticValue {
   const derived = activity.derived;
   const missing = (reason: string): StaticValue => ({ ok: false, reason });
   switch (stat) {
@@ -122,7 +131,7 @@ export function summaryValue(stat: SummaryStatKey, activity: Activity, units: Un
       const moving = derived?.averageMovingSpeedMetersPerSecond;
       const value = moving ?? derived?.averageSpeedMetersPerSecond;
       if (value === undefined) return missing('This activity has no average speed: it needs both a distance and a time.');
-      return { ok: true, caption: moving !== undefined ? 'Avg speed' : 'Avg speed (elapsed)', value: formatSpeed(value, units) };
+      return { ok: true, caption: moving !== undefined ? 'Avg speed' : 'Avg speed (elapsed)', value: decimals === undefined ? formatSpeed(value, units) : formatMetricWith('speed', value, units, decimals) };
     }
     case 'pace': {
       const moving = derived?.averageMovingPaceSecondsPerKm;
@@ -133,7 +142,7 @@ export function summaryValue(stat: SummaryStatKey, activity: Activity, units: Un
     case 'distance':
       return derived?.distanceMeters === undefined
         ? missing('This activity has no distance: it has no GPS positions or recorded distance.')
-        : { ok: true, caption: 'Distance', value: formatDistance(derived.distanceMeters, units) };
+        : { ok: true, caption: 'Distance', value: decimals === undefined ? formatDistance(derived.distanceMeters, units) : formatMetricWith('distance', derived.distanceMeters, units, decimals) };
     case 'elapsed':
       return derived?.durationSeconds === undefined
         ? missing('This activity has no elapsed time: it has no timestamps.')
@@ -145,7 +154,7 @@ export function summaryValue(stat: SummaryStatKey, activity: Activity, units: Un
     case 'climb':
       return derived?.elevationGainMeters === undefined
         ? missing('This activity has no elevation gain: it records no elevation.')
-        : { ok: true, caption: 'Elevation gain', value: formatElevation(derived.elevationGainMeters, units) };
+        : { ok: true, caption: 'Elevation gain', value: decimals === undefined ? formatElevation(derived.elevationGainMeters, units) : formatMetricWith('climb', derived.elevationGainMeters, units, decimals) };
   }
 }
 
@@ -180,14 +189,31 @@ export function dateZoneChoice(
   return { ok: true, zone: { kind: 'zone', timeZone }, description: `Your time zone, ${timeZone}` };
 }
 
+/** AV-1032 (TD-104). The reader's own words for a figure or a date, cleaned as free text is; empty is not drawn. */
+function ownValue(caption: string, written: string): StaticValue {
+  const value = sanitizeLabel(written).split('\n')[0]!;
+  return value.trim() === '' ? { ok: false, reason: 'The text written for this is empty.' } : { ok: true, caption, value };
+}
+
 /** The activity's start date as the component asks for it, or why it cannot be shown. */
 export function dateValue(component: OverlayComponent, context: StillImageContext): StaticValue {
   const start = context.activity.derived?.startTime;
-  if (!(start instanceof Date)) return { ok: false, reason: 'This activity has no timestamps, so it has no date.' };
   const setting = component.date ?? { format: 'medium', withTime: false, timeZone: 'reader' };
+  if (setting.ownValue !== undefined) return ownValue('Date', setting.ownValue);
+  if (!(start instanceof Date)) return { ok: false, reason: 'This activity has no timestamps, so it has no date.' };
   const zone = dateZoneChoice(setting.timeZone, context);
   if (!zone.ok) return { ok: false, reason: zone.reason };
-  return { ok: true, caption: 'Date', value: formatStillDate(start, setting.format, setting.withTime, zone.zone) };
+  return { ok: true, caption: 'Date', value: formatStillDate(start, setting.format, setting.withTime, zone.zone, setting.locale) };
+}
+
+/** AV-1032 (TD-104). A summary figure with the reader's caption, decimals and own value applied. */
+function summaryFigureValue(component: OverlayComponent, context: StillImageContext): StaticValue {
+  const setting = component.summary;
+  if (!setting) return { ok: false, reason: 'This figure names no statistic.' };
+  const caption = setting.caption === undefined ? undefined : sanitizeLabel(setting.caption).split('\n')[0]!;
+  const own = setting.ownValue !== undefined ? ownValue(SUMMARY_CAPTIONS[setting.stat], setting.ownValue) : undefined;
+  const value = own ?? summaryValue(setting.stat, context.activity, context.units, setting.decimals);
+  return value.ok && caption?.trim() ? { ...value, caption } : value;
 }
 
 /** What a still-image text, figure or date reads as, or why it cannot be drawn. */
@@ -198,9 +224,7 @@ export function stillValue(component: OverlayComponent, context: StillImageConte
         ? { ok: false, reason: 'This text is empty.' }
         : { ok: true, caption: '', value: sanitizeLabel(component.content ?? '') };
     case 'summary':
-      return component.summary
-        ? summaryValue(component.summary.stat, context.activity, context.units)
-        : { ok: false, reason: 'This figure names no statistic.' };
+      return summaryFigureValue(component, context);
     case 'date':
       return dateValue(component, context);
     default:
@@ -264,6 +288,9 @@ export function describeStillComponent(component: OverlayComponent): string {
       return component.summary ? SUMMARY_CAPTIONS[component.summary.stat] : 'Figure';
     case 'date':
       return 'Date';
+    // AV-1030. A picture is named for the warning a still gives when it leaves it out.
+    case 'image':
+      return 'Image';
     case 'elevationProfile':
       return 'Elevation profile';
     // AV-1019. Named for the warning a still gives when it leaves them out.
@@ -293,7 +320,6 @@ export function describeStillComponent(component: OverlayComponent): string {
 export type MeasureText = (text: string, font: string) => number;
 
 /** The type the still image is drawn in: the system's, never a font fetched from anywhere. */
-export const STILL_FONT_FAMILY = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 export interface Box {
   x: number;
@@ -430,7 +456,7 @@ export function planStillImage(
     if (!isHexColor(color)) {
       return { ok: false, error: new RouteImageError('invalid_style', 'A text colour must be a hex colour such as #ffffff.') };
     }
-    const item = layoutStillText(component, value, color, layout, measure);
+    const item = layoutStillText(component, value, color, layout, measure, layout.template.style.fontFamily);
     if (item.shrunk) notes.push(`${label} was set smaller than chosen, to fit inside the image.`);
     items.push(item);
   }
@@ -502,8 +528,8 @@ function planRouteItem(
   return { ok: true, item: { kind: 'route', id: component.id, box: { x: left, y: top, w: boxW, h: boxH }, plan } };
 }
 
-const fontOf = (weight: 'normal' | 'bold' | number, size: number) =>
-  `${weight === 'bold' ? 700 : weight === 'normal' ? 400 : weight} ${Math.round(size * 100) / 100}px ${STILL_FONT_FAMILY}`;
+const fontOf = (weight: 'normal' | 'bold' | number, size: number, family?: string) =>
+  `${weight === 'bold' ? 700 : weight === 'normal' ? 400 : weight} ${Math.round(size * 100) / 100}px ${fontStack(family)}`;
 
 /**
  * A still text, figure or date set in its box: measured, made smaller only if
@@ -516,16 +542,19 @@ export function layoutStillText(
   color: string,
   layout: Pick<StaticImageLayout, 'width' | 'height'>,
   measure: MeasureText,
+  /** AV-1031 (TD-103). The layout's font, under the component's own. */
+  layoutFamily?: string,
 ): Extract<PlannedStillItem, { kind: 'text' }> {
   const { width, height } = layout;
   const setting = component.text ?? { align: 'left' as const, weight: 'bold' as const };
+  const family = component.style.fontFamily ?? layoutFamily;
   const caption = component.type === 'summary' && setting.caption !== false ? value.caption.toUpperCase() : undefined;
   const valueLines = value.value.split('\n');
 
   const lay = (size: number) => {
     const rows: { text: string; size: number; font: string; caption: boolean }[] = [];
-    if (caption) rows.push({ text: caption, size: size * CAPTION_SIZE, font: fontOf(600, size * CAPTION_SIZE), caption: true });
-    for (const text of valueLines) rows.push({ text, size, font: fontOf(setting.weight, size), caption: false });
+    if (caption) rows.push({ text: caption, size: size * CAPTION_SIZE, font: fontOf(600, size * CAPTION_SIZE, family), caption: true });
+    for (const text of valueLines) rows.push({ text, size, font: fontOf(setting.weight, size, family), caption: false });
     const w = Math.max(...rows.map((row) => measure(row.text, row.font)), 1);
     const h = rows.reduce((total, row) => total + row.size * LINE_HEIGHT, 0);
     return { rows, w, h };
@@ -640,8 +669,11 @@ export function itemAt(plan: StillImagePlan, x: number, y: number): string | und
 
 export const LAYOUT_FILE_KIND = 'opentrack-overlay-layout';
 export const LAYOUT_FILE_VERSION = 1;
-/** Larger than any layout a person makes; a guard against reading a wrong file whole. */
-export const LAYOUT_FILE_MAX_BYTES = 256 * 1024;
+/**
+ * Larger than any layout a person makes; a guard against reading a wrong file whole. AV-1030: images
+ * are embedded, so room for `LAYOUT_IMAGES_MAX_CHARS` of them besides the 256 KB the layout itself takes.
+ */
+export const LAYOUT_FILE_MAX_BYTES = 256 * 1024 + LAYOUT_IMAGES_MAX_CHARS;
 
 /**
  * The layout as a JSON file: its size, and the overlay template. It holds the
@@ -745,6 +777,11 @@ export function freshComponentId(template: OverlayTemplate, prefix: string): str
   for (let n = 1; ; n += 1) if (!taken.has(`${prefix}-${n}`)) return `${prefix}-${n}`;
 }
 
+const browserLocale = (): { locale?: string } => {
+  const tag = typeof navigator === 'undefined' ? undefined : supportedLocale(navigator.language);
+  return tag ? { locale: tag } : {};
+};
+
 /** A new element of a kind, where a new one is put: the top-left, snapped in from the edges. */
 export function newStillComponent(
   template: OverlayTemplate,
@@ -775,7 +812,8 @@ export function newStillComponent(
       type: 'date',
       rect: at,
       style: { ...textStyle, fontScale: 1.5 },
-      date: { format: 'medium', withTime: false, timeZone: 'reader' },
+      // AV-1032 (TD-104). A new date speaks the browser's language; an older layout has no locale and stays English.
+      date: { format: 'medium', withTime: false, timeZone: 'reader', ...browserLocale() },
       text: { align: 'left', weight: 'bold' },
     };
   }

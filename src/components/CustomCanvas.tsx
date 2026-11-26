@@ -1,7 +1,13 @@
 import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
 import { PrivacyTrimField } from './PrivacyTrimField';
+import { useTemplateImages } from './useTemplateImages';
+import { useTemplateFonts } from './useTemplateFonts';
+import { FontField, MissingFonts } from './FontField';
+import { fontsVersion, subscribeFonts, withFontFamily } from '../overlay/fonts';
+import { readImageFile } from '../overlay/images';
+import { IMAGE_ACCEPT, IMAGE_FITS, LAYOUT_IMAGES_MAX_CHARS, type ImageFit, type OverlayImageSetting } from '../overlay/imageSetting';
 import { hasPrivacyTrim, type PrivacyTrim } from '../overlay/privacyTrim';
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
 import {
@@ -17,6 +23,7 @@ import {
   moveComponent,
   moveLayer,
   newCanvasComponents,
+  newImageComponent,
   nudgeComponent,
   pushHistory,
   removeComponent,
@@ -84,6 +91,8 @@ import { GITHUB_URL } from './SiteFooter';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { DateSettings, PercentField } from './RouteOverlayPanel';
+import { ShownEditor } from './ShownEditor';
+import { visibilityAt } from '../overlay/visibility';
 import { usePersonalStore } from '../state/personalStore';
 import {
   PERSONAL_LIMITS,
@@ -104,6 +113,7 @@ import {
   DEFAULT_ZONES_SMOOTHING_SECONDS,
 } from '../overlay/zones';
 import { ElementRows } from './ElementRows';
+import { SummaryFields, writtenByHand } from './StillValueFields';
 import { ColorField } from './ColorField';
 import { ChartEditor, ClockEditor, CompassEditor, DialEditor, GradientEditor, SplitsEditor, StopwatchEditor } from './MomentEditors';
 import { RouteInsetEditor } from './RouteInsetEditor';
@@ -224,9 +234,14 @@ export function CustomCanvas({
   const [history, setHistory] = useState<CanvasState[]>(initialDraft.history);
   // AV-1022 (TD-091). The privacy trim of the canvas's template; the layout's Undo does not hold it.
   const [privacyTrim, setPrivacyTrim] = useState<PrivacyTrim | undefined>(initialDraft.privacyTrim);
+  // AV-1031 (TD-103). The layout's font, by name; like the trim, not part of Undo. A host (the map video, the map image) keeps only its components' own.
+  const [fontFamily, setFontFamily] = useState<string | undefined>(initialDraft.fontFamily);
+  const layoutFont = host ? undefined : fontFamily;
   const [notice, setNotice] = useState<{ kind: 'status' | 'alert'; message: string; warnings?: string[] }>();
   const [preset, setPreset] = useState<StartLayoutId>('compact-hud');
   const loadInput = useRef<HTMLInputElement>(null);
+  // AV-1029. The preview's moment, for the editor's *Set to the playhead* buttons; a ref, so a playing preview does not redraw the editor.
+  const playhead = useRef(0);
   const { components, selectedId } = state;
   // AV-1018 (TD-086). The reader's own figures are in a layout file only if this is ticked: it starts, and stays, unticked.
   const personal = usePersonalStore((store) => store.personal);
@@ -249,8 +264,8 @@ export function CustomCanvas({
   // A host sets the frame: its video's size.
   const frame = host?.frame ?? ownFrame;
   useEffect(() => {
-    onDraftChange?.({ width, height, frame, state, history, ...(privacyTrim ? { privacyTrim } : {}) });
-  }, [onDraftChange, width, height, frame, state, history, privacyTrim]);
+    onDraftChange?.({ width, height, frame, state, history, ...(privacyTrim ? { privacyTrim } : {}), ...(fontFamily ? { fontFamily } : {}) });
+  }, [onDraftChange, width, height, frame, state, history, privacyTrim, fontFamily]);
   const setSize = (nextWidth: string, nextHeight: string) => {
     setWidth(nextWidth);
     setHeight(nextHeight);
@@ -296,19 +311,36 @@ export function CustomCanvas({
     [timeline, stillContext, still],
   );
   // A host (the map video, the map image) cuts the route its own way, in metres, so it never carries this trim.
-  const template = useMemo(() => canvasTemplate(components, host ? undefined : privacyTrim), [components, privacyTrim, host]);
+  const template = useMemo(() => canvasTemplate(components, host ? undefined : privacyTrim, layoutFont), [components, privacyTrim, host, layoutFont]);
+  // AV-1031. Each font the layout names is made ready; the preview draws again when one arrives, and a missing one is said.
+  const fontState = useTemplateFonts(template);
 
   /** Changes the layout, keeping what it was for Undo. */
   const commit = useCallback(
     (next: CanvasState) => {
       setHistory((current) => pushHistory(current, state));
-      setState({ ...next, components: measured(next.components, stillContext, frame) });
+      setState({ ...next, components: measured(next.components, stillContext, frame, layoutFont) });
     },
-    [state, stillContext, frame],
+    [state, stillContext, frame, layoutFont],
   );
+  /** AV-1031. A new layout font: the figures' boxes and the still texts are measured in it, as one change for Undo. */
+  /** The layout font each state in the history had, for the ones a font change pushed: Undo gives the font back with the boxes. */
+  const fontBefore = useRef(new WeakMap<CanvasState, string | undefined>());
+  const setLayoutFont = (family: string | undefined) => {
+    setFontFamily(family);
+    const sized = host ? components : components.reduce((now, entry) => (entry.type === 'text' || entry.type === 'gauge' ? growFigureToFit(now, entry.id, frame, { timeline, units, measure: measureText, layoutFont: family }) : now), components);
+    const next = measured(sized, stillContext, frame, host ? undefined : family);
+    if (next === components) return;
+    setHistory((current) => pushHistory(current, state));
+    fontBefore.current.set(state, fontFamily);
+    setState({ ...state, components: next });
+  };
   /** A new layout, and with it the selection: given, or the current one kept. One commit, so one Undo. */
   const change = (next: OverlayComponent[], ...selected: [string | undefined] | []) =>
     commit({ components: next, selectedId: selected.length > 0 ? selected[0] : selectedId });
+  // AV-1030. The images' pictures, decoded for the preview and shared with the editor, which says which cannot be read.
+  const decodedImages = useTemplateImages(components, frame);
+  const brokenImageIds = useMemo(() => new Set(decodedImages.broken.map((entry) => entry.id)), [decodedImages.broken]);
   const select = (next: string | undefined) => {
     if (next !== selectedId) commit({ components, selectedId: next });
   };
@@ -317,6 +349,7 @@ export function CustomCanvas({
     if (!previous) return;
     setHistory(history.slice(0, -1));
     setState(previous);
+    if (fontBefore.current.has(previous)) setFontFamily(fontBefore.current.get(previous));
   };
 
   const add = (key: CanvasElementKey) => {
@@ -325,11 +358,42 @@ export function CustomCanvas({
     change([...components, ...added], added[0]?.id);
   };
 
+  // AV-1030 (TD-102). A file read on this device: refused with the reason, or taken. The layout's images together stay within what a layout file can carry, so what is saved can be opened again.
+  // What the layout is *after* a file has been read: an edit, an Undo or another add made meanwhile is kept, not written over.
+  const live = useRef({ components, template, frame, change });
+  useLayoutEffect(() => {
+    live.current = { components, template, frame, change };
+  });
+  const takeImage = async (file: File, replacing?: string) => {
+    const read = await readImageFile(file);
+    if (!read.ok) return read;
+    const others = live.current.components.reduce((sum, entry) => (entry.type === 'image' && entry.id !== replacing ? sum + (entry.image?.src.length ?? 0) : sum), 0);
+    if (others + read.image.src.length > LAYOUT_IMAGES_MAX_CHARS) {
+      return { ok: false as const, reason: `${file.name} would make the layout's images larger than a layout file can carry (about 8 MB together). Remove an image first.` };
+    }
+    return read;
+  };
+  const addImage = async (file: File) => {
+    const read = await takeImage(file);
+    if (!read.ok) {
+      setNotice({ kind: 'alert', message: read.reason });
+      return;
+    }
+    const now = live.current;
+    const added = newImageComponent(now.template, now.frame, read.image, { width: read.width, height: read.height });
+    now.change([...now.components, added], added.id);
+    setNotice({ kind: 'status', message: `Added ${file.name}. It stays in this tab and in the layout file you save.` });
+  };
+
   const saveLayout = () => {
     if (!size) return;
     // AV-1018. Each zones component carries the figures only when asked; otherwise none is written, even one the layout held.
     const filed = { ...template, components: componentsForLayoutFile(template.components, { include: includePersonal, session: personal }) };
     const json = serializeStillLayout({ ...size, template: filed });
+    if (json.length > LAYOUT_FILE_MAX_BYTES) {
+      setNotice({ kind: 'alert', message: 'The layout is too large to be opened again, because of its images. Remove or replace an image to save it.' });
+      return;
+    }
     downloadBlob(new Blob([json], { type: 'application/json' }), 'overlay-layout.json');
     const written = includePersonal && personalHeldBy(filed.components);
     const withFigures = written && (written.maxHeartRate !== undefined || written.ftp !== undefined);
@@ -355,7 +419,10 @@ export function CustomCanvas({
     setSize(String(fitted.width), String(fitted.height));
     // A still (the map image) shows no moment, so what only means something at one (zones, dials, charts, the gradient indicator and the compass: AV-1018, AV-1019) is left out of it, as the still image leaves out a video's figures.
     const readable = host?.still
-      ? parsed.layout.template.components.filter((component) => !MOMENT_COMPONENT_TYPES.includes(component.type))
+      ? parsed.layout.template.components
+          .filter((component) => !MOMENT_COMPONENT_TYPES.includes(component.type))
+          // AV-1029. A still has no time to set a window by, so one saved in a layout is dropped rather than hiding the component with no way to bring it back.
+          .map(({ visibility: _window, ...rest }) => rest)
       : parsed.layout.template.components;
     // AV-1023. A map's own canvas has the map already: an inset in it keeps its view and its line, not a second map.
     const opened = host
@@ -366,7 +433,10 @@ export function CustomCanvas({
         )
       : readable;
     commit({ components: opened, selectedId: undefined });
-    if (!host) setPrivacyTrim(parsed.layout.template.privacyTrim);
+    if (!host) {
+      setPrivacyTrim(parsed.layout.template.privacyTrim);
+      setFontFamily(parsed.layout.template.style.fontFamily);
+    }
     const warnings = [...parsed.warnings];
     if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones, dials, charts, gradient indicators, compasses and splits were left out: this picture shows no moment of the activity.');
     if (fitted.width !== parsed.layout.width || fitted.height !== parsed.layout.height) {
@@ -416,17 +486,21 @@ export function CustomCanvas({
         onSelect={select}
         onChange={(next, ...selected) => change(next, ...selected)}
         onDragStart={() => setHistory((current) => pushHistory(current, state))}
-        onDragMove={(next) => setState({ components: measured(next, stillContext, frame), selectedId })}
+        onDragMove={(next) => setState({ components: measured(next, stillContext, frame, layoutFont), selectedId })}
         onUndo={undo}
         clock={host ? { seconds: host.seconds, onSeek: host.onSeek, still } : undefined}
         backdrop={host?.backdrop}
         liveMaps={!host}
+        playhead={playhead}
+        images={decodedImages.images}
+        brokenIds={brokenImageIds}
       />
       {sizeProblem && (
         <p role="alert" className="export__error">
           {sizeProblem}
         </p>
       )}
+      <MissingFonts problems={fontState.problems} />
       {video && (
         <p className="overlay-controls__hint">
           The video is lined up, and cut, as it is set in Sync, on the template workspace.{' '}
@@ -474,6 +548,9 @@ export function CustomCanvas({
         </fieldset>
         )}
 
+        {/* AV-1031 (TD-103). The layout's font; a host keeps its components' own. */}
+        {!host && <FontField label="Layout font" manage value={fontFamily} onChange={setLayoutFont} />}
+
         {/* AV-1022 (TD-091). One trim for the canvas's template, offered while it draws a route. */}
         {!host && components.some((component) => component.type === 'routeInset') && (
           <PrivacyTrimField trim={privacyTrim} onChange={setPrivacyTrim} activity={activity} units={units} />
@@ -485,6 +562,7 @@ export function CustomCanvas({
             <ElementRows
               label="Elements on the canvas"
               rows={components.map((component) => ({ id: component.id, name: describeCanvasComponent(component) }))}
+              note={writtenByHand(components)}
               selectedId={selectedId}
               onSelect={select}
               onRemove={(removed) =>
@@ -494,7 +572,7 @@ export function CustomCanvas({
           ) : (
             <p className="overlay-controls__hint">The canvas is empty. Add an element, or start from a template.</p>
           )}
-          <AddElement choices={choices} onAdd={add} />
+          <AddElement choices={choices} onAdd={add} onAddImage={(file) => void addImage(file)} />
           {unavailable.length > 0 && (
             <ul className="still-image__unavailable" aria-label="Not in this activity">
               {groupByReason(unavailable).map((group) => (
@@ -533,7 +611,19 @@ export function CustomCanvas({
             timeline={timeline}
             units={units}
             host={host !== undefined}
+            layoutFont={layoutFont}
             trimmed={hasPrivacyTrim(privacyTrim)}
+            timed={!still}
+            imageProblem={decodedImages.broken.find((entry) => entry.id === selected.id)?.reason}
+            onReplaceImage={async (file) => {
+              const read = await takeImage(file, selected.id);
+              if (read.ok) {
+                const now = live.current;
+                now.change(now.components.map((entry) => (entry.id === selected.id && entry.image ? { ...entry, image: { ...entry.image, src: read.image.src, name: read.image.name } } : entry)));
+              }
+              return read;
+            }}
+            playhead={() => playhead.current}
             onChange={(next, ...selected) => change(next, ...selected)}
           />
         )}
@@ -652,12 +742,13 @@ export function fitCanvasSize(width: number, height: number): { width: number; h
   const { minSide, maxSide, maxPixels } = CANVAS_LIMITS;
   let scale = Math.min(1, maxSide / width, maxSide / height, Math.sqrt(maxPixels / (width * height)));
   scale = Math.max(scale, minSide / Math.min(width, height));
-  const even = (value: number) => Math.max(minSide, Math.min(maxSide, Math.round((value * scale) / 2) * 2));
+  const even = (value: number) => Math.max(minSide, Math.min(maxSide, Math.floor((value * scale) / 2) * 2));
   return { width: even(width), height: even(height) };
 }
 
 export function describeCanvasComponent(component: OverlayComponent): string {
   if (component.type === 'shape') return component.shape ? SHAPE_LABELS[component.shape.kind] : 'Shape';
+  if (component.type === 'image') return component.image?.name ? `Image: ${component.image.name}` : 'Image';
   if (component.type === 'text' || component.type === 'gauge') {
     const source = component.source;
     const name = component.display?.label?.trim();
@@ -702,13 +793,14 @@ function NumberInput({ id, label, value, onChange }: { id: string; label: string
 /** AV-1017. The README of the component contract, in the repository. */
 export const COMPONENT_DOCS_URL = `${GITHUB_URL}/blob/main/docs/components/README.md`;
 
-function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd: (key: CanvasElementKey) => void }) {
+function AddElement({ choices, onAdd, onAddImage }: { choices: CanvasElementChoice[]; onAdd: (key: CanvasElementKey) => void; onAddImage: (file: File) => void }) {
   const id = useId();
+  const picker = useRef<HTMLInputElement>(null);
   const firstAvailable = choices.find((choice) => choice.available)?.key;
   const [wanted, setWanted] = useState<CanvasElementKey | undefined>();
   const chosen = choices.find((choice) => choice.key === wanted && choice.available)?.key ?? firstAvailable;
   // TD-088 (AV-1019). The groups the choices bring, in a fixed preferred order and any other after them: a still's "Along the route" is not left out.
-  const preferred: CanvasElementChoice['group'][] = ['Live figures', 'Along the route', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes'];
+  const preferred: CanvasElementChoice['group'][] = ['Live figures', 'Along the route', 'Cycling', 'Running', 'Any sport', 'Whole activity', 'Shapes', 'Pictures'];
   const present = new Set(choices.map((choice) => choice.group));
   const groups = [...preferred.filter((group) => present.has(group)), ...[...present].filter((group) => !preferred.includes(group))];
   return (
@@ -729,9 +821,28 @@ function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd:
             </optgroup>
           ))}
         </select>
-        <button type="button" className="button" disabled={!chosen} onClick={() => chosen && onAdd(chosen)}>
-          Add to the canvas
+        <button
+          type="button"
+          className="button"
+          disabled={!chosen}
+          onClick={() => (chosen === 'image' ? picker.current?.click() : chosen && onAdd(chosen))}
+        >
+          {chosen === 'image' ? 'Choose a file to add' : 'Add to the canvas'}
         </button>
+        {/* AV-1030. Read on this device: nothing is uploaded. */}
+        <input
+          ref={picker}
+          type="file"
+          hidden
+          accept={IMAGE_ACCEPT}
+          aria-label="Image file to add"
+          data-testid="canvas-image-input"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (file) onAddImage(file);
+          }}
+        />
       </div>
       <p className="overlay-controls__hint">
         {/* AV-1017 (TD-085). Where the documented component contract lives; a component of your own is not loaded yet. */}
@@ -750,14 +861,14 @@ function AddElement({ choices, onAdd }: { choices: CanvasElementChoice[]; onAdd:
  * is only where it starts; with its real size in it, a snap to the right
  * leaves the same margin a card has, and a saved layout says how large it is.
  */
-function measured(components: OverlayComponent[], stillContext: StillImageContext, frame: { width: number; height: number }) {
+function measured(components: OverlayComponent[], stillContext: StillImageContext, frame: { width: number; height: number }, layoutFont?: string) {
   let changed = false;
   const next = components.map((component) => {
     if (!STILL_IMAGE_COMPONENT_TYPES.includes(component.type)) return component;
     const value = stillValue(component, stillContext);
     if (!value.ok) return component;
     const color = component.style.textColor ?? DEFAULT_OVERLAY_STYLE.textColor;
-    const { box } = layoutStillText(component, value, color, frame, measureText);
+    const { box } = layoutStillText(component, value, color, frame, measureText, layoutFont);
     const rect = normalizeRect({ x: box.x / frame.width, y: box.y / frame.height, width: box.w / frame.width, height: box.h / frame.height });
     const same = (['x', 'y', 'width', 'height'] as const).every((key) => Math.abs(rect[key] - component.rect[key]) < 1e-6);
     if (same) return component;
@@ -777,6 +888,7 @@ function boxesOf(
   stillContext: StillImageContext,
   width: number,
   height: number,
+  layoutFont?: string,
 ): Map<string, Box> {
   const boxes = new Map<string, Box>();
   for (const component of components) {
@@ -784,7 +896,7 @@ function boxesOf(
       const value = stillValue(component, stillContext);
       if (value.ok) {
         const color = component.style.textColor ?? DEFAULT_OVERLAY_STYLE.textColor;
-        boxes.set(component.id, layoutStillText(component, value, color, { width, height }, measureText).box);
+        boxes.set(component.id, layoutStillText(component, value, color, { width, height }, measureText, layoutFont).box);
         continue;
       }
     }
@@ -815,7 +927,16 @@ function CanvasPreview({
   clock,
   backdrop,
   liveMaps,
+  playhead: playheadRef,
+  images,
+  brokenIds,
 }: {
+  /** AV-1030. The images known to be unreadable: the preview draws a box saying so for each. */
+  brokenIds: ReadonlySet<string>;
+  /** AV-1030. The decoded pictures of the image components, drawn at the preview's size. */
+  images: ReadonlyMap<string, ImageBitmap> | undefined;
+  /** AV-1029. Written with the moment drawn, for the editor to read. */
+  playhead: React.MutableRefObject<number>;
   /** AV-1023 (TD-092). Whether a route inset's map is shown live under the canvas: not inside a map's own canvas. */
   liveMaps: boolean;
   /** The host's time, shown and moved here instead of a clock of the preview's own (AV-1207). */
@@ -850,14 +971,19 @@ function CanvasPreview({
     | undefined
   >(undefined);
 
+  // AV-1031. A font that arrives after the first frame: the renderer, which measures a text once, is made again.
+  const fonts = useSyncExternalStore(subscribeFonts, fontsVersion);
   const factor = PREVIEW_LONG_SIDE / Math.max(frame.width, frame.height);
   const pw = Math.max(1, Math.round(frame.width * factor));
   const ph = Math.max(1, Math.round(frame.height * factor));
   const renderer = useMemo(
-    () => createOverlayRenderer({ template, timeline, activity, units, width: pw, height: ph, readerTimeZone, personal }),
-    [template, timeline, activity, units, pw, ph, readerTimeZone, personal],
+    () => createOverlayRenderer({ template, timeline, activity, units, width: pw, height: ph, readerTimeZone, personal, images, frameWidth: frame.width }),
+    // `fonts` is not read: a font that arrives makes the renderer again, since it measures its texts once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [template, timeline, activity, units, pw, ph, readerTimeZone, personal, images, frame.width, fonts],
   );
-  const boxes = useMemo(() => boxesOf(template.components, stillContext, pw, ph), [template, stillContext, pw, ph]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const boxes = useMemo(() => boxesOf(template.components, stillContext, pw, ph, template.style.fontFamily), [template, stillContext, pw, ph, fonts]);
 
   // The latest listener, so a new one never reloads the video.
   const mediaInfo = useRef(onMediaInfo);
@@ -919,21 +1045,20 @@ function CanvasPreview({
     const timer = setTimeout(() => setRestedKey(typedKey), typedKey === '' ? 0 : 700);
     return () => clearTimeout(timer);
   }, [typedKey]);
-  const liveIds = useMemo(
-    () =>
-      new Set(
-        liveMaps
-          ? template.components
-              .filter((component) => component.visible && cappedMapIds(template.components).has(component.id) && component.routeInset && insetStyleUrl(component.routeInset, maptilerKey) !== undefined)
-              .map((component) => component.id)
-          : [],
-      ),
-    [liveMaps, template, maptilerKey],
-  );
+  // AV-1029. A map is under the canvas only while its inset's window is open (it is not faded: the preview's map is a layer of its own); the key keeps the set the same between ticks.
+  const liveKey = liveMaps
+    ? template.components
+        .filter((component) => component.visible && visibilityAt(component.visibility, time) > 0 && cappedMapIds(template.components).has(component.id) && component.routeInset && insetStyleUrl(component.routeInset, maptilerKey) !== undefined)
+        .map((component) => component.id)
+        .join('\n')
+    : '';
+  const liveIds = useMemo(() => new Set(liveKey === '' ? [] : liveKey.split('\n')), [liveKey]);
   useEffect(() => {
     const ctx = canvas.current?.getContext('2d');
     if (!ctx) return;
-    renderer.drawFrame(ctx, time, liveIds.size > 0 ? { maps: { live: liveIds } } : undefined);
+    playheadRef.current = time;
+    // AV-1029. Only the editor's canvas shows a component outside its window, faded.
+    renderer.drawFrame(ctx, time, { ghostHidden: true, placeholders: brokenIds, ...(liveIds.size > 0 ? { maps: { live: liveIds } } : {}) });
     const box = selectedId ? boxes.get(selectedId) : undefined;
     if (box) {
       // The outline and the corner handle are the preview's own; never in the export.
@@ -947,7 +1072,18 @@ function CanvasPreview({
       ctx.fillRect(box.x + box.w - HANDLE / 2, box.y + box.h - HANDLE / 2, HANDLE, HANDLE);
       ctx.restore();
     }
-  }, [renderer, time, boxes, selectedId, liveIds]);
+  }, [renderer, time, boxes, selectedId, liveIds, playheadRef, brokenIds]);
+
+  // AV-1029 (TD-101). The selected component's window, as a band under the time slider.
+  const shownWindow = template.components.find((component) => component.id === selectedId)?.visibility;
+  const band =
+    shownWindow && durationSeconds > 0
+      ? (() => {
+          const start = Math.min(durationSeconds, shownWindow.from ?? 0);
+          const end = Math.min(durationSeconds, shownWindow.to ?? durationSeconds);
+          return { left: `${(start / durationSeconds) * 100}%`, width: `${(Math.max(0, end - start) / durationSeconds) * 100}%` };
+        })()
+      : undefined;
 
   const togglePlay = () => {
     const media = element.current;
@@ -1085,23 +1221,102 @@ function CanvasPreview({
             {playing ? 'Pause' : 'Play'}
           </button>
         )}
-        <input
-          type="range"
-          className="overlay-preview__scrub"
-          aria-label="Canvas time"
-          min={0}
-          max={durationSeconds || 0}
-          step={0.1}
-          value={Math.min(time, durationSeconds || 0)}
-          disabled={!(durationSeconds > 0)}
-          onChange={(event) => seek(Number(event.target.value))}
-        />
+        <span className="overlay-preview__scrub-wrap">
+          {band && <span className="overlay-preview__window" aria-hidden="true" style={band} />}
+          <input
+            type="range"
+            className="overlay-preview__scrub"
+            aria-label="Canvas time"
+            min={0}
+            max={durationSeconds || 0}
+            step={0.1}
+            value={Math.min(time, durationSeconds || 0)}
+            disabled={!(durationSeconds > 0)}
+            onChange={(event) => seek(Number(event.target.value))}
+          />
+        </span>
         <span className="overlay-preview__time" role="timer" aria-label="Canvas time shown">
           {formatDuration(time)} / {formatDuration(durationSeconds)}
         </span>
       </div>
       )}
     </div>
+  );
+}
+
+const FIT_LABELS: Record<ImageFit, string> = {
+  contain: 'Contain (the whole picture)',
+  cover: 'Cover (cropped to the box)',
+  stretch: 'Stretch',
+  original: 'Original size (centred, clipped to the box)',
+};
+
+/** AV-1030 (TD-102). An image's fit, opacity and file, and why it cannot be drawn when it cannot. */
+function ImageEditor({
+  id,
+  setting,
+  problem,
+  onReplace,
+  onChange,
+}: {
+  id: string;
+  setting: OverlayImageSetting;
+  problem: string | undefined;
+  onReplace: (file: File) => Promise<{ ok: true; image: OverlayImageSetting } | { ok: false; reason: string }>;
+  onChange: (patch: Partial<OverlayImageSetting>) => void;
+}) {
+  const [refused, setRefused] = useState<string>();
+  return (
+    <>
+      {problem && (
+        <p role="alert" className="export__error">
+          {problem} Replace it with a file below, or remove the element.
+        </p>
+      )}
+      {refused && (
+        <p role="alert" className="export__error">
+          {refused}
+        </p>
+      )}
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-fit`}>Fit</label>
+        <select id={`${id}-fit`} className="select" value={setting.fit} onChange={(event) => onChange({ fit: event.target.value as ImageFit })}>
+          {IMAGE_FITS.map((fit) => (
+            <option key={fit} value={fit}>
+              {FIT_LABELS[fit]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <PercentField
+        id={`${id}-image-opacity`}
+        label="Opacity (%)"
+        value={String(Math.round(setting.opacity * 100))}
+        onCommit={(value) => onChange({ opacity: Math.min(1, Math.max(0, value / 100)) })}
+      />
+      <div className="overlay-controls__field">
+        <label htmlFor={`${id}-image-file`}>Replace the picture</label>
+        <input
+          id={`${id}-image-file`}
+          className="input"
+          type="file"
+          accept={IMAGE_ACCEPT}
+          onChange={async (event) => {
+            const input = event.target;
+            const file = input.files?.[0];
+            if (!file) return;
+            const read = await onReplace(file);
+            input.value = '';
+            if (!read.ok) {
+              setRefused(read.reason);
+              return;
+            }
+            setRefused(undefined);
+          }}
+        />
+      </div>
+      <p className="overlay-controls__hint">Read on this device and kept in the layout file; nothing is uploaded. PNG, JPEG, WebP or SVG, at most 2 MB.</p>
+    </>
   );
 }
 
@@ -1114,8 +1329,21 @@ function ComponentEditor({
   units,
   host,
   trimmed,
+  timed,
+  playhead,
+  imageProblem,
+  onReplaceImage,
+  layoutFont,
   onChange,
 }: {
+  /** AV-1031 (TD-103). The layout's font, which the component's own overrides: the box that grows to fit is measured in the resolved one. */
+  layoutFont: string | undefined;
+  /** AV-1030 (TD-102). Why the selected image cannot be drawn, if it cannot; and reading a file to replace its picture. */
+  imageProblem: string | undefined;
+  onReplaceImage: (file: File) => Promise<{ ok: true; image: OverlayImageSetting } | { ok: false; reason: string }>;
+  /** AV-1029. Whether the canvas has a time, so a window can be set: not on a still. */
+  timed: boolean;
+  playhead: () => number;
   component: OverlayComponent;
   components: OverlayComponent[];
   frame: { width: number; height: number };
@@ -1140,7 +1368,7 @@ function ComponentEditor({
         components.map((entry) => (entry.id === component.id ? patch(entry) : entry)),
         component.id,
         frame,
-        { timeline, units, measure: measureText },
+        { timeline, units, measure: measureText, layoutFont },
       ),
     );
   /** Merges into the figure's settings, dropping what is unset and the whole of it when nothing is. */
@@ -1190,6 +1418,7 @@ function ComponentEditor({
           label: undefined,
           value: '',
           figure,
+          fontFamily: style.fontFamily ?? layoutFont,
           track: false,
         });
         return (laid.labelAdvance - laid.labelSize) / frame.width;
@@ -1225,6 +1454,32 @@ function ComponentEditor({
         <p className="overlay-controls__note" role="status">
           {ELEVATION_MISSING} The profile stays empty until an activity with elevation is opened.
         </p>
+      )}
+
+      {component.type !== 'shape' && component.type !== 'image' && component.type !== 'routeInset' && (
+        <FontField
+          label="Font"
+          inherit
+          value={component.style.fontFamily}
+          onChange={(family) =>
+            updateFigure((current) => ({ ...current, style: withFontFamily(current.style, family) }))
+          }
+        />
+      )}
+
+      {timed && (
+        <ShownEditor
+          visibility={component.visibility}
+          playhead={playhead}
+          onChange={(visibility) =>
+            update((current) => {
+              const next = { ...current };
+              if (visibility) next.visibility = visibility;
+              else delete next.visibility;
+              return next;
+            })
+          }
+        />
       )}
 
       <div className="still-image__position">
@@ -1292,6 +1547,16 @@ function ComponentEditor({
             ))}
           </select>
         </div>
+      )}
+
+      {component.type === 'image' && component.image && (
+        <ImageEditor
+          id={id}
+          setting={component.image}
+          problem={imageProblem}
+          onReplace={onReplaceImage}
+          onChange={(patch) => update((current) => ({ ...current, image: { ...(current.image as OverlayImageSetting), ...patch } }))}
+        />
       )}
 
       {shape && (
@@ -1451,6 +1716,7 @@ function ComponentEditor({
         </div>
       )}
       {component.type === 'summary' && (
+        <>
         <div className="overlay-controls__field">
           <label htmlFor={`${id}-stat`}>Figure</label>
           <select id={`${id}-stat`} className="select" value={component.summary?.stat} onChange={(event) => update((current) => ({ ...current, summary: { stat: event.target.value as SummaryStatKey } }))}>
@@ -1461,6 +1727,8 @@ function ComponentEditor({
             ))}
           </select>
         </div>
+        <SummaryFields id={id} component={component} context={stillContext} onChange={(change) => update(change)} />
+        </>
       )}
       {component.type === 'date' && <DateSettings id={id} component={component} context={stillContext} onChange={(change) => update(change)} />}
 

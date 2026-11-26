@@ -5,6 +5,8 @@ import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import type { ExportOutput } from '../../overlay/export/client';
 import { OverlayExportError } from '../../overlay/export/errors';
+import { prepareTemplateFonts } from '../../overlay/fonts';
+import { brokenImagesMessage, closeImages, decodeTemplateImages } from '../../overlay/images';
 import { createMapVideoFigures, drawAttribution, type PhotoImage } from '../figures';
 import type { PersonalFigures } from '../../overlay/template';
 import type { MapVideoModel } from '../model';
@@ -227,24 +229,53 @@ export async function openMapVideoRenderer(
 ): Promise<MapVideoRenderer> {
   const { activity, model, settings, units, maptilerKey, photoImages, personal } = input;
   const { width, height } = settings.output;
-  const exportMap = await openExportMap({ width, height, styleUrl: basemapStyleUrl(settings, maptilerKey), what: 'a frame', ...options });
+  // AV-1030 (TD-102). Each image of the overlay is decoded once for the export, here on the page, before any map is asked for, and closed with the renderer.
+  const decoded = await decodeTemplateImages(settings.overlay?.components ?? [], { width, height });
+  if (decoded.broken.length > 0) {
+    closeImages(decoded.images.values());
+    throw new OverlayExportError('render_failed', brokenImagesMessage(decoded.broken));
+  }
+  // AV-1031 (TD-103). The overlay's fonts are loaded on this page, which draws every frame, before any map is asked for: a font that fails stops the video here, not partway.
+  if (settings.overlay) {
+    try {
+      await prepareTemplateFonts(settings.overlay);
+    } catch (error) {
+      closeImages(decoded.images.values());
+      throw error;
+    }
+  }
+  const exportMap = await openExportMap({ width, height, styleUrl: basemapStyleUrl(settings, maptilerKey), what: 'a frame', ...options }).catch((error: unknown) => {
+    closeImages(decoded.images.values());
+    throw error;
+  });
   const { map, close } = exportMap;
-  installVideoLayers(map, settings);
-  const colors = videoMapColors(activity, model, settings);
-  styleVideoMap(map, activity, model, settings, colors);
+  let colors: ReturnType<typeof videoMapColors>;
+  try {
+    installVideoLayers(map, settings);
+    colors = videoMapColors(activity, model, settings);
+    styleVideoMap(map, activity, model, settings, colors);
+  } catch (error) {
+    close();
+    closeImages(decoded.images.values());
+    throw error;
+  }
 
   const canvas: OffscreenCanvas | HTMLCanvasElement =
     typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(width, height) : Object.assign(document.createElement('canvas'), { width, height });
   const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
   if (!ctx) {
     close();
+    closeImages(decoded.images.values());
     throw new OverlayExportError('unsupported_browser', 'This browser cannot draw the video’s frames.');
   }
-  const figures = createMapVideoFigures({ activity, model, settings, units, width, height, photoImages, personal });
+  const figures = createMapVideoFigures({ activity, model, settings, units, width, height, photoImages, personal, images: decoded.images });
   const credit = mapVideoAttribution(settings);
 
   return {
-    close,
+    close: () => {
+      closeImages(decoded.images.values());
+      close();
+    },
     requests: exportMap.requests,
     async drawFrame(seconds) {
       await exportMap.settle(() => drawVideoMap(map, model, settings, colors, seconds, 0));

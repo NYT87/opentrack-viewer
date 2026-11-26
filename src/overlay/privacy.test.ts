@@ -89,8 +89,36 @@ describe('the overlay code can send nothing anywhere and keeps nothing (AV-1008)
     expect(overlayFiles.length).toBeGreaterThan(20);
   });
 
-  it.each(overlayFiles.map((file) => [relative(SRC, file), file]))('%s', (_name, file) => {
-    expect(violationsIn(readFileSync(file as string, 'utf8'))).toEqual([]);
+  it.each(overlayFiles.map((file) => [relative(SRC, file), file]))('%s', (name, file) => {
+    // AV-1030 (TD-102). The one `new Image()`: it decodes an SVG, given nothing but the `blob:` URL of the reader's own file (checked below).
+    // AV-1031 (TD-103). `fonts.ts` fetches the bundled fonts from this app's own path; `fontStore.ts` keeps the fonts the reader asked to keep (both checked below).
+    const allowed = name === 'overlay/images.ts' ? ['Image()'] : name === 'overlay/fonts.ts' ? ['fetch'] : name === 'overlay/fontStore.ts' ? ['indexedDB'] : [];
+    expect(violationsIn(readFileSync(file as string, 'utf8')).filter((violation) => !allowed.includes(violation))).toEqual([]);
+  });
+
+  it('gives the one image element only the blob URL of the reader’s own SVG, which is revoked (AV-1030)', () => {
+    const code = readFileSync(join(SRC, 'overlay/images.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(code.match(/new Image\(/g)).toHaveLength(1);
+    expect([...code.matchAll(/\.src\s*=\s*([^;]+);/g)].map((match) => match[1])).toEqual(['url']);
+    expect(code).toMatch(/const url = URL\.createObjectURL\(/);
+    expect(code).toMatch(/URL\.revokeObjectURL\(url\)/);
+    // Never put into the page.
+    expect(code).not.toMatch(/innerHTML|insertAdjacentHTML|appendChild|DOMParser|createElement/);
+  });
+
+  it('lets fonts.ts fetch only a bundled font from the app’s own path, and fontStore.ts open only its own database (AV-1031)', () => {
+    const strip = (file: string) => readFileSync(join(SRC, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const fonts = strip('overlay/fonts.ts');
+    expect(fonts.match(/\bfetch\s*\(/g)).toHaveLength(1);
+    expect([...fonts.matchAll(/\bfetch\s*\((\w+\([^)]*\))\)/g)].map((match) => match[1])).toEqual(['bundledFontUrl(font, weight)']);
+    // The URL starts at the app's base path: no scheme, no other origin.
+    expect(fonts).toMatch(/return `\$\{import\.meta\.env\.BASE_URL\}fonts\//);
+    // Nothing else of the browser's storage or network.
+    expect(violationsIn(fonts).filter((violation) => violation !== 'fetch')).toEqual([]);
+    const store = strip('overlay/fontStore.ts');
+    expect([...store.matchAll(/indexedDB\.open\(([^)]*)\)/g)].map((match) => match[1])).toEqual(['DB_NAME, 1']);
+    expect(store).toMatch(/const DB_NAME = 'opentrack-fonts'/);
+    expect(violationsIn(store).filter((violation) => violation !== 'indexedDB')).toEqual([]);
   });
 
   describe('the guard itself catches what it is for', () => {

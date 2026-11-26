@@ -10,6 +10,8 @@ import type { MapVideoModel } from '../mapVideo/model';
 import { formatVideoTime } from '../mapVideo/timing';
 import { clampKeyframe, offsetBetween, type CameraKeyframe } from '../mapVideo/keyframes';
 import { MapVideoKeyframes, freshKeyframeId } from './MapVideoKeyframes';
+import { useTemplateImages } from './useTemplateImages';
+import { useTemplateFonts } from './useTemplateFonts';
 import { createMapVideoFigures, type MapVideoFigures, type PhotoImage } from '../mapVideo/figures';
 import type { MapVideoSettings } from '../mapVideo/project';
 import { usePersonalStore } from '../state/personalStore';
@@ -134,9 +136,14 @@ export function MapVideoPreview({
 
   // What the drawing reads, without making a new map for each change; updated before the effects below run.
   const personal = usePersonalStore((state) => state.personal);
-  const latest = useRef({ model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages, personal });
+  // AV-1030 (TD-102). The overlay's images, decoded for the video's frame and drawn scaled to the preview's.
+  const overlayComponents = useMemo(() => settings.overlay?.components ?? [], [settings.overlay]);
+  const overlayImages = useTemplateImages(overlayComponents, settings.output).images;
+  // AV-1031 (TD-103). A font that arrives draws the figures again (they are drawn in the system font until then).
+  const fontsVersion = useTemplateFonts(settings.overlay ?? undefined).version;
+  const latest = useRef({ model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages, personal, overlayImages, fontsVersion });
   useLayoutEffect(() => {
-    latest.current = { model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages, personal };
+    latest.current = { model, settings, seconds, colors, playing, onSnapshot, activity, units, photoImages, personal, overlayImages, fontsVersion };
   });
 
   // Make the map once; the parent makes a new component for another basemap or terrain.
@@ -194,7 +201,7 @@ export function MapVideoPreview({
     const canvas = figuresRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const { model: current, settings: now, activity: active, units: shown, photoImages: images, personal: owner } = latest.current;
+    const { model: current, settings: now, activity: active, units: shown, photoImages: images, personal: owner, overlayImages: pictures, fontsVersion: fonts } = latest.current;
     const ratio = window.devicePixelRatio || 1;
     const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
@@ -202,16 +209,21 @@ export function MapVideoPreview({
       canvas.width = width;
       canvas.height = height;
     }
-    const key = [current, now.overlay, now.summaryCard.enabled, now.terrain, now.basemap.source, active, shown, images, owner, width, height];
+    const key = [current, now.overlay, now.summaryCard.enabled, now.terrain, now.basemap.source, active, shown, images, owner, pictures, fonts, width, height];
     const cached = figuresCache.current;
     const figures =
       cached && cached.key.every((value, i) => value === key[i])
         ? cached.figures
-        : createMapVideoFigures({ activity: active, model: current, settings: now, units: shown, width, height, photoImages: images, personal: owner });
+        : createMapVideoFigures({ activity: active, model: current, settings: now, units: shown, width, height, photoImages: images, personal: owner, images: pictures, frameWidth: now.output.width });
     figuresCache.current = { key, figures };
     ctx.clearRect(0, 0, width, height);
     figures.drawFrame(ctx, at);
   }, []);
+
+  // A picture that has just been decoded (or replaced) is drawn at the moment shown.
+  useEffect(() => {
+    if (ready) drawFigures(Math.min(latest.current.seconds, length));
+  }, [overlayImages, fontsVersion, ready, drawFigures, length]);
 
   /** Draws the moment `at` of the video: the camera, the line, the trail and the marker. */
   const draw = useCallback((at: number) => {

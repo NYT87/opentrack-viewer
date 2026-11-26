@@ -3,6 +3,7 @@ import {
   DEFAULT_OVERLAY_CONTROLS,
   TILE_WIDTH_EMS,
   buildOverlay,
+  type OverlayControls,
   type OverlayPresetId,
 } from './presets';
 import { figureLayout } from './figureLayout';
@@ -31,9 +32,11 @@ import { cappedMapIds } from './insetCamera';
 import { DEFAULT_SPLITS, splitsContentHeight, splitsMetrics, splitsUnavailableReason } from './splits';
 import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
 import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
+import { cleanFamily } from './fonts';
 import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import type { MeasureText } from './staticImage';
 import type { UnitSystem } from '../domain/units';
+import type { OverlayImageSetting } from './imageSetting';
 
 /**
  * AV-1011 (TD-062). The custom canvas: a video overlay laid out freely, with
@@ -100,6 +103,8 @@ export type CanvasElementKey =
   | 'elevationProfile'
   | `still:${string}`
   | `shape:${ShapeKind}`
+  /** AV-1030 (TD-102). The reader's own picture: chosen from a file, so it is added by `newImageComponent`. */
+  | 'image'
   /** AV-1016. An entry of the registry of predefined components, by its id. */
   | `predefined:${string}`;
 
@@ -142,7 +147,7 @@ export const FIGURE_NAMES: Record<OverlayMetricKey, string> = {
 export interface CanvasElementChoice {
   key: CanvasElementKey;
   label: string;
-  group: 'Live figures' | 'Along the route' | 'Whole activity' | 'Shapes' | 'Cycling' | 'Running' | 'Any sport';
+  group: 'Live figures' | 'Along the route' | 'Whole activity' | 'Shapes' | 'Pictures' | 'Cycling' | 'Running' | 'Any sport';
   available: boolean;
   reason?: string;
 }
@@ -261,6 +266,7 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
     group: 'Shapes',
     available: true,
   }));
+  const pictures: CanvasElementChoice[] = [{ key: 'image', label: 'Image from a file', group: 'Pictures', available: true }];
   // AV-1016. The registry's entries, by sport; the editor only reads this list, so a sport is added in the registry.
   const predefined: CanvasElementChoice[] = PREDEFINED_ENTRIES.map((entry) => {
     const available = predefinedAvailability(entry, timeline);
@@ -280,7 +286,7 @@ export function canvasElementChoices(timeline: OverlayTimeline, still: StillImag
       ? { ...choice, label: `${choice.label} (${choice.group})` }
       : choice,
   );
-  return [...live, ...gauges, ...told, ...whole, ...shapes];
+  return [...live, ...gauges, ...told, ...whole, ...shapes, ...pictures];
 }
 
 const SPORT_GROUPS = { cycling: 'Cycling', running: 'Running', any: 'Any sport' } as const;
@@ -304,6 +310,7 @@ export function newCanvasComponent(
     if (!built) throw new Error(`No predefined component "${key}".`);
     return built;
   }
+  if (key === 'image') throw new Error('An image is added from a file: see newImageComponent.');
   const aspect = size.width / size.height;
   const tileW = Math.min(0.3, (BASE_FONT_CQW / 100) * TILE_WIDTH_EMS);
   const tileH = Math.min(0.2, 0.075 * aspect);
@@ -538,6 +545,29 @@ export function newCanvasComponents(
   return [newCanvasComponent(template, key, size, timeline, units)];
 }
 
+/**
+ * AV-1030 (TD-102). A new image component for a picture read from a file: a fifth of the frame wide at the
+ * picture's own shape (shorter if it would be taller than the frame), in the top left a margin in.
+ */
+export function newImageComponent(
+  template: OverlayTemplate,
+  size: { width: number; height: number },
+  image: OverlayImageSetting,
+  natural: { width: number; height: number },
+): OverlayComponent {
+  const shape = size.width / size.height / (natural.width / natural.height);
+  const width = Math.min(0.2, 0.9 / shape);
+  return {
+    id: freshComponentId(template, 'image'),
+    type: 'image',
+    visible: true,
+    unitMode: 'auto',
+    style: {},
+    rect: normalizeRect({ x: 0.04, y: 0.04, width, height: Math.min(0.9, width * shape) }),
+    image,
+  };
+}
+
 /** A speed gauge's top: the fastest the activity went, rounded up, or 15 m/s (54 km/h). */
 function speedRangeOf(timeline: OverlayTimeline): number {
   let max = 0;
@@ -679,7 +709,7 @@ export function growFigureToFit(
   components: OverlayComponent[],
   id: string,
   frame: { width: number; height: number },
-  context: { timeline: OverlayTimeline; units: UnitSystem; measure: MeasureText },
+  context: { timeline: OverlayTimeline; units: UnitSystem; measure: MeasureText; /** AV-1031. The layout's font, under the figure's own. */ layoutFont?: string },
 ): OverlayComponent[] {
   const found = components.find((component) => component.id === id);
   if (!found || (found.type !== 'text' && found.type !== 'gauge') || !found.source) return components;
@@ -704,7 +734,7 @@ export function growFigureToFit(
             : WIDEST_VALUE[source.metric]
       : (timeline.sensorLabels.get(sourceId)?.max ?? 999);
   const resolved = resolveOverlayComponent(
-    canvasTemplate(components),
+    canvasTemplate(components, undefined, context.layoutFont),
     target,
     { videoTimeSeconds: 0, activityElapsedSeconds: 0, values: { [sourceId]: wide } },
     timeline,
@@ -717,6 +747,7 @@ export function growFigureToFit(
     label: resolved.label,
     value: resolved.text ?? '',
     figure: target.figure,
+    fontFamily: resolved.style.fontFamily,
     track: resolved.fraction !== undefined,
     measure: context.measure,
   });
@@ -835,6 +866,8 @@ export interface CanvasDraft {
   history: CanvasState[];
   /** AV-1022 (TD-091). The privacy trim of the canvas's template: not part of Undo, which is the layout's. */
   privacyTrim?: PrivacyTrim;
+  /** AV-1031 (TD-103). The layout's font, by name; absent is the system font. */
+  fontFamily?: string;
 }
 
 export const EMPTY_CANVAS_DRAFT: CanvasDraft = {
@@ -866,6 +899,21 @@ export function componentsFromPreset(
   return buildOverlay({ ...DEFAULT_OVERLAY_CONTROLS, presetId }, timeline, size.width / size.height).template.components;
 }
 
+/**
+ * AV-1028 (TD-100). The template mode's components as the reader set them, at this canvas's
+ * shape, with the template's style (accent, text colour, background, text size) written onto
+ * each component's own style (its own keys win), so the canvas, which draws every component
+ * over the default style, draws what the template preview draws. Components off are not in it.
+ */
+export function componentsFromControls(
+  controls: OverlayControls,
+  timeline: OverlayTimeline,
+  size: { width: number; height: number },
+): OverlayComponent[] {
+  const { template } = buildOverlay(controls, timeline, size.width / size.height);
+  return template.components.map((component) => ({ ...component, style: { ...template.style, ...component.style } }));
+}
+
 /** AV-1016. What Start from lays out: a built-in template, or a sport's own layout of predefined components. */
 export function componentsFromStart(
   id: StartLayoutId,
@@ -879,12 +927,12 @@ export function componentsFromStart(
 }
 
 /** A template of these components, ready for an exporter or a layout file. */
-export function canvasTemplate(components: OverlayComponent[], privacyTrim?: PrivacyTrim): OverlayTemplate {
+export function canvasTemplate(components: OverlayComponent[], privacyTrim?: PrivacyTrim, fontFamily?: string): OverlayTemplate {
   const trim = readPrivacyTrim(privacyTrim);
   return {
     version: OVERLAY_TEMPLATE_VERSION,
     name: 'Custom canvas',
-    style: { ...DEFAULT_OVERLAY_STYLE },
+    style: { ...DEFAULT_OVERLAY_STYLE, ...(cleanFamily(fontFamily) ? { fontFamily: cleanFamily(fontFamily) } : {}) },
     components: components.map((component) => ({ ...component, rect: normalizeRect(component.rect) })),
     ...(trim ? { privacyTrim: trim } : {}),
   };

@@ -3,6 +3,8 @@ import type { UnitSystem } from '../domain/units';
 import { openExportMap, type RenderWaiting } from '../mapVideo/export/renderMapVideo';
 import { basemapStyleUrl, drawWholeRoute, installVideoLayers, styleVideoMap, videoMapColors } from '../mapVideo/videoMap';
 import { canvasTemplate } from '../overlay/customCanvas';
+import { prepareTemplateFonts } from '../overlay/fonts';
+import { brokenImagesMessage, closeImages, decodeTemplateImages } from '../overlay/images';
 import { createOverlayRenderer, type OverlayContext2D } from '../overlay/export/drawOverlay';
 import { OverlayExportError } from '../overlay/export/errors';
 import { measureText } from '../overlay/measureText';
@@ -49,7 +51,29 @@ export async function renderMapImage(
   const { plan } = planned;
   const { width, height, mapHeight, camera } = plan;
 
-  const exportMap = await openExportMap({ width, height: mapHeight, styleUrl: basemapStyleUrl(plan.video, ''), what: 'the image', ...options });
+  // AV-1030 (TD-102). Each image of the canvas is decoded once, before any map is asked for, and closed when the picture is made.
+  const decoded = await decodeTemplateImages(settings.layout === 'canvas' ? settings.overlay : [], { width, height });
+  const images = decoded.images;
+  if (decoded.broken.length > 0) {
+    closeImages(images.values());
+    throw new OverlayExportError('render_failed', brokenImagesMessage(decoded.broken));
+  }
+  // AV-1031 (TD-103). The canvas's fonts are loaded before any map is asked for; one that fails stops the picture with the reason.
+  if (settings.layout === 'canvas') {
+    try {
+      await prepareTemplateFonts(canvasTemplate(settings.overlay));
+    } catch (error) {
+      closeImages(images.values());
+      throw error;
+    }
+  }
+  let exportMap: Awaited<ReturnType<typeof openExportMap>>;
+  try {
+    exportMap = await openExportMap({ width, height: mapHeight, styleUrl: basemapStyleUrl(plan.video, ''), what: 'the image', ...options });
+  } catch (error) {
+    closeImages(images.values());
+    throw error;
+  }
   try {
     const { map } = exportMap;
     installVideoLayers(map, plan.video);
@@ -71,7 +95,7 @@ export async function renderMapImage(
       settings.layout === 'canvas' && settings.overlay.length > 0
         ? (() => {
             const clock = stillOverlayClock(plan.shown);
-            const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone, personal });
+            const renderer = createOverlayRenderer({ template: canvasTemplate(settings.overlay), timeline: clock.timeline, activity: plan.shown, units, width, height, readerTimeZone, personal, images });
             return (target: OverlayContext2D) => renderer.drawFrame(target, clock.seconds, { clear: false });
           })()
         : undefined;
@@ -89,6 +113,7 @@ export async function renderMapImage(
     );
     return { blob, requests: exportMap.requests() };
   } finally {
+    closeImages(images.values());
     exportMap.close();
   }
 }

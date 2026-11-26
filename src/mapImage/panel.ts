@@ -1,4 +1,5 @@
-import { STILL_FONT_FAMILY, type MeasureText } from '../overlay/staticImage';
+import { fontStack } from '../overlay/fonts';
+import type { MeasureText } from '../overlay/staticImage';
 
 /**
  * AV-1013. The map image's panel of details, laid out: its height follows
@@ -47,7 +48,7 @@ const MIN_SHRINK = 0.35;
 
 const SIZES = { pad: 48, title: 46, date: 26, caption: 22, value: 50, rowGap: 26, colGap: 40, sectionGap: 26, profile: 150 };
 
-const font = (size: number, bold: boolean) => `${bold ? '700 ' : ''}${size}px ${STILL_FONT_FAMILY}`;
+const font = (size: number, bold: boolean) => `${bold ? '700 ' : ''}${size}px ${fontStack()}`;
 
 /** `text`, cut with an ellipsis where it is wider than `maxWidth`. */
 export function fitText(text: string, fontSpec: string, maxWidth: number, measure: MeasureText): string {

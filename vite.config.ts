@@ -137,6 +137,8 @@ export default defineConfig({
         // silently drop it from the precache.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         navigateFallback: 'index.html',
+        // AV-1031. A font's licence file opens in a tab: it is the file, not the app's shell.
+        navigateFallbackDenylist: [/\/fonts\//],
         runtimeCaching: [],
         cleanupOutdatedCaches: true,
       },

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { stubFonts } from '../test/helpers/fonts';
 import userEvent from '@testing-library/user-event';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { OverlayExportError } from '../overlay/export/errors';
@@ -839,5 +840,76 @@ describe('the source’s timecode (AV-1026, TD-095)', () => {
     setup({ video: undefined, size: { width: 1280, height: 720 }, media: undefined });
     expect(screen.queryByTestId('timecode-note')).toBeNull();
     expect(screen.queryByRole('checkbox', { name: /Number the frames/ })).toBeNull();
+  });
+});
+
+describe('an image in the layout (AV-1030, TD-102)', () => {
+  const PNG = `data:image/png;base64,${btoa('\x89PNG\r\n\x1a\n.....')}`;
+  const withImage = (src: string) =>
+    canvasTemplate([
+      { id: 'logo', type: 'image', visible: true, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, unitMode: 'auto', style: {}, image: { src, fit: 'contain', opacity: 1, name: 'logo.png' } },
+    ]);
+  const bitmap = () => ({ width: 10, height: 10, close: vi.fn() }) as unknown as ImageBitmap;
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('refuses to start while an image is broken, saying which and why, and starts nothing', async () => {
+    const { start } = setup({ template: withImage('') });
+    expect(screen.getByRole('button', { name: 'Export PNG sequence' })).toBeDisabled();
+    expect(within(panel()).getByRole('alert').textContent).toMatch(/logo\.png cannot be drawn: .*missing.*Replace or remove it to export/);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('decodes each image once when the export starts and hands the bitmaps to it', async () => {
+    const made = bitmap();
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => made));
+    const { start } = setup({ template: withImage(PNG) });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    expect(createImageBitmap).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0]).toMatchObject({ images: { logo: made } });
+  });
+
+  it('says why when a picture will not decode, starts nothing, and lets go of the others', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => { throw new Error('torn'); }));
+    const { start } = setup({ template: withImage(PNG) });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await vi.waitFor(() => expect(within(panel()).getByText(/logo\.png: could not be read \(torn\)/)).toBeTruthy());
+    expect(start).not.toHaveBeenCalled();
+  });
+});
+
+describe('the layout’s font (AV-1031, TD-103)', () => {
+  const withFont = (family: string) =>
+    canvasTemplate([{ id: 'note', type: 'text', visible: true, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }, unitMode: 'auto', style: { fontFamily: family }, source: { kind: 'metric', metric: 'speed' } }]);
+  let fonts: ReturnType<typeof stubFonts>;
+  beforeEach(() => {
+    fonts = stubFonts();
+  });
+  afterEach(() => fonts.unstub());
+
+  it('loads the bundled font and hands its bytes to the export, which registers them before drawing', async () => {
+    const { start } = setup({ template: withFont('Oswald') });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    const request = start.mock.calls[0]![0] as { fonts: { family: string; weight: number; bytes: ArrayBuffer }[] };
+    expect(request.fonts.map((face) => [face.family, face.weight])).toEqual([['Oswald', 400], ['Oswald', 700]]);
+    expect(request.fonts[0]!.bytes.byteLength).toBeGreaterThan(0);
+    // Only the app's own path was asked for.
+    expect(fonts.requests).toEqual(['/fonts/oswald/oswald-latin-400-normal.woff2', '/fonts/oswald/oswald-latin-700-normal.woff2']);
+  });
+
+  it('stops with the reason before the export starts when the layout’s font is not loaded here', async () => {
+    const { start } = setup({ template: withFont('Brand Sans') });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await vi.waitFor(() => expect(within(panel()).getByText('This layout uses Brand Sans, which is not loaded here.')).toBeTruthy());
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('asks for no font, and starts at once, when the layout draws in the system font', async () => {
+    const { start } = setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0]).not.toHaveProperty('fonts');
+    expect(fonts.requests).toEqual([]);
   });
 });

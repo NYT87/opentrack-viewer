@@ -1,5 +1,6 @@
+import { fontStack } from '../fonts';
 import { CARDINALS, DEFAULT_COMPASS, compassAngle, compassPoint } from '../compass';
-import { FIGURE_FONT_FAMILY, figureLayout, haloShadow } from '../figureLayout';
+import { figureLayout, haloShadow } from '../figureLayout';
 import { needsHalo, type ResolvedOverlayComponent } from '../template';
 import type { Box, OverlayContext2D } from './drawOverlay';
 import { drawLabelValue } from './drawText';
@@ -62,7 +63,7 @@ export function drawCompass(ctx: OverlayContext2D, box: Box, ready: Ready, em: n
   if (setting.labels) {
     const size = Math.max(6, 0.2 * R);
     const shadow = needsHalo(ready.style) ? haloShadow(ready.component.figure) : undefined;
-    ctx.font = `bold ${size}px ${FIGURE_FONT_FAMILY}`;
+    ctx.font = `bold ${size}px ${fontStack(ready.style.fontFamily)}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (shadow) {
@@ -81,7 +82,7 @@ export function drawCompass(ctx: OverlayContext2D, box: Box, ready: Ready, em: n
   }
 
   // The heading, written as a figure, in the middle (under the needle's pivot when there is one).
-  const layout = figureLayout({ em, frameWidth, label: ready.label, value: ready.text ?? '', figure: ready.component.figure, track: false });
+  const layout = figureLayout({ em, frameWidth, label: ready.label, value: ready.text ?? '', figure: ready.component.figure, fontFamily: ready.style.fontFamily, track: false });
   const top = setting.style === 'needle' ? cy + 0.14 * R : cy - layout.contentHeight / 2;
   drawLabelValue(ctx, ready, layout, em, { x: cx, top, align: 'center', maxWidth: 1.3 * R });
 

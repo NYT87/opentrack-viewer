@@ -1,5 +1,6 @@
+import { fontStack } from '../fonts';
 import { DEFAULT_DIAL, dialAngle, dialMajorStep, dialTickLabel, dialTicks } from '../dial';
-import { FIGURE_FONT_FAMILY, figureLayout, haloShadow, type FigureLayout } from '../figureLayout';
+import { figureLayout, haloShadow, type FigureLayout } from '../figureLayout';
 import { needsHalo, type ResolvedOverlayComponent } from '../template';
 import type { Box, OverlayContext2D } from './drawOverlay';
 import { drawLabelValue } from './drawText';
@@ -98,7 +99,7 @@ export function drawDial(ctx: OverlayContext2D, box: Box, ready: Ready, em: numb
   }
 
   // The label and the value, in the middle, under where the needle turns.
-  const layout = figureLayout({ em, frameWidth, label: ready.label, value: ready.text ?? '', figure: ready.component.figure, track: false });
+  const layout = figureLayout({ em, frameWidth, label: ready.label, value: ready.text ?? '', figure: ready.component.figure, fontFamily: ready.style.fontFamily, track: false });
   const textTop = cy + 0.2 * R;
   drawTickNumbers(ctx, ready, {
     ticks: allTicks,
@@ -151,7 +152,7 @@ function drawTickNumbers(
 ): void {
   const majors = at.ticks.filter((tick) => tick.major && tick.value !== undefined);
   if (majors.length === 0 || at.size < (MIN_TICK_LABEL_PX * at.frameWidth) / MIN_TICK_LABEL_FRAME_WIDTH || at.radius <= 0) return;
-  const font = `${at.size}px ${FIGURE_FONT_FAMILY}`;
+  const font = `${at.size}px ${fontStack(ready.style.fontFamily)}`;
   ctx.font = font;
   const labels = majors.map((tick) => dialTickLabel(at.metric, tick.value!, at.step));
   const widest = Math.max(...labels.map((text) => (typeof ctx.measureText === 'function' ? ctx.measureText(text)?.width : undefined) ?? text.length * at.size * 0.55));

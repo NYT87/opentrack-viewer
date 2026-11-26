@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { FAILING, NOT_A_FONT, fontFile, stubFonts } from '../test/helpers/fonts';
 import { CustomCanvas } from './CustomCanvas';
 import { makeActivity } from '../test/helpers/activity';
 import type { Activity } from '../domain/activity';
@@ -28,7 +29,7 @@ beforeEach(() => {
           key === 'font'
             ? font
             : key === 'measureText'
-              ? (text: string) => ({ width: text.length * Number(/([\d.]+)px/.exec(font)?.[1] ?? 16) * 0.55 })
+              ? (text: string) => ({ width: text.length * Number(/([\d.]+)px/.exec(font)?.[1] ?? 16) * (font.includes('"Oswald"') ? 1.1 : 0.55) })
               : () => undefined,
         set: (_target, key: string, value: unknown) => {
           if (key === 'font') font = String(value);
@@ -1433,5 +1434,330 @@ describe('the route inset’s view, shape, trail and map (AV-1023, TD-092)', () 
     const json = await layoutJson();
     expect(JSON.stringify(json)).not.toMatch(/"(lat|lon|time)"/);
     expect((await layoutRoute()).routeInset).toMatchObject({ view: 'follow', map: { provider: 'openfreemap' } });
+  });
+});
+
+describe('a component shown for part of the video (AV-1029, TD-101)', () => {
+  const shown = () => within(editor()).getByRole('group', { name: 'Shown' });
+  const saved0 = async () => (await layoutJson()).template.components[0]!;
+  const undo = () => userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+  const type = (label: string, value: string) => {
+    fireEvent.change(within(shown()).getByLabelText(label), { target: { value } });
+    fireEvent.blur(within(shown()).getByLabelText(label));
+  };
+
+  it('shows a component always, until a window is chosen, and writes none for Always', async () => {
+    setup();
+    await add('Speed');
+    expect(within(shown()).getByRole('radio', { name: 'Always' })).toBeChecked();
+    expect(within(shown()).queryByLabelText('From')).not.toBeInTheDocument();
+    expect(await saved0()).not.toHaveProperty('visibility');
+  });
+
+  it('sets From … to … in m:ss, with fades, in one Undo step each, and clamps the fades to the window', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    type('To', '0:20.5');
+    expect(await saved0()).toMatchObject({ visibility: { from: 10, to: 20.5 } });
+    type('Fade in (s)', '4');
+    type('Fade out (s)', '30');
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 20.5, fadeIn: 4, fadeOut: 10 });
+    expect(shown()).toHaveTextContent('Shown from 0:10 to 0:20.5, fading in over 4 s, fading out over 10 s.');
+    await undo();
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 20.5, fadeIn: 4 });
+  });
+
+  it('keeps what is typed, with a reason, when it is not a time or the end is not after the start', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    type('To', 'soon');
+    expect(within(shown()).getByLabelText('To')).toHaveValue('soon');
+    expect(within(shown()).getByLabelText('To')).toBeInvalid();
+    expect(within(shown()).getByLabelText('To')).toHaveAccessibleDescription(/"soon" is not a time/);
+    type('To', '0:05');
+    expect(within(shown()).getByLabelText('To')).toHaveAccessibleDescription(/not after the start/);
+    expect((await saved0()).visibility).toEqual({ from: 10 });
+  });
+
+  it('applies a field when it is left, so typing it through is one Undo step, and a From after To is refused', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    type('To', '0:30');
+    type('Fade in (s)', '5');
+    const to = within(shown()).getByLabelText('To');
+    await userEvent.clear(to);
+    await userEvent.type(to, '0:35');
+    // Nothing is written until it is left, so the fade is not clamped by "0:3" on the way.
+    await userEvent.tab();
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 35, fadeIn: 5 });
+    await undo();
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 30, fadeIn: 5 });
+    type('From', '0:50');
+    expect(within(shown()).getByLabelText('From')).toHaveAccessibleDescription(/not before the end/);
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 30, fadeIn: 5 });
+  });
+
+  it('shows the window again under From … to … when Undo brings it back after Always', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:10');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'Always' }));
+    await undo();
+    expect(within(shown()).getByRole('radio', { name: 'From … to …' })).toBeChecked();
+    expect(within(shown()).getByLabelText('From')).toHaveValue('0:10');
+  });
+
+  it('writes to = from + N for For … seconds from …, and moves the end with the start', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'For … seconds from …' }));
+    type('From', '0:10');
+    type('For (s)', '8');
+    expect((await saved0()).visibility).toEqual({ from: 10, to: 18 });
+    expect(within(shown()).getByLabelText('For (s)')).toHaveValue('8');
+    type('From', '0:30');
+    expect((await saved0()).visibility).toEqual({ from: 30, to: 38 });
+  });
+
+  it('sets a time to the playhead, the canvas’s own moment', async () => {
+    setup();
+    await add('Speed');
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    fireEvent.change(within(region()).getByLabelText('Canvas time'), { target: { value: '12' } });
+    await userEvent.click(within(shown()).getByRole('button', { name: 'Set to the playhead, from' }));
+    fireEvent.change(within(region()).getByLabelText('Canvas time'), { target: { value: '30' } });
+    await userEvent.click(within(shown()).getByRole('button', { name: 'Set to the playhead, to' }));
+    expect((await saved0()).visibility).toEqual({ from: 12, to: 30 });
+    // Back to Always clears the window.
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'Always' }));
+    expect(await saved0()).not.toHaveProperty('visibility');
+  });
+
+  it('marks the selected component’s window on the time slider, and says it in text', async () => {
+    const { container } = setup();
+    await add('Speed');
+    expect(container.querySelector('.overlay-preview__window')).toBeNull();
+    await userEvent.click(within(shown()).getByRole('radio', { name: 'From … to …' }));
+    type('From', '0:15');
+    type('To', '0:30');
+    const band = container.querySelector('.overlay-preview__window') as HTMLElement;
+    expect(band).toHaveAttribute('aria-hidden', 'true');
+    expect(band.style.left).toBe('25%');
+    expect(band.style.width).toBe('25%');
+  });
+
+  it('is not offered on a still', () => {
+    const activity = ride();
+    const host = { title: 'Figures', intro: 'x', frame: { width: 1280, height: 720 }, timeline: buildOverlayTimeline(activity, { video: { durationSeconds: 60 } }), seconds: 0, onSeek: () => {}, onComponentsChange: () => {}, still: true };
+    render(<CustomCanvas activity={activity} offsetSeconds={0} units="metric" readerTimeZone="UTC" host={host} />);
+    expect(screen.queryByRole('group', { name: 'Shown' })).not.toBeInTheDocument();
+  });
+});
+
+describe('an image on the canvas (AV-1030, TD-102)', () => {
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const logo = (name = 'logo.png', bytes: Uint8Array = PNG) => new File([bytes as BlobPart], name, { type: 'image/png' });
+  const closed = vi.fn();
+  const choose = async (file: File) => {
+    await userEvent.selectOptions(within(region()).getByLabelText('Add'), within(region()).getByRole('option', { name: 'Image from a file' }));
+    // The button opens the browser's picker; the file arrives at the input it opens.
+    fireEvent.change(within(region()).getByTestId('canvas-image-input'), { target: { files: [file] } });
+  };
+
+  beforeEach(() => {
+    closed.mockClear();
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 200, height: 100, close: closed })));
+  });
+
+  it('adds a picture from a file as an element, named for the file, selected, with its fit and opacity to edit', async () => {
+    setup();
+    await choose(logo());
+    expect(await within(region()).findByText(/Added logo\.png/)).toBeTruthy();
+    expect(names()).toEqual(['Image: logo.png']);
+    expect(editor()).toBeTruthy();
+    await userEvent.selectOptions(field('Fit'), 'cover');
+    fireEvent.change(field('Opacity (%)'), { target: { value: '40' } });
+    fireEvent.blur(field('Opacity (%)'));
+    const saved = (await layoutJson()).template.components[0]! as { image: { fit: string; opacity: number; name: string; src: string } };
+    expect(saved.image).toMatchObject({ fit: 'cover', opacity: 0.4, name: 'logo.png' });
+    // The layout file carries the picture itself.
+    expect(saved.image.src).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('refuses a file of another kind, one too large and one that will not decode, each with its reason, and adds nothing', async () => {
+    setup();
+    await choose(logo('notes.png', new TextEncoder().encode('just words')));
+    expect((await within(region()).findByRole('alert')).textContent).toMatch(/notes\.png is not a PNG, JPEG, WebP or SVG/);
+    await choose(Object.defineProperty(logo('big.png'), 'size', { value: 2 * 1024 * 1024 + 1 }));
+    await vi.waitFor(() => expect(within(region()).getByRole('alert').textContent).toMatch(/big\.png is larger than 2 MB/));
+    vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error('bad'));
+    await choose(logo('torn.png'));
+    await vi.waitFor(() => expect(within(region()).getByRole('alert').textContent).toMatch(/torn\.png could not be read as a picture/));
+    expect(names()).toEqual([]);
+  });
+
+  it('opens a layout whose picture cannot be read with the element and the reason, and replacing the picture mends it', async () => {
+    setup();
+    const layout = {
+      kind: 'opentrack-overlay-layout',
+      version: 1,
+      image: { width: 1920, height: 1080 },
+      template: { version: 2, name: 'x', style: {}, components: [{ id: 'logo-1', type: 'image', visible: true, unitMode: 'auto', style: {}, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, image: { src: 'https://example.com/a.png', fit: 'contain', opacity: 1, name: 'a.png' } }] },
+    };
+    fireEvent.change(screen.getByTestId('canvas-layout-input'), { target: { files: [new File([JSON.stringify(layout)], 'layout.json', { type: 'application/json' })] } });
+    await vi.waitFor(() => expect(names()).toEqual(['Image: a.png']));
+    // Decoding it fails: the editor says why, in an alert, beside the way out.
+    vi.mocked(createImageBitmap).mockRejectedValue(new Error('no picture'));
+    await userEvent.click(within(region()).getByRole('button', { name: 'Image: a.png' }));
+    await vi.waitFor(() => expect(within(editor()).getAllByRole('alert')[0]!.textContent).toMatch(/Replace it with a file below/));
+    vi.mocked(createImageBitmap).mockResolvedValue({ width: 10, height: 10, close: closed } as unknown as ImageBitmap);
+    await userEvent.upload(within(editor()).getByLabelText('Replace the picture'), logo('new.png'));
+    await vi.waitFor(() => expect(within(editor()).queryByRole('alert')).toBeNull());
+    expect(names()).toEqual(['Image: new.png']);
+  });
+});
+
+describe('the font of the layout and of a component (AV-1031, TD-103)', () => {
+  let fonts: ReturnType<typeof stubFonts>;
+  beforeEach(() => {
+    fonts = stubFonts();
+  });
+  afterEach(() => fonts.unstub());
+
+  const layoutFont = () => within(region()).getByLabelText('Layout font') as HTMLSelectElement;
+  const openLayout = (template: object) =>
+    fireEvent.change(screen.getByTestId('canvas-layout-input'), {
+      target: { files: [new File([JSON.stringify({ kind: 'opentrack-overlay-layout', version: 1, image: { width: 1920, height: 1080 }, template })], 'layout.json', { type: 'application/json' })] },
+    });
+  const note = { id: 'note-1', type: 'label', content: 'Morning ride', visible: true, unitMode: 'auto', style: {}, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }, text: { align: 'left', weight: 'bold' } };
+
+  it('offers the system font, the four bundled fonts and a file, with System font as the default', () => {
+    setup();
+    expect(layoutFont()).toHaveValue('');
+    expect([...layoutFont().options].map((option) => option.textContent)).toEqual(['System font', 'Inter', 'Roboto Condensed', 'JetBrains Mono', 'Oswald', 'Load a font file…']);
+    // Nothing is fetched until a font is chosen.
+    expect(fonts.requests).toEqual([]);
+  });
+
+  it('loads a bundled font from the app’s own path when chosen, keeps only its name in the layout, and a component overrides it', async () => {
+    setup();
+    await add('Text');
+    await userEvent.selectOptions(layoutFont(), 'Oswald');
+    await vi.waitFor(() => expect(layoutFont()).toHaveValue('Oswald'));
+    expect(fonts.requests).toEqual(['/fonts/oswald/oswald-latin-400-normal.woff2', '/fonts/oswald/oswald-latin-700-normal.woff2']);
+    expect(fonts.registered).toEqual([{ family: 'Oswald', weight: '400' }, { family: 'Oswald', weight: '700' }]);
+
+    // The component follows the layout until it is given a font of its own.
+    const own = within(editor()).getByLabelText('Font') as HTMLSelectElement;
+    expect(own).toHaveValue('');
+    expect(own.options[0]!.textContent).toBe('Layout’s font');
+    await userEvent.selectOptions(own, 'Inter');
+    await vi.waitFor(() => expect((within(editor()).getByLabelText('Font') as HTMLSelectElement).value).toBe('Inter'));
+    let json = await layoutJson();
+    expect((json.template as unknown as { style: { fontFamily: string } }).style.fontFamily).toBe('Oswald');
+    expect(json.template.components[0]!.style).toMatchObject({ fontFamily: 'Inter' });
+    // The file is never in the layout.
+    expect(JSON.stringify(json)).not.toMatch(/base64|bytes/);
+
+    await userEvent.selectOptions(within(editor()).getByLabelText('Font'), 'Layout’s font');
+    json = await layoutJson();
+    expect(json.template.components[0]!.style).not.toHaveProperty('fontFamily');
+    // Back to the system font for the layout.
+    await userEvent.selectOptions(layoutFont(), 'System font');
+    json = await layoutJson();
+    expect((json.template as unknown as { style: object }).style).not.toHaveProperty('fontFamily');
+  });
+
+  it('loads a file of the reader’s, offers it under its name, and uses it for the layout', async () => {
+    setup();
+    await userEvent.selectOptions(layoutFont(), 'Load a font file…');
+    fireEvent.change(within(region()).getByLabelText('Layout font: font file'), { target: { files: [fontFile('Fira Sans.woff2')] } });
+    await vi.waitFor(() => expect(layoutFont()).toHaveValue('Fira Sans'));
+    expect([...layoutFont().options].map((option) => option.textContent)).toContain('Fira Sans');
+    expect(fonts.registered).toEqual([{ family: 'Fira Sans', weight: '400' }]);
+    // Nothing was fetched for it: it was read on this device.
+    expect(fonts.requests).toEqual([]);
+  });
+
+  it('refuses a file that is not a font, one too large and one the browser cannot load, each with the reason, and offers nothing', async () => {
+    setup();
+    const choose = async (file: File) => {
+      fireEvent.change(within(region()).getByLabelText('Layout font: font file'), { target: { files: [file] } });
+    };
+    const message = () => region().querySelector('p[aria-live="assertive"]')!.textContent;
+    await choose(fontFile('notes.ttf', NOT_A_FONT));
+    await vi.waitFor(() => expect(message()).toBe('notes.ttf is not a TTF, OTF, WOFF or WOFF2 font.'));
+    await choose(Object.defineProperty(fontFile('huge.otf'), 'size', { value: 10 * 1024 * 1024 + 1 }));
+    await vi.waitFor(() => expect(message()).toBe('huge.otf is larger than 10 MB.'));
+    await choose(fontFile('torn.woff', [0x77, 0x4f, 0x46, 0x46, ...FAILING]));
+    await vi.waitFor(() => expect(message()).toMatch(/^torn\.woff could not be read as a font/));
+    expect([...layoutFont().options].map((option) => option.textContent)).toEqual(['System font', 'Inter', 'Roboto Condensed', 'JetBrains Mono', 'Oswald', 'Load a font file…']);
+    expect(layoutFont()).toHaveValue('');
+  });
+
+  it('says a layout’s font is not loaded here, draws in the system font, and mends it when the file is loaded', async () => {
+    setup();
+    openLayout({ version: 2, name: 'x', style: { fontFamily: 'Brand Sans' }, components: [note] });
+    const group = await within(region()).findByRole('group', { name: 'Fonts this layout needs' });
+    expect(group).toHaveTextContent('This layout uses Brand Sans, which is not loaded here. It is drawn in the system font.');
+    // The layout still names it, and the select says it is not here.
+    expect(layoutFont()).toHaveValue('Brand Sans');
+    expect(within(region()).getByRole('option', { name: 'Brand Sans (not loaded)' })).toBeTruthy();
+    // The button says which font the file is for; the browser's picker then hands the file to the input.
+    await userEvent.click(within(group).getByRole('button', { name: 'Load Brand Sans…' }));
+    fireEvent.change(within(group).getByLabelText('Font file'), { target: { files: [fontFile('anything.ttf')] } });
+    await vi.waitFor(() => expect(within(region()).queryByRole('group', { name: 'Fonts this layout needs' })).toBeNull());
+    expect(fonts.registered).toEqual([{ family: 'Brand Sans', weight: '400' }]);
+    expect(layoutFont()).toHaveValue('Brand Sans');
+  });
+
+  it('opens a layout that names a bundled font by loading it, and an older layout, with no font, unchanged', async () => {
+    setup();
+    openLayout({ version: 2, name: 'x', style: { fontFamily: 'JetBrains Mono' }, components: [{ ...note, style: { fontFamily: 'Inter' } }] });
+    await vi.waitFor(() => expect(fonts.registered.map((face) => face.family).sort()).toEqual(['Inter', 'Inter', 'JetBrains Mono', 'JetBrains Mono']));
+    expect(within(region()).queryByRole('group', { name: 'Fonts this layout needs' })).toBeNull();
+    expect(layoutFont()).toHaveValue('JetBrains Mono');
+    openLayout({ version: 2, name: 'old', style: {}, components: [note] });
+    await vi.waitFor(() => expect(layoutFont()).toHaveValue(''));
+    expect(within(region()).queryByRole('group', { name: 'Fonts this layout needs' })).toBeNull();
+    expect((await layoutJson()).template.components[0]!.style).toEqual({});
+  });
+
+  it('measures the figures’ boxes in a new layout font, as one change that Undo takes back', async () => {
+    // The test canvas measures Oswald's letters wider than the system font's.
+    setup();
+    await add('Speed');
+    const width = async () => (await layoutJson()).template.components[0]!.rect as { width: number };
+    const before = (await width()).width;
+    await userEvent.selectOptions(layoutFont(), 'Oswald');
+    await vi.waitFor(async () => expect((await width()).width).toBeGreaterThan(before));
+    await userEvent.click(within(region()).getByRole('button', { name: 'Undo' }));
+    expect((await width()).width).toBe(before);
+    // The font goes back with the boxes: Undo never leaves Oswald drawn in a box sized for the system font.
+    expect(layoutFont()).toHaveValue('');
+  });
+
+  it('lists the four fonts’ licences with a link to each licence file shipped beside the font', async () => {
+    setup();
+    const list = within(region()).getByRole('list', { name: 'Font licences' });
+    expect(within(list).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Inter: SIL Open Font License 1.1, Copyright 2016 The Inter Project Authors. Licence',
+      'Roboto Condensed: SIL Open Font License 1.1, Copyright 2011 Google Inc.. Licence',
+      'JetBrains Mono: SIL Open Font License 1.1, Copyright 2020 The JetBrains Mono Project Authors. Licence',
+      'Oswald: SIL Open Font License 1.1, Copyright 2016 The Oswald Project Authors. Licence',
+    ]);
+    expect(within(list).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+      '/fonts/inter/OFL.txt',
+      '/fonts/roboto-condensed/OFL.txt',
+      '/fonts/jetbrains-mono/OFL.txt',
+      '/fonts/oswald/OFL.txt',
+    ]);
   });
 });

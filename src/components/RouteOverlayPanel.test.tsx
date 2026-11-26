@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { stubFonts } from '../test/helpers/fonts';
 import { RouteOverlayPanel } from './RouteOverlayPanel';
 import { RouteImageError, type RouteImagePlan } from '../overlay/routeImage';
 import type { StillImagePlan } from '../overlay/staticImage';
@@ -380,5 +381,110 @@ describe('placing figures, the date and text on the image (AV-1010)', () => {
     await userEvent.upload(screen.getByTestId('still-layout-input'), new File(['{"hello":1}'], 'other.json', { type: 'application/json' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('other.json was not opened. This file is not an OpenTrack overlay layout.');
     expect(screen.getByRole('list', { name: 'Elements on the image' })).toHaveTextContent('Route');
+  });
+
+  it('says a figure’s own caption, decimals and value, marks it edited by hand and gives the way back (AV-1032)', async () => {
+    const { stills } = setup({ activity: timed() });
+    await add('Distance');
+    const text = () => {
+      const item = lastPlan(stills).items.find((entry) => entry.id.startsWith('distance'));
+      return item?.kind === 'text' ? item.lines.map((line) => line.text) : [];
+    };
+    const draw = async () => {
+      await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    };
+    expect(screen.getByLabelText('Caption')).toHaveAttribute('placeholder', 'Distance');
+    await userEvent.type(screen.getByLabelText('Caption'), 'How far');
+    await userEvent.selectOptions(screen.getByLabelText('Decimal places'), '0');
+    await draw();
+    expect(text()).toEqual(['HOW FAR', expect.stringMatching(/^\d+ (km|mi)$/)]);
+
+    expect(screen.queryByText('Written by hand', { exact: false })).toBeNull();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Write my own value' }));
+    expect(screen.getByLabelText('Your text')).toHaveValue(text()[1]);
+    fireEvent.change(screen.getByLabelText('Your text'), { target: { value: 'about ten' } });
+    await draw();
+    expect(text()).toEqual(['HOW FAR', 'about ten']);
+    expect(editor()).toHaveTextContent('Edited by hand');
+    expect(screen.getByRole('list', { name: 'Elements on the image' }).previousElementSibling).toHaveTextContent('Written by hand: Distance');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Use the activity’s value' }));
+    expect(screen.getByRole('checkbox', { name: 'Write my own value' })).toHaveFocus();
+    await draw();
+    expect(text()[1]).toMatch(/^\d+ (km|mi)$/);
+    expect(screen.queryByLabelText('Your text')).toBeNull();
+  });
+
+  it('disables decimal places for a clock, and says why (AV-1032)', async () => {
+    setup({ activity: timed() });
+    await add('Elapsed time');
+    expect(screen.getByLabelText('Decimal places')).toBeDisabled();
+    expect(editor()).toHaveTextContent(/Times and paces are clocks/);
+  });
+
+  it('writes a date in the language chosen, or in the reader’s own text (AV-1032)', async () => {
+    const { stills } = setup({ activity: timed(), readerTimeZone: 'UTC' });
+    await add('Date');
+    await userEvent.selectOptions(screen.getByLabelText('Date format'), 'Thursday 24 September 2026');
+    await userEvent.selectOptions(screen.getByLabelText('Language'), 'es');
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    const date = () => {
+      const item = lastPlan(stills).items.find((entry) => entry.id.startsWith('date'));
+      return item?.kind === 'text' ? item.lines.map((line) => line.text) : [];
+    };
+    expect(date()[0]).toMatch(/^(miércoles|jueves) \d+ septiembre 2026$/);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Write my own text' }));
+    fireEvent.change(screen.getByLabelText('Your text'), { target: { value: 'Race day' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    expect(date()).toEqual(['Race day']);
+  });
+});
+
+describe('the still image’s font (AV-1031, TD-103)', () => {
+  let fonts: ReturnType<typeof stubFonts>;
+  beforeEach(() => {
+    fonts = stubFonts();
+  });
+  afterEach(() => fonts.unstub());
+  const layoutFont = () => screen.getByLabelText('Layout font') as HTMLSelectElement;
+
+  it('writes a text in the layout’s font, or its own, in the plan and in the saved layout, which holds the name only', async () => {
+    const { stills, renderPng, save } = setup();
+    await userEvent.selectOptions(screen.getByLabelText('Add'), 'Text');
+    await userEvent.click(screen.getByRole('button', { name: 'Add to the image' }));
+    await userEvent.selectOptions(layoutFont(), 'Oswald');
+    await vi.waitFor(() => expect(layoutFont()).toHaveValue('Oswald'));
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    await vi.waitFor(() => expect(renderPng).toHaveBeenCalledTimes(1));
+    const text = (still: StillImagePlan) => still.items.find((item) => item.kind === 'text');
+    const drawn = text(stills.at(-1)!);
+    expect(drawn?.kind === 'text' && drawn.lines[0]!.font).toMatch(/"Oswald", system-ui/);
+
+    // The text's own font beats the layout's.
+    await userEvent.selectOptions(within(screen.getByRole('group', { name: /^Selected:/ })).getByLabelText('Font'), 'Inter');
+    await vi.waitFor(() => expect(fonts.registered.some((face) => face.family === 'Inter')).toBe(true));
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    await vi.waitFor(() => expect(renderPng).toHaveBeenCalledTimes(2));
+    const own = text(stills.at(-1)!);
+    expect(own?.kind === 'text' && own.lines[0]!.font).toMatch(/"Inter", system-ui/);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save layout' }));
+    const saved = JSON.parse(await (save.mock.calls.at(-1)![0] as Blob).text()) as { template: { style: { fontFamily: string }; components: { type: string; style: { fontFamily?: string } }[] } };
+    expect(saved.template.style.fontFamily).toBe('Oswald');
+    expect(saved.template.components.find((component) => component.type === 'label')!.style.fontFamily).toBe('Inter');
+    expect(JSON.stringify(saved)).not.toMatch(/bytes|base64/);
+  });
+
+  it('stops with the reason, and makes no image, when the layout’s font is not loaded here, and opens a layout that names one', async () => {
+    const { renderPng, save } = setup();
+    const layout = { kind: 'opentrack-overlay-layout', version: 1, image: { width: 1920, height: 1080 }, template: { version: 2, name: 'x', style: { fontFamily: 'Brand Sans' }, components: [{ id: 'note-1', type: 'label', content: 'Hi', visible: true, unitMode: 'auto', style: {}, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }, text: { align: 'left', weight: 'bold' } }] } };
+    await userEvent.upload(screen.getByTestId('still-layout-input'), new File([JSON.stringify(layout)], 'font.json', { type: 'application/json' }));
+    expect(await screen.findByText(/Opened the layout in font.json/)).toBeInTheDocument();
+    expect(layoutFont()).toHaveValue('Brand Sans');
+    expect(await screen.findByText(/This layout uses Brand Sans, which is not loaded here\. It is drawn in the system font\./)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    expect(await screen.findByText('This layout uses Brand Sans, which is not loaded here.')).toBeInTheDocument();
+    expect(renderPng).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
   });
 });

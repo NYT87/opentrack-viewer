@@ -195,6 +195,44 @@ describe('a WebM export job (AV-1012)', () => {
     expect(ctx.clearRect).toHaveBeenCalledTimes(3);
   });
 
+  it('registers the request’s fonts, and waits for them, before the recording is set up; one that fails stops it with the reason (AV-1031)', async () => {
+    const events: string[] = [];
+    class Face {
+      constructor(readonly family: string, readonly source: ArrayBuffer) {}
+      weight = '400';
+      async load() {
+        events.push(`load:${this.family}`);
+        if (new Uint8Array(this.source)[0] === 1) throw new Error('invalid font data');
+        return this;
+      }
+    }
+    vi.stubGlobal('FontFace', Face);
+    Object.defineProperty(document, 'fonts', { value: { add: (face: Face) => events.push(`add:${face.family}`), forEach: () => undefined }, configurable: true });
+    try {
+      const fake = fakes();
+      const deps: WebmRecordingDeps = {
+        ...fake.deps,
+        setUp: (...args) => {
+          events.push('setUp');
+          return { ...fake.deps.setUp(...args), ctx: { clearRect: vi.fn() } as unknown as OverlayContext2D };
+        },
+      };
+      const body = { ...request, template: { ...template, components: [] } };
+      await startWebmExport({ ...body, fonts: [{ family: 'Oswald', weight: 400, bytes: new ArrayBuffer(4) }] }, () => undefined, deps).done;
+      expect(events.slice(0, 3)).toEqual(['load:Oswald', 'add:Oswald', 'setUp']);
+
+      events.length = 0;
+      await expect(startWebmExport({ ...body, fonts: [{ family: 'Torn', weight: 400, bytes: Uint8Array.of(1).buffer }] }, () => undefined, deps).done).rejects.toMatchObject({
+        code: 'render_failed',
+        message: 'The font Torn could not be loaded (invalid font data).',
+      });
+      expect(events).toEqual(['load:Torn']);
+    } finally {
+      Reflect.deleteProperty(document, 'fonts');
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('rejects as cancelled when stopped', async () => {
     const fake = fakes();
     const job = startWebmExport({ ...request, template: { ...template, components: [] } }, () => undefined, {

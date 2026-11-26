@@ -5,12 +5,14 @@ import {
   canvasElementChoices,
   canvasTemplate,
   checkCanvasSize,
+  componentsFromControls,
   componentsFromPreset,
   duplicateComponent,
   growFigureToFit,
   moveComponent,
   moveLayer,
   newCanvasComponent,
+  newImageComponent,
   nudgeComponent,
   pushHistory,
   removeComponent,
@@ -20,8 +22,10 @@ import {
   type CanvasState,
 } from './customCanvas';
 import { buildOverlayTimeline } from './timeline';
+import { fitCanvasSize } from '../components/CustomCanvas';
 import { extractRoute } from './routeImage';
-import { DEFAULT_SHAPE, type OverlayComponent } from './template';
+import { DEFAULT_SHAPE, resolveOverlayComponent, type OverlayComponent } from './template';
+import { DEFAULT_OVERLAY_CONTROLS, OVERLAY_PRESETS, buildOverlay } from './presets';
 import type { Activity } from '../domain/activity';
 import { makeActivity } from '../test/helpers/activity';
 
@@ -178,7 +182,8 @@ describe('what the canvas offers (AV-1011)', () => {
     const activity = ride((i) => ({ heartRateBpm: 120 + i }));
     const timeline = timelineOf(activity);
     let template = canvasTemplate([]);
-    for (const key of canvasElementChoices(timeline, still(activity)).map((choice) => choice.key)) {
+    // AV-1030. An image needs its file, so it is made by `newImageComponent` (below).
+    for (const key of canvasElementChoices(timeline, still(activity)).map((choice) => choice.key).filter((key) => key !== 'image')) {
       const component = newCanvasComponent(template, key, { width: 1920, height: 1080 }, timeline);
       expect(component.rect.x + component.rect.width, key).toBeLessThanOrEqual(1);
       expect(component.rect.y + component.rect.height, key).toBeLessThanOrEqual(1);
@@ -359,6 +364,19 @@ describe('growing a figure’s box to fit its text (AV-1015, TD-083)', () => {
     expect(rectOf(sensor).width).toBeGreaterThan(small.width);
   });
 
+  it('measures in the figure’s font, its own over the layout’s: a narrower font grows the box less, a wider one more (AV-1031, TD-103)', () => {
+    const byFont = (text: string, font: string) => text.length * Number(/([\d.]+)px/.exec(font)![1]) * (font.includes('"Narrow"') ? 0.3 : font.includes('"Wide"') ? 0.9 : 0.55);
+    const fonted = { ...context, measure: byFont };
+    const widthOf = (component: OverlayComponent, layoutFont?: string) =>
+      rectOf(growFigureToFit([component], 'a', frame, { ...fonted, layoutFont })).width;
+    const plain = widthOf(box('a', small));
+    expect(widthOf(box('a', small), 'Narrow')).toBeLessThan(plain);
+    expect(widthOf(box('a', small), 'Wide')).toBeGreaterThan(plain);
+    // The figure's own beats the layout's.
+    expect(widthOf(box('a', small, { style: { fontFamily: 'Wide' } }), 'Narrow')).toBeGreaterThan(plain);
+    expect(widthOf(box('a', small, { style: { fontFamily: 'Narrow' } }), 'Wide')).toBeLessThan(plain);
+  });
+
   it('sizes a distance of the total for the total’s own text', () => {
     const plain = rectOf(grow([box('a', small, { source: { kind: 'metric', metric: 'distance' } })]));
     const total = rectOf(grow([box('a', small, { source: { kind: 'metric', metric: 'distance' }, display: { ofTotal: true } })]));
@@ -388,5 +406,93 @@ describe('a duplicate of an inset with a map (AV-1023)', () => {
     const two = duplicateComponent(one.components, 'route');
     expect(two.components[2]!.routeInset!.map.provider).toBe('none');
     expect(two.components[2]!.routeInset!.view).toBe('whole');
+  });
+});
+
+describe('a template opened on the canvas (AV-1028, TD-100)', () => {
+  const controls = { ...DEFAULT_OVERLAY_CONTROLS, accentColor: '#00aa55', backgroundOpacity: 0.6, scale: 1.25, enabled: { speed: false } };
+  const size = { width: 1920, height: 1080 };
+
+  it('draws what the template preview draws, for each template: same boxes, colours and texts', () => {
+    const timeline = timelineOf(ride((i) => ({ speed: 5 + i / 10, heartRate: 120 + i })));
+    for (const preset of OVERLAY_PRESETS) {
+      const set = { ...controls, presetId: preset.id };
+      const { template } = buildOverlay(set, timeline, size.width / size.height);
+      const canvas = canvasTemplate(componentsFromControls(set, timeline, size));
+      expect(canvas.components).toHaveLength(template.components.length);
+      for (const at of [0, 30]) {
+        const sample = timeline.sampleAt(at);
+        template.components.forEach((component, index) => {
+          // The component itself differs only in where its style is held; the resolved style is what is drawn.
+          const resolve = (from: typeof template, item: OverlayComponent) => {
+            const { component: drawn, ...rest } = resolveOverlayComponent(from, item, sample, timeline, 'metric') as { component?: OverlayComponent };
+            // The canvas rounds a box to six places; compared to four.
+            const r = drawn?.rect;
+            const round = (n: number) => Math.round(n * 1e4) / 1e4;
+            return { ...rest, rect: r && [r.x, r.y, r.width, r.height].map(round), text: drawn?.text, content: drawn?.content };
+          };
+          expect(resolve(canvas, canvas.components[index]!)).toEqual(resolve(template, component));
+        });
+      }
+    }
+  });
+
+  it('carries the style onto each component, keeps a component’s own text size, and leaves off components out', () => {
+    const timeline = timelineOf(ride((i) => ({ speed: 5 + i / 10 })));
+    const all = componentsFromControls({ ...controls, enabled: {} }, timeline, size);
+    const fewer = componentsFromControls(controls, timeline, size);
+    expect(fewer.length).toBeLessThan(all.length);
+    for (const component of all) {
+      expect(component.style).toMatchObject({ accentColor: '#00aa55', backgroundOpacity: 0.6, textColor: '#ffffff' });
+    }
+    const { template } = buildOverlay({ ...controls, enabled: {} }, timeline, 16 / 9);
+    expect(all.map((component) => component.style.fontScale)).toEqual(
+      template.components.map((component) => component.style.fontScale ?? 1.25),
+    );
+  });
+});
+
+describe('the video’s size fitted to the canvas (AV-1028)', () => {
+  it('is always a size the canvas accepts, as 3840 by 2400 was not when rounded up', () => {
+    for (const [w, h] of [[3840, 2400], [6016, 3200], [4096, 2732], [5312, 2988], [1920, 1080], [848, 480]] as const) {
+      const fit = fitCanvasSize(w, h);
+      expect(checkCanvasSize(fit.width, fit.height), `${w}x${h} -> ${fit.width}x${fit.height}`).toBeUndefined();
+    }
+  });
+});
+
+describe('an image on the canvas (AV-1030, TD-102)', () => {
+  const activity = ride();
+  const template = canvasTemplate([]);
+  const setting = { src: 'data:image/png;base64,AAAA', fit: 'contain' as const, opacity: 1, name: 'logo.png' };
+
+  it('is offered once, as a file to choose, whatever the activity holds', () => {
+    const choices = canvasElementChoices(timelineOf(activity), still(activity)).filter((choice) => choice.key === 'image');
+    expect(choices).toEqual([{ key: 'image', label: 'Image from a file', group: 'Pictures', available: true }]);
+    // It has no preset: it needs its file, so adding it by key alone is refused.
+    expect(() => newCanvasComponent(template, 'image', { width: 1920, height: 1080 }, timelineOf(activity))).toThrow(/from a file/);
+  });
+
+  it('starts a fifth of the frame wide at the picture’s own shape, inside the frame', () => {
+    const wide = newImageComponent(template, { width: 1920, height: 1080 }, setting, { width: 400, height: 100 });
+    expect(wide).toMatchObject({ type: 'image', visible: true, image: setting });
+    expect(wide.rect.width).toBeCloseTo(0.2);
+    // 0.2 x 1920 = 384 px wide, 96 px tall: 96 / 1080 of the height.
+    expect(wide.rect.height).toBeCloseTo(96 / 1080);
+    const tall = newImageComponent(template, { width: 1920, height: 1080 }, setting, { width: 100, height: 4000 });
+    expect(tall.rect.height).toBeLessThanOrEqual(0.9 + 1e-9);
+    expect(tall.rect.x + tall.rect.width).toBeLessThanOrEqual(1);
+    expect(tall.rect.y + tall.rect.height).toBeLessThanOrEqual(1);
+  });
+
+  it('is an ordinary component: held by a shape, moved with it, in the layer order, and removed', () => {
+    const image = newImageComponent(template, { width: 1000, height: 1000 }, setting, { width: 10, height: 10 });
+    const card = newCanvasComponent(template, 'shape:rect', { width: 1000, height: 1000 }, timelineOf(activity));
+    const held = setHolder([card, image], image.id, card.id);
+    expect(held.find((entry) => entry.id === image.id)!.parentId).toBe(card.id);
+    const moved = moveComponent(held, card.id, 0.5, 0.5);
+    expect(moved.find((entry) => entry.id === image.id)!.rect.x).toBeGreaterThan(0.4);
+    expect(moveLayer(held, card.id, 'front').map((entry) => entry.id)).toEqual([image.id, card.id]);
+    expect(removeComponent(held, image.id).map((entry) => entry.id)).toEqual([card.id]);
   });
 });

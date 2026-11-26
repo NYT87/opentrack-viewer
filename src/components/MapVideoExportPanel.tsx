@@ -18,6 +18,7 @@ import { formatVideoTime } from '../mapVideo/timing';
 import { download } from './ExportPanel';
 import { usePersonalStore } from '../state/personalStore';
 import type { PersonalFigures } from '../overlay/template';
+import { imageRefusal } from '../overlay/images';
 
 export interface MapVideoExportPanelProps {
   activity: Activity;
@@ -236,7 +237,9 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
   };
 
   // TD-088 (TD-076): a still and a video are not made together; the one that is not running waits, and says why.
-  const blocked = !support || !format || planProblem !== undefined || keyMissing || running || counting || overBudget || poster.busy;
+  // AV-1030 (TD-102). An image of the overlay that cannot be drawn stops the video, with the reason.
+  const imageProblem = useMemo(() => imageRefusal(settings.overlay?.components ?? []), [settings.overlay]);
+  const blocked = !support || !format || planProblem !== undefined || keyMissing || running || counting || overBudget || poster.busy || imageProblem !== undefined;
   const waitReasonId = `${ids.format}-wait`;
 
   return (
@@ -251,6 +254,7 @@ export function MapVideoExportPanel({ activity, model, settings, units, maptiler
       {support?.reason && <p role="alert">{support.reason}</p>}
       {keyMissing && <p role="status">Type your MapTiler key above, or choose another map, to make the video.</p>}
       {planProblem && <p role="alert">{planProblem}</p>}
+      {imageProblem && <p role="alert">{imageProblem}</p>}
       {counting && <p role="status">Counting the map tiles the video would ask OpenFreeMap for…</p>}
       {overBudget && (
         <p role="alert">

@@ -324,7 +324,7 @@ describe('the contract adapter (AV-1017)', () => {
         const props = contractPropsFor(template, item, sample, timeline, context(activity));
         const section = contractSectionOf(item);
         if (section === undefined) {
-          expect(item.type).toBe('shape');
+          expect(['shape', 'image']).toContain(item.type);
           expect(props).toBeUndefined();
           continue;
         }
@@ -338,8 +338,8 @@ describe('the contract adapter (AV-1017)', () => {
         seen.add(`${item.type}:${props.section}`);
       }
     }
-    // Every type of component but the shape reaches a section; a gauge is both a gauge and, with no range, a figure.
-    for (const type of OVERLAY_COMPONENT_TYPES.filter((type) => type !== 'shape' && type !== 'sensorChart')) {
+    // Every type of component but the shape and the image (AV-1030, TD-102: no data either) reaches a section; a gauge is both a gauge and, with no range, a figure.
+    for (const type of OVERLAY_COMPONENT_TYPES.filter((type) => type !== 'shape' && type !== 'image' && type !== 'sensorChart')) {
       expect([...seen].some((key) => key.startsWith(`${type}:`)), type).toBe(true);
     }
     expect(seen).toContain('gauge:gauge');
@@ -803,10 +803,10 @@ describe('the contract adapter (AV-1017)', () => {
     });
   });
 
-  it('is a section for every built-in type, and the shape is the one without', () => {
+  it('is a section for every built-in type, and the shape and the image (AV-1030) are the ones without', () => {
     for (const type of OVERLAY_COMPONENT_TYPES) {
       const section = contractSectionOf(component('x', type, { range: { min: 0, max: 1 } }));
-      expect(section === undefined, type).toBe(type === 'shape');
+      expect(section === undefined, type).toBe(type === 'shape' || type === 'image');
     }
   });
 });

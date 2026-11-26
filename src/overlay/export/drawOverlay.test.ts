@@ -243,3 +243,78 @@ describe('smoothed figures (AV-1016)', () => {
     expect(frames[0]).toContain(previewAt(9));
   });
 });
+
+describe('components shown for part of the video (AV-1029, TD-101)', () => {
+  const source = activity();
+  const draw = (visibility: object | undefined, time: number, options?: { ghostHidden?: boolean }, cutStartSeconds?: number) => {
+    const timeline = buildOverlayTimeline(source, { video: { durationSeconds: 10 }, cutStartSeconds });
+    const { template } = buildOverlay({ ...DEFAULT_OVERLAY_CONTROLS }, timeline, 16 / 9);
+    const timed: OverlayTemplate = { ...template, components: template.components.filter((c) => c.id === template.components[0]!.id).map((c) => ({ ...c, ...(visibility ? { visibility } : {}) })) as never };
+    const renderer = createOverlayRenderer({ template: timed, timeline, activity: source, units: 'metric', width: 1920, height: 1080 });
+    const recording = recordingContext();
+    renderer.drawFrame(recording.ctx, time, options);
+    return { ...recording, renderer, template: timed };
+  };
+  // The alpha each fillText was drawn at: the proxy records state per call only for the font, so read it from a spy.
+  const alphas = (visibility: object | undefined, time: number) => {
+    const timeline = buildOverlayTimeline(source, { video: { durationSeconds: 10 } });
+    const { template } = buildOverlay({ ...DEFAULT_OVERLAY_CONTROLS }, timeline, 16 / 9);
+    const timed = { ...template, components: [{ ...template.components[0]!, visibility }] } as OverlayTemplate;
+    const state: Record<string, unknown> = { font: '10px sans-serif', fillStyle: '#000', globalAlpha: 1 };
+    const seen: number[] = [];
+    const stack: unknown[] = [];
+    const ctx = new Proxy(state, {
+      get: (target, key: string) => (key === 'save' ? () => stack.push(target.globalAlpha) : key === 'restore' ? () => ((target.globalAlpha = stack.pop()), undefined) : key in target ? target[key] : key === 'fillText' ? () => seen.push(target.globalAlpha as number) : key === 'measureText' ? () => ({ width: 10 }) : () => undefined),
+      set: (target, key: string, value) => ((target[key] = value), true),
+    }) as unknown as OverlayContext2D;
+    createOverlayRenderer({ template: timed, timeline, activity: source, units: 'metric', width: 1920, height: 1080 }).drawFrame(ctx, time);
+    return { seen, final: state.globalAlpha };
+  };
+
+  it('draws a component only within [from, to), at the frame boundaries', () => {
+    const window = { from: 2, to: 4 };
+    const drawn = (t: number) => draw(window, t).ops('fillText').length > 0;
+    // 30 fps: the frame before, the first, the last and the one after.
+    expect([1.966, 2, 3.966, 4].map(drawn)).toEqual([false, true, true, false]);
+    expect(draw(undefined, 0).ops('fillText').length).toBeGreaterThan(0);
+  });
+
+  it('keeps the window where it is under a cut, which is in the video\'s own seconds', () => {
+    const window = { from: 4, to: 6 };
+    const drawn = (t: number) => draw(window, t, undefined, 3).ops('fillText').length > 0;
+    // The cut starts at 3 s: the window is still 4 to 6 in the video, not 7 to 9.
+    expect([3.5, 4.5, 5.5, 6.5].map(drawn)).toEqual([false, true, true, false]);
+  });
+
+  it('multiplies the fade into what the component draws, labels at 0.75 included, and leaves the context as it found it', () => {
+    const full = alphas(undefined, 5);
+    expect(new Set(full.seen)).toEqual(new Set([0.75, 1]));
+    const faded = alphas({ from: 4, fadeIn: 2 }, 5);
+    expect(faded.seen.length).toBe(full.seen.length);
+    expect(faded.seen.map((a) => Math.round(a * 1000) / 1000)).toEqual(full.seen.map((a) => Math.round(a * 0.5 * 1000) / 1000));
+    expect(faded.final).toBe(1);
+  });
+
+  it('draws nothing for a hidden component, unless the editor asks for a ghost: faded, with a dashed outline', () => {
+    const window = { from: 8, to: 9 };
+    expect(draw(window, 2).calls.map((call) => call.op)).toEqual(['clearRect']);
+    const ghost = draw(window, 2, { ghostHidden: true });
+    expect(ghost.ops('fillText').length).toBeGreaterThan(0);
+    expect(ghost.ops('setLineDash')[0]?.args).toEqual([[6, 4]]);
+    expect(ghost.ops('strokeRect')).toHaveLength(1);
+    // Inside its window nothing is added.
+    expect(draw(window, 8.5, { ghostHidden: true }).ops('strokeRect')).toEqual([]);
+    expect(alphas(window, 2).seen).toEqual([]);
+  });
+
+  it('asks for no map tile for an inset that is not shown', () => {
+    const timeline = buildOverlayTimeline(source, { video: { durationSeconds: 10 } });
+    const base = buildOverlay({ ...DEFAULT_OVERLAY_CONTROLS }, timeline, 16 / 9).template;
+    const inset = { id: 'm', type: 'routeInset' as const, visible: true, rect: { x: 0.7, y: 0.1, width: 0.25, height: 0.25 }, unitMode: 'auto' as const, style: {}, routeInset: { map: { style: 'osm' } } } as never;
+    const ids = (visibility?: object) =>
+      createOverlayRenderer({ template: { ...base, components: [{ ...(inset as object), ...(visibility ? { visibility } : {}) }] } as OverlayTemplate, timeline, activity: source, units: 'metric', width: 1920, height: 1080 }).insetsAt(5);
+    expect(ids()).toEqual(['m']);
+    expect(ids({ from: 8 })).toEqual([]);
+    expect(ids({ from: 8, to: 9 })).toEqual([]);
+  });
+});

@@ -1,4 +1,5 @@
 import type { Activity } from '../domain/activity';
+import { LAYOUT_IMAGES_MAX_CHARS } from '../overlay/imageSetting';
 import { componentsForLayoutFile, parseOverlayTemplate, type OverlayTemplate } from '../overlay/template';
 import type { MapVideoCameraSettings } from './camera';
 import { MAX_FIXED_OFFSET_METERS, MAX_KEYFRAMES, type CameraKeyframe } from './keyframes';
@@ -16,7 +17,7 @@ import type { MapVideoTimingMode } from './timing';
 
 export const MAP_VIDEO_PROJECT_KIND = 'opentrack-map-video';
 export const MAP_VIDEO_PROJECT_VERSION = 1;
-export const MAP_VIDEO_PROJECT_MAX_BYTES = 256 * 1024;
+export const MAP_VIDEO_PROJECT_MAX_BYTES = 256 * 1024 + LAYOUT_IMAGES_MAX_CHARS;
 
 export type MapVideoBasemapStyle = 'liberty' | 'positron' | 'bright' | 'dark';
 export const MAP_VIDEO_BASEMAP_STYLES: readonly MapVideoBasemapStyle[] = ['liberty', 'positron', 'bright', 'dark'];

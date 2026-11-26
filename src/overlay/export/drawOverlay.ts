@@ -23,6 +23,8 @@ import {
 } from '../template';
 import type { OverlayTimeline } from '../timeline';
 import { DEFAULT_CHART } from '../template';
+import { visibilityAt } from '../visibility';
+import { imageRect } from '../imageSetting';
 import { chartMoment, chartSeriesOf } from '../chart';
 import { drawChart, drawSeries } from './drawChart';
 import { drawCompass } from './drawCompass';
@@ -67,6 +69,16 @@ export interface OverlayRendererInput {
    * given to the renderer by every caller; never stored, logged or sent.
    */
   personal?: PersonalFigures;
+  /**
+   * AV-1030 (TD-102). The decoded picture of each image component, by component id, from `decodeTemplateImages`.
+   * One missing draws nothing (the editor's preview draws a placeholder). The caller owns the bitmaps and closes them.
+   */
+  images?: ReadonlyMap<string, CanvasImageSource>;
+  /**
+   * AV-1030. The width of the frame this canvas is a scaled copy of (a preview), when it is not the canvas's own:
+   * an image at *Original size* is its pixels in that frame, so it is drawn at the same share of it.
+   */
+  frameWidth?: number;
 }
 
 export interface OverlayRenderer {
@@ -75,8 +87,10 @@ export interface OverlayRenderer {
    * cleared first, so what is not overlay is transparent; a burned-in render
    * passes `clear: false` to draw over a video frame already on the canvas.
    * AV-1023: `maps` is what stands behind the route insets that have a basemap.
+   * AV-1029: `ghostHidden` (the canvas editor's preview only, never an export) draws a component outside its window faded, with a dashed outline.
+   * AV-1030: `placeholders` (previews only) is the ids of the images known to be unreadable: each is drawn as a box saying so (an image still decoding draws nothing).
    */
-  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number, options?: { clear?: boolean; maps?: InsetMapSource }): void;
+  drawFrame(ctx: OverlayContext2D, videoTimeSeconds: number, options?: { clear?: boolean; maps?: InsetMapSource; ghostHidden?: boolean; placeholders?: ReadonlySet<string> }): void;
   /**
    * AV-1023 (TD-092). The route insets that need a basemap picture for this moment, by component id: those
    * with a map that are drawn here. Empty when none is, so an export asks its page for nothing.
@@ -97,6 +111,48 @@ function roundedRect(ctx: OverlayContext2D, box: Box, radius: number): void {
   ctx.beginPath();
   if (typeof ctx.roundRect === 'function') ctx.roundRect(box.x, box.y, box.w, box.h, radius);
   else ctx.rect(box.x, box.y, box.w, box.h);
+}
+
+/** AV-1029. How faded the editor's preview draws a component outside its window. */
+const GHOST_ALPHA = 0.3;
+
+/**
+ * AV-1029 (TD-101). A context whose `globalAlpha` writes are multiplied by `alpha`, because the draw
+ * helpers set their own (0.75 for a label, 1 to finish) and a plain write would undo the fade.
+ * `save`/`restore` act on the real context, so the stack still balances.
+ */
+function scaledAlpha(ctx: OverlayContext2D, alpha: number): OverlayContext2D {
+  return new Proxy(ctx, {
+    get(target, key) {
+      if (key === 'globalAlpha') return target.globalAlpha / alpha;
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set(target, key, value) {
+      Reflect.set(target, key, key === 'globalAlpha' ? value * alpha : value, target);
+      return true;
+    },
+  });
+}
+
+/** AV-1030. What a preview draws for an image that could not be read: a dashed box with the words. */
+function drawBrokenImage(ctx: OverlayContext2D, box: Box, frameWidth: number): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x, box.y, box.w, box.h);
+  ctx.clip();
+  ctx.fillStyle = 'rgb(0 0 0 / 0.5)';
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+  ctx.setLineDash?.([6, 4]);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#f87171';
+  ctx.strokeRect(box.x, box.y, box.w, box.h);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${Math.max(10, BASE_FONT_FRACTION * frameWidth)}px system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Image could not be read', box.x + box.w / 2, box.y + box.h / 2, Math.max(1, box.w - 8));
+  ctx.restore();
 }
 
 export function createOverlayRenderer(input: OverlayRendererInput): OverlayRenderer {
@@ -155,6 +211,7 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
       label: ready.label,
       value: ready.text ?? '',
       figure,
+      fontFamily: ready.style.fontFamily,
       track: ready.fraction !== undefined,
     });
     const { padX, track, trackGap } = layout;
@@ -277,16 +334,41 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
         const value = stillValue(component, context);
         if (!value.ok) continue;
         const color = component.style.textColor ?? DEFAULT_OVERLAY_STYLE.textColor;
-        texts.set(component.id, layoutStillText(component, value, color, { width, height }, measure));
+        texts.set(component.id, layoutStillText(component, value, color, { width, height }, measure, template.style.fontFamily));
       }
     }
     return texts;
   };
 
+  /** AV-1030 (TD-102). An image: fitted into its box, clipped to it, its opacity multiplied into whatever alpha the context carries (a fade). */
+  const drawImageComponent = (ctx: OverlayContext2D, component: OverlayComponent, placeholder: boolean) => {
+    const setting = component.image;
+    if (!setting) return;
+    const box = boxOf(component);
+    const picture = input.images?.get(component.id) as (CanvasImageSource & { width: number; height: number }) | undefined;
+    if (!picture) {
+      if (placeholder) drawBrokenImage(ctx, box, width);
+      return;
+    }
+    // Pixels of the output frame: a scaled-down preview draws them scaled by the same share.
+    const k = width / (input.frameWidth ?? width);
+    const rects = imageRect(setting.fit, box, { w: picture.width * k, h: picture.height * k });
+    if (!rects) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(box.x, box.y, box.w, box.h);
+    ctx.clip();
+    ctx.globalAlpha = ctx.globalAlpha * setting.opacity;
+    ctx.drawImage(picture, rects.sx / k, rects.sy / k, rects.sw / k, rects.sh / k, rects.dx, rects.dy, rects.dw, rects.dh);
+    ctx.restore();
+  };
+
   return {
     insetsAt(videoTimeSeconds) {
       const ids: string[] = [];
-      for (const [id, model] of insetModels) if (model.hasMap && model.momentAt(videoTimeSeconds)) ids.push(id);
+      for (const [id, model] of insetModels) {
+        if (model.hasMap && model.component.visible && visibilityAt(model.component.visibility, videoTimeSeconds) > 0 && model.momentAt(videoTimeSeconds)) ids.push(id);
+      }
       return ids;
     },
     drawFrame(ctx, videoTimeSeconds, options) {
@@ -294,15 +376,18 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
       if (options?.clear !== false) ctx.clearRect(0, 0, width, height);
       // Where the activity does not reach, only what describes the whole of it is drawn.
       const sample = timeline.sampleAt(videoTimeSeconds);
-      stillTexts ??= setStillTexts(ctx);
+      const texts = (stillTexts ??= setStillTexts(ctx));
 
-      for (const component of template.components) {
-        if (!component.visible) continue;
+      const drawComponent = (ctx: OverlayContext2D, component: OverlayComponent) => {
         if (component.type === 'shape') {
           if (component.shape) drawShape(ctx, boxOf(component), component.shape, Math.min(width, height));
-          continue;
+          return;
         }
-        const still = stillTexts.get(component.id);
+        if (component.type === 'image') {
+          drawImageComponent(ctx, component, options?.placeholders?.has(component.id) === true);
+          return;
+        }
+        const still = texts.get(component.id);
         if (still) {
           ctx.save();
           ctx.fillStyle = still.color;
@@ -314,11 +399,11 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
             ctx.fillText(line.text, line.x, line.y);
           }
           ctx.restore();
-          continue;
+          return;
         }
-        if (!sample) continue;
+        if (!sample) return;
         const ready = resolveOverlayComponent(template, component, sample, timeline, units, input.personal, input.readerTimeZone);
-        if (ready.status !== 'ready') continue;
+        if (ready.status !== 'ready') return;
 
         const box = boxOf(component);
         const em = BASE_FONT_FRACTION * width * ready.style.fontScale;
@@ -326,7 +411,7 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
         // A chart with no place on its axis at this moment (a dropout) draws nothing, background included, as the contract has no props for it.
         if (component.type === 'chart') {
           const chartSeries = seriesOf(component);
-          if (!chartSeries || !component.source || chartMoment(chartSeries, component.source, sample, timeline).centre === undefined) continue;
+          if (!chartSeries || !component.source || chartMoment(chartSeries, component.source, sample, timeline).centre === undefined) return;
         }
         ctx.save();
         // Each component stays inside its own box, as the preview's tile does; a round inset inside its circle.
@@ -389,6 +474,28 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
           drawFigure(ctx, box, ready, em);
         }
         ctx.restore();
+      };
+      for (const component of template.components) {
+        if (!component.visible) continue;
+        // AV-1029 (TD-101). Outside its window a component is not drawn (the editor's preview alone shows it faded); inside, what it draws is multiplied by the fade.
+        const shown = visibilityAt(component.visibility, videoTimeSeconds);
+        if (shown >= 1) drawComponent(ctx, component);
+        else if (shown > 0 || options?.ghostHidden) {
+          const alpha = shown > 0 ? shown : GHOST_ALPHA;
+          ctx.save();
+          ctx.globalAlpha = alpha;
+          drawComponent(scaledAlpha(ctx, alpha), component);
+          ctx.restore();
+          if (shown === 0) {
+            const box = boxOf(component);
+            ctx.save();
+            ctx.setLineDash?.([6, 4]);
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgb(255 255 255 / 0.7)';
+            ctx.strokeRect(box.x, box.y, box.w, box.h);
+            ctx.restore();
+          }
+        }
       }
     },
   };

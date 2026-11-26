@@ -41,7 +41,7 @@ export function drawGradient(ctx: OverlayContext2D, box: Box, ready: Ready, em: 
   if (grade === undefined) return;
   const color = setting.bands[gradientBand(grade, setting.bands)]!.color;
   const figure = ready.component.figure;
-  const layout = figureLayout({ em, frameWidth, label: ready.label, value: ready.text ?? '', figure, track: false });
+  const layout = figureLayout({ em, frameWidth, label: ready.label, value: ready.text ?? '', figure, fontFamily: ready.style.fontFamily, track: false });
   const { padX } = layout;
   const glyphSize = setting.glyph ? GLYPH_SHARE * layout.valueSize : 0;
   const glyphGap = setting.glyph ? 0.35 * em : 0;

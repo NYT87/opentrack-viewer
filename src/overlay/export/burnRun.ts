@@ -1,6 +1,8 @@
 import type * as Mediabunny from 'mediabunny';
 import { buildOverlayTimeline, videoClockOf } from '../timeline';
 import { createOverlayRenderer } from './drawOverlay';
+import { closeImages } from '../images';
+import { installFonts } from '../fonts';
 import { acquireInsets } from './insetBridge';
 import { OverlayExportError } from './errors';
 import type { BurnRequest, BurnSourceInfo, FromWorker } from './protocol';
@@ -94,6 +96,13 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
   const { mb, request, writeAt, signal } = options;
   if (signal?.aborted) throw CANCELLED();
 
+  // AV-1031 (TD-103). The page's font bytes are registered, and loaded, before any frame is drawn.
+  try {
+    await installFonts(request.fonts ?? []);
+  } catch (error) {
+    closeImages(Object.values(request.images ?? {}));
+    throw error;
+  }
   const canvas = new OffscreenCanvas(request.width, request.height);
   const ctx = canvas.getContext('2d');
   if (!ctx) {
@@ -105,6 +114,8 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
     // AV-1025. A stopwatch counts from the cut's start.
     cutStartSeconds: request.trim?.start,
   });
+  // AV-1030. The page's decoded pictures, transferred: this worker's to close.
+  const images = new Map(Object.entries(request.images ?? {}));
   const renderer = createOverlayRenderer({
     template: request.template,
     timeline,
@@ -113,6 +124,7 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
     width: request.width,
     height: request.height,
     personal: request.personal,
+    images,
   });
 
   const input = openInput(mb, request.file);
@@ -193,6 +205,7 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
     return { frameCount: frames, notes };
   } finally {
     input.dispose();
+    closeImages(images.values());
   }
 }
 

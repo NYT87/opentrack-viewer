@@ -1,3 +1,4 @@
+import { fontStack } from './fonts';
 import type { MeasureText } from './staticImage';
 import type { OverlayFigureSetting, TextAlign } from './template';
 
@@ -9,8 +10,6 @@ import type { OverlayFigureSetting, TextAlign } from './template';
  * the value's 1.1, an inset of 0.6 em), so a figure with no settings is laid
  * out as it always was.
  */
-
-export const FIGURE_FONT_FAMILY = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 /** How far the content sits from the box's top at least, in ems. */
 export const FIGURE_MIN_TOP_EMS = 0.3;
@@ -26,6 +25,8 @@ export interface FigureLayoutInput {
   figure: OverlayFigureSetting | undefined;
   /** A gauge's track is drawn under the value. */
   track: boolean;
+  /** AV-1031 (TD-103). The figure's font family, resolved (component over layout); absent is the system font. */
+  fontFamily?: string;
   /** Only the editor measures; drawing needs no widths. */
   measure?: MeasureText;
 }
@@ -64,8 +65,9 @@ export function figureLayout(input: FigureLayoutInput): FigureLayout {
     ? labelAdvance + valueSize * 1.1 + trackGap + track
     : valueSize * 1.1 + trackGap + track;
   const padX = 0.6 * em;
-  const labelFont = `${labelSize}px ${FIGURE_FONT_FAMILY}`;
-  const valueFont = `bold ${valueSize}px ${FIGURE_FONT_FAMILY}`;
+  const stack = fontStack(input.fontFamily);
+  const labelFont = `${labelSize}px ${stack}`;
+  const valueFont = `bold ${valueSize}px ${stack}`;
   const { measure } = input;
   const widest = measure
     ? Math.max(showLabel ? measure((input.label ?? '').toUpperCase(), labelFont) : 0, measure(input.value, valueFont))
