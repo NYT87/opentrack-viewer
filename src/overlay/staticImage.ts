@@ -692,7 +692,14 @@ export function parseOverlayLayout(json: string): ParseStillLayoutResult {
   const sizeProblem = checkImageSize(width, height);
   if (sizeProblem) return { ok: false, error: `The layout’s image size cannot be used. ${sizeProblem.message}` };
 
-  const parsed = parseOverlayTemplate(JSON.stringify(file.template ?? null));
+  // A template nested deeper than JSON.stringify can go throws, and is refused like any unreadable one.
+  let template: string;
+  try {
+    template = JSON.stringify(file.template ?? null);
+  } catch {
+    return { ok: false, error: 'The layout’s template cannot be read. It is nested too deeply.' };
+  }
+  const parsed = parseOverlayTemplate(template);
   if (!parsed.ok) return { ok: false, error: `The layout’s template cannot be read. ${parsed.error}` };
   return { ok: true, layout: { width, height, template: parsed.template }, warnings: parsed.warnings };
 }

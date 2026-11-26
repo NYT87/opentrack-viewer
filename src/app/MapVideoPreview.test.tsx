@@ -229,6 +229,18 @@ describe('the project file (AV-1204, TD-066)', () => {
     );
   });
 
+  it('refuses a file too large to be a project without reading it', async () => {
+    await openWithRoute();
+    const file = new File(['{}'], 'huge.json');
+    Object.defineProperty(file, 'size', { value: 3 * 1024 ** 3 });
+    const text = vi.spyOn(file, 'text');
+    await userEvent.upload(screen.getByTestId('map-video-project-input'), file);
+    expect(await within(screen.getByRole('region', { name: 'Project' })).findByRole('alert')).toHaveTextContent(
+      'Could not open huge.json. This file is too large to be a map video project.',
+    );
+    expect(text).not.toHaveBeenCalled();
+  });
+
   it('saves the settings and the file name, and nothing of the route', async () => {
     const blobs: Blob[] = [];
     const original = URL.createObjectURL;

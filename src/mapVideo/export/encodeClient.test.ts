@@ -51,4 +51,14 @@ describe('the map video encoder client (AV-1209)', () => {
     await expect(finished).rejects.toMatchObject({ code: 'cancelled' });
     expect(worker.terminated).toBe(true);
   });
+
+  it('does not start the worker when Stop came before the start was sent', async () => {
+    const { worker, posted } = fakeWorker();
+    const encoder = startMapVideoEncode(request, { createWorker: () => worker });
+    encoder.cancel();
+    await tick();
+    expect(posted.some((message) => message.type === 'mapVideoStart')).toBe(false);
+    await expect(encoder.ready).rejects.toMatchObject({ code: 'cancelled' });
+    expect(worker.terminated).toBe(true);
+  });
 });

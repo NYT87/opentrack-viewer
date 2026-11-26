@@ -382,7 +382,14 @@ export function parseMapVideoProject(json: string): ParseMapVideoProjectResult {
     const problem = outputProblem(settings);
     if (problem) throw new FieldError(problem);
     if (s.overlay !== undefined && s.overlay !== null) {
-      const overlay = parseOverlayTemplate(JSON.stringify(s.overlay));
+      // A template nested deeper than JSON.stringify can go throws, and is refused like any unreadable one.
+      let text: string;
+      try {
+        text = JSON.stringify(s.overlay);
+      } catch {
+        throw new FieldError('The figures over the map cannot be read. They are nested too deeply.');
+      }
+      const overlay = parseOverlayTemplate(text);
       if (!overlay.ok) throw new FieldError(`The figures over the map cannot be read. ${overlay.error}`);
       // AV-1022 (TD-091): the map video cuts its route in metres; an overlay trim in a hand-edited file would cut it a second time.
       settings.overlay = { ...overlay.template };

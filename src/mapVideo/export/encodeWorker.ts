@@ -48,74 +48,90 @@ function fail(error: unknown, post: Post): void {
 
 async function start(request: MapVideoEncodeRequest, controller: AbortController, post: Post): Promise<void> {
   const archive = await createArchiveSink(request.archiveName);
-  // An MP4 goes back to patch its header: it is written to a file. Where no file can be had (a
-  // private window), a video small enough is built in memory; a larger one is refused.
-  if (!archive.writeAt && !request.allowMemory) {
-    await archive.abort();
-    throw new OverlayExportError(
-      'storage_failed',
-      'This video is too big to build in memory, and this browser will not give the page a file to write it to (a private window does not). Make it shorter or smaller, or use a normal window.',
-    );
-  }
-  const writeAt = archive.writeAt;
-  const mb = await loadMediabunny();
-  const mp4 = request.format === 'mp4';
-  const memory = writeAt ? undefined : new mb.BufferTarget();
-  const output = new mb.Output({
-    format: mp4 ? new mb.Mp4OutputFormat({ fastStart: writeAt ? false : 'in-memory' }) : new mb.WebMOutputFormat(),
-    target:
-      memory ??
-      new mb.StreamTarget(
-        new WritableStream({
-          write(chunk: Mediabunny.StreamTargetChunk) {
-            writeAt!(chunk.data, chunk.position);
-          },
-        }),
-      ),
-  });
-  const video = new mb.VideoSampleSource({
-    codec: mp4 ? 'avc' : 'vp9',
-    bitrate: request.bitrate,
-    keyFrameInterval: 2,
-    // The question the panel's own check asked (`canEncodeVideo`, no preference), so the export cannot
-    // refuse what the panel offered: current Chromium answers `prefer-hardware` with "not supported"
-    // on a machine that has only a software H.264 encoder (TD-097). A browser still picks hardware where it has it.
-    hardwareAcceleration: 'no-preference',
-  });
-  output.addVideoTrack(video, { frameRate: request.fps });
+  // A stop that comes while starting is read after each wait: the listener below is only added at the end.
+  const stopped = () => {
+    if (controller.signal.aborted) throw new OverlayExportError('cancelled', 'The export was stopped.');
+  };
+  let output: Mediabunny.Output | undefined;
+  try {
+    stopped();
+    // An MP4 goes back to patch its header: it is written to a file. Where no file can be had (a
+    // private window), a video small enough is built in memory; a larger one is refused.
+    if (!archive.writeAt && !request.allowMemory) {
+      throw new OverlayExportError(
+        'storage_failed',
+        'This video is too big to build in memory, and this browser will not give the page a file to write it to (a private window does not). Make it shorter or smaller, or use a normal window.',
+      );
+    }
+    const writeAt = archive.writeAt;
+    const mb = await loadMediabunny();
+    stopped();
+    const mp4 = request.format === 'mp4';
+    const memory = writeAt ? undefined : new mb.BufferTarget();
+    output = new mb.Output({
+      format: mp4 ? new mb.Mp4OutputFormat({ fastStart: writeAt ? false : 'in-memory' }) : new mb.WebMOutputFormat(),
+      target:
+        memory ??
+        new mb.StreamTarget(
+          new WritableStream({
+            write(chunk: Mediabunny.StreamTargetChunk) {
+              writeAt!(chunk.data, chunk.position);
+            },
+          }),
+        ),
+    });
+    const video = new mb.VideoSampleSource({
+      codec: mp4 ? 'avc' : 'vp9',
+      bitrate: request.bitrate,
+      keyFrameInterval: 2,
+      // The question the panel's own check asked (`canEncodeVideo`, no preference), so the export cannot
+      // refuse what the panel offered: current Chromium answers `prefer-hardware` with "not supported"
+      // on a machine that has only a software H.264 encoder (TD-097). A browser still picks hardware where it has it.
+      hardwareAcceleration: 'no-preference',
+    });
+    output.addVideoTrack(video, { frameRate: request.fps });
 
-  const notes: string[] = [];
-  let sound: Mediabunny.AudioSampleSource | undefined;
-  if (request.audio) {
-    const options = { numberOfChannels: request.audio.channels.length, sampleRate: request.audio.sampleRate, bitrate: 192_000 };
-    const codec = mp4
-      ? (await mb.canEncodeAudio('aac', options)) ? 'aac' : (await mb.canEncodeAudio('opus', options)) ? 'opus' : undefined
-      : (await mb.canEncodeAudio('opus', options)) ? 'opus' : undefined;
-    if (codec) {
-      sound = new mb.AudioSampleSource({ codec, bitrate: 192_000 });
-      output.addAudioTrack(sound);
-    } else {
-      notes.push('This browser cannot encode sound for this video, so it has none.');
+    const notes: string[] = [];
+    let sound: Mediabunny.AudioSampleSource | undefined;
+    if (request.audio) {
+      const options = { numberOfChannels: request.audio.channels.length, sampleRate: request.audio.sampleRate, bitrate: 192_000 };
+      const codec = mp4
+        ? (await mb.canEncodeAudio('aac', options)) ? 'aac' : (await mb.canEncodeAudio('opus', options)) ? 'opus' : undefined
+        : (await mb.canEncodeAudio('opus', options)) ? 'opus' : undefined;
+      stopped();
+      if (codec) {
+        sound = new mb.AudioSampleSource({ codec, bitrate: 192_000 });
+        output.addAudioTrack(sound);
+      } else {
+        notes.push('This browser cannot encode sound for this video, so it has none.');
+      }
     }
-  }
-  await output.start();
-  if (sound && request.audio) {
-    // A second at a time, as planar float samples.
-    const { sampleRate, channels } = request.audio;
-    const length = channels[0]?.length ?? 0;
-    for (let from = 0; from < length && !controller.signal.aborted; from += sampleRate) {
-      const to = Math.min(length, from + sampleRate);
-      const data = new Float32Array((to - from) * channels.length);
-      channels.forEach((channel, i) => data.set(channel.subarray(from, to), i * (to - from)));
-      const sample = new mb.AudioSample({ data, format: 'f32-planar', numberOfChannels: channels.length, sampleRate, timestamp: from / sampleRate });
-      await sound.add(sample);
-      sample.close();
+    await output.start();
+    stopped();
+    if (sound && request.audio) {
+      // A second at a time, as planar float samples.
+      const { sampleRate, channels } = request.audio;
+      const length = channels[0]?.length ?? 0;
+      for (let from = 0; from < length && !controller.signal.aborted; from += sampleRate) {
+        const to = Math.min(length, from + sampleRate);
+        const data = new Float32Array((to - from) * channels.length);
+        channels.forEach((channel, i) => data.set(channel.subarray(from, to), i * (to - from)));
+        const sample = new mb.AudioSample({ data, format: 'f32-planar', numberOfChannels: channels.length, sampleRate, timestamp: from / sampleRate });
+        await sound.add(sample);
+        sample.close();
+      }
+      sound.close();
+      stopped();
     }
-    sound.close();
+    session = { archive, memory, mimeType: mp4 ? 'video/mp4' : 'video/webm', output, video, mb, queue: Promise.resolve(), frames: 0, notes, failed: false };
+    controller.signal.addEventListener('abort', () => fail(new OverlayExportError('cancelled', 'The export was stopped.'), post), { once: true });
+    post({ type: 'mapVideoReady' });
+  } catch (error) {
+    // Not yet a session, so `fail` cannot let these go.
+    void output?.cancel().catch(() => undefined);
+    await archive.abort();
+    throw error;
   }
-  session = { archive, memory, mimeType: mp4 ? 'video/mp4' : 'video/webm', output, video, mb, queue: Promise.resolve(), frames: 0, notes, failed: false };
-  controller.signal.addEventListener('abort', () => fail(new OverlayExportError('cancelled', 'The export was stopped.'), post), { once: true });
-  post({ type: 'mapVideoReady' });
 }
 
 /** The worker's half of a map video export, one message at a time. */

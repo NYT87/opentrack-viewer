@@ -115,6 +115,8 @@ export function startMapVideoEncode(
       if (settled) return release();
       await removeStaleArchives(archiveName);
       if (settled) return release();
+      // Stopped before it began: the start itself is what is dropped.
+      if (failure) return end(failure);
       worker.postMessage({ type: 'mapVideoStart', request: { ...request, archiveName } });
     })
     .catch((error: unknown) => end(new OverlayExportError('storage_failed', `The video could not be given a file. (${String(error)})`)));

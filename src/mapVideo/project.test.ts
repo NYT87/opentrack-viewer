@@ -120,6 +120,11 @@ describe('the map video project file (AV-1203)', () => {
     expect(parseMapVideoProject('not json').ok).toBe(false);
     expect(parseMapVideoProject(' '.repeat(300 * 1024)).ok).toBe(false);
   });
+
+  it('refuses figures nested too deeply to read, rather than throw', () => {
+    const deep = '['.repeat(120_000) + ']'.repeat(120_000);
+    expect(parseMapVideoProject(withSettings({ overlay: 'deep' }).replace('"deep"', deep))).toEqual({ ok: false, error: expect.stringContaining('nested too deeply') });
+  });
 });
 
 describe('the reader’s own figures (AV-1018, TD-086)', () => {

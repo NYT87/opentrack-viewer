@@ -385,6 +385,12 @@ describe('the layout file (AV-1010)', () => {
     expect(parseStillLayout('x'.repeat(LAYOUT_FILE_MAX_BYTES + 1))).toEqual({ ok: false, error: expect.stringMatching(/too large/) });
   });
 
+  it('refuses a template nested too deeply to read, rather than throw', () => {
+    const deep = '['.repeat(120_000) + ']'.repeat(120_000);
+    const json = `{"kind":"${LAYOUT_FILE_KIND}","version":1,"image":{"width":1080,"height":1350},"template":${deep}}`;
+    expect(parseOverlayLayout(json)).toEqual({ ok: false, error: expect.stringContaining('nested too deeply') });
+  });
+
   it('leaves out a video’s components and a second route, saying so', () => {
     const json = JSON.parse(serializeStillLayout(layout()));
     json.template.components.push(

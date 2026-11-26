@@ -101,7 +101,8 @@ export function createInsetMaps(input: InsetMapsInput): InsetMapSession {
 
   return {
     async bitmapsAt(seconds, ids) {
-      const pictures: Record<string, ImageBitmap> = {};
+      // No prototype: a component id of `__proto__` is a picture like any other, not a hidden one never closed.
+      const pictures: Record<string, ImageBitmap> = Object.create(null);
       try {
         for (const id of ids) {
           if (signal?.aborted || closed) throw cancelled();
