@@ -165,7 +165,10 @@ describe('handed over from Video telemetry (AV-1002)', () => {
 
     const { source } = freshStore.getState();
     expect(source.video?.file.name).toBe('GH010042.mp4');
-    expect(source.video?.timing?.start?.toISOString()).toBe('2024-05-04T10:00:00.000Z');
+    // The clock is the GPS clock (#54), not the container's zone-less creation time: the first fix falls in the video's first seconds.
+    const firstFix = source.activity!.points[0]!.time!.getTime() - source.video!.timing!.start!.getTime();
+    expect(firstFix).toBeGreaterThanOrEqual(0);
+    expect(firstFix).toBeLessThan(5_000);
     expect(source.video?.timing?.durationSeconds).toBe(17);
     expect(source.activity?.source.format).toBe('gopro');
     expect(source.activity?.sensorStreams?.length).toBeGreaterThan(0);
