@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { exportActivity, getExportAvailability } from './index';
-import { mergedTrackFormats } from './mergedTrack';
 import { buildTcx } from './tcx/buildTcx';
 import { buildFit } from './fit/buildFit';
 import { makeActivity } from '../test/helpers/activity';
@@ -16,7 +15,6 @@ const merged = (touching = false) => {
 describe('export preservation across entry points', () => {
   it('offers the same formats after a merged recording is handed to the viewer', async () => {
     const activity = merged();
-    expect(getExportAvailability(activity)).toEqual(mergedTrackFormats(activity));
     expect(getExportAvailability(activity).find((entry) => entry.format === 'tcx')?.available).toBe(false);
     await expect(exportActivity(activity, { format: 'tcx' })).rejects.toThrow(/one lap/);
     expect(() => buildTcx(activity)).toThrow(/one lap/);

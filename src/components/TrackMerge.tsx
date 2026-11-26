@@ -13,8 +13,8 @@ import {
   formatSpeed,
   type UnitSystem,
 } from '../domain/units';
-import type { ExportFormat } from '../exporters';
-import { exportMergedTrack, mergedTrackFileStem, mergedTrackFormats } from '../exporters/mergedTrack';
+import { getExportAvailability, type ExportFormat } from '../exporters';
+import { exportMergedTrack, mergedTrackFileStem } from '../exporters/mergedTrack';
 import { parseActivityFile } from '../parsers';
 import { SUPPORTED_FORMATS } from '../parsers/detectFormat';
 import { useActivityStore } from '../state/activityStore';
@@ -377,7 +377,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function MergedExport({ activity, joined }: { activity: Activity; joined: boolean }) {
-  const formats = useMemo(() => mergedTrackFormats(activity), [activity]);
+  const formats = useMemo(() => getExportAvailability(activity), [activity]);
   const [format, setFormat] = useState<ExportFormat>('fit');
   const [outcome, setOutcome] = useState<{ fileName: string; warnings: ActivityWarning[] }>();
   const [error, setError] = useState<string>();

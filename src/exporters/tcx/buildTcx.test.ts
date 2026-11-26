@@ -105,6 +105,21 @@ describe('TCX export round-trips (AV-752 / AV-753)', () => {
   });
 });
 
+describe('TCX keeps the activity UTC offset (#53)', () => {
+  it('writes times in that offset, so it reads back with it', () => {
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 51.501, lon: -0.1, time: new Date('2024-01-01T10:00:10Z') },
+    ]);
+    const zoned = { ...activity, metadata: { ...activity.metadata, utcOffsetMinutes: 330 } };
+
+    const reimported = roundTrip(buildTcx(zoned).xml);
+
+    expect(reimported.metadata.utcOffsetMinutes).toBe(330);
+    expect(reimported.points[0]?.time?.toISOString()).toBe('2024-01-01T10:00:00.000Z');
+  });
+});
+
 describe('TCX export limits (AV-752)', () => {
   it('refuses an activity with no timestamps', () => {
     const noTime = makeActivity([

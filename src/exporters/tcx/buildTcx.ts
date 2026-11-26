@@ -7,6 +7,7 @@ import {
   type ActivityWarning,
 } from '../../domain/activity';
 import { ActivityError } from '../../domain/errors';
+import { decimal, escapeXml, firstDistance, groupBySegment, isoTime } from '../shared';
 
 const TCX_NS = 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2';
 const TPX_NS = 'http://www.garmin.com/xmlschemas/ActivityExtension/v2';
@@ -18,16 +19,6 @@ function tcxSport(activity: Activity): string {
   return 'Other';
 }
 
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-const decimal = (value: number, places: number) => Number(value.toFixed(places)).toString();
 const finite = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
@@ -61,13 +52,14 @@ export function buildTcx(activity: Activity): { xml: string; warnings: ActivityW
   collectLossWarnings(activity, timed, warnings);
 
   const start = timed[0]!.time;
+  const offset = activity.metadata.utcOffsetMinutes;
   const lines: string[] = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push(`<TrainingCenterDatabase xmlns="${TCX_NS}" xmlns:ns3="${TPX_NS}">`);
   lines.push('  <Activities>');
   lines.push(`    <Activity Sport="${tcxSport(activity)}">`);
   // TCX identifies an activity by when it began; there is no name field.
-  lines.push(`      <Id>${start.toISOString()}</Id>`);
+  lines.push(`      <Id>${isoTime(start, offset)}</Id>`);
 
   /*
    * A slice keeps its source's distance readings, so a section starting 160 m
@@ -76,7 +68,7 @@ export function buildTcx(activity: Activity): { xml: string; warnings: ActivityW
    * this file claims to contain.
    */
   const distanceOrigin = firstDistance(timed);
-  for (const lap of buildLaps(activity, timed)) lines.push(...lapElement(lap, distanceOrigin));
+  for (const lap of buildLaps(activity, timed)) lines.push(...lapElement(lap, distanceOrigin, offset));
 
   const creator = activity.metadata.creator ?? activity.metadata.device?.name;
   if (creator) {
@@ -129,14 +121,8 @@ function buildLaps(activity: Activity, timed: (ActivityPoint & { time: Date })[]
   ];
 }
 
-/** The reading every other distance in the exported file is measured from. */
-function firstDistance(points: ActivityPoint[]): number {
-  for (const point of points) if (finite(point.distanceMeters)) return point.distanceMeters;
-  return 0;
-}
-
-function lapElement(lap: TcxLap, distanceOrigin: number): string[] {
-  const lines = [`      <Lap StartTime="${lap.startTime.toISOString()}">`];
+function lapElement(lap: TcxLap, distanceOrigin: number, offsetMinutes: number | undefined): string[] {
+  const lines = [`      <Lap StartTime="${isoTime(lap.startTime, offsetMinutes)}">`];
   lines.push(`        <TotalTimeSeconds>${decimal(lap.durationSeconds, 2)}</TotalTimeSeconds>`);
   lines.push(`        <DistanceMeters>${decimal(lap.distanceMeters, 2)}</DistanceMeters>`);
   lines.push(`        <Calories>${Math.round(lap.caloriesKcal)}</Calories>`);
@@ -145,7 +131,7 @@ function lapElement(lap: TcxLap, distanceOrigin: number): string[] {
 
   for (const track of lap.tracks) {
     lines.push('        <Track>');
-    for (const point of track) lines.push(...trackpoint(point, distanceOrigin));
+    for (const point of track) lines.push(...trackpoint(point, distanceOrigin, offsetMinutes));
     lines.push('        </Track>');
   }
 
@@ -153,9 +139,13 @@ function lapElement(lap: TcxLap, distanceOrigin: number): string[] {
   return lines;
 }
 
-function trackpoint(point: ActivityPoint & { time: Date }, distanceOrigin: number): string[] {
+function trackpoint(
+  point: ActivityPoint & { time: Date },
+  distanceOrigin: number,
+  offsetMinutes: number | undefined,
+): string[] {
   const lines = ['          <Trackpoint>'];
-  lines.push(`            <Time>${point.time.toISOString()}</Time>`);
+  lines.push(`            <Time>${isoTime(point.time, offsetMinutes)}</Time>`);
 
   if (hasValidLocation(point)) {
     lines.push('            <Position>');
@@ -195,20 +185,6 @@ function trackpoint(point: ActivityPoint & { time: Date }, distanceOrigin: numbe
 
   lines.push('          </Trackpoint>');
   return lines;
-}
-
-function groupBySegment(points: (ActivityPoint & { time: Date })[]) {
-  const segments: (ActivityPoint & { time: Date })[][] = [];
-  let current = -1;
-  for (const point of points) {
-    const segment = point.segmentIndex ?? 0;
-    if (segment !== current || segments.length === 0) {
-      segments.push([]);
-      current = segment;
-    }
-    segments.at(-1)!.push(point);
-  }
-  return segments;
 }
 
 /** AV-752. What TCX cannot carry cleanly, said out loud. */

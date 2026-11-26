@@ -6,6 +6,7 @@ import {
   type ActivityWarning,
 } from '../../domain/activity';
 import { ActivityError } from '../../domain/errors';
+import { decimal, escapeXml, firstDistance, groupBySegment, isoTime } from '../shared';
 
 /** Written into the `creator` attribute when the source file named no one. */
 export const EXPORT_CREATOR = 'OpenTrack Viewer';
@@ -22,28 +23,9 @@ const PWR_NS = 'http://www.garmin.com/xmlschemas/PowerExtension/v1';
  */
 const GPXDATA_NS = 'http://www.cluetrust.com/XML/GPXDATA/1/0';
 
-/**
- * XML text escaping. Applied to every value that reaches the document, without
- * exception: an activity name is user-controlled text that arrived from a file,
- * and an unescaped `&` alone is enough to produce a document this app cannot
- * read back.
- */
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
 /** Coordinates keep seven decimals — about a centimetre, past any GPS's truth. */
 function coordinate(value: number): string {
   return value.toFixed(7);
-}
-
-function decimal(value: number, places: number): string {
-  return Number(value.toFixed(places)).toString();
 }
 
 function isFinite(value: unknown): value is number {
@@ -101,7 +83,7 @@ export function buildGpx(activity: Activity): { xml: string; warnings: ActivityW
     lines.push(`    <desc>${escapeXml(activity.metadata.description)}</desc>`);
   }
   if (activity.derived?.startTime) {
-    lines.push(`    <time>${activity.derived.startTime.toISOString()}</time>`);
+    lines.push(`    <time>${isoTime(activity.derived.startTime, activity.metadata.utcOffsetMinutes)}</time>`);
   }
   lines.push('  </metadata>');
 
@@ -114,10 +96,11 @@ export function buildGpx(activity: Activity): { xml: string; warnings: ActivityW
   // would invent both distance and a straight line the athlete never took.
   // Distance counts from the first point written, as the stats count it: a
   // section keeps its odometer readings, which start well above zero.
-  const distanceOrigin = positioned.find((point) => isFinite(point.distanceMeters))?.distanceMeters ?? 0;
+  const distanceOrigin = firstDistance(positioned);
+  const offset = activity.metadata.utcOffsetMinutes;
   for (const segment of groupBySegment(positioned)) {
     lines.push('    <trkseg>');
-    for (const point of segment) lines.push(...trackPoint(point, distanceOrigin));
+    for (const point of segment) lines.push(...trackPoint(point, distanceOrigin, offset));
     lines.push('    </trkseg>');
   }
 
@@ -127,28 +110,18 @@ export function buildGpx(activity: Activity): { xml: string; warnings: ActivityW
   return { xml: `${lines.join('\n')}\n`, warnings };
 }
 
-function groupBySegment(points: (ActivityPoint & { lat: number; lon: number })[]) {
-  const segments: (ActivityPoint & { lat: number; lon: number })[][] = [];
-  let current = -1;
-  for (const point of points) {
-    const segment = point.segmentIndex ?? 0;
-    if (segment !== current || segments.length === 0) {
-      segments.push([]);
-      current = segment;
-    }
-    segments.at(-1)!.push(point);
-  }
-  return segments;
-}
-
-function trackPoint(point: ActivityPoint & { lat: number; lon: number }, distanceOrigin: number): string[] {
+function trackPoint(
+  point: ActivityPoint & { lat: number; lon: number },
+  distanceOrigin: number,
+  offsetMinutes: number | undefined,
+): string[] {
   const lines = [`      <trkpt lat="${coordinate(point.lat)}" lon="${coordinate(point.lon)}">`];
 
   if (isFinite(point.elevationMeters)) {
     lines.push(`        <ele>${decimal(point.elevationMeters, 3)}</ele>`);
   }
   if (point.time instanceof Date && !Number.isNaN(point.time.getTime())) {
-    lines.push(`        <time>${point.time.toISOString()}</time>`);
+    lines.push(`        <time>${isoTime(point.time, offsetMinutes)}</time>`);
   }
 
   // GPX has no field of its own for sensor data; every device writes Garmin's

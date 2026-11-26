@@ -8,7 +8,7 @@ import {
 import {
   chartableStreamKeys,
   decideSensorRead,
-  pointIntervalMs,
+  medianInterval,
   readSensorStreams,
   type GoproStream,
 } from './sensorStreams';
@@ -177,7 +177,7 @@ export async function parseGopro(
     chartable.length > 0
       ? ((await readStreams(goproTelemetry, source, chartable, {
           timeOut: 'cts',
-          groupTimes: Math.max(10, Math.round(pointIntervalMs(pointCtsMs ?? []) / 2)),
+          groupTimes: Math.max(10, Math.round(medianInterval(pointCtsMs ?? []) / 2)),
           disableInterpolation: true,
         })) as Record<string, { streams?: Record<string, GoproStream> }>)
       : {};

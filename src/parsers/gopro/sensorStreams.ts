@@ -435,16 +435,6 @@ function toScalar(value: number | number[] | undefined, reduce: Reduction): numb
 }
 
 /**
- * The interval the activity's own points run at, in milliseconds. Used to size
- * the grouping the library applies while interpreting, so a 200 Hz stream is
- * reduced towards the rate of the points it will be charted against rather
- * than arriving whole (TD-034).
- */
-export function pointIntervalMs(pointCtsMs: number[]): number {
-  return medianInterval(pointCtsMs);
-}
-
-/**
  * The span the telemetry covers, in milliseconds — how long the camera was
  * recording, as its own clock saw it.
  */
@@ -454,7 +444,13 @@ export function telemetrySpanMs(pointCtsMs: number[]): number {
   return first === undefined || last === undefined ? 0 : last - first;
 }
 
-function medianInterval(pointCtsMs: number[]): number {
+/**
+ * The interval the activity's own points run at, in milliseconds. Used to size
+ * the grouping the library applies while interpreting, so a 200 Hz stream is
+ * reduced towards the rate of the points it will be charted against rather
+ * than arriving whole (TD-034).
+ */
+export function medianInterval(pointCtsMs: number[]): number {
   if (pointCtsMs.length < 2) return 1_000;
 
   const gaps: number[] = [];
