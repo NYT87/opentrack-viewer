@@ -311,6 +311,12 @@ describe('the burned-in render (AV-1007)', () => {
     expect(events).toContain('text:10.8 km/h'); // the activity as it was at t = 3
   });
 
+  it('maps video time to the activity by the warp it was given, a time-lapse (AV-1027)', async () => {
+    const { promise } = run({ frames: [3] }, { request: request({ videoWarp: { kind: 'factor', factor: 2 } }) });
+    await promise;
+    expect(events).toContain('text:21.6 km/h'); // the activity as it was at t = 6
+  });
+
   it('cuts the video to the part kept, and draws each frame at its time in the whole video (TD-081)', async () => {
     // The library times a cut video's frames from the cut: 3 s into a cut at 2 s is 5 s into the video.
     const { promise, seen } = run({ frames: [3] }, { request: request({ trim: { start: 2, end: 8 } }) });

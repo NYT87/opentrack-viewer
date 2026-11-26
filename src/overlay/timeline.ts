@@ -102,6 +102,75 @@ export function dataSourceId(source: OverlayDataSource): string {
 export interface OverlayVideoClock {
   durationSeconds: number;
   start?: Date;
+  /** AV-1027 (TD-099). How video seconds become activity seconds; absent is real time. */
+  warp?: VideoTimeWarp;
+}
+
+/**
+ * AV-1027 (TD-099). The video clock an export request describes: one builder, so no export path can
+ * leave the warp behind and draw a time-lapse at real time.
+ */
+export function videoClockOf(request: {
+  videoDurationSeconds: number;
+  videoStart?: Date;
+  videoWarp?: VideoTimeWarp;
+}): OverlayVideoClock {
+  return { durationSeconds: request.videoDurationSeconds, start: request.videoStart, warp: request.videoWarp };
+}
+
+/**
+ * AV-1027 (TD-099). Seconds of activity per second of video, from the video's start: a fixed factor
+ * (a time-lapse) or the camera's own timing (`video[i]` against `real[i]`, piecewise linear, so a
+ * TimeWarp ramp is followed). `video[0] = real[0] = 0`; plain data, structured-clone safe.
+ */
+export type VideoTimeWarp =
+  | { kind: 'factor'; factor: number }
+  | { kind: 'map'; video: number[]; real: number[] };
+
+/** Activity seconds after video second `t`: `t` itself with no warp (real time). */
+export function warpVideoSeconds(warp: VideoTimeWarp | undefined, t: number): number {
+  if (!warp) return t;
+  if (warp.kind === 'factor') return warp.factor * t;
+  const video = (i: number) => warp.video[i]!;
+  const real = (i: number) => warp.real[i]!;
+  const last = warp.video.length - 1;
+  if (last < 0) return t;
+  // Beyond the ends the end segment's rate holds; a single point has no segment, so real time.
+  const rate = (i: number) => (i < 1 ? 1 : (real(i) - real(i - 1)) / (video(i) - video(i - 1)));
+  if (t >= video(last)) return real(last) + (t - video(last)) * rate(last);
+  if (t <= video(0)) return real(0) + (t - video(0)) * rate(Math.min(1, last));
+  let lo = 0;
+  let hi = last;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (video(mid) <= t) lo = mid;
+    else hi = mid;
+  }
+  return real(lo) + (t - video(lo)) * rate(hi);
+}
+
+/**
+ * The video second (held to 0 to `durationSeconds`) whose warped time is `activitySeconds`: the way back
+ * for a click or a drag on the video's lane. A flat stretch of the map answers with its start.
+ */
+export function unwarpVideoSeconds(
+  warp: VideoTimeWarp | undefined,
+  activitySeconds: number,
+  durationSeconds: number,
+): number {
+  const held = (t: number) => Math.min(Math.max(t, 0), Math.max(0, durationSeconds));
+  if (!warp) return held(activitySeconds);
+  if (warp.kind === 'factor') return held(activitySeconds / warp.factor);
+  let lo = 0;
+  let hi = Math.max(0, durationSeconds);
+  if (warpVideoSeconds(warp, 0) >= activitySeconds) return 0;
+  if (warpVideoSeconds(warp, hi) <= activitySeconds) return hi;
+  for (let i = 0; i < 40; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (warpVideoSeconds(warp, mid) < activitySeconds) lo = mid;
+    else hi = mid;
+  }
+  return hi;
 }
 
 export interface OverlayTimelineOptions {
@@ -236,6 +305,8 @@ export interface OverlayAlignment {
   /** Where video 0 and video's end land in activity seconds, with the offset. */
   videoStartInActivity: number;
   videoEndInActivity: number;
+  /** AV-1027. How video seconds become activity seconds, for what is told in video time (the cut). */
+  warp?: VideoTimeWarp;
   /** Whether any of the video's span falls within the activity's. */
   overlaps: boolean;
   /** When the activity starts, and the video when its container says: for a mismatch told in dates. */
@@ -683,7 +754,9 @@ export function buildOverlayTimeline(
   const anchorMs = options.video?.start?.getTime();
   const anchorSeconds =
     typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? (anchorMs - firstMs) / 1000 : 0;
-  const toActivitySeconds = (videoTime: number) => anchorSeconds + videoTime - offsetSeconds;
+  const warp = options.video?.warp;
+  const toActivitySeconds = (videoTime: number) =>
+    anchorSeconds - offsetSeconds + warpVideoSeconds(warp, videoTime);
 
   const pause = activity.cleanup?.pause ?? DEFAULT_PAUSE_SETTINGS;
   const { derived, distance } = deriveStreams(activity, points, pause, firstMs);
@@ -1120,6 +1193,7 @@ export function buildOverlayTimeline(
         activitySpanSeconds: spanSeconds,
         videoStartInActivity,
         videoEndInActivity,
+        ...(warp ? { warp } : {}),
         overlaps: videoEndInActivity >= 0 && videoStartInActivity <= spanSeconds,
         activityStart: new Date(firstMs),
         ...(trace ? { trace } : {}),

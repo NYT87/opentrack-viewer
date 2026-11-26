@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOverlayTimeline, canSmooth, paceFromSpeed, smoothedValueAt } from './timeline';
+import { buildOverlayTimeline, videoClockOf, canSmooth, paceFromSpeed, smoothedValueAt, unwarpVideoSeconds, warpVideoSeconds, type VideoTimeWarp } from './timeline';
 import { makeActivity } from '../test/helpers/activity';
 import type { ActivitySensorStream } from '../domain/activity';
 
@@ -730,5 +730,90 @@ describe('figures so far (AV-1025)', () => {
     const late = buildOverlayTimeline(withStop(), { video: { durationSeconds: 65 }, offsetSeconds: 10 });
     expect(valueAt(late, 'clock', 5)).toBeUndefined();
     expect(valueAt(late, 'clock', 10)).toBe(T0.getTime() / 1000);
+  });
+});
+
+describe('time-lapse and TimeWarp footage (AV-1027, TD-099)', () => {
+  // 120 s of a ride at 2 m/s, one point a second.
+  const ride = makeActivity(
+    Array.from({ length: 121 }, (_, i) => ({
+      lat: 0,
+      lon: 0,
+      time: at(i),
+      distanceMeters: i * 2,
+      speedMetersPerSecond: 2,
+    })),
+  );
+  // Real time for 10 s of video, then 10 times faster for 10 s: a ramp.
+  const ramp: VideoTimeWarp = { kind: 'map', video: [0, 10, 20], real: [0, 10, 110] };
+
+  it('is the identity without a warp, a multiple for a factor, and follows the map for a ramp', () => {
+    expect(warpVideoSeconds(undefined, 7)).toBe(7);
+    expect(warpVideoSeconds({ kind: 'factor', factor: 10 }, 7)).toBe(70);
+    expect(warpVideoSeconds(ramp, 5)).toBe(5);
+    expect(warpVideoSeconds(ramp, 15)).toBe(60);
+    expect(warpVideoSeconds(ramp, 20)).toBe(110);
+    // Past the end the end segment's rate holds; a single point has only real time.
+    expect(warpVideoSeconds(ramp, 21)).toBe(120);
+    expect(warpVideoSeconds({ kind: 'map', video: [0], real: [0] }, 3)).toBe(3);
+  });
+
+  it('is undone by unwarpVideoSeconds, held inside the video', () => {
+    expect(unwarpVideoSeconds({ kind: 'factor', factor: 10 }, 70, 20)).toBe(7);
+    expect(unwarpVideoSeconds(ramp, 60, 20)).toBeCloseTo(15, 5);
+    expect(unwarpVideoSeconds(ramp, 500, 20)).toBe(20);
+    expect(unwarpVideoSeconds(ramp, -5, 20)).toBe(0);
+    expect(unwarpVideoSeconds(undefined, 4, 20)).toBe(4);
+  });
+
+  it('shows the activity ten times as far on, and lays the video over ten times its length', () => {
+    const timeline = buildOverlayTimeline(ride, {
+      video: { durationSeconds: 10, start: at(0), warp: { kind: 'factor', factor: 10 } },
+    });
+    expect(timeline.sampleAt(3)?.values['metric:elapsed']).toBe(30);
+    expect(timeline.alignment).toMatchObject({ videoStartInActivity: 0, videoEndInActivity: 100, overlaps: true });
+    // The video's own length still bounds what can be sampled.
+    expect(timeline.sampleAt(11)).toBeUndefined();
+  });
+
+  it('keeps the offset in activity seconds, and the figures the activity\'s', () => {
+    const timeline = buildOverlayTimeline(ride, {
+      video: { durationSeconds: 10, start: at(20), warp: { kind: 'factor', factor: 4 } },
+      offsetSeconds: 5,
+    });
+    // Video 0 is 20 - 5 = 15 s in; video 2 is 8 s further on.
+    expect(timeline.alignment?.videoStartInActivity).toBe(15);
+    expect(timeline.sampleAt(2)?.values['metric:elapsed']).toBe(23);
+    expect(timeline.sampleAt(2)?.values['metric:speed']).toBeCloseTo(2);
+    expect(timeline.sampleAt(2)?.values['metric:distance']).toBeCloseTo(46);
+  });
+
+  it('follows a ramp from the camera: real time, then ten times as fast', () => {
+    const timeline = buildOverlayTimeline(ride, { video: { durationSeconds: 20, start: at(0), warp: ramp } });
+    expect(timeline.sampleAt(5)?.values['metric:elapsed']).toBe(5);
+    expect(timeline.sampleAt(15)?.values['metric:elapsed']).toBe(60);
+    expect(timeline.alignment).toMatchObject({ videoEndInActivity: 110 });
+  });
+
+  it('gives an export the preview’s moments: its clock is built from the request by one function', () => {
+    for (const warp of [{ kind: 'factor', factor: 6 } as VideoTimeWarp, ramp]) {
+      const preview = buildOverlayTimeline(ride, { video: { durationSeconds: 20, start: at(0), warp } });
+      // What a worker receives: the request, structured-cloned.
+      const request = structuredClone({ videoDurationSeconds: 20, videoStart: at(0), videoWarp: warp });
+      const exported = buildOverlayTimeline(ride, { video: videoClockOf(request) });
+      const realTime = buildOverlayTimeline(ride, { video: { durationSeconds: 20, start: at(0) } });
+      for (const t of [3.5, 12, 19.9]) {
+        expect(exported.sampleAt(t)?.values['metric:elapsed']).toBe(preview.sampleAt(t)?.values['metric:elapsed']);
+      }
+      expect(exported.sampleAt(12)?.values['metric:elapsed']).not.toBe(realTime.sampleAt(12)?.values['metric:elapsed']);
+    }
+  });
+
+  it('leaves real time exactly as it was, with no warp or a warp of one', () => {
+    const plain = buildOverlayTimeline(ride, { video: { durationSeconds: 20, start: at(10) } });
+    const unit = buildOverlayTimeline(ride, { video: { durationSeconds: 20, start: at(10), warp: { kind: 'factor', factor: 1 } } });
+    expect(unit.alignment).toMatchObject({ videoStartInActivity: 10, videoEndInActivity: 30 });
+    expect(unit.sampleAt(7)?.values['metric:elapsed']).toBe(plain.sampleAt(7)?.values['metric:elapsed']);
+    expect(plain.alignment?.warp).toBeUndefined();
   });
 });

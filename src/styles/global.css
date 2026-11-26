@@ -1330,6 +1330,8 @@ input[type='color']:focus-visible {
 .overlay-preview__field .input { width: 9ch; }
 .overlay-preview__nudges { display: inline-flex; flex-wrap: nowrap; gap: 6px; }
 .overlay-preview__against { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--text-muted); font-size: var(--text-reading); }
+.overlay-preview__speed .overlay-preview__field { flex-wrap: wrap; }
+.overlay-preview__speed .select { max-width: 100%; }
 .overlay-preview__lineup { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--text-control); }
 
 /* How the video sits in the activity: a line, and a bar of the same facts. */

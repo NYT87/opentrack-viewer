@@ -85,3 +85,26 @@ describe('the part of the video exported (TD-081)', () => {
     expect(useOverlayStore.getState().trim).toBeUndefined();
   });
 });
+
+describe('the video speed on the overlay store (AV-1027)', () => {
+  it('is kept with the offset through Start over and put back, and forgotten when the video changes, kept when the activity does', () => {
+    const store = useOverlayStore.getState();
+    store.setActivity(activity(), 'hand');
+    store.setSpeed({ mode: 'factor', factor: 8 });
+    expect(useOverlayStore.getState().speed).toEqual({ mode: 'factor', factor: 8 });
+    const snapshot = useOverlayStore.getState().clear();
+    expect(useOverlayStore.getState().speed).toBeUndefined();
+    useOverlayStore.getState().restore(snapshot);
+    expect(useOverlayStore.getState().speed).toEqual({ mode: 'factor', factor: 8 });
+
+    useOverlayStore.getState().setVideo({ file: new File(['x'], 'b.mp4') });
+    expect(useOverlayStore.getState().speed).toBeUndefined();
+    useOverlayStore.getState().setSpeed({ mode: 'camera' });
+    useOverlayStore.getState().setActivity(activity(), 'hand');
+    expect(useOverlayStore.getState().speed).toEqual({ mode: 'camera' });
+    useOverlayStore.getState().clearActivity();
+    expect(useOverlayStore.getState().speed).toEqual({ mode: 'camera' });
+    useOverlayStore.getState().setStandaloneActivity(activity());
+    expect(useOverlayStore.getState().speed).toBeUndefined();
+  });
+});

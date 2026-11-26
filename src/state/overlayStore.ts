@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { VideoTimeWarp } from '../overlay/timeline';
 import type { VideoTrim } from '../overlay/trim';
 import type { SourceTimecode } from '../overlay/timecode';
 import type { Activity } from '../domain/activity';
@@ -16,7 +17,12 @@ export interface OverlayVideoTiming {
   frameIntervalSeconds: number;
   /** Wall-clock time of the first frame, where the container states one. */
   start?: Date;
+  /** AV-1027 (TD-099). The camera's own timing when it runs at least 1.25x faster than the video. */
+  warp?: VideoTimeWarp;
 }
+
+/** AV-1027. The reader's choice of video speed; absent is the video's default. */
+export type OverlaySpeed = { mode: 'camera' } | { mode: 'factor'; factor: number };
 
 export interface OverlayVideo {
   /** The local file itself, so a later preview can play it. Never uploaded. */
@@ -86,6 +92,9 @@ interface OverlayState {
    */
   offsetSeconds: number;
   setOffsetSeconds: (seconds: number) => void;
+  /** AV-1027. The video's, like the trim: forgotten when the video is replaced, kept when the activity is; undefined is the video's default. */
+  speed: OverlaySpeed | undefined;
+  setSpeed: (speed: OverlaySpeed | undefined) => void;
   /**
    * TD-081. The part of the video exported. It belongs to the video, so it is
    * forgotten when the video is replaced, and kept when the activity is.
@@ -152,6 +161,7 @@ interface OverlayState {
 export interface OverlaySnapshot {
   source: OverlaySource;
   offsetSeconds: number;
+  speed: OverlaySpeed | undefined;
   trim: VideoTrim | undefined;
   media: OverlayMedia | undefined;
 }
@@ -159,6 +169,7 @@ export interface OverlaySnapshot {
 export const useOverlayStore = create<OverlayState>((set, get) => ({
   source: {},
   offsetSeconds: 0,
+  speed: undefined,
   trim: undefined,
   setTrim: (trim) => set({ trim }),
   controls: DEFAULT_OVERLAY_CONTROLS,
@@ -181,11 +192,14 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
 
   setOffsetSeconds: (seconds) => set({ offsetSeconds: Number.isFinite(seconds) ? seconds : 0 }),
 
+  setSpeed: (speed) => set({ speed }),
+
   setVideo: (video) =>
     set((state) => {
       const keepsActivity = state.source.activityOrigin === 'hand';
       return {
         offsetSeconds: 0,
+        speed: undefined,
         trim: undefined,
         media: undefined,
         source: {
@@ -214,6 +228,7 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
   setStandaloneActivity: (activity, options) =>
     set({
       offsetSeconds: 0,
+      speed: undefined,
       trim: undefined,
       media: undefined,
       source: {
@@ -230,9 +245,9 @@ export const useOverlayStore = create<OverlayState>((set, get) => ({
   },
 
   clear: () => {
-    const { source, offsetSeconds, trim, media } = get();
-    set({ source: {}, offsetSeconds: 0, trim: undefined, media: undefined });
-    return { source, offsetSeconds, trim, media };
+    const { source, offsetSeconds, speed, trim, media } = get();
+    set({ source: {}, offsetSeconds: 0, speed: undefined, trim: undefined, media: undefined });
+    return { source, offsetSeconds, speed, trim, media };
   },
 
   restore: (snapshot) => set({ ...snapshot }),

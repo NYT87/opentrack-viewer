@@ -163,6 +163,36 @@ test('where the video starts shifts the telemetry against the picture, and a gap
   await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(5).toFixed(1)} km/h`);
 });
 
+test('a time-lapse factor makes the sync bar and the preview follow the activity at that many times (AV-1027)', async ({
+  page,
+}) => {
+  await openOverlays(page);
+  await chooseFiles(page);
+  await scrubTo(page, 4);
+  await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(4).toFixed(1)} km/h`);
+  const bar = page.getByRole('region', { name: 'Preview' }).getByRole('slider', {
+    name: 'Where the video starts in the activity',
+  });
+  await expect(bar).toHaveAttribute('aria-valuetext', /to 0:06 of /);
+
+  // Real time is the default for a clip with no timing of its own, and says nothing of speed.
+  const speed = page.getByRole('group', { name: 'Video speed' });
+  await expect(speed.getByRole('combobox', { name: 'Video runs' })).toHaveValue('real');
+  await expect(page.getByText(/faster than real time/)).toHaveCount(0);
+
+  await speed.getByRole('combobox', { name: 'Video runs' }).selectOption('factor');
+  await speed.getByRole('spinbutton', { name: 'Times faster' }).fill('3');
+  // Four seconds into a clip at 3x is twelve seconds into the ride; the clip now spans 18 s of it.
+  await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(12).toFixed(1)} km/h`);
+  await expect(item(page, 'elapsed')).toContainText('0:12');
+  await expect(bar).toHaveAttribute('aria-valuetext', /to 0:18 of /);
+  await expect(page.getByText('The video runs 3× faster than real time.')).toBeVisible();
+
+  await speed.getByRole('combobox', { name: 'Video runs' }).selectOption('real');
+  await expect(item(page, 'speed')).toContainText(`${ride.speedKmh(4).toFixed(1)} km/h`);
+  await expect(bar).toHaveAttribute('aria-valuetext', /to 0:06 of /);
+});
+
 test('the bar under the picture slides the video along the ride when dragged', async ({ page }) => {
   await openOverlays(page);
   await chooseFiles(page);

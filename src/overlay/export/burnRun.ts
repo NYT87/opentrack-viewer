@@ -1,5 +1,5 @@
 import type * as Mediabunny from 'mediabunny';
-import { buildOverlayTimeline } from '../timeline';
+import { buildOverlayTimeline, videoClockOf } from '../timeline';
 import { createOverlayRenderer } from './drawOverlay';
 import { acquireInsets } from './insetBridge';
 import { OverlayExportError } from './errors';
@@ -100,7 +100,7 @@ export async function runBurn(options: BurnRunOptions): Promise<BurnRunResult> {
     throw new OverlayExportError('unsupported_browser', 'This browser cannot draw on an offscreen canvas.');
   }
   const timeline = buildOverlayTimeline(request.activity, {
-    video: { durationSeconds: request.videoDurationSeconds, start: request.videoStart },
+    video: videoClockOf(request),
     offsetSeconds: request.offsetSeconds,
     // AV-1025. A stopwatch counts from the cut's start.
     cutStartSeconds: request.trim?.start,

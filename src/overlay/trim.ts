@@ -1,4 +1,4 @@
-import type { OverlayAlignment } from './timeline';
+import { warpVideoSeconds, type OverlayAlignment } from './timeline';
 
 /**
  * TD-081. The part of the video that is exported, in the video's own seconds.
@@ -37,12 +37,13 @@ export function trimRange(trim: VideoTrim | undefined, durationSeconds: number):
  * activity is not taken for one inside it. Undefined where nothing is lined up.
  */
 export function activityCoversPart(
-  alignment: Pick<OverlayAlignment, 'videoStartInActivity' | 'activitySpanSeconds'> | undefined,
+  alignment: Pick<OverlayAlignment, 'videoStartInActivity' | 'activitySpanSeconds' | 'warp'> | undefined,
   range: TrimRange,
 ): boolean | undefined {
   if (!alignment) return undefined;
-  const from = alignment.videoStartInActivity + range.start;
-  const to = alignment.videoStartInActivity + range.end;
+  // AV-1027. The cut is in video seconds; the activity moves by the warp's figure for them.
+  const from = alignment.videoStartInActivity + warpVideoSeconds(alignment.warp, range.start);
+  const to = alignment.videoStartInActivity + warpVideoSeconds(alignment.warp, range.end);
   return to >= 0 && from <= alignment.activitySpanSeconds;
 }
 

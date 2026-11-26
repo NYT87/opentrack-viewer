@@ -2,7 +2,7 @@ import { removeArchive, removeStaleArchives } from './archiveSink';
 import { ownArchive } from './archiveOwnership';
 import { OverlayExportError } from './errors';
 import { hasMapInset } from '../insetCamera';
-import { buildOverlayTimeline } from '../timeline';
+import { buildOverlayTimeline, videoClockOf, type VideoTimeWarp } from '../timeline';
 import type { OverlayTemplate } from '../template';
 import type { Activity } from '../../domain/activity';
 import { createInsetMaps, type InsetMapSession, type InsetMapsInput } from './insetMaps';
@@ -71,6 +71,7 @@ interface InsetSource {
   height: number;
   videoDurationSeconds: number;
   videoStart?: Date;
+  videoWarp?: VideoTimeWarp;
   offsetSeconds: number;
 }
 
@@ -79,7 +80,7 @@ function openInsetBridge(request: InsetSource, deps: ExportClientDeps): InsetBri
   if (!hasMapInset(request.template)) return undefined;
   const controller = new AbortController();
   const timeline = buildOverlayTimeline(request.activity, {
-    video: { durationSeconds: request.videoDurationSeconds, start: request.videoStart },
+    video: videoClockOf(request),
     offsetSeconds: request.offsetSeconds,
   });
   const session = (deps.createInsets ?? createInsetMaps)({

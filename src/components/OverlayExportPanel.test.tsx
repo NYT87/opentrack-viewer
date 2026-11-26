@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { OverlayExportError } from '../overlay/export/errors';
@@ -182,6 +182,16 @@ describe('the export panel (AV-1006)', () => {
       'distance',
       'elapsed',
     ]);
+  });
+
+  it('exports with the video speed the preview shows, and none for real time (AV-1027)', async () => {
+    const { start } = setup({ videoWarp: { kind: 'factor', factor: 4 } });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start.mock.calls[0]![0]).toMatchObject({ videoWarp: { kind: 'factor', factor: 4 } });
+    cleanup();
+    const real = setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(real.start.mock.calls[0]![0]).not.toHaveProperty('videoWarp');
   });
 
   it('exports only the part of the video kept, from its start (TD-081)', async () => {
@@ -408,6 +418,7 @@ describe('the export panel (AV-1006)', () => {
       ['a component', { controls: { ...DEFAULT_OVERLAY_CONTROLS, enabled: { speed: false } } }],
       ['the style', { controls: { ...DEFAULT_OVERLAY_CONTROLS, accentColor: '#00ff00' } }],
       ['the offset', { offsetSeconds: 2 }],
+      ['the video speed', { videoWarp: { kind: 'factor' as const, factor: 4 } }],
       ['the units', { units: 'imperial' as const }],
     ])('is flagged when %s changes, and clears when it is put back', async (_name, change) => {
       const utils = setup();

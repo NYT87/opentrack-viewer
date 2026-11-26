@@ -1,4 +1,4 @@
-import { buildOverlayTimeline } from '../timeline';
+import { buildOverlayTimeline, videoClockOf } from '../timeline';
 import { createArchiveSink, probeArchiveStorage } from './archiveSink';
 import { createOverlayRenderer } from './drawOverlay';
 import { acquireInsets, receiveInsetBitmaps } from './insetBridge';
@@ -44,7 +44,7 @@ async function run(request: ExportRequest, controller: AbortController): Promise
     }
 
     const timeline = buildOverlayTimeline(request.activity, {
-      video: { durationSeconds: request.videoDurationSeconds, start: request.videoStart },
+      video: videoClockOf(request),
       offsetSeconds: request.offsetSeconds,
       // AV-1025. A stopwatch counts from the cut's start.
       cutStartSeconds: request.trimStartSeconds,

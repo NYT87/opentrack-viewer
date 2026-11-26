@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MIN_TRIM_SECONDS, trimRange, withTrimEnd, withTrimStart } from './trim';
+import { MIN_TRIM_SECONDS, activityCoversPart, trimRange, withTrimEnd, withTrimStart } from './trim';
 
 describe('the part of the video exported (TD-081)', () => {
   it('is the whole video with no trim', () => {
@@ -27,5 +27,24 @@ describe('the part of the video exported (TD-081)', () => {
     expect(withTrimStart({ startSeconds: 40 }, 0, 120)).toBeUndefined();
     expect(withTrimEnd({ startSeconds: 0, endSeconds: 100 }, 130, 120)).toBeUndefined();
     expect(withTrimEnd({ startSeconds: 10, endSeconds: 100 }, 120, 120)).toEqual({ startSeconds: 10 });
+  });
+});
+
+describe('whether the activity reaches the cut, in video seconds (AV-1027)', () => {
+  // The video starts 100 s before the activity ends (span 110), so only its first 10 s are inside.
+  const alignment = { videoStartInActivity: 100, activitySpanSeconds: 110 };
+  const cut = { start: 5, end: 20, length: 15, trimmed: true };
+
+  it('counts the cut’s seconds as the activity’s at real time', () => {
+    expect(activityCoversPart({ ...alignment, videoStartInActivity: 120 }, cut)).toBe(false);
+    expect(activityCoversPart(alignment, cut)).toBe(true);
+  });
+
+  it('counts them as the warp stretches them: five video seconds at ten times is fifty', () => {
+    const warp = { kind: 'factor', factor: 10 } as const;
+    // At real time the cut starts at 125, past the span; at 10x it starts at 150, further still.
+    expect(activityCoversPart({ ...alignment, videoStartInActivity: 60, warp }, cut)).toBe(true);
+    expect(activityCoversPart({ ...alignment, videoStartInActivity: 70, warp }, cut)).toBe(false);
+    expect(activityCoversPart({ ...alignment, videoStartInActivity: 70 }, cut)).toBe(true);
   });
 });
