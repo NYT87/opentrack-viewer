@@ -295,10 +295,10 @@ describe('FIT export edge cases (audit #49, #50, #53, #61)', () => {
     ]);
 
     expect(() => buildFit(early)).toThrow(ActivityError);
-    expect(() => buildFit(early)).toThrow(/1989/);
+    expect(() => buildFit(early)).toThrow(/1998/);
     expect(getExportAvailability(early).find((entry) => entry.format === 'fit')).toMatchObject({
       available: false,
-      reason: expect.stringMatching(/1989/),
+      reason: expect.stringMatching(/1998/),
     });
   });
 
@@ -389,7 +389,7 @@ function indexOfSequence(haystack: Uint8Array, needle: Uint8Array): number {
 describe('durations past what FIT can hold', () => {
   it('writes a recording that spans decades, from a clock that jumped, instead of failing', () => {
     const activity = makeActivity([
-      { lat: 46, lon: 7, time: new Date('1990-06-01T00:00:00Z') },
+      { lat: 46, lon: 7, time: new Date('1999-06-01T00:00:00Z') },
       { lat: 46.001, lon: 7, time: new Date('2024-06-01T00:00:00Z') },
     ]);
     expect(() => buildFit(activity)).not.toThrow();

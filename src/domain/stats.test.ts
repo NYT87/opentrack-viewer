@@ -102,6 +102,12 @@ describe('computeDistance (AV-401)', () => {
     expect(result.totalMeters).toBe(900);
   });
 
+  it('does not let readings at points with no location stand in for the located ones', () => {
+    const indoor = Array.from({ length: 10 }, (_, i) => ({ distanceMeters: i * 100 }));
+    const outdoor = Array.from({ length: 10 }, (_, i) => ({ lat: 51.5 + i * 0.001, lon: 0.1 }));
+    expect(computeDistance(points([...indoor, ...outdoor])).origin).toBe('derived');
+  });
+
   it('skips invalid coordinates without breaking the chain', () => {
     const result = computeDistance(
       points([{ lat: 0, lon: 0.0001 }, { lat: 999, lon: 0.0001 }, { lat: 1, lon: 0.0001 }]),

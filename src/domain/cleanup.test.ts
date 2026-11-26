@@ -150,6 +150,13 @@ describe('the outlier filter (AV-1024)', () => {
     expect(activity.points.some((point) => point.lat! > LAT0 + 0.5 + 100 / M_PER_DEG)).toBe(false);
   });
 
+  it('keeps the run when two glitches in a row interrupt it', () => {
+    const off = (i: number) => (i === 22 ? 200 : i === 23 ? -400 : 0) / M_PER_DEG;
+    const raw = makeActivity(track(60, 5, (i) => (i >= 20 ? { lat: LAT0 + 0.5 + off(i) } : {})));
+    const { report } = cleanActivity(raw, on());
+    expect(report.dropped.speed).toBe(2);
+  });
+
   it('keeps events, laps, segments and camera streams consistent with the points that stay', () => {
     const raw = makeActivity(track(20, 5, (i) => ({ ...(i === 5 ? { lat: LAT0 + 0.009 } : {}), segmentIndex: i < 12 ? 0 : 1 })));
     raw.events = [

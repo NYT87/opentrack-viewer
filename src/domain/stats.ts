@@ -100,11 +100,15 @@ function readSourceDistance(points: ActivityPoint[]): DistanceResult | undefined
   let travelled: number | undefined;
   let count = 0;
   let located = 0;
+  // Readings at located points only: an indoor stretch's odometer says nothing of the GPS stretch it lacks.
+  let locatedRead = 0;
 
   for (let i = 0; i < points.length; i += 1) {
     const value = points[i]!.distanceMeters;
-    if (hasValidLocation(points[i]!)) located += 1;
+    const isLocated = hasValidLocation(points[i]!);
+    if (isLocated) located += 1;
     if (!Number.isFinite(value)) continue;
+    if (isLocated) locatedRead += 1;
     const reading = value as number;
     // A decreasing stream means resets or corruption; fall back to GPS instead.
     if (previous !== undefined && reading < previous) return undefined;
@@ -116,7 +120,7 @@ function readSourceDistance(points: ActivityPoint[]): DistanceResult | undefined
     count += 1;
   }
 
-  if (count < 2 || travelled === undefined || count < located * MIN_SOURCE_DISTANCE_COVERAGE) return undefined;
+  if (count < 2 || travelled === undefined || locatedRead < located * MIN_SOURCE_DISTANCE_COVERAGE) return undefined;
   return { totalMeters: travelled, cumulativeMeters: cumulative, origin: 'source' };
 }
 

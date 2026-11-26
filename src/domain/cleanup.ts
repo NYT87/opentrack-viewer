@@ -146,7 +146,8 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
           streak = aside;
           aside = [];
         } else {
-          aside = streak;
+          // The longer run is the one kept aside: a second glitch does not push out the run it interrupted.
+          if (streak.length >= aside.length) aside = streak;
           streak = [];
         }
       }

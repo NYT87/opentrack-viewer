@@ -1,6 +1,7 @@
 import {
   isPlausibleSpeed,
-  speedCeilingMps,
+  MAX_PLAUSIBLE_CYCLING_SPEED_MPS,
+  MAX_PLAUSIBLE_RUNNING_SPEED_MPS,
   type Activity,
   type ActivitySensorStream,
   type ActivityPoint,
@@ -210,11 +211,14 @@ function eachWindowSpan(
 function derivePace(activity: Activity): (number | undefined)[] {
   const out: (number | undefined)[] = new Array(activity.points.length).fill(undefined);
 
+  // A sport on foot takes the running limit; anything else, a GoPro clip's 'unknown' among them (often a ride), the cycling one.
+  const onFoot = activity.metadata.sport === 'running' || activity.metadata.sport === 'walking' || activity.metadata.sport === 'hiking';
+  const paceCeiling = onFoot ? MAX_PLAUSIBLE_RUNNING_SPEED_MPS : MAX_PLAUSIBLE_CYCLING_SPEED_MPS;
   eachWindowSpan(activity, ({ index, meters, seconds }) => {
     // Zero-duration or stationary intervals have no meaningful pace: gap them.
     if (seconds <= 0 || meters <= 0) return;
-    // The clean-up's limit for the sport (AV-505): a run's GPS jump is gapped, a ride's pace is not.
-    if (meters / seconds > speedCeilingMps(activity.metadata.sport)) return;
+    // AV-505: a GPS jump on foot is gapped in pace as the clean-up would drop it.
+    if (meters / seconds > paceCeiling) return;
     out[index] = (seconds / meters) * 1000;
   });
 

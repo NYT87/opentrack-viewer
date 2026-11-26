@@ -46,15 +46,15 @@ export function defaultPerformanceMetric(activity: Activity): PerformanceMetric 
   return sport !== undefined && PACE_SPORTS.has(sport) ? 'pace' : 'speed';
 }
 
+// The viewer asks on every render (every hover); an Activity is never changed in place.
+const paceCache = new WeakMap<Activity, boolean>();
+
 /**
  * Whether pace can be worked out at all. Distance over a duration is arithmetic
  * either way round, so the requirement is the same one speed has — but a
  * stationary activity has a speed of zero and no pace, which the summary says
  * for itself.
  */
-// The viewer asks on every render (every hover); an Activity is never changed in place.
-const paceCache = new WeakMap<Activity, boolean>();
-
 function paceIsPossible(activity: Activity): boolean {
   let possible = paceCache.get(activity);
   if (possible === undefined) {

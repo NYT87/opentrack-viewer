@@ -153,6 +153,18 @@ describe('pace series (AV-505)', () => {
     expect(at('running')).toBeLessThan(at('cycling'));
   });
 
+  it('gaps that jump in pace on a walk too', () => {
+    const activity = makeActivity(
+      Array.from({ length: 12 }, (_, index) => ({
+        lat: (index * 30 + (index >= 6 ? 270 : 0)) / 111_195,
+        lon: 0.0001,
+        time: new Date(Date.UTC(2024, 0, 1, 10, 0, index * 10)),
+      })),
+    );
+    activity.metadata.sport = 'walking';
+    expect(buildSeries(activity, 'pace', 'time').samples.length).toBeLessThan(buildSeries(activity, 'speed', 'time').samples.length);
+  });
+
   it('derives seconds per kilometre from distance and time', () => {
     const series = buildSeries(steadyRun(), 'pace', 'time');
 
