@@ -127,6 +127,43 @@ test('adds the date, and draws it in the format chosen', async ({ page }) => {
   expect(long.maxX - long.minX).toBeGreaterThan((short.maxX - short.minX) * 1.6);
 });
 
+test('draws a figure’s own value and replaced caption in the exported PNG (AV-1032)', async ({ page }) => {
+  const panel = await open(page);
+  await panel.getByRole('button', { name: 'Remove Route' }).click();
+  const add = async (kind: string) => {
+    await panel.getByLabel('Add', { exact: true }).selectOption(kind);
+    await panel.getByRole('button', { name: 'Add to the image' }).click();
+    await panel.getByRole('button', { name: 'Snap to top left' }).click();
+  };
+  const selected = (name: RegExp | string) => panel.getByRole('group', { name: /^Selected:/ }).getByLabel(name);
+
+  // The value as written: with its caption hidden it is drawn pixel for pixel as a text of the same words.
+  await add('distance');
+  await selected('Show its name above it').uncheck();
+  await selected('Write my own value').check();
+  await selected('Your text').fill('X Y Z 123');
+  const figure = await download(page, panel);
+  await panel.getByRole('button', { name: 'Remove Distance' }).click();
+  await add('label');
+  await panel.getByLabel('Text', { exact: true }).fill('X Y Z 123');
+  const text = await download(page, panel);
+  expect(drawnBox(figure.png)).toEqual(drawnBox(text.png));
+  expect(figure.png.pixels.equals(text.png.pixels)).toBe(true);
+  await panel.getByRole('button', { name: /^Remove Text/ }).click();
+
+  // The caption replaced: a shorter word draws a narrower caption than the app's "Distance", over the same value.
+  await add('distance');
+  await selected('Write my own value').check();
+  await selected('Your text').fill('X');
+  const app = await download(page, panel);
+  await selected('Caption').fill('Hi');
+  const replaced = await download(page, panel);
+  const [appBox, replacedBox] = [drawnBox(app.png), drawnBox(replaced.png)];
+  expect(replacedBox.maxX - replacedBox.minX).toBeLessThan(appBox.maxX - appBox.minX);
+  expect(replacedBox.maxY - replacedBox.minY).toBe(appBox.maxY - appBox.minY);
+  expect(replaced.png.pixels.equals(app.png.pixels)).toBe(false);
+});
+
 test('saves the layout and opens it again on a fresh page', async ({ page }, testInfo) => {
   const panel = await open(page);
   await panel.getByLabel('Add', { exact: true }).selectOption('distance');

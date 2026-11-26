@@ -382,6 +382,62 @@ describe('placing figures, the date and text on the image (AV-1010)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('other.json was not opened. This file is not an OpenTrack overlay layout.');
     expect(screen.getByRole('list', { name: 'Elements on the image' })).toHaveTextContent('Route');
   });
+
+  it('says a figure’s own caption, decimals and value, marks it edited by hand and gives the way back (AV-1032)', async () => {
+    const { stills } = setup({ activity: timed() });
+    await add('Distance');
+    const text = () => {
+      const item = lastPlan(stills).items.find((entry) => entry.id.startsWith('distance'));
+      return item?.kind === 'text' ? item.lines.map((line) => line.text) : [];
+    };
+    const draw = async () => {
+      await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    };
+    expect(screen.getByLabelText('Caption')).toHaveAttribute('placeholder', 'Distance');
+    await userEvent.type(screen.getByLabelText('Caption'), 'How far');
+    await userEvent.selectOptions(screen.getByLabelText('Decimal places'), '0');
+    await draw();
+    expect(text()).toEqual(['HOW FAR', expect.stringMatching(/^\d+ (km|mi)$/)]);
+
+    expect(screen.queryByText('Written by hand', { exact: false })).toBeNull();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Write my own value' }));
+    expect(screen.getByLabelText('Your text')).toHaveValue(text()[1]);
+    fireEvent.change(screen.getByLabelText('Your text'), { target: { value: 'about ten' } });
+    await draw();
+    expect(text()).toEqual(['HOW FAR', 'about ten']);
+    expect(editor()).toHaveTextContent('Edited by hand');
+    expect(screen.getByRole('list', { name: 'Elements on the image' }).previousElementSibling).toHaveTextContent('Written by hand: Distance');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Use the activity’s value' }));
+    expect(screen.getByRole('checkbox', { name: 'Write my own value' })).toHaveFocus();
+    await draw();
+    expect(text()[1]).toMatch(/^\d+ (km|mi)$/);
+    expect(screen.queryByLabelText('Your text')).toBeNull();
+  });
+
+  it('disables decimal places for a clock, and says why (AV-1032)', async () => {
+    setup({ activity: timed() });
+    await add('Elapsed time');
+    expect(screen.getByLabelText('Decimal places')).toBeDisabled();
+    expect(editor()).toHaveTextContent(/Times and paces are clocks/);
+  });
+
+  it('writes a date in the language chosen, or in the reader’s own text (AV-1032)', async () => {
+    const { stills } = setup({ activity: timed(), readerTimeZone: 'UTC' });
+    await add('Date');
+    await userEvent.selectOptions(screen.getByLabelText('Date format'), 'Thursday 24 September 2026');
+    await userEvent.selectOptions(screen.getByLabelText('Language'), 'es');
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    const date = () => {
+      const item = lastPlan(stills).items.find((entry) => entry.id.startsWith('date'));
+      return item?.kind === 'text' ? item.lines.map((line) => line.text) : [];
+    };
+    expect(date()[0]).toMatch(/^(miércoles|jueves) \d+ septiembre 2026$/);
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Write my own text' }));
+    fireEvent.change(screen.getByLabelText('Your text'), { target: { value: 'Race day' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+    expect(date()).toEqual(['Race day']);
+  });
 });
 
 describe('the still image’s font (AV-1031, TD-103)', () => {

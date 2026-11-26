@@ -31,6 +31,7 @@ import {
   withinZone,
 } from './zones';
 import { formatHeading } from './derivedSeries';
+import { supportedLocale } from './dateFormat';
 import { cleanFamily } from './fonts';
 import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial';
@@ -440,10 +441,22 @@ export interface OverlayComponent {
   windowSeconds?: number;
   /** `label`: the text itself. */
   content?: string;
-  /** `summary`: which figure. */
-  summary?: { stat: SummaryStatKey };
-  /** `date`: how it is written, and in which time zone. */
-  date?: { format: DateFormatId; withTime: boolean; timeZone: DateTimeZoneChoice };
+  /**
+   * `summary`: which figure. AV-1032 (TD-104), still image: `caption` replaces the app's words, `decimals`
+   * the number's places (time figures ignore it), `ownValue` is drawn as written, never recalculated.
+   */
+  summary?: { stat: SummaryStatKey; caption?: string; decimals?: 0 | 1 | 2; ownValue?: string };
+  /**
+   * `date`: how it is written, and in which time zone. AV-1032 (TD-104): `locale` names the month and day
+   * (absent is English, as every older layout wrote it), `ownValue` is drawn as written.
+   */
+  date?: {
+    format: DateFormatId;
+    withTime: boolean;
+    timeZone: DateTimeZoneChoice;
+    locale?: string;
+    ownValue?: string;
+  };
   /** `label`, `summary`, `date`: alignment, weight and caption. */
   text?: OverlayTextSetting;
   /** `routeInset` on the still image: line, padding and markers. */
@@ -650,7 +663,12 @@ function parseComponent(value: unknown): OverlayComponent | string {
   }
   if (componentType === 'label') component.content = sanitizeLabel(value.content as string);
   if (componentType === 'summary' && isRecord(value.summary)) {
+    const { caption, decimals, ownValue } = value.summary;
     component.summary = { stat: value.summary.stat as SummaryStatKey };
+    const words = typeof caption === 'string' ? sanitizeLabel(caption).split('\n')[0]! : '';
+    if (words.trim() !== '') component.summary.caption = words;
+    if (decimals === 0 || decimals === 1 || decimals === 2) component.summary.decimals = decimals;
+    if (typeof ownValue === 'string') component.summary.ownValue = sanitizeLabel(ownValue).split('\n')[0]!;
   }
   if (componentType === 'date' && isRecord(value.date)) {
     component.date = {
@@ -658,6 +676,9 @@ function parseComponent(value: unknown): OverlayComponent | string {
       withTime: value.date.withTime === true,
       timeZone: value.date.timeZone === 'activity' ? 'activity' : 'reader',
     };
+    const locale = typeof value.date.locale === 'string' ? supportedLocale(value.date.locale) : undefined;
+    if (locale) component.date.locale = locale;
+    if (typeof value.date.ownValue === 'string') component.date.ownValue = sanitizeLabel(value.date.ownValue).split('\n')[0]!;
   }
   if (stillOnly) {
     const text = isRecord(value.text) ? value.text : {};

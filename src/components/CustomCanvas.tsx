@@ -113,6 +113,7 @@ import {
   DEFAULT_ZONES_SMOOTHING_SECONDS,
 } from '../overlay/zones';
 import { ElementRows } from './ElementRows';
+import { SummaryFields, writtenByHand } from './StillValueFields';
 import { ColorField } from './ColorField';
 import { ChartEditor, ClockEditor, CompassEditor, DialEditor, GradientEditor, SplitsEditor, StopwatchEditor } from './MomentEditors';
 import { RouteInsetEditor } from './RouteInsetEditor';
@@ -561,6 +562,7 @@ export function CustomCanvas({
             <ElementRows
               label="Elements on the canvas"
               rows={components.map((component) => ({ id: component.id, name: describeCanvasComponent(component) }))}
+              note={writtenByHand(components)}
               selectedId={selectedId}
               onSelect={select}
               onRemove={(removed) =>
@@ -1714,6 +1716,7 @@ function ComponentEditor({
         </div>
       )}
       {component.type === 'summary' && (
+        <>
         <div className="overlay-controls__field">
           <label htmlFor={`${id}-stat`}>Figure</label>
           <select id={`${id}-stat`} className="select" value={component.summary?.stat} onChange={(event) => update((current) => ({ ...current, summary: { stat: event.target.value as SummaryStatKey } }))}>
@@ -1724,6 +1727,8 @@ function ComponentEditor({
             ))}
           </select>
         </div>
+        <SummaryFields id={id} component={component} context={stillContext} onChange={(change) => update(change)} />
+        </>
       )}
       {component.type === 'date' && <DateSettings id={id} component={component} context={stillContext} onChange={(change) => update(change)} />}
 

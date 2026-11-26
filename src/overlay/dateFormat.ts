@@ -51,26 +51,68 @@ function civil(date: Date, zone: DateZone): CivilTime {
   return { year: read('year'), month: read('month'), day: read('day'), hour: read('hour') % 24, minute: read('minute'), second: read('second') };
 }
 
+/**
+ * AV-1032 (TD-104). A BCP 47 tag the browser can write dates in, as typed, or undefined for anything
+ * else (a made-up tag, an empty string, a tag Intl rejects).
+ */
+export function supportedLocale(tag: string): string | undefined {
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf([tag]).length > 0 ? tag : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const isEnglish = (locale: string | undefined) => locale === undefined || /^en(-|$)/i.test(locale);
+
+/**
+ * The month's name beside its day (so a language that declines it writes it so), and the weekday's. Where
+ * the name beside a day is only a number (ja, zh, ko write 3 and 月 apart), the month alone is used.
+ */
+function localNames(locale: string, year: number, month: number, day: number) {
+  const at = new Date(Date.UTC(year, month - 1, day));
+  const format = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC', calendar: 'gregory' });
+  const monthName = (style: 'short' | 'long') => {
+    const beside = format({ day: 'numeric', month: style }).formatToParts(at).find((entry) => entry.type === 'month')?.value;
+    return beside && !/\p{N}/u.test(beside) ? beside : format({ month: style }).format(at);
+  };
+  return {
+    short: monthName('short'),
+    long: monthName('long'),
+    weekday: format({ weekday: 'long' }).formatToParts(at).find((entry) => entry.type === 'weekday')?.value ?? '',
+  };
+}
+
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /**
  * A date as one of the four formats, written the same in every browser: the
- * month and weekday names are this module's, not the locale's, so `24 Sep 2026`
+ * month and weekday names are this module's, not the locale's (unless a locale is asked for), so `24 Sep 2026`
  * does not become `24 Sept 2026` where a locale prefers it. A time is 24-hour.
  */
-export function formatStillDate(date: Date, format: DateFormatId, withTime: boolean, zone: DateZone): string {
+export function formatStillDate(
+  date: Date,
+  format: DateFormatId,
+  withTime: boolean,
+  zone: DateZone,
+  /** AV-1032 (TD-104). Names the month and the day in this language; absent or English is the tables above. */
+  locale?: string,
+): string {
   const { year, month, day, hour, minute } = civil(date, zone);
   const time = `${pad(hour)}:${pad(minute)}`;
-  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]!;
+  const names = isEnglish(locale) ? undefined : localNames(locale!, year, month, day);
+  const weekday = names?.weekday ?? WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]!;
+  const monthShort = names?.short ?? MONTHS_SHORT[month - 1];
+  const monthLong = names?.long ?? MONTHS_LONG[month - 1];
   switch (format) {
     case 'iso':
       return `${year}-${pad(month)}-${pad(day)}${withTime ? ` ${time}` : ''}`;
     case 'medium':
-      return `${day} ${MONTHS_SHORT[month - 1]} ${year}${withTime ? `, ${time}` : ''}`;
+      return `${day} ${monthShort} ${year}${withTime ? `, ${time}` : ''}`;
     case 'numeric':
       return `${pad(day)}/${pad(month)}/${year}${withTime ? ` ${time}` : ''}`;
     case 'long':
-      return `${weekday} ${day} ${MONTHS_LONG[month - 1]} ${year}${withTime ? `, ${time}` : ''}`;
+      return `${weekday} ${day} ${monthLong} ${year}${withTime ? `, ${time}` : ''}`;
   }
 }
 

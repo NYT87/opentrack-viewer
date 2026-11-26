@@ -14,17 +14,22 @@ export interface ElementRow {
 export function ElementRows({
   label,
   rows,
+  note,
   selectedId,
   onSelect,
   onRemove,
 }: {
   label: string;
   rows: ElementRow[];
+  /** AV-1032. A line above the list, such as which figures were written by hand. */
+  note?: string;
   selectedId: string | undefined;
   onSelect: (id: string | undefined) => void;
   onRemove: (id: string) => void;
 }) {
   return (
+    <>
+      {note && <p className="overlay-controls__hint">{note}</p>}
     <ul className="still-image__elements" aria-label={label}>
       {rows.map((row) => (
         <li key={row.id} className={row.id === selectedId ? 'still-image__element is-selected' : 'still-image__element'}>
@@ -43,5 +48,6 @@ export function ElementRows({
         </li>
       ))}
     </ul>
+    </>
   );
 }

@@ -48,6 +48,7 @@ import {
 import { useInteractionStore } from '../state/interactionStore';
 import { measureText } from '../overlay/measureText';
 import { ElementRows } from './ElementRows';
+import { DateFields, SummaryFields, writtenByHand } from './StillValueFields';
 import { PrivacyTrimField } from './PrivacyTrimField';
 import { FontField, MissingFonts } from './FontField';
 import { useTemplateFonts } from './useTemplateFonts';
@@ -509,6 +510,7 @@ function ElementList({
             name: describeStillComponent(component),
             note: plan?.hidden.some((entry) => entry.id === component.id) ? 'not drawn' : undefined,
           }))}
+          note={writtenByHand(components)}
           selectedId={selectedId}
           onSelect={onSelect}
           onRemove={onRemove}
@@ -694,6 +696,7 @@ function ElementEditor({
             />
             <span>Show its name above it</span>
           </label>
+          <SummaryFields id={id} component={component} context={context} onChange={onChange} />
         </>
       )}
 
@@ -833,6 +836,7 @@ export function DateSettings({
           <span>{readerZone.ok ? readerZone.description : 'Yours'}</span>
         </label>
       </fieldset>
+      <DateFields id={id} component={component} context={context} onChange={onChange} />
     </>
   );
 }
