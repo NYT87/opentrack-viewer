@@ -42,3 +42,16 @@ describe('the timecode beside the telemetry (AV-1026)', () => {
     expect('timecode' in read).toBe(false);
   });
 });
+
+describe('where the video starts (#54)', () => {
+  it('is taken from the GPS clock, not the camera’s creation time, which keeps local time with no zone', async () => {
+    const createdAt = new Date('2001-01-01T09:00:00Z');
+    const read = await readVideoTelemetry(video({ createdAt }));
+    const firstFix = read.activity!.points[0]!.time!.getTime();
+    const start = read.timing!.start!.getTime();
+    expect(start).not.toBe(createdAt.getTime());
+    // The first fix lies within the video's first seconds.
+    expect(firstFix - start).toBeGreaterThanOrEqual(0);
+    expect(firstFix - start).toBeLessThan(5_000);
+  });
+});

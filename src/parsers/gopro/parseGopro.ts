@@ -57,7 +57,7 @@ interface GoproSample {
 export async function parseGopro(
   payload: GpmfPayload,
   options: ParseGoproOptions = {},
-): Promise<Activity> {
+): Promise<Activity & { gpsVideoStart?: Date }> {
   const { default: goproTelemetry } = await import('gopro-telemetry');
   const warnings: ActivityWarning[] = [];
 
@@ -221,7 +221,14 @@ export async function parseGopro(
   const withStats = withDerivedStats(activity);
   withStats.metadata.startTime = withStats.derived?.startTime;
   withStats.metadata.endTime = withStats.derived?.endTime;
-  return withStats;
+  // #54. The first fix's GPS time (UTC) less its place in the video: where the video starts, which the
+  // container's creation time (local time with no zone) cannot say. Without a GPS date it is that
+  // creation time again, as the library dates samples from it.
+  const firstTime = points[0]?.time?.getTime();
+  const firstCts = pointCtsMs?.[0];
+  return firstTime !== undefined && firstCts !== undefined
+    ? Object.assign(withStats, { gpsVideoStart: new Date(firstTime - firstCts) })
+    : withStats;
 }
 
 /**

@@ -460,9 +460,11 @@ Tests: unit tests for each figure against a hand-computed fixture (the maximum w
 
 Decision: GoPro cameras write the MP4 creation time in local time with no zone, so a clip could land hours from its own activity ("the video falls at 9:00:02 to 9:00:25 of an activity 0:22 long"). When the camera's clock misses the activity, `buildOverlayTimeline` takes off the shift that lands it inside (`zoneShift`, `src/overlay/timeline.ts`): the viewer's own zone first, then whole hours, then quarter hours, each the smallest first, within ±14 h; none when the clock already lands or no zone would. The shift is in `OverlayAlignment.clockShiftSeconds` and the sync line says it ("read 9:00:00 earlier than it says: cameras keep local time with no time zone"). The reader's own start still moves the video from there.
 
+A GoPro video with a GPS fix is placed by its own GPS clock instead (#54): `parseGopro` gives the first fix's GPS time (UTC) less its place in the video, and `readVideoTelemetry` takes that as the video's start, so no zone is guessed and a video from another outing is still told apart. The guess is left for videos without a fix and for other cameras.
+
 The overlay's privacy trim (TD-091) no longer uses the map video's 100 m floor: on a short route any trim, even 0.1 %, used to hide the whole route. `trimRoute` takes the floor as an argument (default 100 m, so the map video and map image are unchanged) and the share trim passes 0.
 
-Left for later: for an activity longer than an hour, more than one whole-hour shift can land the video; the viewer's zone is the tie-break, and the reader sets the start where it is wrong.
+Left for later: for a video with no GPS fix and an activity longer than an hour, more than one whole-hour shift can land the video; the viewer's zone is the tie-break, and the reader sets the start where it is wrong.
 
 Tests: `src/overlay/timeline.test.ts` (the 9 h case, a half-hour zone, the viewer's zone first, the smallest otherwise, none inside or days off); the trim tests that held a short route not drawn now hold it drawn, and the not-drawn message is tested on a one-place route.
 
