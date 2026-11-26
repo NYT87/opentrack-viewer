@@ -102,6 +102,13 @@ describe('computeDistance (AV-401)', () => {
     expect(result.totalMeters).toBe(900);
   });
 
+  it('keeps the source stream of a short file whose first record has no reading yet', () => {
+    const result = computeDistance(
+      points([{ lat: 51.5, lon: 0.1 }, ...Array.from({ length: 8 }, (_, i) => ({ lat: 51.5 + i * 0.001, lon: 0.1, distanceMeters: i * 100 }))]),
+    );
+    expect(result.origin).toBe('source');
+  });
+
   it('does not let readings at points with no location stand in for the located ones', () => {
     const indoor = Array.from({ length: 10 }, (_, i) => ({ distanceMeters: i * 100 }));
     const outdoor = Array.from({ length: 10 }, (_, i) => ({ lat: 51.5 + i * 0.001, lon: 0.1 }));

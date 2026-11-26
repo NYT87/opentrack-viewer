@@ -124,10 +124,10 @@ describe('pace series (AV-505)', () => {
       })),
     );
 
-  it('keeps a pace wherever speed keeps a speed: a steady 12 m/s is not a gap', () => {
+  it('keeps a pace a fast runner can hold: a steady 11 m/s is not a gap', () => {
     const fast = makeActivity(
       Array.from({ length: 12 }, (_, index) => ({
-        lat: (index * 120) / 111_195,
+        lat: (index * 110) / 111_195,
         lon: 0.0001,
         time: new Date(Date.UTC(2024, 0, 1, 10, 0, index * 10)),
       })),

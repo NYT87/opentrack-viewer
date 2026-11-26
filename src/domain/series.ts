@@ -211,9 +211,10 @@ function eachWindowSpan(
 function derivePace(activity: Activity): (number | undefined)[] {
   const out: (number | undefined)[] = new Array(activity.points.length).fill(undefined);
 
-  // A sport on foot takes the running limit; anything else, a GoPro clip's 'unknown' among them (often a ride), the cycling one.
-  const onFoot = activity.metadata.sport === 'running' || activity.metadata.sport === 'walking' || activity.metadata.sport === 'hiking';
-  const paceCeiling = onFoot ? MAX_PLAUSIBLE_RUNNING_SPEED_MPS : MAX_PLAUSIBLE_CYCLING_SPEED_MPS;
+  // Pace is chosen for movement on foot, so the running limit holds unless the file says wheels or skis. The
+  // clean-up is looser for unknown sports on purpose: dropping a point costs more than gapping a chart.
+  const onWheelsOrSkis = activity.metadata.sport === 'cycling' || activity.metadata.sport === 'skiing';
+  const paceCeiling = onWheelsOrSkis ? MAX_PLAUSIBLE_CYCLING_SPEED_MPS : MAX_PLAUSIBLE_RUNNING_SPEED_MPS;
   eachWindowSpan(activity, ({ index, meters, seconds }) => {
     // Zero-duration or stationary intervals have no meaningful pace: gap them.
     if (seconds <= 0 || meters <= 0) return;

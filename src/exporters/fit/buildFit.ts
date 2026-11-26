@@ -335,7 +335,7 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
       enumField(5, SPORT_IDS[sport]),
       u32(7, durationMs(elapsedSeconds)),
       u32(8, durationMs(timerSeconds)),
-      u32(9, round((activity.derived?.distanceMeters ?? 0) * 100)),
+      u32(9, finite(activity.derived?.distanceMeters) ? round(Math.max(0, activity.derived.distanceMeters) * 100) : INVALID.uint32),
     ],
     LOCAL.session,
   );

@@ -106,7 +106,8 @@ function readSourceDistance(points: ActivityPoint[]): DistanceResult | undefined
   for (let i = 0; i < points.length; i += 1) {
     const value = points[i]!.distanceMeters;
     const isLocated = hasValidLocation(points[i]!);
-    if (isLocated) located += 1;
+    // Counted from the first reading: records written before the odometer starts are no reason to drop it.
+    if (isLocated && (origin !== undefined || Number.isFinite(value))) located += 1;
     if (!Number.isFinite(value)) continue;
     if (isLocated) locatedRead += 1;
     const reading = value as number;

@@ -228,7 +228,7 @@ export async function parseGopro(
   const firstCts = pointCtsMs?.[0];
   if (firstTime === undefined || firstCts === undefined) return withStats;
   const gpsVideoStart = firstTime - firstCts;
-  const datedFromEpoch = payload.timing.start === undefined && Math.abs(gpsVideoStart) < 1000;
+  const datedFromEpoch = payload.timing.start === undefined && gpsVideoStart < Date.UTC(2000, 0, 1);
   return datedFromEpoch ? withStats : Object.assign(withStats, { gpsVideoStart: new Date(gpsVideoStart) });
 }
 
