@@ -270,9 +270,10 @@ describe('the camera under the privacy trim (AV-1022, TD-091)', () => {
     expect(Math.min(bearing, 360 - bearing)).toBeLessThan(1);
   });
 
-  it('has no model at all when too little is left, so nothing is framed or asked for', () => {
-    const none = createInsetModels({ template: templateOf(follow(), { start: 0.45, end: 0.45 }), timeline: buildOverlayTimeline(activityThrough(straightNorth(150, 10, 5)), { video: { durationSeconds: 40 } }), activity: activityThrough(straightNorth(150, 10, 5)), width: 1920, height: 1080 });
-    expect(none.size).toBe(0);
+  it('frames a short route at the widest trim: its kept tenth is still drawn', () => {
+    const short = activityThrough(straightNorth(150, 10, 5));
+    const some = createInsetModels({ template: templateOf(follow(), { start: 0.45, end: 0.45 }), timeline: buildOverlayTimeline(short, { video: { durationSeconds: 40 } }), activity: short, width: 1920, height: 1080 });
+    expect(some.size).toBe(1);
   });
 
   it('frames only the kept route in the whole view', () => {

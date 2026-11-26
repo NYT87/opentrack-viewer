@@ -551,20 +551,11 @@ describe('the still image\u2019s route and the privacy trim (AV-1022, TD-091)', 
     expect(spread(route(withTrim({ start: 0.2, end: 0.2 }), bent))).toBeLessThan(5);
   });
 
-  it('is not drawn when less than 100 m would be left, and says why in the reader\u2019s units', () => {
-    const planned = planStillImage({ ...withTrim({ start: 0.45, end: 0.45 }), template: { ...withTrim({ start: 0.45, end: 0.45 }).template, components: [...defaultStaticLayout().template.components, label('Day 1')] } }, contextOf(ride()), measure);
+  it('still draws a short route at the widest trim: a tenth of it is always kept', () => {
+    const planned = planStillImage(withTrim({ start: 0.45, end: 0.45 }), contextOf(ride()), measure);
     if (!planned.ok) throw planned.error;
-    expect(planned.plan.items.map((item) => item.kind)).toEqual(['text']);
-    expect(planned.plan.hidden).toEqual([{ id: 'route', label: 'Route', reason: 'Less than 100 m of the route would be left, so it is not drawn.' }]);
-    const imperial = planStillImage(
-      { ...withTrim({ start: 0.45, end: 0.45 }), template: { ...withTrim({ start: 0.45, end: 0.45 }).template, components: [...defaultStaticLayout().template.components, label('Day 1')] } },
-      contextOf(ride(), { units: 'imperial' }),
-      measure,
-    );
-    expect(imperial.ok && imperial.plan.hidden[0]!.reason).toBe('Less than 330 ft of the route would be left, so it is not drawn.');
-    // With nothing else to draw, that is the error.
-    const alone = planStillImage(withTrim({ start: 0.45, end: 0.45 }), contextOf(ride()), measure);
-    expect(!alone.ok && alone.error.code).toBe('trimmed_away');
+    expect(planned.plan.items.map((item) => item.kind)).toContain('route');
+    expect(planned.plan.hidden).toEqual([]);
   });
 
   it('keeps the trim in the layout file as the two shares, and opens an older file with none', () => {

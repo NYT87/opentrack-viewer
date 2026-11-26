@@ -365,12 +365,13 @@ describe('placing figures, the date and text on the image (AV-1010)', () => {
       expect(kept.plan.runs.flat()).not.toEqual(whole.plan.runs.flat());
     });
 
-    it('says why the route is not drawn when less than 100 m (330 ft) would be left, and draws none', async () => {
+    it('still draws a route of a few metres under a trim, with no 100 m floor', async () => {
       const tiny = makeActivity(Array.from({ length: 20 }, (_, i) => ({ lat: 10 + i * 0.00001, lon: 20 })));
       const { stills } = setup({ activity: tiny });
       fireEvent.change(percent('Hide from the start (%)'), { target: { value: '5' } });
-      expect(screen.getAllByText(/Less than (100 m|330 ft) of the route would be left, so it is not drawn\./).length).toBeGreaterThan(0);
-      expect(stills).toHaveLength(0);
+      expect(screen.queryByText(/so it is not drawn/)).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Download PNG' }));
+      expect(lastPlan(stills).items.some((entry) => entry.kind === 'route')).toBe(true);
     });
   });
 

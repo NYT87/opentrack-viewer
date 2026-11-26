@@ -471,11 +471,10 @@ describe('the contract adapter (AV-1017)', () => {
     }
     const own = contractPropsFor(template, route, timeline.sampleAt(30), timeline, context(activity, { privacyTrim: { start: 0.3, end: 0.3 } })) as RouteProps;
     expect(count(own)).toBe(count(kept));
-    // Too little left is no route at all, though the box and the progress are still given.
-    // (The ride is 300 m: 45 % off each end leaves 30.)
-    const none = contractPropsFor({ ...template, privacyTrim: { start: 0.45, end: 0.45 } }, route, timeline.sampleAt(30), timeline, context(activity)) as RouteProps;
-    expect(none.route).toBeUndefined();
-    expect(none.progress).toBeDefined();
+    // The widest trim still leaves a route: the ride is 300 m, and 45 % off each end leaves 30.
+    const narrow = contractPropsFor({ ...template, privacyTrim: { start: 0.45, end: 0.45 } }, route, timeline.sampleAt(30), timeline, context(activity)) as RouteProps;
+    expect(narrow.route!.segments.length).toBeGreaterThan(0);
+    expect(narrow.progress).toBeDefined();
   });
 
   it('gives the route in the box’s own space, the position and the profile with its cursor', () => {

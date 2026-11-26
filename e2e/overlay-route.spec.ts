@@ -300,10 +300,10 @@ test('the privacy trim: handles and percentages in step by keyboard, and the rou
   expect(kept.maxY - kept.minY).toBeGreaterThan(700);
   expect(kept.maxX - kept.minX).toBeLessThan(100);
 
-  // Down to under 100 m of route: nothing is drawn, and the control says why.
+  // The widest trim still keeps a tenth of the route: it is drawn, and nothing says otherwise.
   await startInput.fill('45');
   await endInput.fill('45');
-  await expect(trim.getByRole('status')).toContainText(/Less than (100 m|330 ft) of the route would be left, so it is not drawn\./);
+  await expect(trim.getByRole('status')).toHaveCount(0);
   await trim.getByRole('button', { name: 'Show the whole route' }).click();
   await expect(startInput).toHaveValue('0');
   await expect(endInput).toHaveValue('0');

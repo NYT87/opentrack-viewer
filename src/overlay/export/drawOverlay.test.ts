@@ -149,11 +149,10 @@ describe('drawing the overlay on a canvas (AV-1006)', () => {
       expect(drawn.ops('lineTo').length).toBeLessThanOrEqual(6);
     });
 
-    it('draws no route and no marker when less than 100 m would be left', () => {
+    it('still draws a short route under a trim, with no 100 m floor', () => {
       const small = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: at(i), lat: 10 + i * 0.0001, lon: 20, distanceMeters: i * 1.5 })));
       const drawn = render({ controls: { presetId: 'route-inset', privacyTrim: { start: 0.2, end: 0.2 } }, source: small, at: 5 });
-      expect(drawn.ops('stroke').length).toBe(0);
-      expect(drawn.ops('arc').length).toBe(0);
+      expect(drawn.ops('stroke').length).toBeGreaterThan(0);
     });
 
     it('changes nothing for a trim of nothing', () => {

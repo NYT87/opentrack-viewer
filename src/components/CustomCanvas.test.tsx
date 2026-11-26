@@ -104,13 +104,13 @@ describe('the custom canvas\u2019s privacy trim (AV-1022, TD-091)', () => {
     expect(within(trimField()!).getByLabelText('Hide from the start (%)')).toHaveValue(0);
   });
 
-  it('says, as the field does, when less than 100 m would be left of the 300 m ride', async () => {
+  it('still draws the 300 m ride at the widest trim, so the field says nothing is hidden away', async () => {
     setup();
     await add('Route with position');
     const group = trimField()!;
     fireEvent.change(within(group).getByLabelText('Hide from the start (%)'), { target: { value: '45' } });
     fireEvent.change(within(group).getByLabelText('Hide from the end (%)'), { target: { value: '45' } });
-    expect(within(group).getByRole('status')).toHaveTextContent('Less than 100 m of the route would be left, so it is not drawn.');
+    expect(within(group).queryByRole('status')).toBeNull();
   });
 });
 

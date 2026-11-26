@@ -2,7 +2,7 @@ import type { Activity } from '../domain/activity';
 import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
 import { formatStillDate, formatUtcOffset, type DateZone } from './dateFormat';
-import { keptRoute, minimumKeptText } from './privacyTrim';
+import { keptRoute, TRIMMED_AWAY_TEXT } from './privacyTrim';
 import {
   DEFAULT_ROUTE_IMAGE_OPTIONS,
   ROUTE_IMAGE_LIMITS,
@@ -382,11 +382,11 @@ export function planStillImage(
         hidden.push({ id: component.id, label, reason: context.route.error.message });
         continue;
       }
-      // AV-1022 (TD-091). The route is cut by the privacy trim before it is read for drawing, and too little left is not drawn.
+      // AV-1022 (TD-091). The route is cut by the privacy trim before it is read for drawing, and a route with no length is not drawn.
       let route = context.route.route;
       const kept = keptRoute(context.activity, layout.template.privacyTrim);
       if (kept?.tooShort) {
-        const reason = `Less than ${minimumKeptText(context.units)} of the route would be left, so it is not drawn.`;
+        const reason = TRIMMED_AWAY_TEXT;
         routeError = new RouteImageError('trimmed_away', reason);
         hidden.push({ id: component.id, label, reason });
         continue;

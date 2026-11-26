@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOverlayTimeline, canSmooth, paceFromSpeed, smoothedValueAt } from './timeline';
+import { buildOverlayTimeline, zoneShift, canSmooth, paceFromSpeed, smoothedValueAt } from './timeline';
 import { makeActivity } from '../test/helpers/activity';
 import type { ActivitySensorStream } from '../domain/activity';
 
@@ -321,9 +321,24 @@ describe('how the video is laid against the activity (TD-059)', () => {
 
   it('knows when the two do not overlap at all', () => {
     const timeline = buildOverlayTimeline(ride, {
-      video: { durationSeconds: 20, start: new Date(Date.UTC(2024, 0, 1, 12, 0, 0)) },
+      video: { durationSeconds: 20, start: new Date(Date.UTC(2024, 0, 3, 12, 0, 0)) },
     });
     expect(timeline.alignment?.overlaps).toBe(false);
+  });
+
+  it('takes a time-zone offset off a camera clock that keeps local time, when that lands the video in the activity', () => {
+    // The user's case: a 23 s clip 9 h off a 22 s activity.
+    expect(zoneShift(9 * 3600 + 2, 23, 22)).toBe(9 * 3600);
+    expect(zoneShift(-5.5 * 3600 + 3, 10, 60)).toBe(-5.5 * 3600);
+    // The viewer's own zone first, where several would land it.
+    expect(zoneShift(5 * 3600 + 60, 10, 4 * 3600, 3 * 3600)).toBe(3 * 3600);
+    // Else the smallest that does.
+    expect(zoneShift(5 * 3600 + 60, 10, 4 * 3600)).toBe(2 * 3600);
+    // Already inside, or too far for any zone: left alone.
+    expect(zoneShift(5, 10, 60)).toBe(0);
+    expect(zoneShift(2 * 86_400, 10, 60)).toBe(0);
+    const shifted = buildOverlayTimeline(ride, { video: { durationSeconds: 5, start: new Date(ride.points[0]!.time!.getTime() + 2 * 3600 * 1000 + 1000) } });
+    expect(shifted.alignment).toMatchObject({ overlaps: true, clockShiftSeconds: 7200, videoStartInActivity: 1 });
   });
 });
 

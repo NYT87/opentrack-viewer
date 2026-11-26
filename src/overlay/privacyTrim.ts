@@ -1,5 +1,5 @@
 import type { Activity, ActivityPoint } from '../domain/activity';
-import { buildMapVideoRoute, MIN_TRIMMED_ROUTE_METERS, trimRoute, type MapVideoRoute } from '../mapVideo/route';
+import { buildMapVideoRoute, trimRoute, type MapVideoRoute } from '../mapVideo/route';
 
 /**
  * AV-1022 (TD-091). The overlay's privacy trim: a share of the route's distance hidden at each
@@ -58,7 +58,10 @@ export interface KeptRoute {
   totalMeters: number;
 }
 
-/** Less than `MIN_TRIMMED_ROUTE_METERS` would be left (or the route has no length to share): none of it is drawn. */
+/** What the reader is told when a trimmed route is not drawn. */
+export const TRIMMED_AWAY_TEXT = 'The route has no length to trim, so it is not drawn.';
+
+/** The route has no length to share (one place, which may be the place to hide): none of it is drawn. */
 export interface TooShortRoute {
   tooShort: true;
   hiddenMeters: { start: number; end: number };
@@ -112,7 +115,8 @@ function cut(activity: Activity, trim: PrivacyTrim): KeptRoute | TooShortRoute {
   // A route of one place has no distance to share, and that place may be the one to hide.
   if (!route) return { tooShort: true, hiddenMeters: { start: 0, end: 0 }, totalMeters: 0 };
   const hiddenMeters = { start: trim.start * route.totalMeters, end: trim.end * route.totalMeters };
-  const trimmed = trimRoute(route, hiddenMeters.start, hiddenMeters.end);
+  // No 100 m floor: shares cap at 45 % an end, so a tenth is always kept, and a short route keeps it rather than vanish.
+  const trimmed = trimRoute(route, hiddenMeters.start, hiddenMeters.end, 0);
   if (!trimmed) return { tooShort: true, hiddenMeters, totalMeters: route.totalMeters };
   const points: ActivityPoint[] = trimmed.vertices.map((vertex, index) => ({
     index,
@@ -156,11 +160,6 @@ export function markerVisible(route: KeptRoute, activityMs: number | undefined):
 /** The activity time of a sample, in ms since the epoch, from a timeline's start; undefined where the timeline has none. */
 export function sampleActivityMs(timeline: { activityStartMs?: number }, sample: { activityElapsedSeconds: number }): number | undefined {
   return timeline.activityStartMs === undefined ? undefined : timeline.activityStartMs + sample.activityElapsedSeconds * 1000;
-}
-
-/** The shortest route a trim may leave, as the reader reads it: 100 m, or 330 ft. */
-export function minimumKeptText(units: 'metric' | 'imperial'): string {
-  return units === 'imperial' ? `${Math.round(MIN_TRIMMED_ROUTE_METERS / 0.3048 / 10) * 10} ft` : `${MIN_TRIMMED_ROUTE_METERS} m`;
 }
 
 /**

@@ -5,9 +5,9 @@ import {
   PRIVACY_TRIM_MAX_SHARE,
   PRIVACY_TRIM_STEP_PERCENT,
   keptRoute,
-  minimumKeptText,
   readPrivacyTrim,
   routeTotalMeters,
+  TRIMMED_AWAY_TEXT,
   type PrivacyTrim,
 } from '../overlay/privacyTrim';
 
@@ -116,7 +116,7 @@ export function PrivacyTrimField({ trim, onChange, activity, units }: PrivacyTri
       {field('end', 'Hide from the end (%)', end)}
       {kept?.tooShort && (
         <p className="overlay-controls__note" role="status">
-          Less than {minimumKeptText(units)} of the route would be left, so it is not drawn.
+          {TRIMMED_AWAY_TEXT}
         </p>
       )}
       {trim && (

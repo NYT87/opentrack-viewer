@@ -45,9 +45,9 @@ describe('the preview’s route inset and the privacy trim (AV-1022, TD-091)', (
     expect(points(inset(trim, 5).lines[0]!)).toBeLessThan(points(inset({}, 5).lines[0]!));
   });
 
-  it('draws no route, and no dot, when less than 100 m would be left', () => {
+  it('still draws a short route under a trim, with no 100 m floor', () => {
     const small = makeActivity(Array.from({ length: 11 }, (_, i) => ({ time: new Date(T0 + i * 1000), lat: 10 + i * 0.0001, lon: 20 })));
     const drawn = inset({ privacyTrim: { start: 0.2, end: 0.2 } }, 5, small);
-    expect(drawn.svg).toBeNull();
+    expect(drawn.svg).not.toBeNull();
   });
 });

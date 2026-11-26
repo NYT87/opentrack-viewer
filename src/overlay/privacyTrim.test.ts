@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { toValidCoordinate } from '../domain/activity';
-import { MIN_TRIMMED_ROUTE_METERS } from '../mapVideo/route';
 import { activityThrough, METERS_PER_DEGREE, straightNorth } from '../test/helpers/mapVideoRoutes';
 import { makeActivity } from '../test/helpers/activity';
 import { extractRoute } from './routeImage';
@@ -9,7 +8,6 @@ import {
   hasPrivacyTrim,
   keptRoute,
   markerVisible,
-  minimumKeptText,
   readPrivacyTrim,
   routeTotalMeters,
   sampleActivityMs,
@@ -82,13 +80,11 @@ describe('the privacy trim cuts the route by shares of its distance (AV-1022, TD
     expect(extracted.ok && extracted.route.runs).toHaveLength(2);
   });
 
-  it('is too short, and draws nothing, when less than 100 m would be left', () => {
+  it('keeps the tenth a short route has left at the widest trim, with no 100 m floor', () => {
     const short = activityThrough(straightNorth(150, 10, 5));
-    const result = keptRoute(short, { start: 0.2, end: 0.2 });
-    expect(result).toMatchObject({ tooShort: true });
-    expect(MIN_TRIMMED_ROUTE_METERS).toBe(100);
-    // Just enough left is drawn.
-    expect(keptRoute(short, { start: 0.1, end: 0.1 })).not.toMatchObject({ tooShort: true });
+    const result = keptRoute(short, { start: 0.45, end: 0.45 });
+    expect(result).not.toMatchObject({ tooShort: true });
+    expect(result && !result.tooShort && result.activity.points.length).toBeGreaterThanOrEqual(2);
   });
 
   it('is too short for a route of one place: there is no distance to share, and that place may be the one to hide', () => {
@@ -196,9 +192,7 @@ describe('reading a trim (AV-1022, TD-091)', () => {
     expect(readPrivacyTrim([0.1, 0.1])).toBeUndefined();
   });
 
-  it('words the shortest route kept in the reader’s units, and a length as a share of the route', () => {
-    expect(minimumKeptText('metric')).toBe('100 m');
-    expect(minimumKeptText('imperial')).toBe('330 ft');
+  it('words a length as a share of the route', () => {
     expect(shareOfRouteText(40, 1000)).toBe('4 % of the route');
     expect(shareOfRouteText(12.5, 1000)).toBe('1.3 % of the route');
     expect(shareOfRouteText(5000, 1000)).toBe('100 % of the route');
