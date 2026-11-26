@@ -5,6 +5,7 @@ import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import type { ExportOutput } from '../../overlay/export/client';
 import { OverlayExportError } from '../../overlay/export/errors';
+import { prepareTemplateFonts } from '../../overlay/fonts';
 import { brokenImagesMessage, closeImages, decodeTemplateImages } from '../../overlay/images';
 import { createMapVideoFigures, drawAttribution, type PhotoImage } from '../figures';
 import type { PersonalFigures } from '../../overlay/template';
@@ -233,6 +234,15 @@ export async function openMapVideoRenderer(
   if (decoded.broken.length > 0) {
     closeImages(decoded.images.values());
     throw new OverlayExportError('render_failed', brokenImagesMessage(decoded.broken));
+  }
+  // AV-1031 (TD-103). The overlay's fonts are loaded on this page, which draws every frame, before any map is asked for: a font that fails stops the video here, not partway.
+  if (settings.overlay) {
+    try {
+      await prepareTemplateFonts(settings.overlay);
+    } catch (error) {
+      closeImages(decoded.images.values());
+      throw error;
+    }
   }
   const exportMap = await openExportMap({ width, height, styleUrl: basemapStyleUrl(settings, maptilerKey), what: 'a frame', ...options }).catch((error: unknown) => {
     closeImages(decoded.images.values());

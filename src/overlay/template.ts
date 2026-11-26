@@ -31,6 +31,7 @@ import {
   withinZone,
 } from './zones';
 import { formatHeading } from './derivedSeries';
+import { cleanFamily } from './fonts';
 import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import { DEFAULT_DIAL, DIAL_LIMITS, activityRange, rangeFraction } from './dial';
 import { DEFAULT_GRADIENT, GRADIENT_BAND_LIMITS, GRADIENT_FROM_LIMITS } from './gradient';
@@ -403,6 +404,8 @@ export interface OverlayStyle {
   backgroundOpacity: number;
   /** Multiplier on the component's base type size. */
   fontScale: number;
+  /** AV-1031 (TD-103). A font family by name, never its file; absent is the system font, and a component's overrides the layout's. */
+  fontFamily?: string;
 }
 
 export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
@@ -556,6 +559,8 @@ function parseStyle(value: unknown): Partial<OverlayStyle> {
   if (typeof value.accentColor === 'string') style.accentColor = value.accentColor;
   if (isNumber(value.backgroundOpacity)) style.backgroundOpacity = clamp01(value.backgroundOpacity);
   if (isNumber(value.fontScale) && value.fontScale > 0) style.fontScale = value.fontScale;
+  const fontFamily = cleanFamily(value.fontFamily);
+  if (fontFamily) style.fontFamily = fontFamily;
   return style;
 }
 

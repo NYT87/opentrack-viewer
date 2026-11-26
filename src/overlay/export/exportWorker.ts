@@ -2,6 +2,7 @@ import { buildOverlayTimeline, videoClockOf } from '../timeline';
 import { createArchiveSink, probeArchiveStorage } from './archiveSink';
 import { createOverlayRenderer } from './drawOverlay';
 import { closeImages } from '../images';
+import { installFonts } from '../fonts';
 import { acquireInsets, receiveInsetBitmaps } from './insetBridge';
 import { OverlayExportError, isOverlayExportError } from './errors';
 import type { ExportRequest, FromWorker, ToWorker } from './protocol';
@@ -40,6 +41,8 @@ async function run(request: ExportRequest, controller: AbortController): Promise
   // AV-1030. The page's decoded pictures, transferred: this worker's to close.
   const images = new Map(Object.entries(request.images ?? {}));
   try {
+    // AV-1031 (TD-103). The page's font bytes are registered, and loaded, before any frame is drawn.
+    await installFonts(request.fonts ?? []);
     const canvas = new OffscreenCanvas(request.width, request.height);
     const ctx = canvas.getContext('2d');
     if (!ctx) {

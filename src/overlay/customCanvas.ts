@@ -32,6 +32,7 @@ import { cappedMapIds } from './insetCamera';
 import { DEFAULT_SPLITS, splitsContentHeight, splitsMetrics, splitsUnavailableReason } from './splits';
 import { ELEVATION_MISSING, METRIC_MISSING, NO_ROUTE } from './missingData';
 import { PREDEFINED_ENTRIES, predefinedAvailability, predefinedEntry, type StartLayoutId, componentsFromSportLayout } from './predefined';
+import { cleanFamily } from './fonts';
 import { readPrivacyTrim, type PrivacyTrim } from './privacyTrim';
 import type { MeasureText } from './staticImage';
 import type { UnitSystem } from '../domain/units';
@@ -708,7 +709,7 @@ export function growFigureToFit(
   components: OverlayComponent[],
   id: string,
   frame: { width: number; height: number },
-  context: { timeline: OverlayTimeline; units: UnitSystem; measure: MeasureText },
+  context: { timeline: OverlayTimeline; units: UnitSystem; measure: MeasureText; /** AV-1031. The layout's font, under the figure's own. */ layoutFont?: string },
 ): OverlayComponent[] {
   const found = components.find((component) => component.id === id);
   if (!found || (found.type !== 'text' && found.type !== 'gauge') || !found.source) return components;
@@ -733,7 +734,7 @@ export function growFigureToFit(
             : WIDEST_VALUE[source.metric]
       : (timeline.sensorLabels.get(sourceId)?.max ?? 999);
   const resolved = resolveOverlayComponent(
-    canvasTemplate(components),
+    canvasTemplate(components, undefined, context.layoutFont),
     target,
     { videoTimeSeconds: 0, activityElapsedSeconds: 0, values: { [sourceId]: wide } },
     timeline,
@@ -746,6 +747,7 @@ export function growFigureToFit(
     label: resolved.label,
     value: resolved.text ?? '',
     figure: target.figure,
+    fontFamily: resolved.style.fontFamily,
     track: resolved.fraction !== undefined,
     measure: context.measure,
   });
@@ -864,6 +866,8 @@ export interface CanvasDraft {
   history: CanvasState[];
   /** AV-1022 (TD-091). The privacy trim of the canvas's template: not part of Undo, which is the layout's. */
   privacyTrim?: PrivacyTrim;
+  /** AV-1031 (TD-103). The layout's font, by name; absent is the system font. */
+  fontFamily?: string;
 }
 
 export const EMPTY_CANVAS_DRAFT: CanvasDraft = {
@@ -923,12 +927,12 @@ export function componentsFromStart(
 }
 
 /** A template of these components, ready for an exporter or a layout file. */
-export function canvasTemplate(components: OverlayComponent[], privacyTrim?: PrivacyTrim): OverlayTemplate {
+export function canvasTemplate(components: OverlayComponent[], privacyTrim?: PrivacyTrim, fontFamily?: string): OverlayTemplate {
   const trim = readPrivacyTrim(privacyTrim);
   return {
     version: OVERLAY_TEMPLATE_VERSION,
     name: 'Custom canvas',
-    style: { ...DEFAULT_OVERLAY_STYLE },
+    style: { ...DEFAULT_OVERLAY_STYLE, ...(cleanFamily(fontFamily) ? { fontFamily: cleanFamily(fontFamily) } : {}) },
     components: components.map((component) => ({ ...component, rect: normalizeRect(component.rect) })),
     ...(trim ? { privacyTrim: trim } : {}),
   };

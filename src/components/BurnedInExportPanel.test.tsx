@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { stubFonts } from '../test/helpers/fonts';
 import userEvent from '@testing-library/user-event';
 import { BurnedInExportPanel } from './BurnedInExportPanel';
 import { OverlayExportError } from '../overlay/export/errors';
@@ -573,5 +574,30 @@ describe('an image in the layout (AV-1030, TD-102)', () => {
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     expect(createImageBitmap).toHaveBeenCalledTimes(1);
     expect(start.mock.calls[0]![0]).toMatchObject({ images: { logo: made } });
+  });
+});
+
+describe('the layout’s font (AV-1031, TD-103)', () => {
+  const withFont = (family: string) =>
+    canvasTemplate([{ id: 'note', type: 'text', visible: true, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }, unitMode: 'auto', style: { fontFamily: family }, source: { kind: 'metric', metric: 'speed' } }]);
+  let fonts: ReturnType<typeof stubFonts>;
+  beforeEach(() => {
+    fonts = stubFonts();
+  });
+  afterEach(() => fonts.unstub());
+
+  it('hands the font’s bytes to the render, for the worker to register before its first frame', async () => {
+    const { start } = setup({ template: withFont('Inter') });
+    await userEvent.click(renderButton());
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    const request = start.mock.calls[0]![0] as { fonts: { family: string; weight: number }[] };
+    expect(request.fonts.map((face) => [face.family, face.weight])).toEqual([['Inter', 400], ['Inter', 700]]);
+  });
+
+  it('stops with the reason, and renders nothing, when the font is not loaded here', async () => {
+    const { start } = setup({ template: withFont('Brand Sans') });
+    await userEvent.click(renderButton());
+    await screen.findByText('This layout uses Brand Sans, which is not loaded here.');
+    expect(start).not.toHaveBeenCalled();
   });
 });

@@ -49,6 +49,9 @@ import { useInteractionStore } from '../state/interactionStore';
 import { measureText } from '../overlay/measureText';
 import { ElementRows } from './ElementRows';
 import { PrivacyTrimField } from './PrivacyTrimField';
+import { FontField, MissingFonts } from './FontField';
+import { useTemplateFonts } from './useTemplateFonts';
+import { prepareTemplateFonts, withFontFamily } from '../overlay/fonts';
 import type { PrivacyTrim } from '../overlay/privacyTrim';
 
 /** The long side of the preview, in pixels: the image drawn at this scale. */
@@ -111,6 +114,8 @@ export function RouteOverlayPanel({
   );
   // AV-1022 (TD-091). The share of the route hidden from each end, kept in the layout with the rest.
   const [privacyTrim, setPrivacyTrim] = useState<PrivacyTrim | undefined>();
+  // AV-1031 (TD-103). The layout's font, by name; each text may have its own.
+  const [fontFamily, setFontFamily] = useState<string | undefined>();
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const [notice, setNotice] = useState<LayoutNotice | undefined>();
@@ -135,7 +140,7 @@ export function RouteOverlayPanel({
       template: {
         version: OVERLAY_TEMPLATE_VERSION,
         name: 'Still image',
-        style: { ...DEFAULT_OVERLAY_STYLE },
+        style: { ...DEFAULT_OVERLAY_STYLE, ...(fontFamily ? { fontFamily } : {}) },
         ...(privacyTrim ? { privacyTrim } : {}),
         components: components.map((component) =>
           component.type === 'routeInset'
@@ -152,9 +157,12 @@ export function RouteOverlayPanel({
         ),
       },
     };
-  }, [width, height, components, color, lineWidth, paddingPercent, markers, privacyTrim]);
+  }, [width, height, components, color, lineWidth, paddingPercent, markers, privacyTrim, fontFamily]);
 
-  const planned = useMemo(() => planStillImage(layout, context, measureText), [layout, context]);
+  // AV-1031. Each font the layout names is made ready; the plan is measured again when one arrives.
+  const fontState = useTemplateFonts(layout.template);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const planned = useMemo(() => planStillImage(layout, context, measureText), [layout, context, fontState.version]);
   const plan = planned.ok ? planned.plan : undefined;
   const aspect = ROUTE_IMAGE_ASPECTS.find(
     (entry) => entry.width === parseNumber(width) && entry.height === parseNumber(height),
@@ -172,7 +180,16 @@ export function RouteOverlayPanel({
     if (!plan) return;
     setPhase({ status: 'rendering' });
     try {
-      const blob = await renderPng(plan);
+      // AV-1031. A font that cannot be loaded stops the image with the reason; it is never drawn in a fallback.
+      try {
+        await prepareTemplateFonts(layout.template);
+      } catch (error) {
+        setPhase({ status: 'error', message: error instanceof Error ? error.message : 'A font could not be loaded.' });
+        return;
+      }
+      // The fonts have arrived: the picture is planned again, measured in them, not in what stood in until now.
+      const again = planStillImage(layout, context, measureText);
+      const blob = await renderPng(again.ok ? again.plan : plan);
       const fileName = stillImageFileName(plan);
       save(blob, fileName);
       setPhase({ status: 'saved', fileName, bytes: blob.size });
@@ -220,6 +237,7 @@ export function RouteOverlayPanel({
     if (route?.style.accentColor) setColor(route.style.accentColor);
     setComponents(next.template.components);
     setPrivacyTrim(next.template.privacyTrim);
+    setFontFamily(next.template.style.fontFamily);
     setSelectedId(undefined);
     setNotice({ kind: 'loaded', message: `Opened the layout in ${file.name}.`, warnings: parsed.warnings });
   };
@@ -324,6 +342,9 @@ export function RouteOverlayPanel({
           </label>
         </fieldset>
       )}
+
+      <FontField label="Layout font" manage value={fontFamily} onChange={setFontFamily} />
+      <MissingFonts problems={fontState.problems} />
 
       {hasRoute && <PrivacyTrimField trim={privacyTrim} onChange={setPrivacyTrim} activity={activity} units={units} />}
 
@@ -680,6 +701,14 @@ function ElementEditor({
 
       {isText && (
         <>
+          <FontField
+            label="Font"
+            inherit
+            value={component.style.fontFamily}
+            onChange={(family) =>
+              onChange((current) => ({ ...current, style: withFontFamily(current.style, family) }))
+            }
+          />
           <PercentField
             id={`${id}-size`}
             label="Text size (px)"

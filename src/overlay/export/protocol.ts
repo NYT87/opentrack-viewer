@@ -1,6 +1,7 @@
 import type { Activity } from '../../domain/activity';
 import type { UnitSystem } from '../../domain/units';
 import type { OverlayExportErrorCode } from './errors';
+import type { FontBytes } from '../fonts';
 import type { OverlayTemplate, PersonalFigures } from '../template';
 import type { SourceTimecode } from '../timecode';
 import type { VideoTimeWarp } from '../timeline';
@@ -41,6 +42,11 @@ export interface ExportRequest {
    */
   images?: Record<string, ImageBitmap>;
   /**
+   * AV-1031 (TD-103). The bytes of every font the template draws in, copied (the page keeps its own):
+   * the worker registers them with `FontFace` and waits for them before its first frame.
+   */
+  fonts?: FontBytes[];
+  /**
    * Chosen by the page, so the page can delete the file even if the worker is
    * stopped mid-write and never reports it.
    */
@@ -75,6 +81,8 @@ export interface BurnRequest {
   personal?: PersonalFigures;
   /** AV-1030 (TD-102). As in `ExportRequest`. */
   images?: Record<string, ImageBitmap>;
+  /** AV-1031 (TD-103). As in `ExportRequest`. */
+  fonts?: FontBytes[];
   archiveName: string;
 }
 

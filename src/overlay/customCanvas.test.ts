@@ -364,6 +364,19 @@ describe('growing a figure’s box to fit its text (AV-1015, TD-083)', () => {
     expect(rectOf(sensor).width).toBeGreaterThan(small.width);
   });
 
+  it('measures in the figure’s font, its own over the layout’s: a narrower font grows the box less, a wider one more (AV-1031, TD-103)', () => {
+    const byFont = (text: string, font: string) => text.length * Number(/([\d.]+)px/.exec(font)![1]) * (font.includes('"Narrow"') ? 0.3 : font.includes('"Wide"') ? 0.9 : 0.55);
+    const fonted = { ...context, measure: byFont };
+    const widthOf = (component: OverlayComponent, layoutFont?: string) =>
+      rectOf(growFigureToFit([component], 'a', frame, { ...fonted, layoutFont })).width;
+    const plain = widthOf(box('a', small));
+    expect(widthOf(box('a', small), 'Narrow')).toBeLessThan(plain);
+    expect(widthOf(box('a', small), 'Wide')).toBeGreaterThan(plain);
+    // The figure's own beats the layout's.
+    expect(widthOf(box('a', small, { style: { fontFamily: 'Wide' } }), 'Narrow')).toBeGreaterThan(plain);
+    expect(widthOf(box('a', small, { style: { fontFamily: 'Narrow' } }), 'Wide')).toBeLessThan(plain);
+  });
+
   it('sizes a distance of the total for the total’s own text', () => {
     const plain = rectOf(grow([box('a', small, { source: { kind: 'metric', metric: 'distance' } })]));
     const total = rectOf(grow([box('a', small, { source: { kind: 'metric', metric: 'distance' }, display: { ofTotal: true } })]));

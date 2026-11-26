@@ -1,5 +1,6 @@
+import { fontStack } from '../fonts';
 import { formatDuration } from '../../domain/units';
-import { FIGURE_FONT_FAMILY, haloShadow } from '../figureLayout';
+import { haloShadow } from '../figureLayout';
 import { needsHalo, type ResolvedOverlayComponent } from '../template';
 import type { Box, OverlayContext2D } from './drawOverlay';
 
@@ -48,9 +49,9 @@ export function drawZones(
   const labelSize = 0.55 * em * (figure?.labelScale ?? 1);
   const valueSize = 1.1 * em * (figure?.valueScale ?? 1);
   const timeSize = 0.42 * em;
-  const labelFont = `${labelSize}px ${FIGURE_FONT_FAMILY}`;
-  const valueFont = `bold ${valueSize}px ${FIGURE_FONT_FAMILY}`;
-  const timeFont = `${timeSize}px ${FIGURE_FONT_FAMILY}`;
+  const labelFont = `${labelSize}px ${fontStack(ready.style.fontFamily)}`;
+  const valueFont = `bold ${valueSize}px ${fontStack(ready.style.fontFamily)}`;
+  const timeFont = `${timeSize}px ${fontStack(ready.style.fontFamily)}`;
   const align = figure?.align ?? 'left';
   const innerWidth = Math.max(1, box.w - 2 * pad);
   const textX = align === 'center' ? box.x + box.w / 2 : align === 'right' ? box.x + box.w - pad : box.x + pad;

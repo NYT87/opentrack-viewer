@@ -1,3 +1,4 @@
+import { fontStack } from './fonts';
 import { LAYOUT_IMAGES_MAX_CHARS } from './imageSetting';
 import type { Activity } from '../domain/activity';
 import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
@@ -297,7 +298,6 @@ export function describeStillComponent(component: OverlayComponent): string {
 export type MeasureText = (text: string, font: string) => number;
 
 /** The type the still image is drawn in: the system's, never a font fetched from anywhere. */
-export const STILL_FONT_FAMILY = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 export interface Box {
   x: number;
@@ -434,7 +434,7 @@ export function planStillImage(
     if (!isHexColor(color)) {
       return { ok: false, error: new RouteImageError('invalid_style', 'A text colour must be a hex colour such as #ffffff.') };
     }
-    const item = layoutStillText(component, value, color, layout, measure);
+    const item = layoutStillText(component, value, color, layout, measure, layout.template.style.fontFamily);
     if (item.shrunk) notes.push(`${label} was set smaller than chosen, to fit inside the image.`);
     items.push(item);
   }
@@ -506,8 +506,8 @@ function planRouteItem(
   return { ok: true, item: { kind: 'route', id: component.id, box: { x: left, y: top, w: boxW, h: boxH }, plan } };
 }
 
-const fontOf = (weight: 'normal' | 'bold' | number, size: number) =>
-  `${weight === 'bold' ? 700 : weight === 'normal' ? 400 : weight} ${Math.round(size * 100) / 100}px ${STILL_FONT_FAMILY}`;
+const fontOf = (weight: 'normal' | 'bold' | number, size: number, family?: string) =>
+  `${weight === 'bold' ? 700 : weight === 'normal' ? 400 : weight} ${Math.round(size * 100) / 100}px ${fontStack(family)}`;
 
 /**
  * A still text, figure or date set in its box: measured, made smaller only if
@@ -520,16 +520,19 @@ export function layoutStillText(
   color: string,
   layout: Pick<StaticImageLayout, 'width' | 'height'>,
   measure: MeasureText,
+  /** AV-1031 (TD-103). The layout's font, under the component's own. */
+  layoutFamily?: string,
 ): Extract<PlannedStillItem, { kind: 'text' }> {
   const { width, height } = layout;
   const setting = component.text ?? { align: 'left' as const, weight: 'bold' as const };
+  const family = component.style.fontFamily ?? layoutFamily;
   const caption = component.type === 'summary' && setting.caption !== false ? value.caption.toUpperCase() : undefined;
   const valueLines = value.value.split('\n');
 
   const lay = (size: number) => {
     const rows: { text: string; size: number; font: string; caption: boolean }[] = [];
-    if (caption) rows.push({ text: caption, size: size * CAPTION_SIZE, font: fontOf(600, size * CAPTION_SIZE), caption: true });
-    for (const text of valueLines) rows.push({ text, size, font: fontOf(setting.weight, size), caption: false });
+    if (caption) rows.push({ text: caption, size: size * CAPTION_SIZE, font: fontOf(600, size * CAPTION_SIZE, family), caption: true });
+    for (const text of valueLines) rows.push({ text, size, font: fontOf(setting.weight, size, family), caption: false });
     const w = Math.max(...rows.map((row) => measure(row.text, row.font)), 1);
     const h = rows.reduce((total, row) => total + row.size * LINE_HEIGHT, 0);
     return { rows, w, h };

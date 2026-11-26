@@ -23,6 +23,7 @@ import {
 import { canvasTemplate } from '../overlay/customCanvas';
 import type { OverlayComponent } from '../overlay/template';
 import { useTemplateImages } from './useTemplateImages';
+import { useTemplateFonts } from './useTemplateFonts';
 import { createOverlayRenderer } from '../overlay/export/drawOverlay';
 import { usePersonalStore } from '../state/personalStore';
 
@@ -209,6 +210,9 @@ export default function MapImagePreview({ activity, plan, settings, units, onCam
   // AV-1030 (TD-102). The canvas's images, decoded for the picture's own size and drawn scaled to the preview's.
   const decodedImages = useTemplateImages(settings.layout === 'canvas' ? settings.overlay : NO_COMPONENTS, { width: plan.width, height: plan.height });
   const overlayImages = decodedImages.images;
+  // AV-1031 (TD-103). A font that arrives draws the canvas's elements again.
+  const canvasLayout = useMemo(() => canvasTemplate(settings.layout === 'canvas' ? settings.overlay : NO_COMPONENTS), [settings.layout, settings.overlay]);
+  const fontsVersion = useTemplateFonts(canvasLayout).version;
   const brokenIds = useMemo(() => new Set(decodedImages.broken.map((entry) => entry.id)), [decodedImages.broken]);
   useEffect(() => {
     const drawn = prepare(overRef.current);
@@ -224,7 +228,7 @@ export default function MapImagePreview({ activity, plan, settings, units, onCam
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
       drawAttribution(ctx, plan.credit, plan.width, plan.mapHeight);
     }
-  }, [prepare, plan, settings.layout, settings.overlay, overlayImages, brokenIds, clock, units, readerTimeZone, personal, previewWidth]);
+  }, [prepare, plan, settings.layout, settings.overlay, overlayImages, brokenIds, fontsVersion, clock, units, readerTimeZone, personal, previewWidth]);
 
   return (
     <div className="map-image-preview">

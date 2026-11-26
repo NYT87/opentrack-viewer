@@ -23,7 +23,9 @@ import { useMapVideoStore } from '../state/mapVideoStore';
 import { checkInsetExportCached } from '../overlay/insetExportCheck';
 import { hasMapInset } from '../overlay/insetCamera';
 import { InsetExportNotes, InsetWaiting } from './InsetExportNotes';
-import { brokenImagesMessage, closeImages, decodeTemplateImages, imageRefusal } from '../overlay/images';
+import { closeImages, imageRefusal } from '../overlay/images';
+import { needsPreparing, prepareExportInputs } from '../overlay/prepare';
+import type { FontBytes } from '../overlay/fonts';
 import { CleanupNote } from './CleanupPanel';
 import { TimecodeNote } from './TimecodeNote';
 import { addSeconds } from '../overlay/timecode';
@@ -297,21 +299,21 @@ export function BurnedInExportPanel({
     setWaiting(undefined);
     setPhase({ status: 'running', fraction: 0, seconds: 0 });
     stopped.current = false;
-    if (!built.template.components.some((component) => component.type === 'image' && component.visible)) {
+    if (!needsPreparing(built.template)) {
       launch();
       return;
     }
-    // Each image is decoded once, here, and transferred to the worker, which closes it.
-    void decodeTemplateImages(built.template.components, { width: outWidth, height: outHeight }).then((decoded) => {
-      if (gone.current || stopped.current || decoded.broken.length > 0) {
-        closeImages(decoded.images.values());
-        if (!gone.current) setPhase(stopped.current ? { status: 'stopped' } : { status: 'error', message: brokenImagesMessage(decoded.broken) });
+    // Each image is decoded once, here, and transferred to the worker, which closes it. AV-1031: the fonts' bytes go with it, to be registered before the first frame.
+    void prepareExportInputs(built.template, { width: outWidth, height: outHeight }).then((prepared) => {
+      if (gone.current || stopped.current || !prepared.ok) {
+        if (prepared.ok) closeImages(Object.values(prepared.images ?? {}));
+        if (!gone.current) setPhase(stopped.current ? { status: 'stopped' } : { status: 'error', message: prepared.ok ? '' : prepared.message });
         return;
       }
-      launch(Object.fromEntries(decoded.images));
+      launch(prepared.images, prepared.fonts);
     });
   };
-  const launch = (images?: Record<string, ImageBitmap>) => {
+  const launch = (images?: Record<string, ImageBitmap>, fonts?: FontBytes[]) => {
 
     let active: ExportJob;
     try {
@@ -332,6 +334,7 @@ export function BurnedInExportPanel({
           activity,
           ...(Object.keys(personal).length > 0 ? { personal } : {}),
           ...(images ? { images } : {}),
+          ...(fonts ? { fonts } : {}),
         },
         (fraction, seconds) => setPhase({ status: 'running', fraction, seconds }),
         // AV-1023. The key stays on the page, where the maps are; it goes with the render only when a route inset has a map.

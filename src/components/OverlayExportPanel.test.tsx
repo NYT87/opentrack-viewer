@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { stubFonts } from '../test/helpers/fonts';
 import userEvent from '@testing-library/user-event';
 import { OverlayExportPanel } from './OverlayExportPanel';
 import { OverlayExportError } from '../overlay/export/errors';
@@ -874,5 +875,41 @@ describe('an image in the layout (AV-1030, TD-102)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
     await vi.waitFor(() => expect(within(panel()).getByText(/logo\.png: could not be read \(torn\)/)).toBeTruthy());
     expect(start).not.toHaveBeenCalled();
+  });
+});
+
+describe('the layout’s font (AV-1031, TD-103)', () => {
+  const withFont = (family: string) =>
+    canvasTemplate([{ id: 'note', type: 'text', visible: true, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }, unitMode: 'auto', style: { fontFamily: family }, source: { kind: 'metric', metric: 'speed' } }]);
+  let fonts: ReturnType<typeof stubFonts>;
+  beforeEach(() => {
+    fonts = stubFonts();
+  });
+  afterEach(() => fonts.unstub());
+
+  it('loads the bundled font and hands its bytes to the export, which registers them before drawing', async () => {
+    const { start } = setup({ template: withFont('Oswald') });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    const request = start.mock.calls[0]![0] as { fonts: { family: string; weight: number; bytes: ArrayBuffer }[] };
+    expect(request.fonts.map((face) => [face.family, face.weight])).toEqual([['Oswald', 400], ['Oswald', 700]]);
+    expect(request.fonts[0]!.bytes.byteLength).toBeGreaterThan(0);
+    // Only the app's own path was asked for.
+    expect(fonts.requests).toEqual(['/fonts/oswald/oswald-latin-400-normal.woff2', '/fonts/oswald/oswald-latin-700-normal.woff2']);
+  });
+
+  it('stops with the reason before the export starts when the layout’s font is not loaded here', async () => {
+    const { start } = setup({ template: withFont('Brand Sans') });
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    await vi.waitFor(() => expect(within(panel()).getByText('This layout uses Brand Sans, which is not loaded here.')).toBeTruthy());
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('asks for no font, and starts at once, when the layout draws in the system font', async () => {
+    const { start } = setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Export PNG sequence' }));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0]).not.toHaveProperty('fonts');
+    expect(fonts.requests).toEqual([]);
   });
 });

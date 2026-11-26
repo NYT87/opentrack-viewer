@@ -3,6 +3,7 @@ import type { UnitSystem } from '../domain/units';
 import { openExportMap, type RenderWaiting } from '../mapVideo/export/renderMapVideo';
 import { basemapStyleUrl, drawWholeRoute, installVideoLayers, styleVideoMap, videoMapColors } from '../mapVideo/videoMap';
 import { canvasTemplate } from '../overlay/customCanvas';
+import { prepareTemplateFonts } from '../overlay/fonts';
 import { brokenImagesMessage, closeImages, decodeTemplateImages } from '../overlay/images';
 import { createOverlayRenderer, type OverlayContext2D } from '../overlay/export/drawOverlay';
 import { OverlayExportError } from '../overlay/export/errors';
@@ -56,6 +57,15 @@ export async function renderMapImage(
   if (decoded.broken.length > 0) {
     closeImages(images.values());
     throw new OverlayExportError('render_failed', brokenImagesMessage(decoded.broken));
+  }
+  // AV-1031 (TD-103). The canvas's fonts are loaded before any map is asked for; one that fails stops the picture with the reason.
+  if (settings.layout === 'canvas') {
+    try {
+      await prepareTemplateFonts(canvasTemplate(settings.overlay));
+    } catch (error) {
+      closeImages(images.values());
+      throw error;
+    }
   }
   let exportMap: Awaited<ReturnType<typeof openExportMap>>;
   try {

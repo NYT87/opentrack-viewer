@@ -2,6 +2,7 @@ import { buildOverlayTimeline, videoClockOf } from '../timeline';
 import type { ExportJob, ExportOutput } from './client';
 import { createOverlayRenderer, type OverlayContext2D } from './drawOverlay';
 import { closeImages } from '../images';
+import { installFonts } from '../fonts';
 import { hasMapInset } from '../insetCamera';
 import { createInsetMaps, type InsetMapSession, type InsetMapsInput } from './insetMaps';
 import { OverlayExportError, isOverlayExportError } from './errors';
@@ -234,6 +235,8 @@ export function startWebmExport(
     : undefined;
   const from = request.trimStartSeconds ?? 0;
   const record = async () => {
+    // AV-1031 (TD-103). The recording is on this page, so the fonts are its own; waited for before the clock starts.
+    await installFonts(request.fonts ?? []);
     if (maps) {
       // Every tile the plan needs is loaded before the clock starts: a recording in real time cannot wait for one.
       onProgress(0, request.frameCount);

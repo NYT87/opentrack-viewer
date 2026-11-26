@@ -80,6 +80,17 @@ describe('the export client (AV-1006)', () => {
     expect(kept.close).toHaveBeenCalled();
   });
 
+  it('copies the font bytes into the start message, never transfers them: the page keeps its own (AV-1031)', async () => {
+    const sent: { message: ToWorker; transfer?: Transferable[] }[] = [];
+    const { worker } = fakeWorker();
+    worker.postMessage = (message, transfer) => void sent.push({ message, transfer });
+    const fonts = [{ family: 'Oswald', weight: 400, bytes: new ArrayBuffer(8) }];
+    startOverlayExport({ ...request, fonts }, () => undefined, { createWorker: () => worker });
+    await tick();
+    expect((sent[0]!.message as Extract<ToWorker, { type: 'start' }>).request.fonts).toBe(fonts);
+    expect(sent[0]!.transfer).toBeUndefined();
+  });
+
   it('relays progress and resolves with the finished file, ending the worker', async () => {
     const { worker } = fakeWorker();
     const onProgress = vi.fn();

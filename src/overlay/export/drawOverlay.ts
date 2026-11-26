@@ -211,6 +211,7 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
       label: ready.label,
       value: ready.text ?? '',
       figure,
+      fontFamily: ready.style.fontFamily,
       track: ready.fraction !== undefined,
     });
     const { padX, track, trackGap } = layout;
@@ -333,7 +334,7 @@ export function createOverlayRenderer(input: OverlayRendererInput): OverlayRende
         const value = stillValue(component, context);
         if (!value.ok) continue;
         const color = component.style.textColor ?? DEFAULT_OVERLAY_STYLE.textColor;
-        texts.set(component.id, layoutStillText(component, value, color, { width, height }, measure));
+        texts.set(component.id, layoutStillText(component, value, color, { width, height }, measure, template.style.fontFamily));
       }
     }
     return texts;

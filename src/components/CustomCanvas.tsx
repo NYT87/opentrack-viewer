@@ -1,10 +1,13 @@
 import { LAYOUT_FILE_MAX_BYTES } from '../overlay/staticImage';
 import { PrivacyTrimField } from './PrivacyTrimField';
 import { useTemplateImages } from './useTemplateImages';
+import { useTemplateFonts } from './useTemplateFonts';
+import { FontField, MissingFonts } from './FontField';
+import { fontsVersion, subscribeFonts, withFontFamily } from '../overlay/fonts';
 import { readImageFile } from '../overlay/images';
 import { IMAGE_ACCEPT, IMAGE_FITS, LAYOUT_IMAGES_MAX_CHARS, type ImageFit, type OverlayImageSetting } from '../overlay/imageSetting';
 import { hasPrivacyTrim, type PrivacyTrim } from '../overlay/privacyTrim';
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Activity } from '../domain/activity';
 import { formatDuration, type UnitSystem } from '../domain/units';
 import {
@@ -230,6 +233,9 @@ export function CustomCanvas({
   const [history, setHistory] = useState<CanvasState[]>(initialDraft.history);
   // AV-1022 (TD-091). The privacy trim of the canvas's template; the layout's Undo does not hold it.
   const [privacyTrim, setPrivacyTrim] = useState<PrivacyTrim | undefined>(initialDraft.privacyTrim);
+  // AV-1031 (TD-103). The layout's font, by name; like the trim, not part of Undo. A host (the map video, the map image) keeps only its components' own.
+  const [fontFamily, setFontFamily] = useState<string | undefined>(initialDraft.fontFamily);
+  const layoutFont = host ? undefined : fontFamily;
   const [notice, setNotice] = useState<{ kind: 'status' | 'alert'; message: string; warnings?: string[] }>();
   const [preset, setPreset] = useState<StartLayoutId>('compact-hud');
   const loadInput = useRef<HTMLInputElement>(null);
@@ -257,8 +263,8 @@ export function CustomCanvas({
   // A host sets the frame: its video's size.
   const frame = host?.frame ?? ownFrame;
   useEffect(() => {
-    onDraftChange?.({ width, height, frame, state, history, ...(privacyTrim ? { privacyTrim } : {}) });
-  }, [onDraftChange, width, height, frame, state, history, privacyTrim]);
+    onDraftChange?.({ width, height, frame, state, history, ...(privacyTrim ? { privacyTrim } : {}), ...(fontFamily ? { fontFamily } : {}) });
+  }, [onDraftChange, width, height, frame, state, history, privacyTrim, fontFamily]);
   const setSize = (nextWidth: string, nextHeight: string) => {
     setWidth(nextWidth);
     setHeight(nextHeight);
@@ -304,16 +310,30 @@ export function CustomCanvas({
     [timeline, stillContext, still],
   );
   // A host (the map video, the map image) cuts the route its own way, in metres, so it never carries this trim.
-  const template = useMemo(() => canvasTemplate(components, host ? undefined : privacyTrim), [components, privacyTrim, host]);
+  const template = useMemo(() => canvasTemplate(components, host ? undefined : privacyTrim, layoutFont), [components, privacyTrim, host, layoutFont]);
+  // AV-1031. Each font the layout names is made ready; the preview draws again when one arrives, and a missing one is said.
+  const fontState = useTemplateFonts(template);
 
   /** Changes the layout, keeping what it was for Undo. */
   const commit = useCallback(
     (next: CanvasState) => {
       setHistory((current) => pushHistory(current, state));
-      setState({ ...next, components: measured(next.components, stillContext, frame) });
+      setState({ ...next, components: measured(next.components, stillContext, frame, layoutFont) });
     },
-    [state, stillContext, frame],
+    [state, stillContext, frame, layoutFont],
   );
+  /** AV-1031. A new layout font: the figures' boxes and the still texts are measured in it, as one change for Undo. */
+  /** The layout font each state in the history had, for the ones a font change pushed: Undo gives the font back with the boxes. */
+  const fontBefore = useRef(new WeakMap<CanvasState, string | undefined>());
+  const setLayoutFont = (family: string | undefined) => {
+    setFontFamily(family);
+    const sized = host ? components : components.reduce((now, entry) => (entry.type === 'text' || entry.type === 'gauge' ? growFigureToFit(now, entry.id, frame, { timeline, units, measure: measureText, layoutFont: family }) : now), components);
+    const next = measured(sized, stillContext, frame, host ? undefined : family);
+    if (next === components) return;
+    setHistory((current) => pushHistory(current, state));
+    fontBefore.current.set(state, fontFamily);
+    setState({ ...state, components: next });
+  };
   /** A new layout, and with it the selection: given, or the current one kept. One commit, so one Undo. */
   const change = (next: OverlayComponent[], ...selected: [string | undefined] | []) =>
     commit({ components: next, selectedId: selected.length > 0 ? selected[0] : selectedId });
@@ -328,6 +348,7 @@ export function CustomCanvas({
     if (!previous) return;
     setHistory(history.slice(0, -1));
     setState(previous);
+    if (fontBefore.current.has(previous)) setFontFamily(fontBefore.current.get(previous));
   };
 
   const add = (key: CanvasElementKey) => {
@@ -411,7 +432,10 @@ export function CustomCanvas({
         )
       : readable;
     commit({ components: opened, selectedId: undefined });
-    if (!host) setPrivacyTrim(parsed.layout.template.privacyTrim);
+    if (!host) {
+      setPrivacyTrim(parsed.layout.template.privacyTrim);
+      setFontFamily(parsed.layout.template.style.fontFamily);
+    }
     const warnings = [...parsed.warnings];
     if (opened.length !== parsed.layout.template.components.length) warnings.push('Zones, dials, charts, gradient indicators, compasses and splits were left out: this picture shows no moment of the activity.');
     if (fitted.width !== parsed.layout.width || fitted.height !== parsed.layout.height) {
@@ -461,7 +485,7 @@ export function CustomCanvas({
         onSelect={select}
         onChange={(next, ...selected) => change(next, ...selected)}
         onDragStart={() => setHistory((current) => pushHistory(current, state))}
-        onDragMove={(next) => setState({ components: measured(next, stillContext, frame), selectedId })}
+        onDragMove={(next) => setState({ components: measured(next, stillContext, frame, layoutFont), selectedId })}
         onUndo={undo}
         clock={host ? { seconds: host.seconds, onSeek: host.onSeek, still } : undefined}
         backdrop={host?.backdrop}
@@ -475,6 +499,7 @@ export function CustomCanvas({
           {sizeProblem}
         </p>
       )}
+      <MissingFonts problems={fontState.problems} />
       {video && (
         <p className="overlay-controls__hint">
           The video is lined up, and cut, as it is set in Sync, on the template workspace.{' '}
@@ -521,6 +546,9 @@ export function CustomCanvas({
           <p className="overlay-controls__hint">{CANVAS_LIMITS_TEXT} The layout keeps its proportions at any size.</p>
         </fieldset>
         )}
+
+        {/* AV-1031 (TD-103). The layout's font; a host keeps its components' own. */}
+        {!host && <FontField label="Layout font" manage value={fontFamily} onChange={setLayoutFont} />}
 
         {/* AV-1022 (TD-091). One trim for the canvas's template, offered while it draws a route. */}
         {!host && components.some((component) => component.type === 'routeInset') && (
@@ -581,6 +609,7 @@ export function CustomCanvas({
             timeline={timeline}
             units={units}
             host={host !== undefined}
+            layoutFont={layoutFont}
             trimmed={hasPrivacyTrim(privacyTrim)}
             timed={!still}
             imageProblem={decodedImages.broken.find((entry) => entry.id === selected.id)?.reason}
@@ -830,14 +859,14 @@ function AddElement({ choices, onAdd, onAddImage }: { choices: CanvasElementChoi
  * is only where it starts; with its real size in it, a snap to the right
  * leaves the same margin a card has, and a saved layout says how large it is.
  */
-function measured(components: OverlayComponent[], stillContext: StillImageContext, frame: { width: number; height: number }) {
+function measured(components: OverlayComponent[], stillContext: StillImageContext, frame: { width: number; height: number }, layoutFont?: string) {
   let changed = false;
   const next = components.map((component) => {
     if (!STILL_IMAGE_COMPONENT_TYPES.includes(component.type)) return component;
     const value = stillValue(component, stillContext);
     if (!value.ok) return component;
     const color = component.style.textColor ?? DEFAULT_OVERLAY_STYLE.textColor;
-    const { box } = layoutStillText(component, value, color, frame, measureText);
+    const { box } = layoutStillText(component, value, color, frame, measureText, layoutFont);
     const rect = normalizeRect({ x: box.x / frame.width, y: box.y / frame.height, width: box.w / frame.width, height: box.h / frame.height });
     const same = (['x', 'y', 'width', 'height'] as const).every((key) => Math.abs(rect[key] - component.rect[key]) < 1e-6);
     if (same) return component;
@@ -857,6 +886,7 @@ function boxesOf(
   stillContext: StillImageContext,
   width: number,
   height: number,
+  layoutFont?: string,
 ): Map<string, Box> {
   const boxes = new Map<string, Box>();
   for (const component of components) {
@@ -864,7 +894,7 @@ function boxesOf(
       const value = stillValue(component, stillContext);
       if (value.ok) {
         const color = component.style.textColor ?? DEFAULT_OVERLAY_STYLE.textColor;
-        boxes.set(component.id, layoutStillText(component, value, color, { width, height }, measureText).box);
+        boxes.set(component.id, layoutStillText(component, value, color, { width, height }, measureText, layoutFont).box);
         continue;
       }
     }
@@ -939,14 +969,19 @@ function CanvasPreview({
     | undefined
   >(undefined);
 
+  // AV-1031. A font that arrives after the first frame: the renderer, which measures a text once, is made again.
+  const fonts = useSyncExternalStore(subscribeFonts, fontsVersion);
   const factor = PREVIEW_LONG_SIDE / Math.max(frame.width, frame.height);
   const pw = Math.max(1, Math.round(frame.width * factor));
   const ph = Math.max(1, Math.round(frame.height * factor));
   const renderer = useMemo(
     () => createOverlayRenderer({ template, timeline, activity, units, width: pw, height: ph, readerTimeZone, personal, images, frameWidth: frame.width }),
-    [template, timeline, activity, units, pw, ph, readerTimeZone, personal, images, frame.width],
+    // `fonts` is not read: a font that arrives makes the renderer again, since it measures its texts once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [template, timeline, activity, units, pw, ph, readerTimeZone, personal, images, frame.width, fonts],
   );
-  const boxes = useMemo(() => boxesOf(template.components, stillContext, pw, ph), [template, stillContext, pw, ph]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const boxes = useMemo(() => boxesOf(template.components, stillContext, pw, ph, template.style.fontFamily), [template, stillContext, pw, ph, fonts]);
 
   // The latest listener, so a new one never reloads the video.
   const mediaInfo = useRef(onMediaInfo);
@@ -1296,8 +1331,11 @@ function ComponentEditor({
   playhead,
   imageProblem,
   onReplaceImage,
+  layoutFont,
   onChange,
 }: {
+  /** AV-1031 (TD-103). The layout's font, which the component's own overrides: the box that grows to fit is measured in the resolved one. */
+  layoutFont: string | undefined;
   /** AV-1030 (TD-102). Why the selected image cannot be drawn, if it cannot; and reading a file to replace its picture. */
   imageProblem: string | undefined;
   onReplaceImage: (file: File) => Promise<{ ok: true; image: OverlayImageSetting } | { ok: false; reason: string }>;
@@ -1328,7 +1366,7 @@ function ComponentEditor({
         components.map((entry) => (entry.id === component.id ? patch(entry) : entry)),
         component.id,
         frame,
-        { timeline, units, measure: measureText },
+        { timeline, units, measure: measureText, layoutFont },
       ),
     );
   /** Merges into the figure's settings, dropping what is unset and the whole of it when nothing is. */
@@ -1378,6 +1416,7 @@ function ComponentEditor({
           label: undefined,
           value: '',
           figure,
+          fontFamily: style.fontFamily ?? layoutFont,
           track: false,
         });
         return (laid.labelAdvance - laid.labelSize) / frame.width;
@@ -1413,6 +1452,17 @@ function ComponentEditor({
         <p className="overlay-controls__note" role="status">
           {ELEVATION_MISSING} The profile stays empty until an activity with elevation is opened.
         </p>
+      )}
+
+      {component.type !== 'shape' && component.type !== 'image' && component.type !== 'routeInset' && (
+        <FontField
+          label="Font"
+          inherit
+          value={component.style.fontFamily}
+          onChange={(family) =>
+            updateFigure((current) => ({ ...current, style: withFontFamily(current.style, family) }))
+          }
+        />
       )}
 
       {timed && (
