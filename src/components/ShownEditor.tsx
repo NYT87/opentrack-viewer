@@ -43,11 +43,19 @@ export function ShownEditor({
   // A window that comes back (Undo) is never shown under Always.
   const mode = visibility && picked === 'always' ? 'range' : picked;
   const [drafts, setDrafts] = useState<Partial<Record<Field, string>>>({});
+  // A field's problem is said once it is left or Enter is pressed, not while it is being typed ("1:" on the way to 1:30).
+  const [tried, setTried] = useState<Partial<Record<Field, true>>>({});
+  // A playhead the window cannot take, said in words: its time rounded to tenths may read as one the field would accept.
+  const [refusals, setRefusals] = useState<Partial<Record<Field, string>>>({});
   const from = visibility?.from ?? 0;
   const to = visibility?.to;
   const length = to === undefined ? undefined : clean(to - from);
 
-  const draft = (field: Field, text: string | undefined) => setDrafts((current) => ({ ...current, [field]: text }));
+  const draft = (field: Field, text: string | undefined) => {
+    setDrafts((current) => ({ ...current, [field]: text }));
+    setTried((current) => ({ ...current, [field]: undefined }));
+    setRefusals((current) => ({ ...current, [field]: undefined }));
+  };
   const write = (patch: Partial<Record<keyof OverlayVisibility, number | undefined>>) => {
     const raw: Record<string, unknown> = { ...visibility, ...patch };
     for (const key of Object.keys(raw)) if (raw[key] === undefined) delete raw[key];
@@ -63,15 +71,17 @@ export function ShownEditor({
     if (field === 'for' && seconds <= 0) return 'A window is longer than 0 seconds.';
     return undefined;
   };
-  const problems = Object.fromEntries((Object.keys(drafts) as Field[]).flatMap((field) => {
+  const problems: Partial<Record<Field, string>> = Object.fromEntries((['from', 'to', 'for', 'fadeIn', 'fadeOut'] as Field[]).flatMap((field) => {
     const text = drafts[field];
-    const message = text === undefined ? undefined : problem(field, text);
+    const message = refusals[field] ?? (text === undefined || !tried[field] ? undefined : problem(field, text));
     return message ? [[field, message]] : [];
   }));
 
   const pick = (next: Mode) => {
     setMode(next);
     setDrafts({});
+    setTried({});
+    setRefusals({});
     if (next === 'always') onChange(undefined);
     else if (next === 'for') write({ to: clean(from + (length ?? 5)) });
   };
@@ -91,15 +101,17 @@ export function ShownEditor({
     else write({ [field]: seconds });
   };
   const leave = (field: Field) => {
-    if (!problems[field]) commit(field);
+    setTried((current) => ({ ...current, [field]: true }));
+    commit(field);
   };
   const setToPlayhead = (field: 'from' | 'to') => {
     const now = clean(playhead());
     draft(field, undefined);
-    if (field === 'from' && mode !== 'for' && to !== undefined && now >= to) draft('from', clock(now));
+    const refuse = (message: string) => setRefusals((current) => ({ ...current, [field]: message }));
+    if (field === 'from' && mode !== 'for' && to !== undefined && now >= to) refuse(`The playhead, ${clock(now)}, is not before the end, ${clock(to)}.`);
     else if (field === 'from') write({ from: now, ...(mode === 'for' ? { to: clean(now + (length ?? 5)) } : {}) });
     else if (now > from) write({ to: now });
-    else draft('to', clock(now));
+    else refuse(`The playhead, ${clock(now)}, is not after the start, ${clock(from)}.`);
   };
 
   const commitFade = (field: 'fadeIn' | 'fadeOut') => {
