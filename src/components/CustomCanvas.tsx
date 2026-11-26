@@ -652,7 +652,7 @@ export function fitCanvasSize(width: number, height: number): { width: number; h
   const { minSide, maxSide, maxPixels } = CANVAS_LIMITS;
   let scale = Math.min(1, maxSide / width, maxSide / height, Math.sqrt(maxPixels / (width * height)));
   scale = Math.max(scale, minSide / Math.min(width, height));
-  const even = (value: number) => Math.max(minSide, Math.min(maxSide, Math.round((value * scale) / 2) * 2));
+  const even = (value: number) => Math.max(minSide, Math.min(maxSide, Math.floor((value * scale) / 2) * 2));
   return { width: even(width), height: even(height) };
 }
 

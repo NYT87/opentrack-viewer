@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { OverlayControls } from '../components/OverlayControls';
 import { buildOverlayTimeline } from '../overlay/timeline';
+import { componentsFromControls, pushHistory } from '../overlay/customCanvas';
+import { readPrivacyTrim } from '../overlay/privacyTrim';
 import { FileDropZone } from '../components/FileDropZone';
 import { ErrorPanel, WarningList } from '../components/ErrorPanel';
 import { BurnedInExportPanel } from '../components/BurnedInExportPanel';
 import { OverlayExportPanel } from '../components/OverlayExportPanel';
 import { OverlayPreview } from '../components/OverlayPreview';
 import { RouteOverlayPanel } from '../components/RouteOverlayPanel';
-import { CustomCanvas } from '../components/CustomCanvas';
+import { CustomCanvas, fitCanvasSize } from '../components/CustomCanvas';
 import { MapImagePanel } from '../components/MapImagePanel';
 import { VideoReadProgress } from '../components/VideoReadProgress';
 import type { Activity } from '../domain/activity';
@@ -328,6 +330,29 @@ export function OverlayPage() {
     [source.activity, durationSeconds, source.video?.timing?.start, videoWarp, offsetSeconds],
   );
 
+  // AV-1028 (TD-100). The template's components as set, on the canvas to move by hand. The
+  // controls are left as they are, so template mode shows the template as it was; a layout the
+  // canvas held is one Undo step back.
+  const openOnCanvas = () => {
+    const old = canvasDraft;
+    // The video's size as the canvas can take it (even sides, within its limits), else the canvas's own.
+    const frame =
+      media && media.width > 0 && media.height > 0 ? fitCanvasSize(media.width, media.height) : old.frame;
+    const components = componentsFromControls(controls, timeline, frame);
+    setCanvasDraft({
+      width: String(frame.width),
+      height: String(frame.height),
+      frame,
+      state: { components },
+      history: old.state.components.length > 0 ? pushHistory(old.history, old.state) : old.history,
+      ...(readPrivacyTrim(controls.privacyTrim) ? { privacyTrim: readPrivacyTrim(controls.privacyTrim) } : {}),
+    });
+    setCanvasMode(true);
+    setMapImageChosen(false);
+    // The button goes with template mode; focus stays with the mode choice, which is still there.
+    setTimeout(() => document.querySelector<HTMLElement>('input[name="overlay-mode"]:checked')?.focus(), 0);
+  };
+
   /** Start over, and its confirm; `beside` is another action on the same row. */
   const startOverControls = (beside?: ReactNode) => (
     <>
@@ -473,6 +498,7 @@ export function OverlayPage() {
                 onControlsChange={setControls}
                 onMediaInfo={setMedia}
                 controlsElsewhere
+                onOpenCanvas={source.activity && !timeline.unavailable ? openOnCanvas : undefined}
                 syncTarget={syncTarget}
               />
             ) : null}
@@ -677,6 +703,7 @@ export function OverlayPage() {
                 frameAspect={media && media.height > 0 ? media.width / media.height : undefined}
                 activity={source.activity}
                 units={unitSystem}
+                onOpenCanvas={openOnCanvas}
               />
             )}
             {source.video && source.activity && !canvas && (

@@ -27,6 +27,8 @@ interface OverlayControlsProps {
   /** AV-1022. The activity the privacy trim's shares are of, and the reader's units for the distance each hides. */
   activity?: Activity;
   units?: UnitSystem;
+  /** AV-1028 (TD-100). Opens these components on the custom canvas, to move and resize them. */
+  onOpenCanvas?: () => void;
 }
 
 /**
@@ -34,7 +36,7 @@ interface OverlayControlsProps {
  * a design editor: three templates, a checkbox per component, where it sits,
  * how big it is, and three style choices.
  */
-export function OverlayControls({ controls, timeline, onChange, frameAspect = 16 / 9, activity, units = 'metric' }: OverlayControlsProps) {
+export function OverlayControls({ controls, timeline, onChange, frameAspect = 16 / 9, activity, units = 'metric', onOpenCanvas }: OverlayControlsProps) {
   const id = useId();
   const catalog = overlayCatalog(timeline);
   // TD-059. Past what one row holds at a readable size the strip wraps over the
@@ -81,6 +83,11 @@ export function OverlayControls({ controls, timeline, onChange, frameAspect = 16
             </span>
           </div>
         ))}
+        {onOpenCanvas && (
+          <button type="button" className="button" onClick={onOpenCanvas}>
+            Move and resize on the canvas
+          </button>
+        )}
       </fieldset>
 
       <fieldset className="overlay-controls__group">

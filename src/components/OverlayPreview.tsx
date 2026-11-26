@@ -33,6 +33,8 @@ interface OverlayPreviewProps {
    * side column beside the preview, so the preview leaves them out.
    */
   controlsElsewhere?: boolean;
+  /** AV-1028 (TD-100). Opens the template's components on the custom canvas; the hint under the picture offers it. */
+  onOpenCanvas?: () => void;
   /**
    * TD-059. Where the sync panel (the full sync line, its bar and trace, the
    * offset) is drawn: the workspace's side column, so the sticky stage holds
@@ -128,6 +130,7 @@ export function OverlayPreview({
   onControlsChange,
   onMediaInfo,
   controlsElsewhere = false,
+  onOpenCanvas,
   syncTarget,
 }: OverlayPreviewProps) {
   const element = useRef<HTMLVideoElement>(null);
@@ -453,6 +456,14 @@ export function OverlayPreview({
             )}
           </div>
         </div>
+      )}
+      {onOpenCanvas && (
+        <p className="overlay-preview__hint">
+          To move or resize the components, open them on the canvas.{' '}
+          <button type="button" className="button" onClick={onOpenCanvas}>
+            Move and resize on the canvas
+          </button>
+        </p>
       )}
       {warnings.length > 0 && (
         <ul className="overlay-preview__warnings" aria-label="Overlay warnings">

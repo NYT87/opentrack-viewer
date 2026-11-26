@@ -5,6 +5,7 @@ import {
   canvasElementChoices,
   canvasTemplate,
   checkCanvasSize,
+  componentsFromControls,
   componentsFromPreset,
   duplicateComponent,
   growFigureToFit,
@@ -20,8 +21,10 @@ import {
   type CanvasState,
 } from './customCanvas';
 import { buildOverlayTimeline } from './timeline';
+import { fitCanvasSize } from '../components/CustomCanvas';
 import { extractRoute } from './routeImage';
-import { DEFAULT_SHAPE, type OverlayComponent } from './template';
+import { DEFAULT_SHAPE, resolveOverlayComponent, type OverlayComponent } from './template';
+import { DEFAULT_OVERLAY_CONTROLS, OVERLAY_PRESETS, buildOverlay } from './presets';
 import type { Activity } from '../domain/activity';
 import { makeActivity } from '../test/helpers/activity';
 
@@ -388,5 +391,57 @@ describe('a duplicate of an inset with a map (AV-1023)', () => {
     const two = duplicateComponent(one.components, 'route');
     expect(two.components[2]!.routeInset!.map.provider).toBe('none');
     expect(two.components[2]!.routeInset!.view).toBe('whole');
+  });
+});
+
+describe('a template opened on the canvas (AV-1028, TD-100)', () => {
+  const controls = { ...DEFAULT_OVERLAY_CONTROLS, accentColor: '#00aa55', backgroundOpacity: 0.6, scale: 1.25, enabled: { speed: false } };
+  const size = { width: 1920, height: 1080 };
+
+  it('draws what the template preview draws, for each template: same boxes, colours and texts', () => {
+    const timeline = timelineOf(ride((i) => ({ speed: 5 + i / 10, heartRate: 120 + i })));
+    for (const preset of OVERLAY_PRESETS) {
+      const set = { ...controls, presetId: preset.id };
+      const { template } = buildOverlay(set, timeline, size.width / size.height);
+      const canvas = canvasTemplate(componentsFromControls(set, timeline, size));
+      expect(canvas.components).toHaveLength(template.components.length);
+      for (const at of [0, 30]) {
+        const sample = timeline.sampleAt(at);
+        template.components.forEach((component, index) => {
+          // The component itself differs only in where its style is held; the resolved style is what is drawn.
+          const resolve = (from: typeof template, item: OverlayComponent) => {
+            const { component: drawn, ...rest } = resolveOverlayComponent(from, item, sample, timeline, 'metric') as { component?: OverlayComponent };
+            // The canvas rounds a box to six places; compared to four.
+            const r = drawn?.rect;
+            const round = (n: number) => Math.round(n * 1e4) / 1e4;
+            return { ...rest, rect: r && [r.x, r.y, r.width, r.height].map(round), text: drawn?.text, content: drawn?.content };
+          };
+          expect(resolve(canvas, canvas.components[index]!)).toEqual(resolve(template, component));
+        });
+      }
+    }
+  });
+
+  it('carries the style onto each component, keeps a component’s own text size, and leaves off components out', () => {
+    const timeline = timelineOf(ride((i) => ({ speed: 5 + i / 10 })));
+    const all = componentsFromControls({ ...controls, enabled: {} }, timeline, size);
+    const fewer = componentsFromControls(controls, timeline, size);
+    expect(fewer.length).toBeLessThan(all.length);
+    for (const component of all) {
+      expect(component.style).toMatchObject({ accentColor: '#00aa55', backgroundOpacity: 0.6, textColor: '#ffffff' });
+    }
+    const { template } = buildOverlay({ ...controls, enabled: {} }, timeline, 16 / 9);
+    expect(all.map((component) => component.style.fontScale)).toEqual(
+      template.components.map((component) => component.style.fontScale ?? 1.25),
+    );
+  });
+});
+
+describe('the video’s size fitted to the canvas (AV-1028)', () => {
+  it('is always a size the canvas accepts, as 3840 by 2400 was not when rounded up', () => {
+    for (const [w, h] of [[3840, 2400], [6016, 3200], [4096, 2732], [5312, 2988], [1920, 1080], [848, 480]] as const) {
+      const fit = fitCanvasSize(w, h);
+      expect(checkCanvasSize(fit.width, fit.height), `${w}x${h} -> ${fit.width}x${fit.height}`).toBeUndefined();
+    }
   });
 });

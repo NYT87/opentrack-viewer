@@ -162,3 +162,53 @@ describe('the custom canvas on the page (AV-1011)', () => {
     expect(within(canvas).getByRole('option', { name: 'Same as the video (1280 × 720)' })).toBeInTheDocument();
   });
 });
+
+describe('a template opened on the canvas (AV-1028, TD-100)', () => {
+  async function templateOverVideo() {
+    render(<App />);
+    act(() => {
+      useOverlayStore.getState().setVideo({
+        file: new File([new Uint8Array(8)], 'clip.mp4', { type: 'video/mp4' }),
+        timing: { durationSeconds: 30, frameIntervalSeconds: 1 / 30, start: new Date(T0) },
+      });
+      useOverlayStore.getState().setActivity(ride(), 'hand');
+    });
+    return screen.findByRole('region', { name: 'Overlay controls' });
+  }
+
+  it('says where the components are moved, and offers the button there and with the controls', async () => {
+    const controls = await templateOverVideo();
+    expect(screen.getByText(/To move or resize the components, open them on the canvas\./)).toBeInTheDocument();
+    expect(within(controls).getByRole('button', { name: 'Move and resize on the canvas' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Move and resize on the canvas' })).toHaveLength(2);
+  });
+
+  it('opens the components as set, leaves the controls alone, and is one Undo step over a held layout', async () => {
+    const controls = await templateOverVideo();
+    act(() => useOverlayStore.getState().setControls({ accentColor: '#00aa55', enabled: { speed: false }, privacyTrim: { start: 0.1, end: 0.1 } }));
+    const before = useOverlayStore.getState().controls;
+    // A layout the canvas already holds.
+    act(() => {
+      const held = { components: [{ id: 'held', type: 'text' as const, visible: true, rect: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }, unitMode: 'auto' as const, style: {}, source: { kind: 'metric' as const, metric: 'speed' as const } }] };
+      useOverlayStore.getState().setCanvasDraft({ ...useOverlayStore.getState().canvasDraft, frame: { width: 1280, height: 720 }, state: held });
+    });
+    await userEvent.click(within(controls).getByRole('button', { name: 'Move and resize on the canvas' }));
+
+    const canvas = screen.getByRole('region', { name: 'Custom canvas' });
+    const draft = useOverlayStore.getState().canvasDraft;
+    expect(draft.state.components.length).toBeGreaterThan(0);
+    expect(draft.state.components.some((c) => c.id === 'held')).toBe(false);
+    expect(draft.state.components.every((c) => c.style.accentColor === '#00aa55')).toBe(true);
+    expect(draft.privacyTrim).toEqual({ start: 0.1, end: 0.1 });
+    expect(draft.history).toHaveLength(1);
+    expect([draft.width, draft.height, draft.frame]).toEqual(['1280', '720', { width: 1280, height: 720 }]);
+    expect(useOverlayStore.getState().controls).toBe(before);
+
+    await userEvent.click(within(canvas).getByRole('button', { name: 'Undo' }));
+    expect(useOverlayStore.getState().canvasDraft.state.components.map((c) => c.id)).toEqual(['held']);
+
+    // Back in template mode, the template is as it was.
+    await userEvent.click(within(canvas).getByRole('button', { name: 'Change where the video starts' }));
+    expect(useOverlayStore.getState().controls).toEqual(before);
+  });
+});

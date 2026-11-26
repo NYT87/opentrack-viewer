@@ -3,6 +3,7 @@ import {
   DEFAULT_OVERLAY_CONTROLS,
   TILE_WIDTH_EMS,
   buildOverlay,
+  type OverlayControls,
   type OverlayPresetId,
 } from './presets';
 import { figureLayout } from './figureLayout';
@@ -864,6 +865,21 @@ export function componentsFromPreset(
   size: { width: number; height: number },
 ): OverlayComponent[] {
   return buildOverlay({ ...DEFAULT_OVERLAY_CONTROLS, presetId }, timeline, size.width / size.height).template.components;
+}
+
+/**
+ * AV-1028 (TD-100). The template mode's components as the reader set them, at this canvas's
+ * shape, with the template's style (accent, text colour, background, text size) written onto
+ * each component's own style (its own keys win), so the canvas, which draws every component
+ * over the default style, draws what the template preview draws. Components off are not in it.
+ */
+export function componentsFromControls(
+  controls: OverlayControls,
+  timeline: OverlayTimeline,
+  size: { width: number; height: number },
+): OverlayComponent[] {
+  const { template } = buildOverlay(controls, timeline, size.width / size.height);
+  return template.components.map((component) => ({ ...component, style: { ...template.style, ...component.style } }));
 }
 
 /** AV-1016. What Start from lays out: a built-in template, or a sport's own layout of predefined components. */
