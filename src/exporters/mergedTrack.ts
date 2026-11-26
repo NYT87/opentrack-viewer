@@ -20,19 +20,7 @@ import { getExportAvailability, exportActivity, safeFileStem, type ExportFormat,
  *   as unavailable, with that reason, rather than written wrong.
  */
 
-export interface MergedFormatAvailability {
-  format: ExportFormat;
-  label: string;
-  available: boolean;
-  /** Present only when unavailable. */
-  reason?: string;
-}
-
 export { hasStretchesTouchingInFit } from './preservation';
-
-export function mergedTrackFormats(activity: Activity): MergedFormatAvailability[] {
-  return getExportAvailability(activity);
-}
 
 /**
  * `merged` is in the name of a file made of several, so the download is never
@@ -49,7 +37,7 @@ export function mergedTrackFileStem(activity: Activity): string {
  * availability reports, so the page never offers a control that fails.
  */
 export async function exportMergedTrack(activity: Activity, format: ExportFormat): Promise<ExportResult> {
-  const availability = mergedTrackFormats(activity).find((entry) => entry.format === format);
+  const availability = getExportAvailability(activity).find((entry) => entry.format === format);
   if (!availability?.available) {
     throw new ActivityError(
       'unsupported_format',

@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { PrivacyTrimField } from './PrivacyTrimField';
 import type { PrivacyTrim } from '../overlay/privacyTrim';
 import { activityThrough, straightNorth } from '../test/helpers/mapVideoRoutes';
+import { makeActivity } from '../test/helpers/activity';
 
 // 10 km of road: 1 % of it is 100 m.
 const road = activityThrough(straightNorth(10_000, 100, 5));
@@ -99,13 +100,13 @@ describe('the privacy trim field (AV-1022, TD-091)', () => {
     expect(screen.getByRole('group', { name: 'Privacy trim' })).toBeInTheDocument();
   });
 
-  it('says why nothing is drawn when less than 100 m would be left, in the reader’s units', () => {
+  it('draws a short route at the widest trim, and says why only a route with no length is not drawn', () => {
     const short = activityThrough(straightNorth(150, 10, 5));
-    const { unmount } = render(<Harness initial={{ start: 0.2, end: 0.2 }} activity={short} />);
-    expect(screen.getByRole('status')).toHaveTextContent('Less than 100 m of the route would be left, so it is not drawn.');
+    const { unmount } = render(<Harness initial={{ start: 0.45, end: 0.45 }} activity={short} />);
+    expect(screen.queryByRole('status')).toBeNull();
     unmount();
-    render(<Harness initial={{ start: 0.2, end: 0.2 }} activity={short} units="imperial" />);
-    expect(screen.getByRole('status')).toHaveTextContent('Less than 330 ft of the route would be left, so it is not drawn.');
+    render(<Harness initial={{ start: 0.2, end: 0.2 }} activity={makeActivity([{ lat: 46, lon: 7 }])} />);
+    expect(screen.getByRole('status')).toHaveTextContent('The route has no length to trim, so it is not drawn.');
   });
 
   it('says nothing of the sort while enough is left', () => {

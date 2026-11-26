@@ -238,11 +238,11 @@ describe('a route inset with a map (AV-1023)', () => {
     expect(make(withMap).insetsAt(9999)).toEqual([]);
     expect(make(parsed({ view: 'follow' })).insetsAt(100)).toEqual([]);
     expect(make(undefined).insetsAt(100)).toEqual([]);
-    // Too little kept: no route is drawn, and none of the area is asked for.
+    // The widest trim still keeps a tenth, of a short route too, and that is asked for.
     expect(make(withMap, { start: 0.45, end: 0.45 }).insetsAt(100)).toEqual(['route']);
     const short = activityThrough(straightNorth(150, 10, 5));
     const shortRenderer = createOverlayRenderer({ template: templateOf(insetComponent(withMap), { start: 0.45, end: 0.45 }), timeline: buildOverlayTimeline(short, { video: { durationSeconds: 40 } }), activity: short, units: 'metric', ...T });
-    expect(shortRenderer.insetsAt(20)).toEqual([]);
+    expect(shortRenderer.insetsAt(20)).toEqual(['route']);
   });
 });
 
@@ -287,12 +287,12 @@ describe('a route inset under the privacy trim (AV-1022, TD-091)', () => {
     expect(first[1]).toBeCloseTo(frame.y + frame.h / 2, 3);
   });
 
-  it('draws no inset at all, though the box and its border are there, when under 100 m is kept', () => {
+  it('still draws a short route’s kept tenth at the widest trim, with no 100 m floor', () => {
     const short = activityThrough(straightNorth(150, 10, 5));
     const timeline = buildOverlayTimeline(short, { video: { durationSeconds: 40 } });
     const renderer = createOverlayRenderer({ template: templateOf(insetComponent(parsed({ view: 'follow' })), { start: 0.45, end: 0.45 }), timeline, activity: short, units: 'metric', ...T });
     const { ctx, calls } = recorder();
     renderer.drawFrame(ctx, 20);
-    expect(calls.some((call) => call.op === 'stroke' || call.op === 'arc')).toBe(false);
+    expect(calls.some((call) => call.op === 'stroke')).toBe(true);
   });
 });

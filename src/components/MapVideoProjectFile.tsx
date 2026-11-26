@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { Activity } from '../domain/activity';
 import {
   isProjectFor,
+  MAP_VIDEO_PROJECT_MAX_BYTES,
   parseMapVideoProject,
   referenceActivity,
   serializeMapVideoProject,
@@ -29,6 +30,12 @@ export function MapVideoProjectFile({ activity, settings, onOpen }: MapVideoProj
   const [outcome, setOutcome] = useState<Outcome>();
 
   const open = async (file: File) => {
+    // Checked before reading, so a file of gigabytes is not read whole into memory first. The parser counts
+    // characters, and UTF-8 spends up to 3 bytes on one, so only a file past that is refused unread.
+    if (file.size > MAP_VIDEO_PROJECT_MAX_BYTES * 3) {
+      setOutcome({ kind: 'refused', fileName: file.name, error: 'This file is too large to be a map video project.' });
+      return;
+    }
     const parsed = parseMapVideoProject(await file.text());
     if (!parsed.ok) {
       setOutcome({ kind: 'refused', fileName: file.name, error: parsed.error });

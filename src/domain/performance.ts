@@ -46,6 +46,9 @@ export function defaultPerformanceMetric(activity: Activity): PerformanceMetric 
   return sport !== undefined && PACE_SPORTS.has(sport) ? 'pace' : 'speed';
 }
 
+// The viewer asks on every render (every hover); an Activity is never changed in place.
+const paceCache = new WeakMap<Activity, boolean>();
+
 /**
  * Whether pace can be worked out at all. Distance over a duration is arithmetic
  * either way round, so the requirement is the same one speed has — but a
@@ -53,6 +56,15 @@ export function defaultPerformanceMetric(activity: Activity): PerformanceMetric 
  * for itself.
  */
 function paceIsPossible(activity: Activity): boolean {
+  let possible = paceCache.get(activity);
+  if (possible === undefined) {
+    possible = computePaceIsPossible(activity);
+    paceCache.set(activity, possible);
+  }
+  return possible;
+}
+
+function computePaceIsPossible(activity: Activity): boolean {
   const distance = computeDistance(activity.points);
   // Ground actually covered, not merely a distance that could be computed: a
   // recording made standing still has coordinates and timestamps and a total

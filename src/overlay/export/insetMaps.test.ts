@@ -89,6 +89,13 @@ describe('the page’s maps for an export (AV-1023)', () => {
     expect(Object.keys(pictures)).toEqual(['route']);
   });
 
+  it('keeps the picture of an inset whose id is `__proto__`', async () => {
+    const given = template();
+    const { session } = make({ ...given, components: [{ ...given.components[0]!, id: '__proto__' }] });
+    const pictures = await session.bitmapsAt(100, ['__proto__']);
+    expect(Object.keys(pictures)).toEqual(['__proto__']);
+  });
+
   it('does not wait for a map that has not moved: no `idle` would come', async () => {
     const { session, settle } = make(template({ view: 'whole' }));
     await session.bitmapsAt(10, ['route']);

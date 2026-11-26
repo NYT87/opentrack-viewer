@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildFit } from './buildFit';
-import { exportActivity } from '../index';
+import { exportActivity, getExportAvailability } from '../index';
 import { parseFit } from '../../parsers/fit/parseFit';
 import { parseGpx } from '../../parsers/gpx/parseGpx';
 import { readBinaryFixture, readFixture } from '../../test/helpers/fixtures';
@@ -285,6 +285,70 @@ describe('FIT export limits (AV-553)', () => {
   });
 });
 
+describe('FIT export edge cases (audit #49, #50, #53, #61)', () => {
+  const at = (seconds: number) => new Date(Date.UTC(2024, 0, 1, 10) + seconds * 1000);
+
+  it('refuses a time before the FIT epoch with a reason, and offers FIT as unavailable for it', () => {
+    const early = makeActivity([
+      { lat: 51.5, lon: -0.1, time: new Date('1980-01-06T00:00:00Z') },
+      { lat: 51.501, lon: -0.1, time: new Date('1980-01-06T00:00:10Z') },
+    ]);
+
+    expect(() => buildFit(early)).toThrow(ActivityError);
+    expect(() => buildFit(early)).toThrow(/1998/);
+    expect(getExportAvailability(early).find((entry) => entry.format === 'fit')).toMatchObject({
+      available: false,
+      reason: expect.stringMatching(/1998/),
+    });
+  });
+
+  it('writes a segment whose clock runs backwards instead of crashing', () => {
+    const backwards = makeActivity([
+      { lat: 51.5, lon: -0.1, time: at(10) },
+      { lat: 51.501, lon: -0.1, time: at(0) },
+    ]);
+
+    expect(() => buildFit(backwards)).not.toThrow();
+  });
+
+  it('keeps a point at the antimeridian, which would otherwise overflow or read as invalid', async () => {
+    const reimported = await roundTrip(
+      buildFit(
+        makeActivity([
+          { lat: 0, lon: 180, time: at(0) },
+          { lat: 0, lon: 179.99999995, time: at(1) },
+        ]),
+      ).bytes,
+    );
+
+    expect(reimported.points.map((point) => point.lon)).toEqual([
+      expect.closeTo(180, 6),
+      expect.closeTo(180, 6),
+    ]);
+  });
+
+  it('writes a lap with no stated distance or duration as absent, not zero', async () => {
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1, time: at(0) },
+      { lat: 51.501, lon: -0.1, time: at(10) },
+    ]);
+    const reimported = await roundTrip(buildFit({ ...activity, laps: [{ index: 0, startTime: at(0), endTime: at(10) }] }).bytes);
+
+    expect(reimported.laps?.[0]?.distanceMeters).toBeUndefined();
+    expect(reimported.laps?.[0]?.durationSeconds).toBeUndefined();
+  });
+
+  it('keeps the activity UTC offset through a round trip', async () => {
+    const activity = makeActivity([
+      { lat: 51.5, lon: -0.1, time: at(0) },
+      { lat: 51.501, lon: -0.1, time: at(10) },
+    ]);
+    const zoned = { ...activity, metadata: { ...activity.metadata, utcOffsetMinutes: 540 } };
+
+    expect((await roundTrip(buildFit(zoned).bytes)).metadata.utcOffsetMinutes).toBe(540);
+  });
+});
+
 describe('FIT through the export registry (AV-550)', () => {
   it('produces a .fit download with the right mime type', async () => {
     const result = await exportActivity(gpx('route-with-elevation.gpx'), { format: 'fit' });
@@ -321,3 +385,13 @@ function indexOfSequence(haystack: Uint8Array, needle: Uint8Array): number {
   }
   return -1;
 }
+
+describe('durations past what FIT can hold', () => {
+  it('writes a recording that spans decades, from a clock that jumped, instead of failing', () => {
+    const activity = makeActivity([
+      { lat: 46, lon: 7, time: new Date('1999-06-01T00:00:00Z') },
+      { lat: 46.001, lon: 7, time: new Date('2024-06-01T00:00:00Z') },
+    ]);
+    expect(() => buildFit(activity)).not.toThrow();
+  });
+});

@@ -327,6 +327,7 @@ describe('a distance carried in an extension (AV-1109)', () => {
       '</trkseg></trk></gpx>';
     const activity = parseGpx(xml, { fileName: 'odometer.gpx' });
     expect(activity.points.map((point) => point.distanceMeters)).toEqual([0, 9.5, undefined]);
-    expect(activity.derived!.distanceMeters).toBe(9.5);
+    // The ignored reading leaves a located point without one, so the total comes from GPS instead (#52).
+    expect(activity.derived!.distanceMeters).toBeCloseTo(2.22, 2);
   });
 });

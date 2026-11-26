@@ -161,6 +161,28 @@ describe('GPX export (AV-551)', async () => {
     expect(reimported.metadata.name).toBe('Tom & Jerry’s <ride> "fast"');
   });
 
+  it('drops control characters XML forbids, so the file reads back (#51)', async () => {
+    const activity = makeActivity([{ lat: 0, lon: 0.1 }, { lat: 1, lon: 0.1 }]);
+    const hostile = { ...activity, metadata: { ...activity.metadata, name: 'Run\u0001 & go' } };
+
+    const reimported = await roundTrip((await exportActivity(hostile, { format: 'gpx' })).blob);
+
+    expect(reimported.metadata.name).toBe('Run & go');
+  });
+
+  it('writes times in the activity UTC offset, so it reads back with it (#53)', async () => {
+    const activity = makeActivity([
+      { lat: 0, lon: 0.1, time: new Date('2024-01-01T10:00:00Z') },
+      { lat: 1, lon: 0.1, time: new Date('2024-01-01T10:00:10Z') },
+    ]);
+    const zoned = { ...activity, metadata: { ...activity.metadata, utcOffsetMinutes: -150 } };
+
+    const reimported = await roundTrip((await exportActivity(zoned, { format: 'gpx' })).blob);
+
+    expect(reimported.metadata.utcOffsetMinutes).toBe(-150);
+    expect(reimported.points[0]?.time?.toISOString()).toBe('2024-01-01T10:00:00.000Z');
+  });
+
   it('refuses to write a GPX for an activity with no coordinates', async () => {
     const indoor = makeActivity([
       { heartRateBpm: 120, time: new Date('2024-01-01T10:00:00Z') },

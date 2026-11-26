@@ -1,5 +1,7 @@
 import {
   isPlausibleSpeed,
+  MAX_PLAUSIBLE_CYCLING_SPEED_MPS,
+  MAX_PLAUSIBLE_RUNNING_SPEED_MPS,
   type Activity,
   type ActivitySensorStream,
   type ActivityPoint,
@@ -128,12 +130,6 @@ const DEFINITIONS: Record<ChartSeriesKey, SeriesDefinition> = {
  */
 export const PACE_WINDOW_SECONDS = 15;
 
-/**
- * Speeds above this are not plausible for a human on foot, so the interval that
- * produced them is treated as a gap rather than plotted (AV-505).
- */
-const MAX_PLAUSIBLE_SPEED_MPS = 10;
-
 /** The span between the two ends of a point's trailing window. */
 interface WindowSpan {
   index: number;
@@ -215,10 +211,15 @@ function eachWindowSpan(
 function derivePace(activity: Activity): (number | undefined)[] {
   const out: (number | undefined)[] = new Array(activity.points.length).fill(undefined);
 
+  // Pace is chosen for movement on foot, so the running limit holds unless the file says wheels or skis. The
+  // clean-up is looser for unknown sports on purpose: dropping a point costs more than gapping a chart.
+  const onWheelsOrSkis = activity.metadata.sport === 'cycling' || activity.metadata.sport === 'skiing';
+  const paceCeiling = onWheelsOrSkis ? MAX_PLAUSIBLE_CYCLING_SPEED_MPS : MAX_PLAUSIBLE_RUNNING_SPEED_MPS;
   eachWindowSpan(activity, ({ index, meters, seconds }) => {
     // Zero-duration or stationary intervals have no meaningful pace: gap them.
     if (seconds <= 0 || meters <= 0) return;
-    if (meters / seconds > MAX_PLAUSIBLE_SPEED_MPS) return;
+    // AV-505: a GPS jump on foot is gapped in pace as the clean-up would drop it.
+    if (meters / seconds > paceCeiling) return;
     out[index] = (seconds / meters) * 1000;
   });
 

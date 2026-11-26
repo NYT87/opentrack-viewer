@@ -1466,7 +1466,7 @@ Acceptance criteria:
   - while the moment is in a hidden stretch, the inset shows the kept route with no marker.
   - The figures (speed, distance, heart rate …) are not places and keep showing.
 - **The route is cut before anything is built from it**, by the map video's own cut (`trimRoute`, TD-068): the ends are interpolated exactly that far in, and the projection, the fit and the simplification see only the kept part, so in the whole-route view the inset fits only what is kept and the hidden ends cannot be guessed from an empty margin. A segment break inside a kept part stays a break.
-- **Too little left:** when less than 100 m of route would remain (`MIN_TRIMMED_ROUTE_METERS`), no route, marker or route image is drawn, and the control says why.
+- **Too little left:** only a route with no length (one place) is not drawn, and the control says why. The map video's 100 m floor (`MIN_TRIMMED_ROUTE_METERS`) does not apply: shares cap at 45 % an end, so a tenth is always kept (TD-098).
 - **Saved** in the layout file (and the template) as the two shares, never as places. A layout without one opens with none, within template version 2.
 - **The other trims:** the map video's and map image's trims stay in metres, as their projects save them, and now show the share they hide beside them. One cut serves all three.
 - Tests: the cut at chosen shares, at 0 %, at both ends at once, on a route with a segment break, and too little left; the fit using only the kept part; no marker in a hidden stretch; the editor's slider and inputs in step both ways and by keyboard; the layout round trip; the share beside the map video's and map image's trims; and a browser test whose exported frame has no line or marker in the hidden stretches.

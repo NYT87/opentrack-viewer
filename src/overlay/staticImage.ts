@@ -2,7 +2,7 @@ import type { Activity } from '../domain/activity';
 import { formatDistance, formatDuration, formatElevation, formatPace, formatSpeed, type UnitSystem } from '../domain/units';
 import { BASE_FONT_CQW } from './presets';
 import { formatStillDate, formatUtcOffset, type DateZone } from './dateFormat';
-import { keptRoute, minimumKeptText } from './privacyTrim';
+import { keptRoute, TRIMMED_AWAY_TEXT } from './privacyTrim';
 import {
   DEFAULT_ROUTE_IMAGE_OPTIONS,
   ROUTE_IMAGE_LIMITS,
@@ -382,11 +382,11 @@ export function planStillImage(
         hidden.push({ id: component.id, label, reason: context.route.error.message });
         continue;
       }
-      // AV-1022 (TD-091). The route is cut by the privacy trim before it is read for drawing, and too little left is not drawn.
+      // AV-1022 (TD-091). The route is cut by the privacy trim before it is read for drawing, and a route with no length is not drawn.
       let route = context.route.route;
       const kept = keptRoute(context.activity, layout.template.privacyTrim);
       if (kept?.tooShort) {
-        const reason = `Less than ${minimumKeptText(context.units)} of the route would be left, so it is not drawn.`;
+        const reason = TRIMMED_AWAY_TEXT;
         routeError = new RouteImageError('trimmed_away', reason);
         hidden.push({ id: component.id, label, reason });
         continue;
@@ -692,7 +692,14 @@ export function parseOverlayLayout(json: string): ParseStillLayoutResult {
   const sizeProblem = checkImageSize(width, height);
   if (sizeProblem) return { ok: false, error: `The layout’s image size cannot be used. ${sizeProblem.message}` };
 
-  const parsed = parseOverlayTemplate(JSON.stringify(file.template ?? null));
+  // A template nested deeper than JSON.stringify can go throws, and is refused like any unreadable one.
+  let template: string;
+  try {
+    template = JSON.stringify(file.template ?? null);
+  } catch {
+    return { ok: false, error: 'The layout’s template cannot be read. It is nested too deeply.' };
+  }
+  const parsed = parseOverlayTemplate(template);
   if (!parsed.ok) return { ok: false, error: `The layout’s template cannot be read. ${parsed.error}` };
   return { ok: true, layout: { width, height, template: parsed.template }, warnings: parsed.warnings };
 }

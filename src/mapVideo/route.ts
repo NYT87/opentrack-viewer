@@ -139,12 +139,17 @@ export const MIN_TRIMMED_ROUTE_METERS = 100;
  * `endMeters`. The cut ends are interpolated, so the trimmed route starts and
  * ends exactly that far in. Everything downstream is built from the result,
  * so the trimmed stretches reach no line, marker, camera or figure.
- * Undefined when less than `MIN_TRIMMED_ROUTE_METERS` would remain.
+ * Undefined when less than `minMeters` (by default `MIN_TRIMMED_ROUTE_METERS`) would remain.
  */
-export function trimRoute(route: MapVideoRoute, startMeters: number, endMeters: number): MapVideoRoute | undefined {
+export function trimRoute(
+  route: MapVideoRoute,
+  startMeters: number,
+  endMeters: number,
+  minMeters = MIN_TRIMMED_ROUTE_METERS,
+): MapVideoRoute | undefined {
   const start = Math.max(0, startMeters);
   const end = route.totalMeters - Math.max(0, endMeters);
-  if (end - start < MIN_TRIMMED_ROUTE_METERS) return undefined;
+  if (end <= start || end - start < minMeters) return undefined;
   if (start === 0 && end === route.totalMeters) return route;
 
   // The start is cut on the later side of a gap and the end on the earlier, so neither keeps a place of a trimmed stretch.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import FitParser from 'fit-file-parser';
-import { exportMergedTrack, hasStretchesTouchingInFit, mergedTrackFileStem, mergedTrackFormats } from './mergedTrack';
+import { exportMergedTrack, hasStretchesTouchingInFit, mergedTrackFileStem } from './mergedTrack';
+import { getExportAvailability } from './index';
 import { mergeTracks, type MergeSource } from '../domain/mergeTracks';
 import type { Activity } from '../domain/activity';
 import { ActivityError } from '../domain/errors';
@@ -53,7 +54,7 @@ const totals = (activity: Activity) => {
 
 describe('which formats a merged track can be written to (AV-1109, TD-060)', () => {
   it('offers GPX and FIT, which carry the pause, and names why TCX cannot', () => {
-    const formats = mergedTrackFormats(merged());
+    const formats = getExportAvailability(merged());
     expect(formats.filter((entry) => entry.available).map((entry) => entry.format)).toEqual(['gpx', 'fit']);
     expect(formats.find((entry) => entry.format === 'tcx')).toMatchObject({
       available: false,
@@ -223,7 +224,7 @@ describe('recordings that meet within one second (AV-1109, reviews R2-C1, R3-C1,
   it.each(touching)('refuses FIT, with the reason, for %s', async (_case, sources) => {
     const activity = merge(sources);
     expect(hasStretchesTouchingInFit(activity)).toBe(true);
-    expect(mergedTrackFormats(activity).find((entry) => entry.format === 'fit')).toMatchObject({
+    expect(getExportAvailability(activity).find((entry) => entry.format === 'fit')).toMatchObject({
       available: false,
       reason: expect.stringMatching(/whole second.+same second the next begins/),
     });
@@ -243,7 +244,7 @@ describe('recordings that meet within one second (AV-1109, reviews R2-C1, R3-C1,
     // [0, 1], a nine-second pause, then two records in second 10 (review R3-C1).
     const activity = merge([at('a.fit', [0, 1], 100), at('b.fit', [10, 10], 1000)]);
     expect(hasStretchesTouchingInFit(activity)).toBe(false);
-    expect(mergedTrackFormats(activity).find((entry) => entry.format === 'fit')?.available).toBe(true);
+    expect(getExportAvailability(activity).find((entry) => entry.format === 'fit')?.available).toBe(true);
     const back = await read(activity, 'fit');
     expect(back.points.map((point) => point.segmentIndex)).toEqual([0, 0, 1, 1]);
     expect(back.derived!.elevationGainMeters).toBe(20);

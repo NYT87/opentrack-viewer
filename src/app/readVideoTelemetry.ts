@@ -79,8 +79,10 @@ export async function readVideoTelemetry(
   };
 
   try {
-    const activity = await parseGopro(payload, { fileName: file.name, fileSizeBytes: file.size });
+    const { gpsVideoStart, ...activity } = await parseGopro(payload, { fileName: file.name, fileSizeBytes: file.size });
     throwIfAborted(options.signal);
+    // #54. The GPS clock, in UTC, places the video; the camera's own clock keeps local time with no zone.
+    if (gpsVideoStart) timing.start = gpsVideoStart;
     return { timing, ...(timecode ? { timecode } : {}), activity };
   } catch (error) {
     const failure = toActivityError(error, 'gopro_extract_failed');

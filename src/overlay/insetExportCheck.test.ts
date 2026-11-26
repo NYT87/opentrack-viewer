@@ -57,11 +57,10 @@ describe('counting an export’s tiles (AV-1023)', () => {
     expect(count({}, { start: 0.3, end: 0.3 })).toBeLessThan(all);
   });
 
-  it('counts nothing where too little is left to draw', () => {
+  it('counts the tiles of a short route’s kept tenth at the widest trim', () => {
     const short = activityThrough(straightNorth(150, 10, 5));
     const check = checkInsetExport(input(template({ view: 'follow', map: ofm }, { start: 0.45, end: 0.45 }), { activity: short, timeline: buildOverlayTimeline(short, { video: { durationSeconds: 40 } }) }))!;
-    expect(check.tiles).toBe(0);
-    expect(insetTilesText(check)).toContain('no tiles');
+    expect(check.tiles).toBeGreaterThan(0);
   });
 
   it('refuses above OpenFreeMap’s 3,000 tiles at a time, with the reason and the way out', () => {

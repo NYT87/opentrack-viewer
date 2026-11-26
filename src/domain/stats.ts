@@ -7,7 +7,10 @@ import {
 } from './activity';
 import { DEFAULT_PAUSE_SETTINGS, movingSteps, type PauseSettings, type PauseStep } from './pause';
 
-const EARTH_RADIUS_METERS = 6_371_008.8;
+export const EARTH_RADIUS_METERS = 6_371_008.8;
+
+/** The share of located points a distance stream must read for it to be the activity's distance. */
+const MIN_SOURCE_DISTANCE_COVERAGE = 0.9;
 
 /**
  * Elevation gain is summed only once the running climb clears this threshold
@@ -78,7 +81,9 @@ export function computeDistance(points: ActivityPoint[]): DistanceResult {
 }
 
 /**
- * Uses the file's distance stream only when it is present and non-decreasing.
+ * Uses the file's distance stream only when it is present, non-decreasing, and read on at least
+ * `MIN_SOURCE_DISTANCE_COVERAGE` of the located points (#52): a sensor connected for a moment is not the
+ * activity's distance, while a first record written before the odometer starts is no reason to drop it.
  *
  * Values are made relative to the first one, because a recorded distance stream
  * is an odometer, not a measure of the points in hand. A slice of an activity
@@ -94,10 +99,17 @@ function readSourceDistance(points: ActivityPoint[]): DistanceResult | undefined
   let previous: number | undefined;
   let travelled: number | undefined;
   let count = 0;
+  let located = 0;
+  // Readings at located points only: an indoor stretch's odometer says nothing of the GPS stretch it lacks.
+  let locatedRead = 0;
 
   for (let i = 0; i < points.length; i += 1) {
     const value = points[i]!.distanceMeters;
+    const isLocated = hasValidLocation(points[i]!);
+    // Counted from the first reading: records written before the odometer starts are no reason to drop it.
+    if (isLocated && (origin !== undefined || Number.isFinite(value))) located += 1;
     if (!Number.isFinite(value)) continue;
+    if (isLocated) locatedRead += 1;
     const reading = value as number;
     // A decreasing stream means resets or corruption; fall back to GPS instead.
     if (previous !== undefined && reading < previous) return undefined;
@@ -109,7 +121,7 @@ function readSourceDistance(points: ActivityPoint[]): DistanceResult | undefined
     count += 1;
   }
 
-  if (count < 2 || travelled === undefined) return undefined;
+  if (count < 2 || travelled === undefined || locatedRead < located * MIN_SOURCE_DISTANCE_COVERAGE) return undefined;
   return { totalMeters: travelled, cumulativeMeters: cumulative, origin: 'source' };
 }
 

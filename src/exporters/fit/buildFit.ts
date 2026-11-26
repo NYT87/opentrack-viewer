@@ -9,6 +9,7 @@ import {
   type ActivityWarning,
 } from '../../domain/activity';
 import { ActivityError } from '../../domain/errors';
+import { firstDistance, groupBySegment } from '../shared';
 
 /** Global message numbers, from the FIT profile (TD-021). */
 const MSG = {
@@ -35,6 +36,8 @@ const EVENT_TYPE_STOP = 1;
 const ACTIVITY_TYPE_MANUAL = 0;
 
 const SEMICIRCLES_PER_DEGREE = 2 ** 31 / 180;
+/** 180° is 2^31, one past sint32, and 0x7FFFFFFF is the invalid marker; the clamp moves a point under 1 cm. */
+const semicircles = (degrees: number) => clamp(round(degrees * SEMICIRCLES_PER_DEGREE), -0x7ffffffe, 0x7ffffffe);
 
 /**
  * FIT sport ids. Our `skiing` covers three of theirs, so it exports as alpine —
@@ -98,7 +101,7 @@ const RECORD_FIELDS: (RecordField & { needs: (activity: Activity) => boolean })[
     baseType: FitBaseType.Sint32,
     invalid: INVALID.sint32,
     needs: (a) => a.streams.hasLocation,
-    read: (p) => (hasValidLocation(p) ? round(p.lat * SEMICIRCLES_PER_DEGREE) : undefined),
+    read: (p) => (hasValidLocation(p) ? semicircles(p.lat) : undefined),
   },
   {
     number: 1,
@@ -106,7 +109,7 @@ const RECORD_FIELDS: (RecordField & { needs: (activity: Activity) => boolean })[
     baseType: FitBaseType.Sint32,
     invalid: INVALID.sint32,
     needs: (a) => a.streams.hasLocation,
-    read: (p) => (hasValidLocation(p) ? round(p.lon * SEMICIRCLES_PER_DEGREE) : undefined),
+    read: (p) => (hasValidLocation(p) ? semicircles(p.lon) : undefined),
   },
   {
     number: 2,
@@ -202,6 +205,9 @@ const u32 = (number: number, value: number): FitEncoderField => ({
   baseType: FitBaseType.Uint32,
   value,
 });
+
+/** A duration in FIT's milliseconds, held under the uint32 invalid marker: past 49.7 days a broken clock would otherwise overflow it. */
+const durationMs = (seconds: number) => Math.min(round(Math.max(0, seconds) * 1000), 0xfffffffe);
 
 const hasTime = (point: ActivityPoint): point is ActivityPoint & { time: Date } =>
   point.time instanceof Date && !Number.isNaN(point.time.getTime());
@@ -300,20 +306,23 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
       [
         u32(253, stamp(lapEnd)),
         u32(2, stamp(lapStart)),
-        u32(7, round((lap.durationSeconds ?? 0) * 1000)),
-        u32(9, round((lap.distanceMeters ?? 0) * 100)),
+        // A lap that states no figure writes FIT's invalid marker, which reads back as absent, not 0.
+        u32(7, finite(lap.durationSeconds) ? durationMs(lap.durationSeconds) : INVALID.uint32),
+        u32(9, finite(lap.distanceMeters) ? round(Math.max(0, lap.distanceMeters) * 100) : INVALID.uint32),
       ],
       LOCAL.lap,
     );
   }
 
-  const elapsedSeconds = activity.derived?.durationSeconds ?? (end.getTime() - start.getTime()) / 1000;
+  // Never negative: points are written in file order, which a broken clock can run backwards.
+  const elapsedSeconds = Math.max(0, activity.derived?.durationSeconds ?? (end.getTime() - start.getTime()) / 1000);
   // Timer time is the time the timer ran: each recorded stretch, start to end,
   // and none of the gaps between them, where the events above stopped it. Not
   // moving time, which is a different figure, and not elapsed, which would
   // count a pause between stretches as time recorded (AV-1109).
   const timerSeconds = groupBySegment(timed).reduce(
-    (total, segment) => total + (segment.at(-1)!.time.getTime() - segment[0]!.time.getTime()) / 1000,
+    (total, segment) =>
+      total + Math.max(0, (segment.at(-1)!.time.getTime() - segment[0]!.time.getTime()) / 1000),
     0,
   );
   encoder.writeMessage(
@@ -324,9 +333,9 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
       enumField(1, EVENT_TYPE_STOP),
       u32(2, stamp(start)),
       enumField(5, SPORT_IDS[sport]),
-      u32(7, round(elapsedSeconds * 1000)),
-      u32(8, round(timerSeconds * 1000)),
-      u32(9, round((activity.derived?.distanceMeters ?? 0) * 100)),
+      u32(7, durationMs(elapsedSeconds)),
+      u32(8, durationMs(timerSeconds)),
+      u32(9, finite(activity.derived?.distanceMeters) ? round(Math.max(0, activity.derived.distanceMeters) * 100) : INVALID.uint32),
     ],
     LOCAL.session,
   );
@@ -335,11 +344,12 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
     MSG.activity,
     [
       u32(253, stamp(end)),
-      u32(0, round(timerSeconds * 1000)),
+      u32(0, durationMs(timerSeconds)),
       u16(1, 1),
       enumField(2, ACTIVITY_TYPE_MANUAL),
       enumField(3, EVENT_ACTIVITY),
       enumField(4, EVENT_TYPE_STOP),
+      ...localTimestamp(stamp(end), activity.metadata.utcOffsetMinutes),
     ],
     LOCAL.activity,
   );
@@ -347,24 +357,14 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
   return { bytes: encoder.close(), warnings };
 }
 
-/** The reading every other distance in the exported file is measured from. */
-function firstDistance(points: ActivityPoint[]): number {
-  for (const point of points) if (finite(point.distanceMeters)) return point.distanceMeters;
-  return 0;
-}
-
-function groupBySegment(points: (ActivityPoint & { time: Date })[]) {
-  const segments: (ActivityPoint & { time: Date })[][] = [];
-  let current = -1;
-  for (const point of points) {
-    const segment = point.segmentIndex ?? 0;
-    if (segment !== current || segments.length === 0) {
-      segments.push([]);
-      current = segment;
-    }
-    segments.at(-1)!.push(point);
-  }
-  return segments;
+/**
+ * The activity's `local_timestamp`: its end in the activity's own UTC offset,
+ * which is how a FIT file states its zone and how `parseFit` reads it back.
+ */
+function localTimestamp(endStamp: number, offsetMinutes: number | undefined): FitEncoderField[] {
+  if (!finite(offsetMinutes)) return [];
+  const local = endStamp + round(offsetMinutes) * 60;
+  return local >= 0 && local <= 0xfffffffe ? [u32(5, local)] : [];
 }
 
 /** AV-553. What FIT omits or approximates, said out loud. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NoTelemetryTrackError, extractGpmf } from './extractGpmf';
+import { NoTelemetryTrackError, extractGpmf, type ReadableVideo } from './extractGpmf';
 import { formatStartTimecode } from '../../overlay/timecode';
 import { readBinaryFixture } from '../../test/helpers/fixtures';
 import { virtualVideo } from '../../test/helpers/virtualVideo';
@@ -318,6 +318,71 @@ describe('extraction limits and failures (AV-903)', () => {
     );
     expect(error).toBeInstanceOf(ActivityError);
     expect((error as ActivityError).code).toBe('gopro_extract_failed');
+  });
+});
+
+describe('hand-built boxes it refuses (audit #48, #64)', () => {
+  const ftyp = box('ftyp', new Uint8Array([0x6d, 0x70, 0x34, 0x31, 0, 0, 0, 0]));
+  const header = (size: number, type: string, size64?: number) => {
+    const bytes = new Uint8Array(size64 === undefined ? 8 : 16);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, size);
+    bytes.set([...type].map((char) => char.charCodeAt(0)), 4);
+    if (size64 !== undefined) view.setBigUint64(8, BigInt(size64));
+    return bytes;
+  };
+  /** A file of `size` bytes, zero but for `head` and `tail`: a huge box costs nothing. */
+  const sparse = (head: Uint8Array, size = head.length, tail = new Uint8Array()): ReadableVideo => ({
+    size,
+    slice: (start, end) => ({
+      arrayBuffer: async () => {
+        const out = new Uint8Array(Math.max(0, Math.min(end, size) - start));
+        out.set(head.subarray(start, Math.min(end, head.length)));
+        const tailAt = size - tail.length;
+        if (end > tailAt) out.set(tail.subarray(Math.max(0, start - tailAt), end - tailAt), Math.max(0, tailAt - start));
+        return out.buffer;
+      },
+    }),
+  });
+  const u32 = (value: number) => {
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setUint32(0, value);
+    return bytes;
+  };
+  const refusal = (video: ReadableVideo) => extractGpmf(video).catch((thrown: unknown) => thrown);
+  const synthetic = () => new Uint8Array(readBinaryFixture('hero7-synthetic.mp4'));
+
+  it('refuses each malformed or implausible box as gopro_extract_failed', async () => {
+    const MB = 1024 * 1024;
+    // Every stsz entry in the synthetic clip made 768 MB: a payload past MAX_PAYLOAD_BYTES.
+    const oversized = synthetic();
+    const view = new DataView(oversized.buffer);
+    for (let at = 0; at + 20 <= oversized.length; at += 1) {
+      if (view.getUint32(at) !== 0x7374737a) continue;
+      for (let entry = 0; entry < view.getUint32(at + 12); entry += 1) view.setUint32(at + 16 + entry * 4, 768 * MB);
+    }
+    const cases: [string, ReadableVideo, RegExp][] = [
+      ['a moov past MAX_MOOV_BYTES', sparse(concat([ftyp, header(257 * MB, 'moov')]), 16 + 257 * MB), /index .+ implausibly large/],
+      [
+        'a free box past MAX_OTHER_BOX_BYTES',
+        sparse(concat([ftyp, header(17 * MB, 'free')]), 16 + 17 * MB + 8, header(8, 'moov')),
+        /holds an implausibly large box/,
+      ],
+      ['more boxes than MAX_TOP_LEVEL_BOXES', sparse(concat([ftyp, ...Array.from({ length: 4096 }, () => header(8, 'free'))])), /not an MP4/],
+      ['a box smaller than its header', sparse(concat([ftyp, header(4, 'free')])), /not an MP4/],
+      ['a size-1 header cut short', sparse(concat([ftyp, header(1, 'mdat'), new Uint8Array(4)])), /not an MP4/],
+      ['a payload past MAX_PAYLOAD_BYTES', sparse(oversized), /telemetry track .+ implausibly large/],
+      [
+        // #48: mp4box would build one object per claimed sample, synchronously.
+        'an stsz claiming more samples than MAX_TRACK_SAMPLES',
+        sparse(concat([ftyp, box('moov', box('stsz', u32(0), u32(1), u32(20_000_000)))])),
+        /implausible number of samples/,
+      ],
+    ];
+
+    for (const [name, video, message] of cases) {
+      expect(await refusal(video), name).toMatchObject({ code: 'gopro_extract_failed', message: expect.stringMatching(message) });
+    }
   });
 });
 

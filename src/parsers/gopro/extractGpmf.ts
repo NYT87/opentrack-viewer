@@ -90,6 +90,13 @@ const MAX_TOP_LEVEL_BOXES = 4096;
  */
 const MAX_PAYLOAD_BYTES = 512 * 1024 * 1024;
 
+/**
+ * An hour at 240 fps is 864k frames. `mp4box` builds an object per sample a
+ * `stsz` claims, synchronously, so a 20-byte box claiming billions would freeze
+ * the tab past any Stop.
+ */
+const MAX_TRACK_SAMPLES = 10_000_000;
+
 /** Limit each telemetry read so Stop is checked even within a contiguous run. */
 const MAX_SAMPLE_READ_BYTES = 32 * 1024;
 
@@ -317,6 +324,12 @@ async function describeTracks(
     const end = isMdat ? box.start + box.headerSize : box.start + box.size;
     const buffer = (await file.slice(box.start, end).arrayBuffer()) as Mp4Buffer;
     buffer.fileStart = box.start;
+    if (box.type === 'moov' && hasImplausibleSampleCount(new DataView(buffer))) {
+      throw new ActivityError(
+        'gopro_extract_failed',
+        'The index of this video claims an implausible number of samples, so it was not read.',
+      );
+    }
     try {
       mp4.appendBuffer(buffer);
     } catch (error) {
@@ -340,6 +353,19 @@ async function describeTracks(
     );
   }
   return { ...ready, file: mp4 };
+}
+
+/**
+ * The `sample_count` of every `stsz` and `stz2` in the `moov`, against
+ * `MAX_TRACK_SAMPLES`. Both keep it 12 bytes after their type.
+ * shortcut: matches the type anywhere in the bytes rather than walking the box tree; a stray match can only refuse a file, never admit one.
+ */
+function hasImplausibleSampleCount(moov: DataView): boolean {
+  for (let at = 0; at + 16 <= moov.byteLength; at += 1) {
+    const type = moov.getUint32(at);
+    if ((type === 0x7374737a || type === 0x73747a32) && moov.getUint32(at + 12) > MAX_TRACK_SAMPLES) return true;
+  }
+  return false;
 }
 
 /**

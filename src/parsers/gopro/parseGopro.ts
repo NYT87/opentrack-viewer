@@ -8,7 +8,7 @@ import {
 import {
   chartableStreamKeys,
   decideSensorRead,
-  pointIntervalMs,
+  medianInterval,
   readSensorStreams,
   type GoproStream,
 } from './sensorStreams';
@@ -57,7 +57,7 @@ interface GoproSample {
 export async function parseGopro(
   payload: GpmfPayload,
   options: ParseGoproOptions = {},
-): Promise<Activity> {
+): Promise<Activity & { gpsVideoStart?: Date }> {
   const { default: goproTelemetry } = await import('gopro-telemetry');
   const warnings: ActivityWarning[] = [];
 
@@ -177,7 +177,7 @@ export async function parseGopro(
     chartable.length > 0
       ? ((await readStreams(goproTelemetry, source, chartable, {
           timeOut: 'cts',
-          groupTimes: Math.max(10, Math.round(pointIntervalMs(pointCtsMs ?? []) / 2)),
+          groupTimes: Math.max(10, Math.round(medianInterval(pointCtsMs ?? []) / 2)),
           disableInterpolation: true,
         })) as Record<string, { streams?: Record<string, GoproStream> }>)
       : {};
@@ -221,7 +221,15 @@ export async function parseGopro(
   const withStats = withDerivedStats(activity);
   withStats.metadata.startTime = withStats.derived?.startTime;
   withStats.metadata.endTime = withStats.derived?.endTime;
-  return withStats;
+  // #54. The first fix's GPS time (UTC) less its place in the video: where the video starts, which the
+  // container's creation time (local time with no zone) cannot say. Without a GPS date the library dates
+  // samples from that creation time, or from the epoch where there is none: no start is told then.
+  const firstTime = points[0]?.time?.getTime();
+  const firstCts = pointCtsMs?.[0];
+  if (firstTime === undefined || firstCts === undefined) return withStats;
+  const gpsVideoStart = firstTime - firstCts;
+  const datedFromEpoch = payload.timing.start === undefined && gpsVideoStart < Date.UTC(2000, 0, 1);
+  return datedFromEpoch ? withStats : Object.assign(withStats, { gpsVideoStart: new Date(gpsVideoStart) });
 }
 
 /**

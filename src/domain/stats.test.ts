@@ -81,6 +81,40 @@ describe('computeDistance (AV-401)', () => {
     expect(result.origin).toBe('derived');
   });
 
+  it('falls back to GPS when the source stream covers only some located points', () => {
+    const result = computeDistance(
+      points([
+        { lat: 51.5, lon: 0.1, distanceMeters: 0 },
+        { lat: 51.6, lon: 0.1, distanceMeters: 1 },
+        { lat: 51.7, lon: 0.1 },
+      ]),
+    );
+
+    expect(result.origin).toBe('derived');
+    expect(result.totalMeters).toBeCloseTo(22_239, -2);
+  });
+
+  it('keeps the source stream when only a few located points lack a reading, as a first record often does', () => {
+    const result = computeDistance(
+      points([{ lat: 51.5, lon: 0.1 }, ...Array.from({ length: 10 }, (_, i) => ({ lat: 51.5 + i * 0.001, lon: 0.1, distanceMeters: i * 100 }))]),
+    );
+    expect(result.origin).toBe('source');
+    expect(result.totalMeters).toBe(900);
+  });
+
+  it('keeps the source stream of a short file whose first record has no reading yet', () => {
+    const result = computeDistance(
+      points([{ lat: 51.5, lon: 0.1 }, ...Array.from({ length: 8 }, (_, i) => ({ lat: 51.5 + i * 0.001, lon: 0.1, distanceMeters: i * 100 }))]),
+    );
+    expect(result.origin).toBe('source');
+  });
+
+  it('does not let readings at points with no location stand in for the located ones', () => {
+    const indoor = Array.from({ length: 10 }, (_, i) => ({ distanceMeters: i * 100 }));
+    const outdoor = Array.from({ length: 10 }, (_, i) => ({ lat: 51.5 + i * 0.001, lon: 0.1 }));
+    expect(computeDistance(points([...indoor, ...outdoor])).origin).toBe('derived');
+  });
+
   it('skips invalid coordinates without breaking the chain', () => {
     const result = computeDistance(
       points([{ lat: 0, lon: 0.0001 }, { lat: 999, lon: 0.0001 }, { lat: 1, lon: 0.0001 }]),

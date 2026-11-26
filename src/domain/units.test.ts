@@ -18,6 +18,12 @@ describe('formatDistance', () => {
     expect(formatDistance(1500)).toBe('1.50 km');
   });
 
+  it('picks the unit after rounding, so just under a kilometre reads in kilometres', () => {
+    expect(formatDistance(999.6)).toBe('1.00 km');
+    expect(formatDistance(999.4)).toBe('999 m');
+    expect(formatDistanceOnScale(999.6, 999.6)).toBe('1.00 km');
+  });
+
   it('supports imperial units', () => {
     expect(formatDistance(1609.344, 'imperial')).toBe('1.00 mi');
     expect(formatDistance(30, 'imperial')).toBe('98 ft');

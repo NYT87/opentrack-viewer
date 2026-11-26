@@ -56,7 +56,7 @@ describe('the overlay controls’ privacy trim (AV-1022, TD-091)', () => {
     expect(controls.privacyTrim).toEqual({ start: 0.2, end: 0.2 });
   });
 
-  it('says why nothing is drawn when too little would be left', () => {
+  it('says nothing is hidden away for a short route under a trim: it is still drawn', () => {
     const small = activityThrough(straightNorth(150, 10, 5));
     render(
       <OverlayControls
@@ -67,6 +67,6 @@ describe('the overlay controls’ privacy trim (AV-1022, TD-091)', () => {
         units="imperial"
       />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent('Less than 330 ft of the route would be left, so it is not drawn.');
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

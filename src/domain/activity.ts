@@ -302,6 +302,13 @@ export interface Activity {
  */
 export const MAX_PLAUSIBLE_CYCLING_SPEED_MPS = 35;
 
+/** Running ceiling in metres per second; cycling's is `MAX_PLAUSIBLE_CYCLING_SPEED_MPS`, which every other sport uses. */
+export const MAX_PLAUSIBLE_RUNNING_SPEED_MPS = 12;
+
+export function speedCeilingMps(sport: ActivitySport | undefined): number {
+  return sport === 'running' ? MAX_PLAUSIBLE_RUNNING_SPEED_MPS : MAX_PLAUSIBLE_CYCLING_SPEED_MPS;
+}
+
 /**
  * True when a recorded speed can be believed. A device that reports a negative
  * or absurd value has faulted, and the honest thing to do with a faulty reading
