@@ -227,14 +227,15 @@ describe('stretches with no location (AV-1101)', () => {
     { lat: 11, lon: 20 },
   ]);
 
-  it('starts a new segment after a dropped point, so no line or distance crosses it', () => {
+  it('joins the fixes either side of a dropped point, as the viewer does, so the copy keeps its distance (#59)', () => {
     const draft = unwrap(draftFromActivity(withGap, { id: 'd' }));
-    expect(draft.points.map((point) => point.segmentIndex)).toEqual([0, 1]);
+    expect(draft.points.map((point) => point.segmentIndex)).toEqual([0, 0]);
     const activity = unwrap(draftToActivity(draft));
-    expect(activity.derived!.distanceMeters).toBe(0);
+    expect(activity.derived!.distanceMeters).toBeCloseTo(haversineMeters(10, 20, 11, 20), 1);
+    expect(activity.derived!.distanceMeters).toBeCloseTo(withDerivedStats(withGap).derived!.distanceMeters!, 1);
   });
 
-  it('counts one break for a run of dropped points, and none at the ends', () => {
+  it('joins across a run of dropped points too, and keeps no place for the ends', () => {
     const activity = makeActivity([
       { elevationMeters: 1 },
       { lat: 10, lon: 20 },
@@ -246,12 +247,12 @@ describe('stretches with no location (AV-1101)', () => {
       { elevationMeters: 3 },
     ]);
     const draft = unwrap(draftFromActivity(activity, { id: 'd' }));
-    expect(draft.points.map((point) => point.segmentIndex)).toEqual([0, 0, 1, 1]);
+    expect(draft.points.map((point) => point.segmentIndex)).toEqual([0, 0, 0, 0]);
     const leg = haversineMeters(10, 20, 10.001, 20);
-    expect(unwrap(draftToActivity(draft)).derived!.distanceMeters).toBeCloseTo(2 * leg, 1);
+    expect(unwrap(draftToActivity(draft)).derived!.distanceMeters).toBeCloseTo(3 * leg, 1);
   });
 
-  it('keeps a recorded segment boundary and a gap distinct, in order', () => {
+  it('keeps a recorded segment boundary, and joins across a gap inside a segment', () => {
     const activity = makeActivity([
       { lat: 10, lon: 20, segmentIndex: 0 },
       { elevationMeters: 1, segmentIndex: 0 },
@@ -259,13 +260,13 @@ describe('stretches with no location (AV-1101)', () => {
       { lat: 10.2, lon: 20, segmentIndex: 1 },
     ]);
     const draft = unwrap(draftFromActivity(activity, { id: 'd' }));
-    expect(draft.points.map((point) => point.segmentIndex)).toEqual([0, 1, 2]);
+    expect(draft.points.map((point) => point.segmentIndex)).toEqual([0, 0, 1]);
   });
 
   it('does the same for an appended import, after the segments already there', () => {
     const first = unwrap(appendAll([makeActivity([{ lat: 5, lon: 5 }, { lat: 5.001, lon: 5 }])], { id: 'd' }));
     const more = unwrap(appendImportedRoute(first, withGap));
-    expect(more.points.map((point) => point.segmentIndex)).toEqual([0, 0, 1, 2]);
+    expect(more.points.map((point) => point.segmentIndex)).toEqual([0, 0, 1, 1]);
   });
 
   it('keeps a draft with no unlocated points in one segment per recorded segment, as before', () => {

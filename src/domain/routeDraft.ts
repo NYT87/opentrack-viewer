@@ -180,24 +180,19 @@ function takePoints(
   const points: DraftPoint[] = [];
   let offered = 0;
   let unlocated = 0;
-  const segments = new Map<string, number>();
-  // How many stretches without a location have been passed: the fixes either
-  // side of one are not known to be joined, so they do not share a segment.
-  let breaks = 0;
-  let inBreak = false;
+  // #59: a point with no location is a lost fix inside a recorded stretch, not a break in it. The fixes
+  // either side stay one segment, joined as the viewer joins them, so a copy keeps the ride's distance.
+  const segments = new Map<number, number>();
   for (const source of activity.points) {
     if (range && (source.index < range.startIndex || source.index > range.endIndex)) continue;
     offered += 1;
     if (!hasValidLocation(source)) {
       unlocated += 1;
-      if (!inBreak) breaks += 1;
-      inBreak = true;
       continue;
     }
-    inBreak = false;
     // Segments are renumbered from the base, in order of appearance, so two
     // sources never share one and a gap in a recording is still a gap.
-    const key = `${source.segmentIndex ?? 0}:${breaks}`;
+    const key = source.segmentIndex ?? 0;
     if (!segments.has(key)) segments.set(key, segmentBase + segments.size);
     const point: DraftPoint = {
       id: `p${counters.point}`,
