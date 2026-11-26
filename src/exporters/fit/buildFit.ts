@@ -206,6 +206,9 @@ const u32 = (number: number, value: number): FitEncoderField => ({
   value,
 });
 
+/** A duration in FIT's milliseconds, held under the uint32 invalid marker: past 49.7 days a broken clock would otherwise overflow it. */
+const durationMs = (seconds: number) => Math.min(round(Math.max(0, seconds) * 1000), 0xfffffffe);
+
 const hasTime = (point: ActivityPoint): point is ActivityPoint & { time: Date } =>
   point.time instanceof Date && !Number.isNaN(point.time.getTime());
 
@@ -304,7 +307,7 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
         u32(253, stamp(lapEnd)),
         u32(2, stamp(lapStart)),
         // A lap that states no figure writes FIT's invalid marker, which reads back as absent, not 0.
-        u32(7, finite(lap.durationSeconds) ? round(Math.max(0, lap.durationSeconds) * 1000) : INVALID.uint32),
+        u32(7, finite(lap.durationSeconds) ? durationMs(lap.durationSeconds) : INVALID.uint32),
         u32(9, finite(lap.distanceMeters) ? round(Math.max(0, lap.distanceMeters) * 100) : INVALID.uint32),
       ],
       LOCAL.lap,
@@ -330,8 +333,8 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
       enumField(1, EVENT_TYPE_STOP),
       u32(2, stamp(start)),
       enumField(5, SPORT_IDS[sport]),
-      u32(7, round(elapsedSeconds * 1000)),
-      u32(8, round(timerSeconds * 1000)),
+      u32(7, durationMs(elapsedSeconds)),
+      u32(8, durationMs(timerSeconds)),
       u32(9, round((activity.derived?.distanceMeters ?? 0) * 100)),
     ],
     LOCAL.session,
@@ -341,7 +344,7 @@ export function buildFit(activity: Activity): { bytes: Uint8Array; warnings: Act
     MSG.activity,
     [
       u32(253, stamp(end)),
-      u32(0, round(timerSeconds * 1000)),
+      u32(0, durationMs(timerSeconds)),
       u16(1, 1),
       enumField(2, ACTIVITY_TYPE_MANUAL),
       enumField(3, EVENT_ACTIVITY),

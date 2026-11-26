@@ -1,5 +1,6 @@
 import {
   isPlausibleSpeed,
+  speedCeilingMps,
   type Activity,
   type ActivitySensorStream,
   type ActivityPoint,
@@ -212,8 +213,8 @@ function derivePace(activity: Activity): (number | undefined)[] {
   eachWindowSpan(activity, ({ index, meters, seconds }) => {
     // Zero-duration or stationary intervals have no meaningful pace: gap them.
     if (seconds <= 0 || meters <= 0) return;
-    // The same limit as speed, so pace and speed gap the same intervals (AV-505).
-    if (!isPlausibleSpeed(meters / seconds)) return;
+    // The clean-up's limit for the sport (AV-505): a run's GPS jump is gapped, a ride's pace is not.
+    if (meters / seconds > speedCeilingMps(activity.metadata.sport)) return;
     out[index] = (seconds / meters) * 1000;
   });
 

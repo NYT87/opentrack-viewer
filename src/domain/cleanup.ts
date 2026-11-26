@@ -1,11 +1,11 @@
 import {
   MAX_PLAUSIBLE_CYCLING_SPEED_MPS,
   computeStreams,
+  speedCeilingMps,
   toValidCoordinate,
   type Activity,
   type ActivityCleanup,
   type ActivityPoint,
-  type ActivitySport,
   type ActivityWarning,
 } from './activity';
 import { DEFAULT_PAUSE_SETTINGS, isPauseGap, type PauseSettings } from './pause';
@@ -69,12 +69,7 @@ export interface CleanupResult {
   report: CleanupReport;
 }
 
-/** Running ceiling in metres per second; cycling's is `MAX_PLAUSIBLE_CYCLING_SPEED_MPS`, which every other sport uses. */
-export const MAX_PLAUSIBLE_RUNNING_SPEED_MPS = 12;
-
-export function speedCeilingMps(sport: ActivitySport | undefined): number {
-  return sport === 'running' ? MAX_PLAUSIBLE_RUNNING_SPEED_MPS : MAX_PLAUSIBLE_CYCLING_SPEED_MPS;
-}
+export { MAX_PLAUSIBLE_RUNNING_SPEED_MPS, speedCeilingMps } from './activity';
 
 /** An elevation is a spike when it differs from both neighbours by more than this... */
 export const ELEVATION_SPIKE_METERS = 50;
@@ -121,6 +116,8 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
   let firstLocated: number | undefined;
   // A run of fixes, each plausible from the one before it, all implausible from the anchor.
   let streak: Fix[] = [];
+  // The run a disagreeing fix interrupted: taken back up when the fixes after that one agree with it.
+  let aside: Fix[] = [];
   // At least a second is allowed between two fixes: at 10 or 18 Hz the metres of ordinary fix noise are not a speed.
   const plausible = (a: Fix, b: Fix) =>
     haversineMeters(a.lat, a.lon, b.lat, b.lon) / Math.max(Math.abs(b.ms - a.ms) / 1000, 1) <= ceiling;
@@ -142,8 +139,17 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
     firstLocated ??= position;
     const here: Fix = { position, lat: where.lat, lon: where.lon, ms };
     if (anchor && !plausible(anchor, here)) {
-      // A fix that disagrees with the run before it starts a new run, so one glitch cannot keep a relocation from standing.
-      if (streak.length > 0 && !plausible(streak[streak.length - 1]!, here)) streak = [];
+      // A fix that disagrees with the run is a spike inside it, or the run was the spike: the run is set aside,
+      // and taken back up if the next fix agrees with it, so one glitch cannot keep a relocation from standing.
+      if (streak.length > 0 && !plausible(streak[streak.length - 1]!, here)) {
+        if (aside.length > 0 && plausible(aside[aside.length - 1]!, here)) {
+          streak = aside;
+          aside = [];
+        } else {
+          aside = streak;
+          streak = [];
+        }
+      }
       dropped.add(position);
       speed += 1;
       streak.push(here);
@@ -153,12 +159,14 @@ function dropOutliers(points: ActivityPoint[], ceiling: number): Dropped {
         restore(anchor.position === firstLocated);
         anchor = here;
         streak = [];
+        aside = [];
       }
       return;
     }
     // The run has ended. If it was after a bad first fix, that fix goes and the run is restored.
     if (firstFixWasBad(here)) restore(true);
     streak = [];
+    aside = [];
     anchor = here;
   });
   if (firstFixWasBad()) restore(true);

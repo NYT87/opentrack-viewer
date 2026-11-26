@@ -231,8 +231,6 @@ export interface OverlayAlignment {
   anchoredBy: 'videoClock' | 'activityStart';
   /** Seconds into the activity at video time 0, before the offset. */
   anchorSeconds: number;
-  /** A camera clock read in local time with no zone (GoPro's): the whole quarter hours taken off it to land it in the activity. */
-  clockShiftSeconds?: number;
   /** Seconds from the activity's first timed point to its last. */
   activitySpanSeconds: number;
   /** Where video 0 and video's end land in activity seconds, with the offset. */
@@ -647,30 +645,6 @@ export function pointValuesOf(activity: Activity, source: OverlayDataSource): (n
   return any ? values : undefined;
 }
 
-const QUARTER_HOUR = 900;
-const MAX_ZONE_SECONDS = 14 * 3600;
-
-/**
- * Cameras (GoPro among them) write their creation time in local time with no zone, so the clock can
- * be off by a time-zone offset. When the clock misses the activity, the shift that lands it inside:
- * the viewer's own zone first (a camera is usually set where it is used), then whole hours, then
- * quarter hours (every zone is one), each the smallest first, within ±14 h; else 0.
- */
-export function zoneShift(
-  clockSeconds: number,
-  durationSeconds: number,
-  spanSeconds: number,
-  viewerZoneSeconds = 0,
-): number {
-  const lands = (start: number) => start + durationSeconds >= 0 && start <= spanSeconds;
-  if (clockSeconds === 0 || lands(clockSeconds)) return 0;
-  const candidates = [viewerZoneSeconds];
-  for (const step of [3600, QUARTER_HOUR]) {
-    for (let shift = step; shift <= MAX_ZONE_SECONDS; shift += step) candidates.push(shift, -shift);
-  }
-  return candidates.find((shift) => shift !== 0 && lands(clockSeconds - shift)) ?? 0;
-}
-
 /**
  * Builds the timeline for an activity against a video's clock.
  *
@@ -707,12 +681,8 @@ export function buildOverlayTimeline(
   // Video time `t` is `anchor + t` on the wall clock; the activity then shows
   // `anchor + t - offset`, expressed as seconds since its first point.
   const anchorMs = options.video?.start?.getTime();
-  const clockSeconds =
+  const anchorSeconds =
     typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? (anchorMs - firstMs) / 1000 : 0;
-  // Local time read as UTC runs ahead by the zone's offset; getTimezoneOffset is minutes behind UTC.
-  const viewerZone = typeof anchorMs === 'number' ? -new Date(anchorMs).getTimezoneOffset() * 60 : 0;
-  const clockShiftSeconds = zoneShift(clockSeconds, durationSeconds, spanSeconds, viewerZone || 0);
-  const anchorSeconds = clockSeconds - clockShiftSeconds;
   const toActivitySeconds = (videoTime: number) => anchorSeconds + videoTime - offsetSeconds;
 
   const pause = activity.cleanup?.pause ?? DEFAULT_PAUSE_SETTINGS;
@@ -1147,7 +1117,6 @@ export function buildOverlayTimeline(
     ? {
         anchoredBy: typeof anchorMs === 'number' && Number.isFinite(anchorMs) ? 'videoClock' : 'activityStart',
         anchorSeconds,
-        ...(clockShiftSeconds ? { clockShiftSeconds } : {}),
         activitySpanSeconds: spanSeconds,
         videoStartInActivity,
         videoEndInActivity,

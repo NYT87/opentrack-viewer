@@ -127,9 +127,10 @@ async function start(request: MapVideoEncodeRequest, controller: AbortController
     controller.signal.addEventListener('abort', () => fail(new OverlayExportError('cancelled', 'The export was stopped.'), post), { once: true });
     post({ type: 'mapVideoReady' });
   } catch (error) {
-    // Not yet a session, so `fail` cannot let these go.
-    void output?.cancel().catch(() => undefined);
-    await archive.abort();
+    // Not yet a session, so `fail` cannot let these go: the output stops writing before its file goes,
+    // and the reason the start failed is the one reported, whatever letting go of them says.
+    await output?.cancel().catch(() => undefined);
+    await archive.abort().catch(() => undefined);
     throw error;
   }
 }

@@ -488,11 +488,7 @@ function SyncStatus({ alignment }: { alignment: OverlayAlignment }) {
     <div className="overlay-sync">
       <p className="overlay-sync__line">
         {alignment.anchoredBy === 'videoClock'
-          ? alignment.clockShiftSeconds
-            ? `The camera's clock placed the video in the activity, read ${formatDuration(Math.abs(alignment.clockShiftSeconds))} ${
-                alignment.clockShiftSeconds > 0 ? 'earlier' : 'later'
-              } than it says: cameras keep local time with no time zone.`
-            : "The camera's clock placed the video in the activity."
+          ? "The camera's clock placed the video in the activity."
           : "This video states no clock of its own, so it was placed at the activity's start."}{' '}
         {alignment.overlaps &&
           `It covers ${signedDuration(start)} to ${signedDuration(end)} of the activity's ${formatDuration(span)}.`}

@@ -142,11 +142,12 @@ describe('the outlier filter (AV-1024)', () => {
   });
 
   it('lets a relocation stand even when one of its fixes is a glitch', () => {
-    // The third fix after the jump is 200 m off: the run restarts after it, and the rest still stands.
+    // The third fix after the jump is 200 m off: it alone goes, and the run around it stands whole.
     const raw = makeActivity(track(60, 5, (i) => (i >= 20 ? { lat: LAT0 + 0.5 + (i === 22 ? 200 / M_PER_DEG : 0) } : {})));
     const { report, activity } = cleanActivity(raw, on());
-    expect(report.dropped.speed).toBe(3);
-    expect(activity.points).toHaveLength(57);
+    expect(report.dropped.speed).toBe(1);
+    expect(activity.points).toHaveLength(59);
+    expect(activity.points.some((point) => point.lat! > LAT0 + 0.5 + 100 / M_PER_DEG)).toBe(false);
   });
 
   it('keeps events, laps, segments and camera streams consistent with the points that stay', () => {

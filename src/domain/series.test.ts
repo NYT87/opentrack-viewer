@@ -137,6 +137,22 @@ describe('pace series (AV-505)', () => {
     expect(buildSeries(fast, 'pace', 'time').isEmpty).toBe(false);
   });
 
+  it('gaps a run’s GPS jump in pace, by the running limit, and not a ride’s', () => {
+    // A steady 3 m/s with one 300 m jump in 10 s: over the 15 s window, about 16 m/s.
+    const at = (sport: 'running' | 'cycling') => {
+      const activity = makeActivity(
+        Array.from({ length: 12 }, (_, index) => ({
+          lat: (index * 30 + (index >= 6 ? 270 : 0)) / 111_195,
+          lon: 0.0001,
+          time: new Date(Date.UTC(2024, 0, 1, 10, 0, index * 10)),
+        })),
+      );
+      activity.metadata.sport = sport;
+      return buildSeries(activity, 'pace', 'time').samples.length;
+    };
+    expect(at('running')).toBeLessThan(at('cycling'));
+  });
+
   it('derives seconds per kilometre from distance and time', () => {
     const series = buildSeries(steadyRun(), 'pace', 'time');
 

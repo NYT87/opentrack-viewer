@@ -222,13 +222,14 @@ export async function parseGopro(
   withStats.metadata.startTime = withStats.derived?.startTime;
   withStats.metadata.endTime = withStats.derived?.endTime;
   // #54. The first fix's GPS time (UTC) less its place in the video: where the video starts, which the
-  // container's creation time (local time with no zone) cannot say. Without a GPS date it is that
-  // creation time again, as the library dates samples from it.
+  // container's creation time (local time with no zone) cannot say. Without a GPS date the library dates
+  // samples from that creation time, or from the epoch where there is none: no start is told then.
   const firstTime = points[0]?.time?.getTime();
   const firstCts = pointCtsMs?.[0];
-  return firstTime !== undefined && firstCts !== undefined
-    ? Object.assign(withStats, { gpsVideoStart: new Date(firstTime - firstCts) })
-    : withStats;
+  if (firstTime === undefined || firstCts === undefined) return withStats;
+  const gpsVideoStart = firstTime - firstCts;
+  const datedFromEpoch = payload.timing.start === undefined && Math.abs(gpsVideoStart) < 1000;
+  return datedFromEpoch ? withStats : Object.assign(withStats, { gpsVideoStart: new Date(gpsVideoStart) });
 }
 
 /**
